@@ -1,0 +1,8 @@
+kind: dta_creation_template
+id: psi2
+version: "1.0"
+abstract: true
+party_slots:
+  - id: bogus
+    label: Bogus slot
+    target: metadata.not_a_party_field

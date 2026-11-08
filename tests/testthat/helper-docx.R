@@ -184,3 +184,15 @@
   hit <- grepl(text, blocks$text, fixed = fixed)
   unique(blocks$orientation[hit])
 }
+
+# Visible text of every header*.xml / footer*.xml part, keyed by part name.
+.docx_part_texts <- function(path, pattern) {
+  ex <- tempfile()
+  on.exit(unlink(ex, recursive = TRUE, force = TRUE), add = TRUE)
+  files <- utils::unzip(path, exdir = ex)
+  parts <- grep(pattern, basename(files))
+  vapply(files[parts], function(f) {
+    xml <- xml2::read_xml(f)
+    paste(xml2::xml_text(xml2::xml_find_all(xml, ".//*[local-name()='t' or local-name()='instrText']")), collapse = "")
+  }, character(1))
+}

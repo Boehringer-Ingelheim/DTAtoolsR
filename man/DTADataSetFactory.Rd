@@ -2,12 +2,12 @@
 % Please edit documentation in R/00_helpers.R
 \name{DTADataSetFactory}
 \alias{DTADataSetFactory}
-\title{Create a DTADataSetFactory Object}
+\title{Create a DTADataSet Object}
 \usage{
 DTADataSetFactory(type, columns = NULL, rules = NULL, files = NULL, ...)
 }
 \arguments{
-\item{type}{Character. The type specification, potentially prefixed with a backend identifier.}
+\item{type}{Character. Dataset type, \code{"tabular"} or \code{"file"}.}
 
 \item{columns}{A list with column specifications (optional)}
 
@@ -19,27 +19,28 @@ parses to -- or an unnamed list of such lists, one per handler, the shape a
 YAML \code{files:} sequence parses to. \code{NULL} or an empty list yields a
 dataset with no file handlers.}
 
-\item{...}{Character. Arguments passed on to the specific backend constructor.}
+\item{...}{Further arguments passed on to the \code{DTADataSetTabular()}
+or \code{DTADataSetFile()} constructor, according to \code{type}.}
 }
 \value{
 An object derived from class \code{DTADataSet} like \code{DTADataSetTabular},
-depending on the backend specified.
+depending on \code{type}.
 }
 \description{
-Constructs a DTADataSetFactory object for a specified backend (e.g., SAS or R),
-based on the provided type.
+Constructs a DTADataSetTabular or DTADataSetFile object, according to
+\code{type}.
 }
 \examples{
 DTADataSetFactory(
   type = "file",
-  name = "mydataset",
+  id = "mydataset",
   files = list(type = "csv", filename = "clinical_data.csv")
 )
 
 # Several file handlers: an unnamed list of handler specifications.
 DTADataSetFactory(
   type = "file",
-  name = "mydataset",
+  id = "mydataset",
   files = list(
     list(type = "csv", filename = "clinical_data.csv"),
     list(type = "tsv", filename = "gf_data_small_smirna.tsv")

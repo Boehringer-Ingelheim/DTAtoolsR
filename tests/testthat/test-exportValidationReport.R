@@ -24,7 +24,7 @@ test_that("write_validation_report happy path with capping", {
   ds <- create_example_DTADataSetTabular(2)
   ds <- check(ds, tab = "tab1", force = TRUE, persist = FALSE, quiet = TRUE)
   dta <- DTA(
-    datasets = list(clinical_data = ds),
+    datasets = list(demographics = ds),
     metadata = DTAMetaData(title = "Test DTA")
   )
 
@@ -37,9 +37,11 @@ test_that("write_validation_report happy path with capping", {
 
   doc <- xml2::read_html(out)
 
-  # Assert title in page
+  # The document name is the main heading; the DTA title sits beneath it.
   h1 <- xml2::xml_find_first(doc, "//h1")
-  expect_equal(xml2::xml_text(h1), "Test DTA")
+  expect_equal(xml2::xml_text(h1), "Data Transfer Agreement")
+  sub_title <- xml2::xml_find_first(doc, "//*[@class='report-subtitle']")
+  expect_equal(xml2::xml_text(sub_title), "Test DTA")
 
   # Assert 1 summary row with fail status
   summary_rows <- xml2::xml_find_all(doc, "//tr[@data-status]")
@@ -77,7 +79,7 @@ test_that("write_validation_report capping disabled with max_repeats = NULL", {
   ds <- create_example_DTADataSetTabular(2)
   ds <- check(ds, tab = "tab1", force = TRUE, persist = FALSE, quiet = TRUE)
   dta <- DTA(
-    datasets = list(clinical_data = ds),
+    datasets = list(demographics = ds),
     metadata = DTAMetaData(title = "Test DTA")
   )
 
@@ -111,7 +113,7 @@ test_that("write_validation_report capping disabled with max_repeats = Inf", {
   ds <- create_example_DTADataSetTabular(2)
   ds <- check(ds, tab = "tab1", force = TRUE, persist = FALSE, quiet = TRUE)
   dta <- DTA(
-    datasets = list(clinical_data = ds),
+    datasets = list(demographics = ds),
     metadata = DTAMetaData(title = "Test DTA")
   )
 
@@ -161,8 +163,8 @@ test_that("write_validation_report escapes HTML in metadata title", {
 
   # Parse HTML and verify the title round-trips correctly
   # xml2::xml_text() will un-escape the entities back to the original text
-  h1 <- xml2::xml_find_first(doc, "//h1")
-  expect_equal(xml2::xml_text(h1), "A & B <Co>")
+  sub_title <- xml2::xml_find_first(doc, "//*[@class='report-subtitle']")
+  expect_equal(xml2::xml_text(sub_title), "A & B <Co>")
 })
 
 test_that("write_validation_report handles zero messages (all-pass)", {
@@ -206,9 +208,17 @@ test_that("write_validation_report overwrite = TRUE allows replacing existing fi
   )
   expect_true(file.exists(out))
 
-  # File is still valid HTML
+  # read_html() returns a document even for an empty or truncated file, so
+  # !is.na(doc) passes regardless -- check that the second write actually
+  # produced the same report content the "zero messages" test expects.
   doc <- xml2::read_html(out)
-  expect_true(!is.na(doc))
+  summary_sections <- xml2::xml_find_all(doc, "//section[@class='report-summary']")
+  expect_length(summary_sections, 1)
+  msg_rows <- xml2::xml_find_all(
+    doc,
+    "//tr[contains(concat(' ', normalize-space(@class), ' '), ' msg-row ')]"
+  )
+  expect_length(msg_rows, 0)
 })
 
 test_that("write_validation_report validates title and falls back on NA", {
@@ -486,4 +496,236 @@ test_that("no inspect panel branch ever falls back to the generic '(see technica
   )) {
     expect_false(grepl("see technical detail below", html, fixed = TRUE))
   }
+})
+
+
+# ---------------------------------------------------------------------------
+# A metadata import issue must not strip inspect detail from the report
+# ---------------------------------------------------------------------------
+
+make_dta_with_metadata_issue <- function() {
+  ds <- create_example_DTADataSetTabular(2)
+  ds <- check(ds, tab = "tab1", force = TRUE, persist = FALSE, quiet = TRUE)
+  DTA(
+    datasets = list(demographics = ds),
+    metadata = DTAMetaData(
+      title = "dirty",
+      transmission = list(date_last_transfer = "2026-12-31 at the earliest")
+    )
+  )
+}
+
+panel_badge <- function(doc, id) {
+  node <- xml2::xml_find_first(doc, sprintf("//*[@id='inspect-panel-%d']//span[contains(@class,'inspect-badge')]", id))
+  regmatches(cls <- xml2::xml_attr(node, "class"), regexpr("inspect-badge-[a-z]+", cls))
+}
+
+test_that("inspect() answers a metadata message instead of aborting, alone or mixed with dataset ids", {
+  dta <- make_dta_with_metadata_issue()
+  msgs <- messages(dta, as_tibble = FALSE)
+  meta_id <- msgs$id[msgs$target == "metadata"]
+  expect_length(meta_id, 1L)
+
+  rec <- inspect(dta, id = meta_id, as_tibble = FALSE)
+  expect_equal(nrow(rec), 1L)
+  expect_equal(rec$type, "import")
+  expect_equal(rec$import_raw, "2026-12-31 at the earliest")
+
+  mixed <- inspect(dta, id = msgs$id, as_tibble = FALSE)
+  expect_setequal(unique(mixed$id), msgs$id)
+})
+
+test_that("a metadata import issue leaves the other report panels typed and has detail of its own", {
+  dta <- make_dta_with_metadata_issue()
+  msgs <- messages(dta, as_tibble = FALSE)
+  out <- tempfile(fileext = ".html")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_validation_report(dta, out, quiet = TRUE)
+  doc <- xml2::read_html(out)
+
+  col_id <- msgs$id[msgs$source == "columnspec"][[1]]
+  meta_id <- msgs$id[msgs$target == "metadata"]
+  expect_equal(panel_badge(doc, col_id), "inspect-badge-columnspec")
+  expect_equal(panel_badge(doc, meta_id), "inspect-badge-import")
+  for (id in msgs$id) {
+    expect_false(identical(panel_badge(doc, id), "inspect-badge-unknown"))
+  }
+})
+
+test_that("a failing inspect() for one dataset's ids costs only that dataset its detail", {
+  # No faithful real failure can be built for a single group, so inspect() is
+  # mocked to abort whenever the requested ids include the dataset's.
+  dta <- make_dta_with_metadata_issue()
+  msgs <- messages(dta, as_tibble = FALSE)
+  ds_ids <- msgs$id[!is.na(msgs$dataset)]
+  real_inspect <- inspect
+
+  testthat::local_mocked_bindings(
+    inspect = function(x, id = NULL, ...) {
+      if (any(id %in% ds_ids)) {
+        cli::cli_abort("simulated inspect failure")
+      }
+      real_inspect(x, id = id, ...)
+    },
+    .package = "DTAtools"
+  )
+
+  out <- tempfile(fileext = ".html")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_validation_report(dta, out, quiet = TRUE)
+  doc <- xml2::read_html(out)
+
+  meta_id <- msgs$id[msgs$target == "metadata"]
+  expect_equal(panel_badge(doc, meta_id), "inspect-badge-import")
+  failed <- ds_ids[[1]]
+  expect_equal(panel_badge(doc, failed), "inspect-badge-unknown")
+  expect_match(
+    xml2::xml_text(xml2::xml_find_first(doc, sprintf("//*[@id='inspect-panel-%d']", failed))),
+    "Detail could not be generated for this message",
+    fixed = TRUE
+  )
+})
+# ---- traceability: what the report was run over ------------------------------
+
+test_that("the report header records the offset, both versions and the spec version", {
+  ds <- check(create_example_DTADataSetTabular(2), persist = FALSE, quiet = TRUE)
+  dta <- DTA(datasets = list(demographics = ds), metadata = DTAMetaData(title = "T", version = "2.1"))
+  out <- withr::local_tempfile(fileext = ".html")
+  write_validation_report(dta, out, quiet = TRUE)
+
+  metas <- xml2::xml_text(xml2::xml_find_all(xml2::read_html(out), "//*[contains(@class,'report-meta')]"))
+  expect_match(metas[[1]], "[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} [+-][0-9]{4}")
+  expect_match(metas[[1]], paste0("DTAtools ", utils::packageVersion("DTAtools")), fixed = TRUE)
+  expect_match(metas[[1]], paste0("R ", getRversion()), fixed = TRUE)
+  expect_match(metas[[2]], "Specification version 2.1", fixed = TRUE)
+
+  dta_nov <- DTA(datasets = list(demographics = ds), metadata = DTAMetaData(title = "T"))
+  out2 <- withr::local_tempfile(fileext = ".html")
+  write_validation_report(dta_nov, out2, quiet = TRUE)
+  metas2 <- xml2::xml_text(xml2::xml_find_all(xml2::read_html(out2), "//*[contains(@class,'report-meta')]"))
+  expect_match(metas2[[2]], "Specification version not set", fixed = TRUE)
+})
+
+test_that("the Inputs section lists in-memory tables with their content hash", {
+  ds <- DTADataSetTabular(
+    id = "dm",
+    specs = create_example_DTAColumnSpecCollection(1),
+    tables = list(t1 = data.frame(STUDYID = "S1", SUBJID = "001", VISIT = "V1", AGE = 30, stringsAsFactors = FALSE))
+  )
+  dta <- DTA(datasets = list(dm = ds), metadata = DTAMetaData(title = "T"))
+  inputs <- .report_inputs_df(dta)
+
+  expect_identical(inputs$Dataset, "dm")
+  expect_identical(inputs$Table, "t1")
+  expect_identical(inputs$Kind, "in memory")
+  expect_identical(inputs$`Content hash`, dta_table_hash_stamp(ds@tables[["t1"]]))
+  expect_false(is.na(inputs$`Content hash`))
+  expect_true(is.na(inputs$`Source file`))
+
+  out <- withr::local_tempfile(fileext = ".html")
+  write_validation_report(dta, out, quiet = TRUE)
+  section <- xml2::xml_find_first(xml2::read_html(out), "//section[contains(@class,'report-inputs')]")
+  expect_false(inherits(section, "xml_missing"))
+  expect_match(xml2::xml_text(section), inputs$`Content hash`, fixed = TRUE)
+})
+
+test_that("the Inputs section lists streamed and file sources with size and UTC mtime", {
+  dir <- withr::local_tempdir()
+  csv <- file.path(dir, "dm.csv")
+  writeLines(c("STUDYID,SUBJID", "S1,001", "S1,002"), csv)
+  ds <- DTADataSetTabular(id = "dm", specs = create_example_DTAColumnSpecCollection(1))
+  ds@tables <- list(dm = arrow::open_dataset(csv, format = "csv"))
+  pdf_path <- file.path(dir, "protocol.pdf")
+  writeBin(charToRaw("%PDF-1.4 tiny"), pdf_path)
+  files_ds <- DTADataSetFile(id = "docs", paths = c(pdf_path, file.path(dir, "missing.pdf")))
+  dta <- DTA(datasets = list(dm = ds, docs = files_ds), metadata = DTAMetaData(title = "T"))
+
+  inputs <- .report_inputs_df(dta)
+  streamed <- inputs[inputs$Kind == "streamed", , drop = FALSE]
+  expect_identical(nrow(streamed), 1L)
+  expect_identical(normalizePath(streamed$`Source file`, winslash = "/"), normalizePath(csv, winslash = "/"))
+  expect_identical(streamed$`Size (bytes)`, as.character(file.size(csv)))
+  expect_identical(
+    streamed$`Modified (UTC)`,
+    format(file.mtime(csv), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+  )
+
+  files <- inputs[inputs$Kind == "file", , drop = FALSE]
+  expect_identical(files$Dataset, c("docs", "docs"))
+  expect_identical(files$`Size (bytes)`, c(as.character(file.size(pdf_path)), "file not found"))
+})
+
+test_that("a transfer with no data attached says so instead of an empty table", {
+  dta <- DTA(datasets = list(example_container_specs_without_data = create_example_DTADataSetTabular(1)), metadata = DTAMetaData(title = "T"))
+  expect_identical(nrow(.report_inputs_df(dta)), 0L)
+  out <- withr::local_tempfile(fileext = ".html")
+  write_validation_report(dta, out, quiet = TRUE)
+  expect_match(
+    xml2::xml_text(xml2::xml_find_first(xml2::read_html(out), "//section[contains(@class,'report-inputs')]")),
+    "No data was attached",
+    fixed = TRUE
+  )
+})
+
+test_that("input names are HTML-escaped in the report", {
+  ds <- DTADataSetTabular(
+    id = "dm",
+    specs = create_example_DTAColumnSpecCollection(1),
+    tables = list(`<b>x</b>` = data.frame(STUDYID = "S1", SUBJID = "001", VISIT = "V1", AGE = 30, stringsAsFactors = FALSE))
+  )
+  dta <- DTA(datasets = list(dm = ds), metadata = DTAMetaData(title = "T"))
+  out <- withr::local_tempfile(fileext = ".html")
+  write_validation_report(dta, out, quiet = TRUE)
+  html <- paste(readLines(out, warn = FALSE), collapse = "\n")
+  expect_false(grepl("<b>x</b>", html, fixed = TRUE))
+  expect_true(grepl("&lt;b&gt;x&lt;/b&gt;", html, fixed = TRUE))
+})
+
+test_that("write_validation_report leads with document_name and shows the organisation in the header", {
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".html")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_validation_report(dta, out,
+    quiet = TRUE, document_name = c("Data Transmission Specification", "Data Transfer Agreement"),
+    organisation = "Acme Pharma", organisation_unit = "Biometrics"
+  )
+  doc <- xml2::read_html(out)
+  expect_equal(
+    xml2::xml_text(xml2::xml_find_first(doc, "//h1")),
+    "Data Transmission Specification / Data Transfer Agreement"
+  )
+  expect_equal(
+    xml2::xml_text(xml2::xml_find_first(doc, "//*[@class='report-subtitle']")),
+    "Example DTA"
+  )
+  expect_equal(
+    xml2::xml_text(xml2::xml_find_first(doc, "//*[contains(@class,'report-org')]")),
+    "Acme Pharma · Biometrics"
+  )
+  # The page <title> is the report's title and is unchanged by the document name.
+  expect_equal(xml2::xml_text(xml2::xml_find_first(doc, "//title")), "Example DTA")
+})
+
+test_that("write_validation_report shows no organisation block when none is given and escapes it when given", {
+  dta <- create_example_DTA()
+  plain <- tempfile(fileext = ".html")
+  hostile <- tempfile(fileext = ".html")
+  on.exit(unlink(c(plain, hostile), force = TRUE), add = TRUE)
+  write_validation_report(dta, plain, quiet = TRUE)
+  expect_length(xml2::xml_find_all(xml2::read_html(plain), "//*[contains(@class,'report-org')]"), 0)
+
+  write_validation_report(dta, hostile, quiet = TRUE, organisation = "<script>x</script>")
+  doc <- xml2::read_html(hostile)
+  expect_equal(
+    xml2::xml_text(xml2::xml_find_first(doc, "//*[contains(@class,'report-org')]")),
+    "<script>x</script>"
+  )
+})
+
+test_that("write_validation_report validates the document and organisation arguments", {
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".html")
+  expect_error(write_validation_report(dta, out, organisation = c("a", "b")), "organisation")
+  expect_error(write_validation_report(dta, out, document_name = 1), "document_name")
+  expect_false(file.exists(out))
 })

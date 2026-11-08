@@ -41,9 +41,9 @@ by default -- and emits one record batch per block. The \code{batch_rows}
 argument of \code{\link{check}()} reaches
 \code{arrow::Scanner$create(batch_size = )}, which only ever \emph{slices} a
 batch that is already larger, so on a delimited file it is a ceiling and not
-a target: measured on a 4.4 MB, 46,000-row CSV, the default block gave 5
+a target: measured on a 4.4 MB, 46,000-row CSV, a 1 MiB block gave 5
 batches of about 10,485 rows for \code{batch_rows} of 131,072 and of
-1,000,000 alike.
+1,000,000 alike, while the 8 MiB default gave one batch of all 46,000 rows.
 
 Peak memory during a scan is therefore governed by the block size times
 Arrow's read-ahead, not by \code{batch_rows}. Change it with

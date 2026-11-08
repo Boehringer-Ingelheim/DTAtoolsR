@@ -1,6 +1,7 @@
 #' @title DTAMetaData Class
 #' @description This class holds comprehensive metadata information for Data Transfer Agreements,
-#' including version history, transmission details, error handling, and contact information.
+#' including study identity, ordered agreement sections, version history,
+#' transmission details, error handling, and contact information.
 #' @import S7
 #' @export
 #'
@@ -11,41 +12,77 @@
 #' @param version_history list of version records; each record must be a list with:
 #'   \itemize{
 #'     \item \code{version}: version string (e.g. "1.0")
-#'     \item \code{date}: Date object for this version
+#'     \item \code{date}: Date object for this version; a character string
+#'       \code{"YYYY-MM-DD"}, as loaded from YAML, is also read as a date
 #'     \item \code{changes}: character description of what was changed in this version
 #'   }
 #' @param receiver list with affiliation and contacts (authorized to request corrections)
 #' @param supplier list with affiliation and contacts
-#' @param transmission list with type, frequency, notification, dates (first/last transfer), and flags
+#' @param transmission list with type, frequency, notification, dates (first/last
+#'   transfer), and flags. Optional text fields \code{extent}, \code{scope},
+#'   \code{packaging}, \code{security}, \code{checksum}, \code{test_requirements},
+#'   and \code{blinding_requirements} must each be a single non-\code{NA}
+#'   character string; blank strings are allowed for drafts. Existing fields
+#'   and other extensions, including structured values, retain their semantics.
 #' @param error_handling character description of error handling procedures
 #' @param authorized_for_corrections character or list indicating BI contact(s) authorized to request corrections
 #' @param template A machine-owned provenance record written by the template
 #'   engine that generated this document, e.g. \code{list(id = "...", version = "...")}.
 #'   Never set by a specification author. When non-empty, \code{id} and
 #'   \code{version} are each required to be a single non-empty character.
+#' @param study Optional named list containing \code{id} and/or
+#'   \code{protocol_id}. Each supplied value must be a single non-\code{NA},
+#'   nonblank character string. Unknown, duplicate, or unnamed fields are
+#'   rejected. Study identity is independent of \code{header} and imposes no
+#'   dataset constraints.
+#' @param sections Ordered named list of agreement section records, serialized
+#'   as a YAML mapping. Names must be unique identifiers matching
+#'   \code{^[A-Za-z][A-Za-z0-9_]*$}. Each record contains exactly \code{title}
+#'   (a single non-\code{NA}, nonblank character string) and \code{text}
+#'   (a single non-\code{NA} character string, which may be blank for a draft).
+#'   Section order and text are preserved, without an executable Markdown or
+#'   HTML contract. Empty \code{study} and \code{sections} lists are omitted
+#'   from list and YAML serialization.
 #' @return An object of class DTAMetaData.
 #'
 #' @details
 #' Date-valued metadata fields (\code{date}, \code{transmission$date_first_transfer}
 #' and \code{transmission$date_last_transfer}) may be supplied as strings. A string
-#' that is exactly an ISO date becomes a \code{Date}. A string that has no ISO date
-#' at its start (\code{"after approval"}, \code{"2 weeks after approval"},
+#' that is exactly an ISO date becomes a \code{Date}.
+#'
+#' \code{transmission$date_first_transfer} and \code{transmission$date_last_transfer}
+#' are untyped list elements, so a string that has no ISO date at its start
+#' (\code{"after approval"}, \code{"2 weeks after approval"},
 #' \code{"final transfer by 2026-12-31"}) is a legitimate free-text phrase and is
 #' kept verbatim as character.
 #'
+#' \code{date}, in contrast, is declared \code{Date}-typed (see the \code{date}
+#' property) and cannot hold a phrase: a string with no ISO date at its start
+#' cannot be represented and becomes \code{NA}, the same coercion \code{as.Date()}
+#' would perform. Unlike the transmission fields, that loss is recorded as an
+#' import issue in \code{@import_issues}, carrying the original string verbatim, so
+#' \code{check()} on the enclosing \code{DTA} still fails rather than reporting
+#' \code{metadata_ok = TRUE} over a top-level date that was silently discarded.
+#'
 #' A string that *starts* with an ISO date but carries trailing text
-#' (\code{"2026-12-31 at the earliest"}) is the dangerous case: \code{as.Date()}
-#' silently discards the trailing words, turning a qualified statement in a data
-#' transfer agreement into a committed date. Such a value is still converted to the
-#' \code{Date} - \code{validate_transmission_dates()} and the exported documents
-#' need a real \code{Date} - but the loss is recorded as an import issue in
-#' \code{@import_issues}, carrying the original string verbatim. Import issues make
-#' \code{check()} on the enclosing \code{DTA} fail, so the discarded qualification
-#' can never pass silently.
+#' (\code{"2026-12-31 at the earliest"}) is the dangerous case for any of the three
+#' fields: \code{as.Date()} silently discards the trailing words, turning a
+#' qualified statement in a data transfer agreement into a committed date. Such a
+#' value is still converted to the \code{Date} - \code{validate_transmission_dates()}
+#' and the exported documents need a real \code{Date} - but the loss is recorded as
+#' an import issue in \code{@import_issues}, carrying the original string verbatim.
+#' Import issues make \code{check()} on the enclosing \code{DTA} fail, so the
+#' discarded qualification can never pass silently.
 #'
 #' @examples
 #'
 #' DTAMetaData(title = "Clinical Data Transfer", version = "1.0")
+#' DTAMetaData(
+#'   title = "Clinical Data Transfer", version = "1.0",
+#'   study = list(id = "ST-001", protocol_id = "P-001"),
+#'   sections = list(scope = list(title = "Scope", text = "First line\nSecond line")),
+#'   transmission = list(packaging = "One archive per transfer", security = "")
+#' )
 DTAMetaData <- S7::new_class(
   "DTAMetaData",
   constructor = function(
@@ -59,7 +96,9 @@ DTAMetaData <- S7::new_class(
     transmission = list(),
     error_handling = NULL,
     authorized_for_corrections = NULL,
-    template = list()
+    template = list(),
+    study = list(),
+    sections = list()
   ) {
     import_issues <- list()
 
@@ -91,6 +130,8 @@ DTAMetaData <- S7::new_class(
       error_handling = error_handling,
       authorized_for_corrections = authorized_for_corrections,
       template = template,
+      study = study,
+      sections = sections,
       import_issues = import_issues
     )
   },
@@ -106,10 +147,16 @@ DTAMetaData <- S7::new_class(
     error_handling = class_character_or_null,
     authorized_for_corrections = class_character_or_list_or_null,
     template = S7::new_property(S7::class_list, default = list()),
+    study = S7::new_property(S7::class_list, default = list()),
+    sections = S7::new_property(S7::class_list, default = list()),
     import_issues = S7::new_property(S7::class_list, default = list())
   ),
   validator = function(self) {
-    errors <- c()
+    errors <- c(
+      .dta_metadata_validate_study(self@study),
+      .dta_metadata_validate_sections(self@sections),
+      .dta_metadata_validate_transmission_text(self@transmission)
+    )
 
     if (!is.null(self@version) && self@version == "") {
       errors <- c(errors, "'version' cannot be an empty string.")
@@ -251,7 +298,10 @@ DTAMetaData <- S7::new_class(
 #' @param field Character. Field path used in the import issue record.
 #' @param require_date Logical. When \code{TRUE} the field is typed \code{Date}
 #'   and a phrase cannot be stored, so an unparseable string is coerced the way
-#'   \code{as.Date()} would coerce it (to \code{NA}).
+#'   \code{as.Date()} would coerce it (to \code{NA}) - and, unlike the
+#'   \code{FALSE} case where a phrase is legitimate free text, that \code{NA}
+#'   is recorded as an import issue, since a Date-typed field silently losing
+#'   its value is exactly the discard \code{@import_issues} exists to catch.
 #' @return A list with \code{value} (the value to store) and \code{issues} (a
 #'   possibly empty list of import issue records).
 #' @keywords internal
@@ -265,15 +315,20 @@ DTAMetaData <- S7::new_class(
   split <- .split_date_prefix(value)
 
   if (is.na(split$date)) {
-    # A phrase with no parseable date prefix ("after approval", "2 weeks after
-    # approval", "final transfer by 2026-12-31"). Documented, legitimate input:
-    # keep it verbatim and do NOT report an import issue.
     if (isTRUE(require_date)) {
+      # The field is Date-typed, so a phrase cannot be stored: it becomes NA,
+      # exactly as as.Date() would coerce it. Unlike the free-text case below,
+      # that NA is a real loss -- nothing about it is legitimate the way a
+      # transmission-date phrase is -- so it is recorded as an import issue
+      # rather than passing silently.
       return(list(
         value = suppressWarnings(as.Date(value, format = "%Y-%m-%d")),
-        issues = list()
+        issues = list(.metadata_import_issue(field, value, "not_convertible"))
       ))
     }
+    # A phrase with no parseable date prefix ("after approval", "2 weeks after
+    # approval", "final transfer by 2026-12-31"). Documented, legitimate input
+    # for a free-text field: keep it verbatim and do NOT report an import issue.
     return(none)
   }
 
@@ -382,6 +437,21 @@ method(print_info, DTAMetaData) <- function(x, ...) {
   }
   if (!is.null(x@header)) {
     cli::cli_alert_info("Header: {x@header}")
+  }
+  if (!is.null(x@study$id)) {
+    cli::cli_alert_info("Study ID: {x@study$id}")
+  }
+  if (!is.null(x@study$protocol_id)) {
+    cli::cli_alert_info("Protocol ID: {x@study$protocol_id}")
+  }
+
+  if (length(x@sections) > 0) {
+    cli::cli_alert_info("Agreement Sections:")
+    for (id in names(x@sections)) {
+      section <- x@sections[[id]]
+      cli::cli_alert("  {section$title} [{id}]")
+      cli::cli_text("{section$text}")
+    }
   }
 
   # Version History

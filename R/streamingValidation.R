@@ -22,7 +22,7 @@
 
 # ---- streaming the rules axis ------------------------------------------------
 #
-# Rules divide into three kinds by how much of the table they need at once.
+# Rules divide into four kinds by how much of the table they need at once.
 #
 #   decomposable  A count over a per-row mask. Range and IF/THEN rules are
 #                 these. Sum the per-batch counts and the total is exactly the
@@ -51,11 +51,11 @@
 #' @return One of `"decomposable"`, `"keyed"`, `"grouped"` or `"unsupported"`.
 #' @keywords internal
 dta_rule_stream_kind <- function(rule) {
-  switch(normalize_rule_type(rule@type),
-    check_range = "decomposable",
-    check_col_condition = "decomposable",
-    check_unique = "keyed",
-    check_group_condition = "grouped",
+  switch(rule@type,
+    col_range = "decomposable",
+    col_condition = "decomposable",
+    col_unique = "keyed",
+    group_condition = "grouped",
     # An unrecognised type must not be silently treated as buffered and handed
     # to the grouped evaluator; it is reported as a rule failure, as the
     # materialising path does.
@@ -293,7 +293,7 @@ dta_rule_stream_update <- function(state, rule, df, numeric_cache = NULL) {
     {
       switch(state$kind,
         decomposable = {
-          violated <- if (identical(normalize_rule_type(rule@type), "check_range")) {
+          violated <- if (identical(rule@type, "col_range")) {
             dta_range_violated(rule, df, numeric_cache)
           } else {
             dta_condition_violated(rule, df, numeric_cache)
@@ -366,7 +366,7 @@ dta_rule_stream_finalise <- function(state, rule) {
     return(list(
       id = rule@id,
       valid = FALSE,
-      message = paste("Unknown rule type:", normalize_rule_type(rule@type))
+      message = paste("Unknown rule type:", rule@type)
     ))
   }
 
@@ -411,7 +411,7 @@ dta_rule_stream_finalise <- function(state, rule) {
 
   message <- if (state$kind == "keyed") {
     dta_unique_violation_message(rule@id, state$count, dta_unique_columns(rule))
-  } else if (identical(normalize_rule_type(rule@type), "check_range")) {
+  } else if (identical(rule@type, "col_range")) {
     target <- dta_range_target(rule)
     dta_range_violation_message(rule@id, state$count, target$col, target$range)
   } else {
@@ -929,8 +929,9 @@ dta_validate_table_stream <- function(specs,
 
     # Arrow's `null` type -- an all-empty CSV column, a Parquet or user-supplied
     # Dataset with a genuinely null-typed column -- converts to a
-    # `vctrs_unspecified` vector, which has no `asJSON` method and no numeric
-    # conversion, so it reaches the checks untyped and aborts the scan.
+    # `vctrs_unspecified` vector, which has no usable type for the checks
+    # (not character, not numeric), so it reaches them untyped and aborts the
+    # scan.
     # `validate_table_detailed()` has replaced such columns with all-NA
     # character since before streaming existed; the same substitution here is
     # what makes the two paths agree on a column of nothing but missing values
@@ -2270,6 +2271,13 @@ dta_validate_any_table <- function(specs,
   # judged against what the file really has.
   column_names <- dta_table_column_names(table)
 
+  # Refused here, where the names are first in hand, rather than at the
+  # structural gate below the scan: that gate is the same call, but it runs
+  # AFTER the batch loop, so a repeated name used to cost a full pass over the
+  # source -- with the uniqueness precompute, the spill files and the hours a
+  # 60 GB scan takes -- before an answer its header had already settled.
+  dta_abort_on_duplicate_columns(column_names)
+
   # Eligible uniqueness rules are answered by Arrow's grouped aggregation over
   # the whole source before the batch scan -- the distinct keys then live in
   # the C++ engine instead of an R hash that grows with key cardinality.
@@ -2329,6 +2337,31 @@ dta_validate_any_table <- function(specs,
 # is retained as the default. But it is a poor way to learn that a column is
 # absent, so a caller can ask to be told structurally instead.
 
+# Refuses a table that carries one name twice.
+#
+# A name carried twice makes the table UNVALIDATABLE rather than invalid, so it
+# is refused rather than reported as a finding. `table[[name]]` resolves to the
+# first occurrence, so every per-row check would silently inspect one column and
+# never see the other, while the structural comparisons are `setdiff()` on sets,
+# blind to repetition, and would call the shape sound. The result was a table
+# whose second column nobody looked at being certified clean, which is the one
+# verdict a transfer specification must never produce. Which of the two the spec
+# describes is not something this package may decide on the submitter's behalf.
+#
+# Kept as its own function because the answer is decidable from the names alone,
+# so it belongs wherever the names are first obtained -- before a scanner is
+# built, not after the scan it drives has finished.
+dta_abort_on_duplicate_columns <- function(column_names) {
+  duplicated_names <- unique(column_names[duplicated(column_names)])
+  if (length(duplicated_names) > 0) {
+    cli::cli_abort(c(
+      "The table has duplicate column name{?s}: {.field {duplicated_names}}.",
+      i = "A declared name must identify exactly one column."
+    ))
+  }
+  invisible(column_names)
+}
+
 #' @title Structural Findings from Column Names Alone
 #' @description
 #' Compares the columns a spec collection declares against the columns a file
@@ -2345,8 +2378,18 @@ dta_validate_any_table <- function(specs,
 #'   when the table's columns are EXACTLY the declared ones: a spec describes a
 #'   transfer, and a column nobody agreed to carry is as much a departure from
 #'   it as a column that was promised and never arrived.
+#'
+#'   Aborts instead of returning when `column_names` repeats a name: that table
+#'   cannot be validated at all, as neither the per-row checks nor the set
+#'   comparisons here can see past the first column of a given name.
 #' @keywords internal
 dta_structure_findings <- function(specs, column_names) {
+  # The backstop. Every caller that can obtain the names earlier refuses there
+  # instead, so that a 60 GB source is not scanned to reach a verdict decided by
+  # its header; this keeps the refusal true of the function itself, for callers
+  # that arrive with nothing read yet.
+  dta_abort_on_duplicate_columns(column_names)
+
   columns <- tryCatch(specs@columns, error = function(e) NULL)
   declared <- if (is.null(columns) || length(columns) == 0) {
     character(0)
@@ -2572,13 +2615,15 @@ dta_open_validation_dataset <- function(path,
 #' rest need never be read at all. If your data looks like that, measure it.
 #' Otherwise, do not convert.
 #'
-#' The columns are typed by the specs during conversion, exactly as they would
-#' be when validating the text directly, so the cache preserves the declared
-#' types rather than Parquet's own inference of them.
-#' @param specs A `DTAColumnSpecCollection`, used to type the columns.
+#' Every column is written as text (utf8), exactly as the delimited file is
+#' read for validation: the specs normalise the header names, and the declared
+#' types are applied when the cache is validated, not stored in it.
+#' @param specs A `DTAColumnSpecCollection`, used to normalise the header
+#'   names; columns are written as text.
 #' @param path Character. Path to the delimited file.
 #' @param cache_path Character or `NULL`. Where to write. Defaults to the input
-#'   path with a `_parquet` suffix.
+#'   path with its extension replaced by `_parquet` (`data.csv` becomes
+#'   `data_parquet`).
 #' @param delim,quote,has_header Parse options for the input file.
 #' @param compression Character. Parquet compression codec.
 #' @return The cache path, invisibly.
@@ -2710,18 +2755,24 @@ cache_as_parquet <- function(specs,
 #' discarded multi-hour scans at exactly the per-row-unique-key scale streaming
 #' exists for). What bounds memory instead:
 #'
-#' * `check_unique` rules whose key columns are text are answered by Arrow's
-#'   own grouped aggregation over the dataset, in one extra streaming pass over
-#'   just the key columns -- the distinct keys live compactly in the C++
-#'   engine, not as R strings. `options(DTAtools.stream_arrow_unique = FALSE)`
-#'   restores the per-batch accumulator.
-#' * A uniqueness rule that cannot take that path (non-text keys, or a
-#'   consumable reader as the source) falls back to an R-side key set whose
-#'   memory grows with the number of distinct keys (roughly 100 bytes per
-#'   key). Grouped rules likewise hold state per distinct group.
-#' * Columns nothing reads are projected out of the scan entirely, and every
-#'   scanned column is read as text and typed in R, so a malformed value can
-#'   never abort the scan mid-file.
+#' * `col_unique` rules are answered by Arrow's own grouped aggregation over
+#'   the dataset, in one extra streaming pass over just the key columns -- the
+#'   distinct keys live compactly in the C++ engine, not as R strings. Key
+#'   columns the specs declare numeric are cast to numbers first, so they are
+#'   eligible too. `options(DTAtools.stream_arrow_unique = FALSE)` restores the
+#'   per-batch accumulator.
+#' * A uniqueness rule that cannot take that path falls back to an R-side key
+#'   set whose memory grows with the number of distinct keys (roughly 100 bytes
+#'   per key). That happens when the source is not a text-typed dataset (for
+#'   example Parquet, which carries its own types), when the source is a
+#'   consumable reader rather than a re-scannable dataset, or when Arrow
+#'   refuses the cast of a declared-numeric key. Grouped rules likewise hold
+#'   state per distinct group.
+#' * Columns nothing reads are projected out of the scan entirely. A delimited
+#'   file is scanned with every column as text, so a malformed value can never
+#'   abort the scan mid-file; each batch is then typed by the specs, in Arrow
+#'   where Arrow's parser provably agrees with R's and in R otherwise.
+#'   Parquet is not read as text; its stored types are used.
 #' @return A validation details list. It always carries an `n_rows_scanned`
 #'   attribute (rows actually read; `0` for a structural early return). When
 #'   `benchmark = TRUE` it additionally carries a `"benchmark"` attribute; see

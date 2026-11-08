@@ -29,8 +29,8 @@ test_that("the package still loads when a non-generic `check` is attached", {
 
   pkg <- normalizePath(testthat::test_path("..", ".."), winslash = "/", mustWork = FALSE)
   skip_if(
-    !file.exists(file.path(pkg, "DESCRIPTION")),
-    "not running from a package source tree (R CMD check runs from the install)"
+    length(source_r_files()) == 0,
+    "not running from a package source tree (R CMD check and covr run from the install)"
   )
 
   rscript <- file.path(
@@ -82,16 +82,18 @@ test_that("every generic-existence guard in R/ is scoped correctly", {
   # account.
   unscoped_names <- c("names", "print", "labels")
 
-  r_dir <- testthat::test_path("..", "..", "R")
-  r_files <- list.files(r_dir, pattern = "\\.R$", full.names = TRUE)
+  r_files <- source_r_files()
+  testthat::skip_if(length(r_files) == 0, "package source not available")
 
   guard_pattern <- 'exists\\("([a-zA-Z_.]+)",\\s*mode\\s*=\\s*"function"'
 
   offenders <- character(0)
+  total_hits <- 0
 
   for (f in r_files) {
     lines <- readLines(f, warn = FALSE)
     hits <- grep(guard_pattern, lines)
+    total_hits <- total_hits + length(hits)
 
     for (i in hits) {
       line <- lines[i]
@@ -117,6 +119,12 @@ test_that("every generic-existence guard in R/ is scoped correctly", {
     }
   }
 
+  # The scan is line-based: a styler reflow that folds the pattern or a
+  # matching line across lines would silently leave `hits` empty in every
+  # file without failing anything above. Pin a nonzero total so that
+  # happens loudly instead.
+  expect_gt(total_hits, 0)
+
   expect_true(
     length(offenders) == 0,
     info = paste(c("Incorrectly scoped generic guard(s):", offenders), collapse = "\n")
@@ -134,8 +142,8 @@ test_that("the package still loads when a non-generic `read_file` is attached", 
 
   pkg <- normalizePath(testthat::test_path("..", ".."), winslash = "/", mustWork = FALSE)
   skip_if(
-    !file.exists(file.path(pkg, "DESCRIPTION")),
-    "not running from a package source tree (R CMD check runs from the install)"
+    length(source_r_files()) == 0,
+    "not running from a package source tree (R CMD check and covr run from the install)"
   )
 
   rscript <- file.path(
@@ -169,4 +177,39 @@ test_that("the package still loads when a non-generic `read_file` is attached", 
     any(grepl("^LOADED_OK$", out)),
     info = paste(c("subprocess output:", out), collapse = "\n")
   )
+})
+
+test_that("the skip_on_cran() tests above are not silently skipped on CI", {
+  # COMPANION GUARD to the two subprocess tests in this file. They are the only
+  # way to observe a package-LOAD failure -- the failure happens while DTAtools
+  # is being loaded, so it cannot be seen from a session where it already is --
+  # and both are gated on skip_on_cran(), which skips unless NOT_CRAN is set.
+  #
+  # `R CMD check` does not set it. These tests used to run under it only because
+  # fourteen test files each called Sys.setenv(NOT_CRAN = "true") at file level,
+  # which leaked into every file sourced after them; when that leak was cleaned
+  # up the gated tests went quiet without failing anything, which is the whole
+  # problem -- a permanently skipped test is invisible dead coverage. CI now
+  # declares NOT_CRAN once, in .github/workflows/R-CMD-check.yaml, and this
+  # asserts the declaration is still there and still reaching the tests.
+  #
+  # Asserted from the environment rather than by reading the workflow file,
+  # because `.Rbuildignore` keeps .github out of the built tarball: under the
+  # very check this is defending, the file is not there to read. This test
+  # itself never skips -- both branches assert.
+  if (identical(Sys.getenv("CI"), "true")) {
+    expect_identical(
+      Sys.getenv("NOT_CRAN"), "true",
+      info = paste(
+        "CI must set NOT_CRAN (see the job-level env: in R-CMD-check.yaml);",
+        "without it every skip_on_cran() test in this suite silently skips."
+      )
+    )
+  } else {
+    # Off CI, whether it is set is the runner's business -- devtools::test()
+    # sets it, a bare R CMD check does not. What is pinned is the spelling:
+    # skip_on_cran() tests for the exact string "true", so a well-meant "TRUE"
+    # would skip everything while looking set.
+    expect_true(Sys.getenv("NOT_CRAN") %in% c("", "true"))
+  }
 })

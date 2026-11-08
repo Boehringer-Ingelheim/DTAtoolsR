@@ -4,7 +4,7 @@
 \alias{.format_metadata_pairs}
 \title{Format metadata as key-value pairs for display}
 \usage{
-.format_metadata_pairs(metadata_list)
+.format_metadata_pairs(metadata_list, truncate = TRUE)
 }
 \description{
 Format metadata as key-value pairs for display

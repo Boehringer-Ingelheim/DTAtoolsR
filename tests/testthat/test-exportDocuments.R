@@ -14,7 +14,9 @@ test_that("write_dta validates inputs and exports markdown/docx", {
   write_dta(dta, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
   expect_true(file.exists(out_md))
   md_lines <- readLines(out_md, warn = FALSE)
-  expect_true(any(grepl("^# Data Transfer Agreement Metadata", md_lines)))
+  # The document name is the top heading; the DTA title follows it.
+  expect_equal(md_lines[1], "# Data Transfer Agreement")
+  expect_true("**Title:** Example DTA" %in% md_lines)
   expect_true(any(grepl("^## Datasets", md_lines)))
 
   out_docx <- tempfile(fileext = ".docx")
@@ -70,8 +72,9 @@ test_that("write_dta exports docx when title contains regex metacharacters", {
   body <- .read_docx_body_xml(out_docx)
   expect_match(body, "<w:t[^>]*>Study \\(Phase 3</w:t>")
 
-  paragraphs <- .docx_paragraphs(out_docx)
-  expect_equal(Filter(nzchar, paragraphs)[1], "Study (Phase 3")
+  # The document name leads; the supplied title follows it, unreplaced.
+  paragraphs <- Filter(nzchar, .docx_paragraphs(out_docx))
+  expect_equal(paragraphs[1:2], c("Data Transfer Agreement", "Study (Phase 3"))
 })
 
 test_that("write_dataset_metadata and alias export metadata documents", {
@@ -99,7 +102,8 @@ test_that("write_dataset_metadata and alias export metadata documents", {
   write_dataset_metadata(ds, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
   expect_true(file.exists(out_md))
   md_lines <- readLines(out_md, warn = FALSE)
-  expect_true(any(grepl("^# Dataset Specification", md_lines)))
+  expect_equal(md_lines[1], "# Data Transfer Agreement")
+  expect_true(any(grepl("^## +Demographics", md_lines)))
   expect_true(any(grepl("^### Approval & Signatures", md_lines)))
 
   out_docx <- tempfile(fileext = ".docx")
@@ -116,37 +120,177 @@ test_that("write_dataset_metadata and alias export metadata documents", {
 # .read_docx_body_xml() and .docx_paragraphs() live in helper-docx.R.
 
 test_that("bundled numbered template ships a 'heading 4' style", {
-  tp <- system.file("extdata", "templates", "dta_numbered_template.docx", package = "DTAtools")
+  tp <- system.file("extdata", "word-templates", "dta_numbered_template.docx", package = "DTAtools")
   expect_true(nzchar(tp) && file.exists(tp))
 
   si <- officer::styles_info(officer::read_docx(path = tp))
   expect_true("heading 4" %in% si$style_name)
 })
 
-test_that("write_dta docx uses numbered heading hierarchy incl. heading 4", {
+test_that("write_dta docx uses numbered heading hierarchy", {
   dta <- create_example_DTA()
   out_docx <- tempfile(fileext = ".docx")
   on.exit(unlink(out_docx, force = TRUE), add = TRUE)
   write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
 
   # Assert on style_name, not on the underlying styleId. The checked-in template
-  # inst/extdata/templates/dta_numbered_template.docx was saved by a French Word
+  # inst/extdata/word-templates/dta_numbered_template.docx was saved by a French Word
   # install, so its ids happen to be "Titre1".."Titre4"; regenerating it on an
   # English install would yield "Heading1".. with no functional change.
   # .add_heading() (R/documentBuilders.R:61-64) requests "heading <level>", and
   # that is the locale-independent contract worth pinning.
   summary <- officer::docx_summary(officer::read_docx(out_docx))
-  for (nm in c("heading 1", "heading 2", "heading 3", "heading 4")) {
+  for (nm in c("heading 1", "heading 2", "heading 3")) {
     expect_true(nm %in% summary$style_name)
   }
 
-  # The Datasets -> <dataset> -> Files / Dataset Specifications hierarchy must
-  # be carried by those heading levels, not by bold body paragraphs.
+  # The Datasets -> <dataset> -> Files / Column Specifications hierarchy must
+  # be carried by those heading levels, not by bold body paragraphs. Each
+  # chapter is a top-level heading; there is no wrapper chapter above them.
   headings <- summary[summary$style_name %in% paste("heading", 1:4), ]
-  expect_equal(headings$style_name[headings$text == "Datasets"], "heading 2")
-  expect_equal(unique(headings$style_name[headings$text == "demographics"]), "heading 3")
-  expect_equal(unique(headings$style_name[headings$text == "Dataset Specifications"]), "heading 4")
-  expect_true("Data Transfer Agreement" %in% summary$text)
+  expect_equal(headings$style_name[headings$text == "Datasets"], "heading 1")
+  # A dataset with a name is headed "<name> (<id>)".
+  expect_equal(
+    unique(headings$style_name[headings$text == "Demographics (demographics)"]),
+    "heading 2"
+  )
+  expect_equal(unique(headings$style_name[headings$text == "Column Specifications"]), "heading 3")
+  expect_false("Dataset Specifications" %in% headings$text)
+  expect_false("Data Transfer Agreement" %in% headings$text)
+})
+
+# A dataset is headed by its name with the id beside it ("Demographics
+# (demographics)"), because the id is what every validation message and
+# {COLUMN_SPECS:<id>} refers to; a dataset with no name is headed by the bare
+# id. The long description is body text under the heading.
+.export_naming_dta <- function() {
+  named <- create_example_DTADataSetTabular(2)
+  named@description <- "One row per subject, as delivered by the CRO."
+  unnamed <- DTADataSetTabular(
+    id = "audit_trail",
+    specs = create_example_DTAColumnSpecCollection(1),
+    description = "Every change made to the records."
+  )
+  DTA(datasets = list(named, unnamed), metadata = create_example_DTAMetaData())
+}
+
+test_that("write_dta markdown heads a dataset by name and id, an unnamed one by its id", {
+  out_md <- tempfile(fileext = ".md")
+  on.exit(unlink(out_md, force = TRUE), add = TRUE)
+  write_dta(.export_naming_dta(), file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
+  md <- readLines(out_md, warn = FALSE)
+
+  named_at <- match("### Demographics (demographics)", md)
+  # Escaped Markdown: the `_` would otherwise start emphasis.
+  unnamed_at <- match("### audit\\_trail", md)
+  expect_false(is.na(named_at))
+  expect_false(is.na(unnamed_at))
+  # The long description is the paragraph under its heading.
+  expect_identical(md[named_at + 2], "One row per subject, as delivered by the CRO.")
+  expect_identical(md[unnamed_at + 2], "Every change made to the records.")
+  # Neither the bare id of a named dataset nor a name-only heading appears.
+  expect_false("### demographics" %in% md)
+  expect_false("### Demographics" %in% md)
+})
+
+test_that("the Markdown exports escape a dataset's name and description", {
+  ds <- create_example_DTADataSetTabular(2)
+  ds@name <- "*Draft* #2"
+  ds@description <- "# not a heading"
+  dta <- DTA(datasets = list(ds), metadata = create_example_DTAMetaData())
+
+  out_md <- tempfile(fileext = ".md")
+  on.exit(unlink(out_md, force = TRUE), add = TRUE)
+  write_dta(dta, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
+  md <- readLines(out_md, warn = FALSE)
+  expect_true("### \\*Draft\\* \\#2 (demographics)" %in% md)
+  expect_true("\\# not a heading" %in% md)
+  expect_false("# not a heading" %in% md)
+
+  out_ds <- tempfile(fileext = ".md")
+  on.exit(unlink(out_ds, force = TRUE), add = TRUE)
+  write_dataset_metadata(ds, file = out_ds, format = "md", overwrite = TRUE, quiet = TRUE)
+  ds_md <- readLines(out_ds, warn = FALSE)
+  expect_true(any(grepl("**Name:** \\*Draft\\* \\#2", ds_md, fixed = TRUE)))
+  expect_true(any(grepl("**Description:** \\# not a heading", ds_md, fixed = TRUE)))
+})
+
+test_that("write_dta docx heads a dataset by name and id, with its description as body text", {
+  out_docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+  write_dta(.export_naming_dta(), file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
+  summary <- officer::docx_summary(officer::read_docx(out_docx))
+
+  is_heading <- summary$style_name %in% paste("heading", 1:4)
+  headings <- summary$text[is_heading]
+  expect_true("Demographics (demographics)" %in% headings)
+  expect_true("audit_trail" %in% headings)
+  expect_false("demographics" %in% headings)
+
+  # The descriptions are paragraphs, not headings and not table cells.
+  body <- summary$text[summary$content_type == "paragraph" & !is_heading]
+  expect_true("One row per subject, as delivered by the CRO." %in% body)
+  expect_true("Every change made to the records." %in% body)
+})
+
+test_that("write_dataset_metadata markdown lists the id, name and description of a dataset", {
+  ds <- create_example_DTADataSetTabular(2)
+  ds@description <- "One row per subject, as delivered by the CRO."
+  out_md <- tempfile(fileext = ".md")
+  on.exit(unlink(out_md, force = TRUE), add = TRUE)
+  write_dataset_metadata(ds, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
+  md <- readLines(out_md, warn = FALSE)
+
+  expect_true(any(grepl("^## +Demographics \\(demographics\\)$", md)))
+  overview <- match("### Overview", md)
+  expect_false(is.na(overview))
+  expect_identical(
+    md[overview + 1:3],
+    c(
+      "**ID:** demographics",
+      "**Name:** Demographics",
+      "**Description:** One row per subject, as delivered by the CRO."
+    )
+  )
+
+  # Without a name there is no Name line and the heading is the bare id.
+  bare <- create_example_DTADataSetTabular(1)
+  out_bare <- tempfile(fileext = ".md")
+  on.exit(unlink(out_bare, force = TRUE), add = TRUE)
+  write_dataset_metadata(bare, file = out_bare, format = "md", overwrite = TRUE, quiet = TRUE)
+  md_bare <- readLines(out_bare, warn = FALSE)
+
+  # Escaped Markdown, so the underscores cannot start emphasis.
+  expect_true(any(grepl("^## +example\\\\_container\\\\_specs\\\\_without\\\\_data$", md_bare)))
+  expect_true("**ID:** example\\_container\\_specs\\_without\\_data" %in% md_bare)
+  expect_false(any(grepl("^\\*\\*Name:\\*\\*", md_bare)))
+})
+
+test_that("write_dataset_metadata docx titles a dataset by name and id and tables ID, Name, Description", {
+  ds <- create_example_DTADataSetTabular(2)
+  ds@description <- "One row per subject, as delivered by the CRO."
+  out_docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+  write_dataset_metadata(
+    ds,
+    file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE,
+    include_signatures = FALSE
+  )
+  summary <- officer::docx_summary(officer::read_docx(out_docx))
+
+  paragraphs <- summary$text[summary$content_type == "paragraph"]
+  expect_true("Dataset Specification: Demographics (demographics)" %in% paragraphs)
+
+  # The metadata table opens with the header, then ID, Name, Description in
+  # that order -- the identifier first, the label second, the long text last.
+  cells <- summary$text[summary$content_type == "table cell"]
+  expect_identical(
+    cells[1:8],
+    c(
+      "Item", "Details", "ID", "demographics", "Name", "Demographics",
+      "Description", "One row per subject, as delivered by the CRO."
+    )
+  )
 })
 
 test_that("write_dta docx places Process Information before Datasets", {
@@ -159,9 +303,9 @@ test_that("write_dta docx places Process Information before Datasets", {
   write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
 
   summary <- officer::docx_summary(officer::read_docx(out_docx))
-  heading2 <- summary[summary$style_name == "heading 2", c("doc_index", "text")]
-  idx_process <- heading2$doc_index[which(heading2$text == "Process Information")[1]]
-  idx_datasets <- heading2$doc_index[which(heading2$text == "Datasets")[1]]
+  heading1 <- summary[summary$style_name %in% "heading 1", c("doc_index", "text")]
+  idx_process <- heading1$doc_index[which(heading1$text == "Process Information")[1]]
+  idx_datasets <- heading1$doc_index[which(heading1$text == "Datasets")[1]]
   expect_true(length(idx_process) == 1 && length(idx_datasets) == 1)
   expect_true(idx_process < idx_datasets)
 })
@@ -183,15 +327,17 @@ test_that("write_dta docx puts ONLY the specs and rules tables in landscape", {
   # the table and not merely its heading.
   expect_identical(.docx_orientation_of(out_docx, "Variable Name"), "landscape")
 
-  # Everything around them stays portrait: the title page, the metadata
-  # narrative, the dataset heading, and the trailing footer.
+  # Everything around them stays portrait: the cover, the metadata narrative,
+  # the dataset heading and its Files table.
   expect_identical(.docx_orientation_of(out_docx, "Data Transfer Agreement"), "portrait")
   expect_identical(.docx_orientation_of(out_docx, "Document Information"), "portrait")
   expect_identical(.docx_orientation_of(out_docx, "Datasets"), "portrait")
-  expect_identical(.docx_orientation_of(out_docx, "Dataset Specifications"), "portrait")
+  expect_identical(.docx_orientation_of(out_docx, "^Files$", fixed = FALSE), "portrait")
 
+  # The specs headings sit inside the landscape section, so they can never be
+  # orphaned at the foot of a portrait page.
   blocks <- .docx_blocks_with_orientation(out_docx)
-  expect_identical(blocks$orientation[nrow(blocks)], "portrait")
+  expect_identical(blocks$orientation[match("Column Specifications", blocks$text)], "landscape")
 
   # A landscape run must not swallow the rest of the document.
   expect_true(any(blocks$orientation == "landscape"))
@@ -492,10 +638,10 @@ test_that("dta_pdf_backend reports a usable backend or NULL", {
   } else {
     expect_type(backend, "list")
     expect_named(backend, c("name", "engine", "available"))
-    expect_true(backend$name %in% c("libreoffice", "tinytex", "pandoc"))
+    expect_true(backend$name %in% c("word", "libreoffice", "tinytex", "pandoc"))
     # The reported backend is the first choice, not an arbitrary one.
     expect_identical(backend$name, backend$available[[1]])
-    expect_true(all(backend$available %in% c("libreoffice", "tinytex", "pandoc")))
+    expect_true(all(backend$available %in% c("word", "libreoffice", "tinytex", "pandoc")))
     expect_true(nzchar(backend$engine))
     expect_true(.pdf_conversion_available())
   }
@@ -652,6 +798,85 @@ test_that("the abort reports every backend that failed, with braces intact", {
   expect_false(file.exists(out))
 })
 
+test_that("a failed PDF conversion never touches a valid file already at the destination", {
+  # Regression guard: every backend used to unlink() the destination on its own
+  # failure, so a conversion attempted against an already-exported PDF (e.g. a
+  # re-run with overwrite = TRUE) destroyed that valid file even though the new
+  # attempt never produced a replacement.
+  test_dir <- tempfile("pdf_export_")
+  dir.create(test_dir)
+  on.exit(unlink(test_dir, recursive = TRUE, force = TRUE), add = TRUE)
+  out <- file.path(test_dir, "out.pdf")
+  original <- charToRaw("%PDF-1.4\nold valid pdf bytes\n%%EOF\n")
+  writeBin(original, out)
+
+  docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(docx, force = TRUE), add = TRUE)
+  print(officer::read_docx(), target = docx)
+
+  local_mocked_bindings(
+    .pdf_backends_available = function() c("libreoffice", "pandoc"),
+    .soffice_docx_to_pdf = function(docx_file, pdf_file) cli::cli_abort("soffice exploded"),
+    .pandoc_docx_to_pdf = function(docx_file, pdf_file) cli::cli_abort("pandoc exploded")
+  )
+
+  expect_error(.convert_docx_to_pdf(docx, out), class = "rlang_error")
+  expect_identical(readBin(out, what = "raw", n = length(original)), original)
+  # No staging file left behind next to the untouched destination.
+  expect_identical(list.files(test_dir), "out.pdf")
+})
+
+test_that(".dta_write_staged leaves an existing destination untouched when write() fails", {
+  test_dir <- tempfile("staged_write_")
+  dir.create(test_dir)
+  on.exit(unlink(test_dir, recursive = TRUE, force = TRUE), add = TRUE)
+  dest <- file.path(test_dir, "out.bin")
+  original <- charToRaw("original bytes, must survive")
+  writeBin(original, dest)
+
+  expect_error(
+    .dta_write_staged(dest, write = function(stage) cli::cli_abort("write blew up")),
+    class = "rlang_error"
+  )
+  expect_identical(readBin(dest, what = "raw", n = length(original)), original)
+  expect_identical(list.files(test_dir), "out.bin")
+})
+
+test_that(".dta_write_staged leaves an existing destination untouched when check() rejects it", {
+  test_dir <- tempfile("staged_write_")
+  dir.create(test_dir)
+  on.exit(unlink(test_dir, recursive = TRUE, force = TRUE), add = TRUE)
+  dest <- file.path(test_dir, "out.bin")
+  original <- charToRaw("original bytes, must survive")
+  writeBin(original, dest)
+
+  expect_error(
+    .dta_write_staged(
+      dest,
+      write = function(stage) writeBin(charToRaw("garbage"), stage),
+      check = function(stage) cli::cli_abort("rejected")
+    ),
+    class = "rlang_error"
+  )
+  expect_identical(readBin(dest, what = "raw", n = length(original)), original)
+  expect_identical(list.files(test_dir), "out.bin")
+})
+
+test_that(".dta_write_staged replaces the destination and leaves no staging file on success", {
+  test_dir <- tempfile("staged_write_")
+  dir.create(test_dir)
+  on.exit(unlink(test_dir, recursive = TRUE, force = TRUE), add = TRUE)
+  dest <- file.path(test_dir, "out.bin")
+
+  .dta_write_staged(
+    dest,
+    write = function(stage) writeBin(charToRaw("new content"), stage),
+    check = function(stage) invisible(TRUE)
+  )
+  expect_identical(readBin(dest, what = "raw", n = 11L), charToRaw("new content"))
+  expect_identical(list.files(test_dir), "out.bin")
+})
+
 test_that(".cli_escape neutralises braces so cli cannot reinterpret tool output", {
   expect_identical(.cli_escape("a {b} c"), "a {{b}} c")
   expect_identical(.cli_escape("no braces"), "no braces")
@@ -677,6 +902,126 @@ test_that(".pandoc_pdf_engine and .find_soffice return scalar strings", {
   if (nzchar(bin_dir)) {
     expect_true(dir.exists(bin_dir))
   }
+})
+
+test_that(".tinytex_docx_to_pdf typesets a character pdflatex cannot (retry with xelatex)", {
+  skip_if(!nzchar(.tinytex_bin_dir()))
+  skip_if_not(rmarkdown::pandoc_available())
+  old_path <- Sys.getenv("PATH")
+  if (!nzchar(Sys.which("latexmk")) && !nzchar(Sys.which("pdflatex"))) {
+    Sys.setenv(PATH = paste(.tinytex_bin_dir(), old_path, sep = .Platform$path.sep))
+    on.exit(Sys.setenv(PATH = old_path), add = TRUE)
+  }
+  docx <- tempfile(fileext = ".docx")
+  pdf <- tempfile(fileext = ".pdf")
+  on.exit(unlink(c(docx, pdf), force = TRUE), add = TRUE)
+  doc <- officer::body_add_par(officer::read_docx(), "a ≠ b")
+  print(doc, target = docx)
+
+  .tinytex_docx_to_pdf(docx, pdf)
+  expect_true(.is_pdf_file(pdf))
+})
+
+test_that("word is a backend only when Word is found, and then comes first", {
+  local_mocked_bindings(.find_word = function() "")
+  expect_false("word" %in% .pdf_backends_available())
+
+  local_mocked_bindings(.find_word = function() "C:/fake/WINWORD.EXE")
+  expect_identical(.pdf_backends_available()[[1]], "word")
+})
+
+test_that(".find_word returns \"\" for a registry path that does not exist, and the path of one that does", {
+  skip_if_not(.Platform$OS.type == "windows")
+  real <- tempfile(fileext = ".exe")
+  file.create(real)
+  on.exit(unlink(real), add = TRUE)
+
+  local_mocked_bindings(
+    readRegistry = function(...) list(`(Default)` = "C:/no/such/dir/WINWORD.EXE"),
+    .package = "utils"
+  )
+  expect_identical(.find_word(), "")
+
+  local_mocked_bindings(
+    readRegistry = function(...) list(`(Default)` = paste0("\"", real, "\"")),
+    .package = "utils"
+  )
+  expect_identical(.find_word(), normalizePath(real, winslash = "/"))
+})
+
+test_that(".find_word is empty off Windows", {
+  skip_if(.Platform$OS.type == "windows")
+  expect_identical(.find_word(), "")
+})
+
+.word_pids <- function() {
+  out <- suppressWarnings(system2("tasklist",
+    c("/FO", "CSV", "/NH", "/FI", shQuote("IMAGENAME eq WINWORD.EXE", type = "cmd")),
+    stdout = TRUE, stderr = TRUE
+  ))
+  hit <- grep("WINWORD.EXE", out, fixed = TRUE, value = TRUE)
+  as.integer(vapply(strsplit(hit, "\",\"", fixed = TRUE), `[`, "", 2))
+}
+
+.word_test_docx <- function() {
+  docx <- tempfile(fileext = ".docx")
+  doc <- officer::body_add_par(officer::read_docx(), "Body text")
+  print(doc, target = docx)
+  docx
+}
+
+test_that(".word_docx_to_pdf writes a PDF of plausible size and leaves no Word behind", {
+  skip_if_not(.Platform$OS.type == "windows")
+  skip_if(!nzchar(.find_word()), "Microsoft Word is not installed")
+  skip_if(length(.word_pids()) > 0, "a Word session is already open; see the attach test")
+
+  docx <- .word_test_docx()
+  pdf <- tempfile(fileext = ".pdf")
+  on.exit(unlink(c(docx, pdf), force = TRUE), add = TRUE)
+
+  .word_docx_to_pdf(docx, pdf)
+  expect_true(.is_pdf_file(pdf))
+  expect_gt(file.info(pdf)$size, 1000)
+  expect_identical(.word_pids(), integer(0))
+})
+
+test_that(".word_docx_to_pdf never ends a Word session that was already running", {
+  skip_if_not(.Platform$OS.type == "windows")
+  skip_if(!nzchar(.find_word()), "Microsoft Word is not installed")
+  skip_if(length(.word_pids()) > 0, "a Word session is already open; will not disturb it")
+
+  # A separate PowerShell holds a Word instance for a minute, as a user's
+  # session would be; Word 2013+ may hand it to our New-Object call.
+  holder <- tempfile(fileext = ".ps1")
+  writeLines(
+    c(
+      "$w = New-Object -ComObject Word.Application",
+      "Start-Sleep -Seconds 60"
+    ),
+    holder
+  )
+  docx <- .word_test_docx()
+  pdf <- tempfile(fileext = ".pdf")
+  on.exit(unlink(c(holder, docx, pdf), force = TRUE), add = TRUE)
+  system2("powershell",
+    c("-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", shQuote(holder, type = "cmd")),
+    wait = FALSE
+  )
+  existing <- integer(0)
+  for (i in seq_len(40)) {
+    existing <- .word_pids()
+    if (length(existing) > 0) break
+    Sys.sleep(0.5)
+  }
+  on.exit(
+    for (p in .word_pids()) tools::pskill(p),
+    add = TRUE, after = FALSE
+  )
+  skip_if(length(existing) == 0, "could not start a stand-in Word session")
+
+  .word_docx_to_pdf(docx, pdf)
+  expect_true(.is_pdf_file(pdf))
+  expect_true(all(existing %in% .word_pids()))
 })
 
 test_that(".is_pdf_file recognises the PDF signature and nothing else", {
@@ -716,10 +1061,14 @@ test_that("exported document dates are ISO 8601 under any LC_TIME", {
   on.exit(unlink(out_docx, force = TRUE), add = TRUE)
   write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
 
-  paragraphs <- .docx_paragraphs(out_docx)
-  expect_true("Date: 2026-01-15" %in% paragraphs)
-  # No localized month name may survive anywhere in the document.
-  expect_false(any(grepl("Januar|January|janvier", paragraphs)))
+  # The cover and Document Information tables carry the date as a cell.
+  cells <- officer::docx_summary(officer::read_docx(out_docx))$text
+  expect_true("2026-01-15" %in% cells)
+  # The running footer carries it too, and no localized month name may survive
+  # anywhere in the document.
+  footer <- paste(.docx_part_texts(out_docx, "^footer[0-9]+[.]xml$"), collapse = " ")
+  expect_match(footer, "2026-01-15", fixed = TRUE)
+  expect_false(any(grepl("Januar|January|janvier", c(cells, footer))))
 })
 
 test_that("write_dta docx opens with the signature block, before any other chapter", {
@@ -731,11 +1080,11 @@ test_that("write_dta docx opens with the signature block, before any other chapt
   write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
 
   summary <- officer::docx_summary(officer::read_docx(out_docx))
-  h2 <- summary[summary$style_name == "heading 2", c("doc_index", "text")]
-  idx <- function(txt) h2$doc_index[which(h2$text == txt)[1]]
+  h1 <- summary[summary$style_name %in% "heading 1", c("doc_index", "text")]
+  idx <- function(txt) h1$doc_index[which(h1$text == txt)[1]]
 
-  expect_false(is.na(idx("Approval & Signatures")))
-  for (later in c("Document Information", "Receiver Information", "Supplier Information", "Datasets")) {
+  expect_identical(h1$text[[1]], "Approval & Signatures")
+  for (later in c("Document Information", "Parties", "Datasets")) {
     expect_lt(idx("Approval & Signatures"), idx(later))
   }
 
@@ -803,7 +1152,8 @@ test_that("write_dta docx uses one font family and one table header fill through
   )))
   expect_setequal(fonts, c(FONTS$primary, FONTS$monospace))
 
-  # Every table header cell is filled with the single house navy.
+  # Every table header cell is filled with the single light house tint; key/value
+  # label columns use the light grey.
   fills <- unique(unlist(regmatches(
     xml, gregexpr('(?<=<w:shd )[^>]*w:fill="[^"]+', xml, perl = TRUE)
   )))
@@ -811,7 +1161,7 @@ test_that("write_dta docx uses one font family and one table header fill through
   fills <- setdiff(fills, c("AUTO", "FFFFFF"))
   expect_setequal(
     fills,
-    toupper(sub("^#", "", c(THEME_COLORS$primary_dark, THEME_COLORS$gray_light)))
+    toupper(sub("^#", "", c(THEME_COLORS$primary_light, THEME_COLORS$gray_light)))
   )
 })
 
@@ -825,9 +1175,9 @@ test_that("write_dta docx introduces the supplier before the receiver", {
   write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
 
   summary <- officer::docx_summary(officer::read_docx(out_docx))
-  h2 <- summary[summary$style_name == "heading 2", c("doc_index", "text")]
-  idx_sup <- h2$doc_index[which(h2$text == "Supplier Information")[1]]
-  idx_rec <- h2$doc_index[which(h2$text == "Receiver Information")[1]]
+  h2 <- summary[summary$style_name %in% "heading 2", c("doc_index", "text")]
+  idx_sup <- h2$doc_index[which(h2$text == "Supplier")[1]]
+  idx_rec <- h2$doc_index[which(h2$text == "Receiver")[1]]
   expect_false(is.na(idx_sup))
   expect_false(is.na(idx_rec))
   expect_lt(idx_sup, idx_rec)
@@ -863,7 +1213,7 @@ test_that("the bundled template renders headings in the brand green", {
   # Heading colour comes from the template's own styles, not from anything the
   # package writes per paragraph, so it has to be pinned on the asset itself --
   # otherwise Word draws black headings above brand-green tables.
-  tmpl <- system.file("extdata", "templates", "dta_numbered_template.docx", package = "DTAtools")
+  tmpl <- system.file("extdata", "word-templates", "dta_numbered_template.docx", package = "DTAtools")
   expect_true(nzchar(tmpl))
 
   ex <- tempfile()
@@ -919,6 +1269,291 @@ test_that("group_condition rules reach the exported documents fully described", 
   expect_match(rule_rows, "<br>", fixed = TRUE)
   # A well-formed pipe row: no stray newline split it into a headless fragment.
   expect_match(rule_rows, "\\|$")
+})
+
+# ---- exact rule definitions in the exported documents -----------------------
+#
+# A rules table that only paraphrases ("IF ... THEN ...") cannot be turned back
+# into the rule. These tests read the definition out of the written file,
+# rebuild the rule with DTARuleFactory() and compare it with the rule object
+# that went in. The expected value is always that object, never rendered output.
+
+.rule_from_definition <- function(id, description, definition) {
+  # Word/PDF cells indent with U+00A0 (pandoc strips ordinary leading spaces).
+  definition <- gsub("\u00a0", " ", definition, fixed = TRUE)
+  do.call(
+    DTARuleFactory,
+    c(list(id = id, description = description), yaml::yaml.load(definition))
+  )
+}
+
+test_that("Word rule definitions indent nested YAML with non-breaking spaces", {
+  rule <- DTARuleColCondition(
+    id = "nested",
+    condition = list(AGE = list(greater = 17)),
+    then = list(STATUS = list(equals = "adult"))
+  )
+  cell <- .build_rules_table(list(rule))$body$dataset[["Definition"]]
+  expected <- paste(
+    c(
+      "type: col_condition", "condition:", "\u00a0\u00a0AGE:", "\u00a0\u00a0\u00a0\u00a0greater: 17.0",
+      "then:", "\u00a0\u00a0STATUS:", "\u00a0\u00a0\u00a0\u00a0equals: adult"
+    ),
+    collapse = "\n"
+  )
+  expect_identical(cell, expected)
+})
+
+# One rule of every type plus the values that are hard to carry through YAML,
+# a table cell and a Markdown code fence.
+.definition_fixture_rules <- function() {
+  list(
+    DTARuleColRange(id = "age_range", description = "Adult age", columns = "AGE", min = 18, max = 65),
+    DTARuleColRange(id = "open_low", columns = "AGE", min = -Inf, max = 100),
+    DTARuleColUnique(id = "unique_keys", columns = c("SUBJID", "VISIT")),
+    DTARuleColCondition(
+      id = "thirty_values",
+      description = "Visit must be one of the planned visits",
+      condition = list(SITE = list(`in` = sprintf("S%02d", 1:30)), AGE = list(greater_equal = 18, less = 65)),
+      then = list(FLAG = list(equals = "yes"), N = list(equals = "N"))
+    ),
+    DTARuleColCondition(
+      id = "pattern_chars",
+      condition = list(CODE = list(pattern = "^(a|b)\\d+'x\"y$")),
+      then = list(NOTE = list(equals = "line1\nline2"))
+    ),
+    DTARuleColCondition(
+      id = "three_ticks",
+      condition = list(CODE = list(pattern = "a```b")),
+      then = list(NOTE = list(empty = TRUE))
+    ),
+    DTARuleGroupCondition(
+      id = "group_all_scopes",
+      description = "Every row of a subject",
+      group_by = c("SUBJID", "VISIT"),
+      conditions = list(
+        a = list(X = list(empty = FALSE)),
+        b = list(Y = list(equals = "yes"))
+      ),
+      constraints = list(
+        list(
+          type = "requires", `if` = "a", `then` = "b",
+          if_scope = "all", then_scope = "all", id = "needs_b", message = "a needs b: always"
+        ),
+        list(type = "mutually_exclusive", left = "a", right = "b")
+      )
+    )
+  )
+}
+
+.definition_fixture_dta <- function(rules = .definition_fixture_rules()) {
+  # The collection checks that rules only name declared columns, so declare
+  # every column the fixture rules use (free text, no value lists).
+  cols <- lapply(
+    c("SUBJID", "VISIT", "SITE", "FLAG", "N", "CODE", "NOTE", "X", "Y"),
+    function(id) DTAColumnSpec(id = id, type = "SAS Char")
+  )
+  cols <- c(list(DTAColumnSpec(id = "AGE", type = "SAS Int")), cols)
+  names(cols) <- vapply(cols, function(col) col@id, character(1))
+  ds <- DTADataSetTabular(
+    id = "rules_fixture",
+    specs = DTAColumnSpecCollection(columns = cols, rules = rules)
+  )
+  DTA(datasets = list(ds), metadata = create_example_DTAMetaData())
+}
+
+# Every rule of every tabular dataset, in document order.
+.dta_rules <- function(dta) {
+  unlist(
+    lapply(dta@datasets, function(ds) {
+      if (inherits(ds, "DTAtools::DTADataSetTabular")) ds@specs@rules else list()
+    }),
+    recursive = FALSE
+  )
+}
+
+.rule_ids <- function(rules) vapply(rules, function(r) r@id, character(1), USE.NAMES = FALSE)
+
+# Each table of a docx whose first cell is "Rule ID": its header cells and its
+# body as a (rules x 3) character matrix. Cells are read positionally, three to
+# a row, so a rule id equal to a header label cannot confuse it.
+.docx_rules_tables <- function(path) {
+  summary <- officer::docx_summary(officer::read_docx(path))
+  cells <- summary[summary$content_type == "table cell", ]
+  tables <- lapply(unique(cells$table_index), function(ti) {
+    text <- cells$text[cells$table_index == ti]
+    if (!identical(text[[1]], "Rule ID")) {
+      return(NULL)
+    }
+    list(header = text[1:3], body = matrix(text[-(1:3)], ncol = 3, byrow = TRUE))
+  })
+  Filter(Negate(is.null), tables)
+}
+
+# The (id, yaml) pairs of the fenced blocks under "**Exact rule definitions**":
+# an id in backticks, a blank line, an opening fence "```yaml" (or a longer
+# one), the YAML, then the same fence again.
+.md_rule_blocks <- function(md) {
+  blocks <- list()
+  for (i in seq_along(md)) {
+    opens <- i + 2L <= length(md) &&
+      grepl("^`[^`]+`$", md[[i]]) && md[[i + 1L]] == "" && grepl("^`{3,}yaml$", md[[i + 2L]])
+    if (!opens) next
+    fence <- sub("yaml$", "", md[[i + 2L]])
+    close <- i + 2L + match(fence, md[(i + 3L):length(md)])
+    blocks[[length(blocks) + 1L]] <- list(
+      id = gsub("`", "", md[[i]], fixed = TRUE),
+      fence = fence,
+      yaml = paste(md[(i + 3L):(close - 1L)], collapse = "\n")
+    )
+  }
+  blocks
+}
+
+# Rebuild every rule from its definition and compare with the originals.
+.expect_rules_rebuilt <- function(ids, definitions, rules) {
+  expect_identical(ids, .rule_ids(rules))
+  for (i in seq_along(rules)) {
+    rebuilt <- .rule_from_definition(ids[[i]], rules[[i]]@description, definitions[[i]])
+    expect_identical(as.list(rebuilt), as.list(rules[[i]]), info = rules[[i]]@id)
+  }
+}
+
+test_that("the docx rules table has a Definition column that rebuilds every rule", {
+  rules <- .definition_fixture_rules()
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dta(.definition_fixture_dta(rules), file = out, format = "docx", overwrite = TRUE, quiet = TRUE)
+
+  tables <- .docx_rules_tables(out)
+  expect_length(tables, 1)
+  expect_identical(tables[[1]]$header, c("Rule ID", "Description", "Definition"))
+  expect_identical(nrow(tables[[1]]$body), length(rules))
+
+  .expect_rules_rebuilt(tables[[1]]$body[, 1], tables[[1]]$body[, 3], rules)
+})
+
+test_that("the Definition column is set in Consolas and the others are not", {
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dta(.definition_fixture_dta(), file = out, format = "docx", overwrite = TRUE, quiet = TRUE)
+
+  doc <- xml2::read_xml(.read_docx_body_xml(out))
+  tables <- xml2::xml_find_all(doc, "//*[local-name()='tbl']")
+  is_rules <- vapply(tables, function(tbl) {
+    first <- xml2::xml_find_first(tbl, ".//*[local-name()='tc']")
+    identical(xml2::xml_text(first), "Rule ID")
+  }, logical(1))
+  expect_identical(sum(is_rules), 1L)
+
+  rows <- xml2::xml_find_all(tables[[which(is_rules)]], "./*[local-name()='tr']")
+  expect_identical(length(rows), length(.definition_fixture_rules()) + 1L)
+
+  # Font of every text run in a cell.
+  fonts <- function(cell) {
+    runs <- xml2::xml_find_all(cell, ".//*[local-name()='r'][*[local-name()='t']]")
+    vapply(runs, function(run) {
+      f <- xml2::xml_find_all(
+        run, "./*[local-name()='rPr']/*[local-name()='rFonts']/@*[local-name()='ascii']"
+      )
+      if (length(f) == 0) NA_character_ else xml2::xml_text(f[[1]])
+    }, character(1))
+  }
+
+  for (row in rows[-1]) {
+    cells <- xml2::xml_find_all(row, "./*[local-name()='tc']")
+    expect_length(cells, 3)
+    definition_fonts <- fonts(cells[[3]])
+    expect_gt(length(definition_fonts), 0)
+    expect_true(all(definition_fonts == "Consolas"))
+    expect_false(any(fonts(cells[[1]]) %in% "Consolas"))
+    expect_false(any(fonts(cells[[2]]) %in% "Consolas"))
+  }
+})
+
+test_that("the Markdown export keeps one pipe-table line per rule and adds a fenced definition each", {
+  rules <- .definition_fixture_rules()
+  out <- tempfile(fileext = ".md")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dta(.definition_fixture_dta(rules), file = out, format = "md", overwrite = TRUE, quiet = TRUE)
+  md <- readLines(out, warn = FALSE)
+
+  # The pipe table: header, separator, one line per rule, then a blank line.
+  header_at <- which(md == "| Rule ID | Description |")
+  expect_length(header_at, 1)
+  table_lines <- md[header_at:(header_at + match("", md[header_at:length(md)]) - 2L)]
+  expect_length(table_lines, 2L + length(rules))
+  for (id in .rule_ids(rules)) {
+    expect_identical(sum(startsWith(table_lines, paste0("| ", id, " | "))), 1L, info = id)
+  }
+
+  blocks <- .md_rule_blocks(md)
+  .expect_rules_rebuilt(
+    vapply(blocks, function(b) b$id, character(1)),
+    vapply(blocks, function(b) b$yaml, character(1)),
+    rules
+  )
+
+  # A pattern holding three backticks needs a longer fence, or the block would
+  # end early; every other block gets the plain three.
+  fences <- vapply(blocks, function(b) b$fence, character(1))
+  names(fences) <- vapply(blocks, function(b) b$id, character(1))
+  expect_identical(unname(fences[["three_ticks"]]), "````")
+  expect_true(all(fences[names(fences) != "three_ticks"] == "```"))
+})
+
+test_that("write_dataset_metadata carries the exact definitions in docx and md", {
+  rules <- .definition_fixture_rules()
+  ds <- .definition_fixture_dta(rules)@datasets[[1]]
+
+  out_docx <- tempfile(fileext = ".docx")
+  out_md <- tempfile(fileext = ".md")
+  on.exit(unlink(c(out_docx, out_md), force = TRUE), add = TRUE)
+  write_dataset_metadata(ds, file = out_docx, overwrite = TRUE, quiet = TRUE)
+  write_dataset_metadata(ds, file = out_md, overwrite = TRUE, quiet = TRUE)
+
+  tables <- .docx_rules_tables(out_docx)
+  expect_length(tables, 1)
+  expect_identical(tables[[1]]$header, c("Rule ID", "Description", "Definition"))
+  .expect_rules_rebuilt(tables[[1]]$body[, 1], tables[[1]]$body[, 3], rules)
+
+  blocks <- .md_rule_blocks(readLines(out_md, warn = FALSE))
+  .expect_rules_rebuilt(
+    vapply(blocks, function(b) b$id, character(1)),
+    vapply(blocks, function(b) b$yaml, character(1)),
+    rules
+  )
+})
+
+test_that("every rule of the bundled clinical example rebuilds from its exported definition", {
+  yaml_path <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+  skip_if(!nzchar(yaml_path) || !file.exists(yaml_path), "clinical_dta.yaml fixture missing")
+  dta <- read_dta_from_yaml(yaml_path)
+  rules <- .dta_rules(dta)
+  expect_gt(length(rules), 0)
+
+  out_docx <- tempfile(fileext = ".docx")
+  out_md <- tempfile(fileext = ".md")
+  on.exit(unlink(c(out_docx, out_md), force = TRUE), add = TRUE)
+  write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
+  write_dta(dta, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
+
+  tables <- .docx_rules_tables(out_docx)
+  for (tbl in tables) {
+    expect_identical(tbl$header, c("Rule ID", "Description", "Definition"))
+  }
+  .expect_rules_rebuilt(
+    unlist(lapply(tables, function(t) t$body[, 1])),
+    unlist(lapply(tables, function(t) t$body[, 3])),
+    rules
+  )
+
+  blocks <- .md_rule_blocks(readLines(out_md, warn = FALSE))
+  .expect_rules_rebuilt(
+    vapply(blocks, function(b) b$id, character(1)),
+    vapply(blocks, function(b) b$yaml, character(1)),
+    rules
+  )
 })
 
 test_that("a generated version-history summary does not break the Markdown table (regression guard)", {
@@ -1000,4 +1635,207 @@ test_that("a generated version-history summary does not break the Markdown table
   # fragment.
   expect_match(v1_rows, "\\|$")
   expect_match(v2_rows, "\\|$")
+})
+
+test_that("the numbered docx base has the heading styles the exporters use", {
+  # write_dta() adds level-4 headings (.add_heading(level = 4)), and officer's
+  # stock template has no 'heading 4' style: with it the export fails.
+  doc <- .new_numbered_docx()
+
+  expect_true("heading 4" %in% officer::styles_info(doc)$style_name)
+  expect_no_error(.add_heading(doc, "Deep heading", level = 4))
+})
+
+test_that(".new_numbered_docx refuses to fall back to a template that lacks heading 4", {
+  local_mocked_bindings(.numbered_docx_path = function() "")
+
+  expect_error(.new_numbered_docx(), "reinstall", ignore.case = TRUE, class = "rlang_error")
+})
+
+test_that("the Markdown exports hold no non-breaking space, and nested YAML is indented with real spaces", {
+  rules <- .definition_fixture_rules()
+  dta <- .definition_fixture_dta(rules)
+  out_dta <- tempfile(fileext = ".md")
+  out_ds <- tempfile(fileext = ".md")
+  on.exit(unlink(c(out_dta, out_ds), force = TRUE), add = TRUE)
+  write_dta(dta, file = out_dta, format = "md", overwrite = TRUE, quiet = TRUE)
+  write_dataset_metadata(dta@datasets[[1]], file = out_ds, format = "md", overwrite = TRUE, quiet = TRUE)
+
+  for (path in c(out_dta, out_ds)) {
+    md <- readLines(path, warn = FALSE, encoding = "UTF-8")
+    expect_false(any(grepl("\u00a0", md, fixed = TRUE)), info = path)
+
+    # The thirty_values rule nests SITE under its condition: two real spaces.
+    yaml_lines <- unlist(lapply(.md_rule_blocks(md), function(b) strsplit(b$yaml, "\n", fixed = TRUE)[[1]]))
+    expect_true("  SITE:" %in% yaml_lines, info = path)
+    expect_true(any(grepl("^  [^ ]", yaml_lines)), info = path)
+  }
+})
+
+test_that("a rule id containing backticks keeps an intact Markdown label", {
+  ids <- c("a`b", "`lead", "trail`", "x``y")
+  rules <- lapply(ids, function(id) DTARuleColUnique(id = id, columns = "SUBJID"))
+  out <- tempfile(fileext = ".md")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dta(.definition_fixture_dta(rules), file = out, format = "md", overwrite = TRUE, quiet = TRUE)
+  md <- readLines(out, warn = FALSE)
+  # CommonMark: the span fence is a backtick run not found in the text, and a
+  # text that starts or ends with a backtick is padded with one space.
+  expected <- c("``a`b``", "`` `lead ``", "`` trail` ``", "`x``y`")
+  expect_true(all(expected %in% md))
+  # Each label is followed by a blank line and its fenced yaml block.
+  for (label in expected) {
+    i <- match(label, md)
+    expect_identical(md[[i + 1L]], "")
+    expect_match(md[[i + 2L]], "^`{3,}yaml$")
+  }
+})
+
+# ---- document_name, document_abbreviation, organisation -----------------------
+
+test_that("write_dta puts document_name first in Markdown, with the DTA title and organisation beneath", {
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".md")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dta(dta, out,
+    format = "md", quiet = TRUE,
+    document_name = c("Data Transmission Specification", "Data Transfer Agreement"),
+    organisation = "Acme Pharma", organisation_unit = "Biometrics"
+  )
+  lines <- readLines(out, warn = FALSE)
+  expect_equal(lines[1], "# Data Transmission Specification / Data Transfer Agreement")
+  title_at <- match("**Title:** Example DTA", lines)
+  org_at <- match("**Organisation:** Acme Pharma · Biometrics", lines)
+  expect_false(is.na(title_at))
+  expect_false(is.na(org_at))
+  # Both sit in the header block, before the first section.
+  expect_lt(max(title_at, org_at), match("## Document Information", lines))
+})
+
+test_that("write_dta shows nothing for a NULL or empty organisation", {
+  dta <- create_example_DTA()
+  plain <- tempfile(fileext = ".md")
+  blank <- tempfile(fileext = ".md")
+  on.exit(unlink(c(plain, blank), force = TRUE), add = TRUE)
+  write_dta(dta, plain, format = "md", quiet = TRUE)
+  write_dta(dta, blank, format = "md", quiet = TRUE, organisation = "", organisation_unit = "  ")
+  strip <- function(p) grep("^[*]Generated on:", readLines(p, warn = FALSE), invert = TRUE, value = TRUE)
+  expect_identical(strip(blank), strip(plain))
+  expect_false(any(grepl("Organisation", strip(plain), fixed = TRUE)))
+})
+
+test_that("the Word cover leads with the document name, then the DTA title, then the organisation", {
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dta(dta, out,
+    format = "docx", quiet = TRUE,
+    document_name = "Data Transmission Specification",
+    organisation = "Acme Pharma", organisation_unit = "Biometrics"
+  )
+  paras <- Filter(nzchar, .docx_paragraphs(out))
+  expect_equal(paras[1:3], c(
+    "Data Transmission Specification", "Example DTA",
+    "Acme Pharma · Biometrics"
+  ))
+})
+
+test_that("the Word cover shows only the document name when the DTA has no title", {
+  dta <- DTA(datasets = create_example_DTADataSetTabular(1))
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dta(dta, out, format = "docx", quiet = TRUE, document_name = "Data Transmission Specification")
+  paras <- Filter(nzchar, .docx_paragraphs(out))
+  expect_equal(paras[1], "Data Transmission Specification")
+  expect_false("Data Transfer Agreement" %in% paras[1:2])
+})
+
+test_that("the organisation is in the running header of the pages after the cover, only when given", {
+  dta <- create_example_DTA()
+  with_org <- tempfile(fileext = ".docx")
+  without <- tempfile(fileext = ".docx")
+  on.exit(unlink(c(with_org, without), force = TRUE), add = TRUE)
+  write_dta(dta, with_org, format = "docx", quiet = TRUE, organisation = "Acme Pharma", organisation_unit = "Biometrics")
+  write_dta(dta, without, format = "docx", quiet = TRUE)
+  headers <- .docx_part_texts(with_org, "^header")
+  expect_gt(length(headers), 0)
+  expect_true(all(grepl("Acme Pharma · Biometrics", headers, fixed = TRUE)))
+  expect_false(any(grepl("Acme Pharma", .docx_part_texts(without, "^header"), fixed = TRUE)))
+})
+
+test_that("write_dta validates the document and organisation arguments", {
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".md")
+  expect_error(write_dta(dta, out, format = "md", organisation = c("a", "b")), "organisation")
+  expect_error(write_dta(dta, out, format = "md", organisation = 1), "organisation")
+  expect_error(write_dta(dta, out, format = "md", document_name = NA_character_), "document_name")
+  expect_error(write_dta(dta, out, format = "md", document_abbreviation = c("a", "b")), "document_abbreviation")
+  expect_false(file.exists(out))
+})
+
+test_that("export context does not leak from one export into the next", {
+  dta <- create_example_DTA()
+  first <- tempfile(fileext = ".md")
+  second <- tempfile(fileext = ".md")
+  on.exit(unlink(c(first, second), force = TRUE), add = TRUE)
+  write_dta(dta, first, format = "md", quiet = TRUE, document_name = "Named", organisation = "Acme")
+  write_dta(dta, second, format = "md", quiet = TRUE)
+  expect_equal(readLines(second, warn = FALSE)[1], "# Data Transfer Agreement")
+  expect_false(any(grepl("Acme", readLines(second, warn = FALSE), fixed = TRUE)))
+
+  # The context itself is cleared on return ...
+  expect_identical(dta_template_placeholders(dta)[["{ORGANISATION_NAME}"]], "")
+  expect_identical(dta_template_placeholders(dta)[["{DOCUMENT_NAME}"]], "Data Transfer Agreement")
+
+  # ... and when the writer aborts after the context was set (bad format).
+  expect_error(
+    write_dta(dta, first, format = "xyz", quiet = TRUE, organisation = "Acme", document_name = "Named"),
+    "'format' must be"
+  )
+  expect_identical(dta_template_placeholders(dta)[["{ORGANISATION_NAME}"]], "")
+  expect_identical(dta_template_placeholders(dta)[["{DOCUMENT_NAME}"]], "Data Transfer Agreement")
+})
+
+test_that("newlines in export text are collapsed, so they cannot inject Markdown", {
+  dta <- create_example_DTA()
+  md <- tempfile(fileext = ".md")
+  on.exit(unlink(md, force = TRUE), add = TRUE)
+  write_dta(dta, md, format = "md", quiet = TRUE, organisation = "Acme\n## Injected", document_name = "Doc\r\n# Evil")
+  lines <- readLines(md, warn = FALSE)
+  expect_false(any(grepl("^#+ (Injected|Evil)", lines)))
+  expect_equal(lines[1], "# Doc \\# Evil") # the inline # is escaped, not a heading
+  expect_true(any(grepl("^\\*\\*Organisation:\\*\\* Acme (\\\\)?#(\\\\)?# Injected$", lines)))
+
+  ds <- tempfile(fileext = ".md")
+  on.exit(unlink(ds, force = TRUE), add = TRUE)
+  write_dataset_metadata(create_example_DTADataSetTabular(), ds,
+    format = "md", quiet = TRUE,
+    organisation = "Acme\n## Injected"
+  )
+  dlines <- readLines(ds, warn = FALSE)
+  expect_false(any(grepl("^## Injected", dlines)))
+  expect_equal(dlines[3], "**Dataset Specification**")
+})
+
+test_that("write_dataset_metadata leads with document_name and shows the organisation", {
+  ds <- create_example_DTADataSetTabular()
+  md <- tempfile(fileext = ".md")
+  docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(c(md, docx), force = TRUE), add = TRUE)
+  write_dataset_metadata(ds, md,
+    format = "md", quiet = TRUE,
+    document_name = "Data Transmission Specification", organisation = "Acme Pharma"
+  )
+  lines <- readLines(md, warn = FALSE)
+  expect_equal(lines[1], "# Data Transmission Specification")
+  expect_true("**Organisation:** Acme Pharma" %in% lines)
+
+  write_dataset_metadata(ds, docx,
+    format = "docx", quiet = TRUE,
+    document_name = "Data Transmission Specification", organisation = "Acme Pharma"
+  )
+  paras <- Filter(nzchar, .docx_paragraphs(docx))
+  expect_equal(paras[1], "Data Transmission Specification")
+  expect_match(paras[2], "^Dataset Specification: ")
+  expect_equal(paras[3], "Acme Pharma")
 })

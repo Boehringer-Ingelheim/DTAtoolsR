@@ -1,0 +1,22 @@
+kind: dta_creation_template
+id: me_gone
+version: "1.0"
+mixins: [me_m@1.0]
+base:
+  metadata:
+    title: Edit
+    version: "1.0"
+    date: "2026-01-01"
+    header: QA Org
+    receiver:
+      affiliation:
+        name: Our org
+      contacts: []
+    transmission:
+      type: Secure EDT server (SSH sFTP)
+      frequency: one-time
+datasets:
+  - id: obs
+    remove: true
+  - id: extra
+    remove: true

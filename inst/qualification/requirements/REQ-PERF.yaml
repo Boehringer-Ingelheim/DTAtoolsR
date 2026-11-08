@@ -1,0 +1,198 @@
+area: PERF
+title: End-to-end workflows and behaviour at scale
+
+# Correctness that holds on ten rows and fails on ten million is the failure
+# mode a small test suite cannot see, and production data is the large case.
+# These requirements are about the whole journey a delivery takes -- read,
+# check, report, export -- and about that journey still being correct when the
+# delivery is the size a real transfer is.
+
+requirements:
+  # ---- end-to-end workflows on the shipped examples --------------------------
+
+  - id: REQ-PERF-001
+    text: >
+      The example specification and its matching clean delivery, both shipped
+      with the package, shall validate with no errors on any axis.
+    risk: high
+    category: functional
+    covers: [read_dta_from_yaml, load_file, check, validation_status]
+    source: inst/extdata/clinical_dta.yaml with inst/extdata/clinical_data.csv
+
+  - id: REQ-PERF-002
+    text: >
+      Each shipped deliberately-broken delivery shall report exactly the error
+      counts recorded for it, on exactly the axes recorded for it.
+    risk: high
+    category: functional
+    covers: [check, validation_status, messages]
+    source: inst/extdata/clinical_data_error_*.csv
+    notes: >
+      The counts are derived from the fixtures themselves and are stated in the
+      test, not read back from a run. The column-specification count for the
+      columnspec fixture is dominated by a column the delivery omits entirely,
+      which costs one error per row (see REQ-VAL-003).
+
+  - id: REQ-PERF-003
+    text: >
+      A validated delivery shall carry through the whole reporting chain: the
+      standalone HTML report, the Word document and the exported data file
+      shall each be produced from the same verdict and shall agree with it.
+    risk: high
+    category: functional
+    covers: [write_validation_report, write_dta, write_table_to_file]
+    source: README section "Additional features"
+
+  - id: REQ-PERF-004
+    text: >
+      A specification declaring several deliveries, and one declaring a
+      file-presence dataset, shall both load and validate end to end.
+    risk: medium
+    category: functional
+    covers: [read_dta_from_yaml, load_file, check, results]
+    source: >
+      inst/extdata/clinical_dta_multiple_files.yaml and
+      inst/extdata/clinical_dta_with_file_dataset.yaml
+
+  - id: REQ-PERF-005
+    text: >
+      A specification and delivery from a second domain, shipped with the
+      package, shall load and validate end to end.
+    risk: medium
+    category: functional
+    covers: [read_dataset_from_yaml, load_file, check]
+    source: inst/extdata/gf_dataset.yaml with inst/extdata/gf_data_small_smirna.tsv
+
+  # ---- correctness at scale ---------------------------------------------------
+
+  - id: REQ-PERF-006
+    text: >
+      A generated delivery carrying a known set of defects shall report exactly
+      those defects, and the same ones, at every scale tier.
+    risk: high
+    category: functional
+    covers: [check, validation_status, messages]
+    source: inst/qualification/tests/helper-generators.R
+    notes: >
+      The expected counts follow arithmetically from where the defects were
+      injected, so the same small set of errors must be reported whether the
+      delivery holds ten thousand rows or ten million. Anything else means the
+      answer depends on the size of the file rather than on its contents.
+
+  - id: REQ-PERF-007
+    text: >
+      The whole-column and streaming engines shall report identical messages
+      for the same delivery at every scale tier.
+    risk: high
+    category: functional
+    covers: [load_file, check, messages]
+    source: R/streamingValidation.R
+
+  - id: REQ-PERF-008
+    text: >
+      A compressed delivery shall reach the same verdict as the same data
+      uncompressed.
+    risk: high
+    category: functional
+    covers: [load_file, check]
+    source: R/streamingScale.R
+
+  # ---- resource behaviour -----------------------------------------------------
+
+  - id: REQ-PERF-009
+    text: >
+      Elapsed time shall grow no faster than twice as fast as the data: a
+      tenfold increase in rows shall cost no more than twenty times the time.
+    risk: medium
+    category: performance
+    covers: [check, validation_benchmark]
+    source: inst/qualification/docs/validation-plan.md
+    notes: >
+      A deliberately wide bound. The purpose is to catch a change of complexity
+      class, not to police the speed of any particular machine; absolute
+      throughput is recorded for comparison and judged only when the caller
+      asks for it.
+
+  - id: REQ-PERF-010
+    text: >
+      Peak memory on the streaming path shall grow substantially more slowly
+      than the data: a tenfold increase in rows shall cost no more than three
+      times the peak.
+    risk: high
+    category: performance
+    covers: [validate_file_stream, validation_benchmark]
+    source: inst/qualification/docs/validation-plan.md
+    notes: >
+      This is the property that makes streaming worth having. If memory grew
+      with the file, the streaming path would offer nothing over reading the
+      whole table, and a delivery larger than memory could not be checked at
+      all.
+
+  - id: REQ-PERF-011
+    text: >
+      Every measured run shall record its elapsed time, processor time, peak R
+      memory, resident memory and Arrow pool peak, together with the row count
+      and the throughput derived from them.
+    risk: medium
+    category: performance
+    covers: [validation_benchmark]
+    source: R/benchmarking.R
+
+  # ---- repeatability ----------------------------------------------------------
+
+  - id: REQ-PERF-012
+    text: >
+      Repeated validations of one unchanged delivery shall report identical
+      messages every time.
+    risk: high
+    category: functional
+    covers: [check, messages]
+    source: inst/qualification/docs/validation-plan.md
+    notes: >
+      Without this, a delivery could be accepted or rejected depending on when
+      it happened to be checked, and no verdict would be defensible.
+
+  - id: REQ-PERF-013
+    text: >
+      The verdict shall not depend on how many processor threads are used, on
+      the batch size the streaming engine reads with, or on whether the Arrow
+      compute path is enabled.
+    risk: high
+    category: functional
+    covers: [check, set_dta_compute_threads]
+    source: R/arrowCompute.R
+
+  - id: REQ-PERF-014
+    text: >
+      The verdict shall not depend on the locale of the session that produced
+      it.
+    risk: high
+    category: functional
+    covers: [check, messages]
+    source: inst/qualification/docs/validation-plan.md
+    notes: >
+      Collation order differs between locales, and several checks sort. A
+      delivery must not pass in one country and fail in another.
+
+  - id: REQ-PERF-015
+    text: >
+      Repeated validations shall not accumulate memory or leave temporary files
+      behind.
+    risk: medium
+    category: performance
+    covers: [check]
+    source: inst/qualification/docs/validation-plan.md
+
+  # ---- the application --------------------------------------------------------
+
+  - id: REQ-PERF-016
+    text: >
+      The interactive application shall start in its own process and serve its
+      first page.
+    risk: low
+    category: functional
+    covers: [run_dta_app]
+    source: R/run_dta_app.R
+    notes: >
+      A launch check only. The application drives the same engine qualified
+      elsewhere, so what is at stake here is that it starts at all.

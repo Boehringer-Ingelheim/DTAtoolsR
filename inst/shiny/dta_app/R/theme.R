@@ -4,89 +4,136 @@
 # NOTE: Replace the hex values below with the official Boehringer Ingelheim
 # brand palette where available. The values here are a BI-style green/teal
 # family chosen to look on-brand and modern.
+#
+# Type is IBM Plex Sans (body/headings) and IBM Plex Mono (identifiers/code),
+# loaded from Google Fonts at run time with a Segoe UI / system fallback --
+# same mechanism as before, just a different family. --bs-font-monospace is
+# the single monospace stack the rest of this sheet uses.
 
-BI <- list(
-  green = "#00625B", # primary brand green/teal (deep)
-  green_dark = "#003D38",
-  green_light = "#E6F1EF",
-  accent = "#00A886", # brighter accent green
-  ink = "#1A2B2A", # near-black text
-  grey = "#5B6B6A",
-  grey_light = "#F4F7F6",
-  # Semantic status colors (harmonized with the BI green family)
-  pass = "#1E8E5A",
-  pass_bg = "#E5F4EC",
-  pass_border = "#9BD3B4",
-  fail = "#C0392B",
-  fail_bg = "#FBEAE7",
-  fail_border = "#E9B4AC",
-  pending = "#5B6B6A",
-  pending_bg = "#EEF1F1",
-  pending_border = "#CDD5D4"
-)
+# The palette itself lives in R/app_config.R (dta_app_config_defaults()$colors)
+# so a template library's dta-app.yaml can replace it; bi_theme() and bi_css()
+# take the (already validated) colour vector and default to the stock palette.
 
 # bslib theme --------------------------------------------------------------
-bi_theme <- function() {
+bi_theme <- function(colors = dta_app_config_defaults()$colors) {
+  colors <- bi_colors(colors)
   bslib::bs_theme(
     version = 5,
-    bg = "#FFFFFF",
-    fg = BI$ink,
-    primary = BI$green,
-    secondary = BI$grey,
-    success = BI$pass,
-    danger = BI$fail,
+    bg = colors[["surface"]],
+    fg = colors[["text"]],
+    primary = colors[["primary"]],
+    secondary = colors[["muted"]],
+    success = colors[["pass"]],
+    danger = colors[["fail"]],
     base_font = bslib::font_collection(
-      bslib::font_google("Inter", local = FALSE),
-      "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"
+      bslib::font_google("IBM Plex Sans", wght = c(400, 500, 600), local = FALSE),
+      "Segoe UI", "system-ui", "-apple-system", "Roboto", "sans-serif"
     ),
     heading_font = bslib::font_collection(
-      bslib::font_google("Inter", local = FALSE),
-      "system-ui", "sans-serif"
+      bslib::font_google("IBM Plex Sans", wght = c(400, 500, 600), local = FALSE),
+      "Segoe UI", "system-ui", "sans-serif"
     ),
-    "border-radius" = "0.6rem",
-    "card-border-radius" = "0.8rem"
+    code_font = bslib::font_collection(
+      bslib::font_google("IBM Plex Mono", wght = c(400, 500), local = FALSE),
+      "ui-monospace", "SFMono-Regular", "Consolas", "Menlo", "monospace"
+    ),
+    "border-radius" = ".5rem",
+    "border-radius-sm" = ".375rem",
+    "border-radius-lg" = ".75rem",
+    "card-border-radius" = ".75rem",
+    "headings-font-weight" = "600",
+    "btn-font-weight" = "500"
   )
 }
 
 # Extra CSS ----------------------------------------------------------------
-bi_css <- function() {
+bi_colors <- function(colors) {
+  # Defence in depth: the config parser already rejects anything but #RGB /
+  # #RRGGBB, but these values are pasted into a stylesheet, so each one is
+  # re-checked here and falls back to the stock colour (as do missing names).
+  defaults <- dta_app_config_defaults()$colors
+  out <- defaults
+  for (nm in names(defaults)) {
+    v <- if (nm %in% names(colors)) colors[[nm]] else NULL
+    if (is.character(v) && length(v) == 1 && !is.na(v) &&
+      grepl("^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$", v)) {
+      out[[nm]] <- v
+    }
+  }
+  out
+}
+
+# "#RGB" / "#RRGGBB" -> c(r, g, b)
+bi_rgb <- function(hex) {
+  h <- sub("^#", "", hex)
+  if (nchar(h) == 3) h <- paste(rep(strsplit(h, "")[[1]], each = 2), collapse = "")
+  strtoi(substring(h, c(1, 3, 5), c(2, 4, 6)), 16L)
+}
+
+bi_css <- function(colors = dta_app_config_defaults()$colors) {
+  colors <- bi_colors(colors)
+  # Derived, not configurable: the focus glow is the accent at 25% alpha.
+  glow <- sprintf("rgba(%s,.25)", paste(bi_rgb(colors[["accent"]]), collapse = ","))
   root <- sprintf(
     ":root {
       --bi-green: %s; --bi-green-dark: %s; --bi-green-light: %s;
       --bi-accent: %s; --bi-ink: %s; --bi-grey: %s; --bi-grey-light: %s;
+      --bi-surface: %s; --bi-warn: %s; --bi-warn-dark: %s;
+      --bi-warn-border: %s; --bi-unknown: %s; --bi-accent-glow: %s;
       --bi-pass: %s; --bi-pass-bg: %s; --bi-pass-border: %s;
       --bi-fail: %s; --bi-fail-bg: %s; --bi-fail-border: %s;
       --bi-pending: %s; --bi-pending-bg: %s; --bi-pending-border: %s;
     }",
-    BI$green, BI$green_dark, BI$green_light,
-    BI$accent, BI$ink, BI$grey, BI$grey_light,
-    BI$pass, BI$pass_bg, BI$pass_border,
-    BI$fail, BI$fail_bg, BI$fail_border,
-    BI$pending, BI$pending_bg, BI$pending_border
+    colors[["primary"]], colors[["primary_dark"]], colors[["primary_light"]],
+    colors[["accent"]], colors[["text"]], colors[["muted"]], colors[["page_background"]],
+    colors[["surface"]], colors[["warning"]], colors[["warning_dark"]],
+    colors[["nodata_border"]], colors[["unknown"]], glow,
+    colors[["pass"]], colors[["pass_bg"]], colors[["pass_border"]],
+    colors[["fail"]], colors[["fail_bg"]], colors[["fail_border"]],
+    colors[["pending"]], colors[["pending_bg"]], colors[["pending_border"]]
   )
   shiny::HTML(paste0(root, "
-    body { background: var(--bi-grey-light); }
-    .app-brandbar {
-      background: linear-gradient(90deg, var(--bi-green-dark), var(--bi-green));
-      color: #fff; padding: 14px 20px; display: flex; align-items: center;
-      gap: 14px; box-shadow: 0 2px 10px rgba(0,0,0,.08);
+    body { background: var(--bi-grey-light); color: var(--bi-ink); }
+    /* Low-key inline code -- e.g. a filename or extension inside running
+       text (a msg-hint, a modal body). */
+    code {
+      font-family: var(--bs-font-monospace); font-size: .85em;
+      color: var(--bi-green-dark); background: var(--bi-green-light);
+      padding: .1em .35em; border-radius: .3em;
     }
-    .app-brandbar .brand-logo { height: 40px; width: auto; display: block; flex: none; }
-    .app-brandbar .brand-title { font-weight: 700; font-size: 1.15rem; letter-spacing: .2px; }
-    .app-brandbar .brand-sub { opacity: .85; font-size: .85rem; }
+    /* Keyboard-only focus rings: :focus-visible so a mouse click never
+       shows one, only Tab navigation does. */
+    .btn:focus-visible, .action-button:focus-visible,
+    .nav-link:focus-visible, a:focus-visible {
+      outline: 2px solid var(--bi-accent); outline-offset: 2px; box-shadow: none;
+    }
+    .form-control:focus, .form-select:focus {
+      border-color: var(--bi-accent); box-shadow: 0 0 0 3px var(--bi-accent-glow);
+    }
+    /* Flat deep green, no gradient; the accent rule along the bottom edge is
+       the logo's own frame colour, carried down into the bar it sits on. */
+    .app-brandbar {
+      background: var(--bi-green-dark);
+      color: #fff; padding: 10px 24px; display: flex; align-items: center;
+      gap: 14px; min-height: 60px;
+      border-bottom: 3px solid var(--bi-accent); box-shadow: none;
+    }
+    .app-brandbar .brand-logo { height: 36px; width: auto; display: block; flex: none; border-radius: 8px; }
+    .app-brandbar .brand-title { font-weight: 600; font-size: 1.0625rem; letter-spacing: 0; line-height: 1.2; }
+    .app-brandbar .brand-sub { opacity: .78; font-size: .8125rem; line-height: 1.3; }
     /* align-items: center -- without it a flex container defaults to
        'stretch', so the Edit menu toggle and the status pill (whose heights
        come from their own content) and the .brand-link pills (padding:
-       5px 11px below) end up on different baselines instead of one centre
+       5px 12px below) end up on different baselines instead of one centre
        line. */
     .app-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
     .app-actions .brand-link {
-      color: #fff; text-decoration: none; font-weight: 600;
-      border: 1px solid rgba(255,255,255,.45);
-      background: rgba(255,255,255,.08);
+      color: #fff; text-decoration: none; font-weight: 500;
+      border: 1px solid rgba(255,255,255,.35);
+      background: rgba(255,255,255,.06);
       border-radius: 999px;
-      padding: 5px 11px;
-      font-size: .82rem;
+      padding: 5px 12px;
+      font-size: .8125rem;
       line-height: 1.2;
       white-space: nowrap;
       transition: background .15s ease, border-color .15s ease, color .15s ease;
@@ -94,24 +141,23 @@ bi_css <- function() {
     .app-actions .brand-link:hover,
     .app-actions .brand-link:focus {
       color: #fff;
-      background: rgba(255,255,255,.18);
-      border-color: rgba(255,255,255,.7);
+      background: rgba(255,255,255,.14);
+      border-color: rgba(255,255,255,.6);
       text-decoration: none;
     }
-    /* create_new_version_button() is an actionButton(), which renders
-       <button class='btn btn-default action-button'> -- none of the
-       .brand-link rule above applies to it (that rule targets <a>), and
-       Bootstrap's own .btn supplies a background and border of its own on
-       top. Re-state the .brand-link look property by property so the
+    /* .brand-action is applied to the plain <button> toggle in edit_menu().
+       None of the .brand-link rule above applies to it (that rule targets
+       <a>), and a <button> brings the browser's default background and
+       border. Re-state the .brand-link look property by property so the
        button reads as the same pill as the links either side of it. */
     .app-actions .brand-action {
-      background: rgba(255,255,255,.08);
-      border: 1px solid rgba(255,255,255,.45);
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.35);
       border-radius: 999px;
-      padding: 5px 11px;
-      font-size: .82rem;
+      padding: 5px 12px;
+      font-size: .8125rem;
       line-height: 1.2;
-      font-weight: 600;
+      font-weight: 500;
       color: #fff;
       white-space: nowrap;
       transition: background .15s ease, border-color .15s ease, color .15s ease;
@@ -119,8 +165,8 @@ bi_css <- function() {
     .app-actions .brand-action:hover,
     .app-actions .brand-action:focus {
       color: #fff;
-      background: rgba(255,255,255,.18);
-      border-color: rgba(255,255,255,.7);
+      background: rgba(255,255,255,.14);
+      border-color: rgba(255,255,255,.6);
     }
     /* The edit-menu toggle keeps the .brand-action pill look above, but as
        a Bootstrap dropdown-toggle it also draws its own caret. Bootstrap
@@ -136,20 +182,21 @@ bi_css <- function() {
        clickable when there is nothing to click. */
     .app-actions .brand-status {
       border-radius: 999px;
-      padding: 5px 11px;
-      font-size: .82rem;
+      padding: 5px 12px;
+      font-size: .8125rem;
       line-height: 1.2;
-      font-weight: 600;
+      font-weight: 500;
       white-space: nowrap;
-      background: rgba(255,255,255,.22);
-      border: 1px solid rgba(255,255,255,.55);
+      background: rgba(255,255,255,.2);
+      border: 1px solid rgba(255,255,255,.5);
       color: #fff;
     }
     /* The menu body opens over the light page below the dark bar, so it
        keeps Bootstrap's own light surface -- only stacking and offset need
-       setting here. .app-brandbar casts a box-shadow over the content
-       beneath it (see its rule above); without a z-index this menu would
-       paint under that shadow instead of over it. .app-brandbar also sets
+       setting here. The bar no longer casts a shadow of its own (it once
+       did, which is what first made the z-index necessary), but the menu
+       still has to stack above the page content and the sidebar layout
+       beneath the bar, so the z-index stays. .app-brandbar also sets
        no overflow, which is what lets the menu escape the bar's own box at
        all -- worth recording because giving .app-brandbar an overflow:
        hidden later would silently clip this menu without this rule itself
@@ -195,67 +242,258 @@ bi_css <- function() {
       .app-actions .brand-status { flex: 0 0 auto; }
     }
 
-    /* Status chips */
+    /* Landing: a centred hero and one large drop target instead of a form in
+       a card -- the document-with-tick glyph is the page's only illustration. */
+    .landing { max-width: 760px; margin: 40px auto 24px; padding: 0 12px; }
+    .landing-hero { text-align: center; margin-bottom: 28px; }
+    .landing-title {
+      font-size: 1.875rem; font-weight: 600; line-height: 1.2; letter-spacing: -.01em;
+      color: var(--bi-green-dark); margin: 0 0 12px;
+    }
+    .landing-lede { font-size: 1rem; color: var(--bi-grey); line-height: 1.55; max-width: 62ch; margin: 0 auto; }
+    .landing-drop {
+      background: var(--bi-surface); border: 1px solid var(--bi-pending-border); border-radius: .75rem;
+      padding: 28px 28px 24px; text-align: center;
+    }
+    .landing-drop-glyph { width: 44px; height: 44px; display: block; margin: 0 auto 10px; }
+    .landing-drop-glyph .glyph-doc { stroke: var(--bi-green); }
+    .landing-drop-glyph .glyph-tick { stroke: var(--bi-accent); }
+    .landing-drop-title { font-size: 1.125rem; font-weight: 600; color: var(--bi-ink); margin: 0 0 4px; }
+    .landing-drop-hint { font-size: .8125rem; color: var(--bi-grey); margin: 0 auto 18px; max-width: 56ch; }
+    .landing-drop .dropzone { max-width: 560px; margin: 0 auto; text-align: center; }
+    /* Centred like the glyph, title and hint above it. Bootstrap gives an
+       .input-group's .form-control flex: 1 1 auto and a 1% width, so
+       justify-content alone would centre nothing. */
+    .landing-drop .dropzone .input-group { justify-content: center; }
+    .landing-drop .dropzone .form-control { flex: 0 1 auto; width: auto; max-width: 24ch; }
+    .landing-alt { display: flex; align-items: center; justify-content: center; gap: 10px 14px; flex-wrap: wrap; margin-top: 22px; }
+    .landing-alt-label { font-size: .875rem; color: var(--bi-grey); }
+    .landing-alt-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+    /* The drop target is this page's one call to action. The alternatives
+       under it keep their own classes (the template button's btn-primary is
+       another session's to change), but none of them gets the solid fill
+       here, or the eye lands on the secondary row before the target. */
+    .landing-alt-actions .btn-primary {
+      --bs-btn-color: var(--bi-green); --bs-btn-bg: var(--bi-surface); --bs-btn-border-color: var(--bi-green);
+      --bs-btn-hover-color: #fff; --bs-btn-hover-bg: var(--bi-green); --bs-btn-hover-border-color: var(--bi-green);
+      --bs-btn-active-color: #fff; --bs-btn-active-bg: var(--bi-green-dark); --bs-btn-active-border-color: var(--bi-green-dark);
+    }
+    @media (max-width: 900px) {
+      .landing { margin-top: 20px; }
+      .landing-title { font-size: 1.5rem; }
+    }
+
+    /* Status chips: an outline with a coloured dot, not a tinted fill. The
+       tint was the one place the fill language survived the rail redesign,
+       and it also failed AA (the pass green on its own tint measures 3.65:1
+       at 12px); ink on white is 14.8:1, and the dot carries the colour. */
     .status-chip {
       display: inline-flex; align-items: center; gap: 6px;
-      padding: 3px 10px; border-radius: 999px; font-size: .78rem;
-      font-weight: 600; border: 1px solid transparent; white-space: nowrap;
+      padding: 2px 9px; border-radius: 999px; font-size: .75rem;
+      font-weight: 500; border: 1px solid var(--bi-pending-border);
+      background: var(--bi-surface); color: var(--bi-ink); white-space: nowrap;
     }
-    .status-pass    { color: var(--bi-pass); background: var(--bi-pass-bg); border-color: var(--bi-pass-border); }
-    .status-fail    { color: var(--bi-fail); background: var(--bi-fail-bg); border-color: var(--bi-fail-border); }
-    .status-pending { color: var(--bi-pending); background: var(--bi-pending-bg); border-color: var(--bi-pending-border); }
-    .status-nodata  { color: #8A6D3B; background: #FCF4E6; border-color: #EBD9B6; }
+    .status-pass    { border-color: var(--bi-pass-border); }
+    .status-fail    { border-color: var(--bi-fail-border); }
+    .status-pending { border-color: var(--bi-pending-border); }
+    .status-nodata  { border-color: var(--bi-warn-border); }
     .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-
-    /* Dataset tiles get a colored left edge by status */
-    .tile-pass    { border-left: 5px solid var(--bi-pass) !important; }
-    .tile-fail    { border-left: 5px solid var(--bi-fail) !important; }
-    .tile-pending { border-left: 5px solid var(--bi-pending-border) !important; }
-    .tile-nodata  { border-left: 5px solid #EBD9B6 !important; }
+    .status-pass .status-dot    { background: var(--bi-pass); }
+    .status-fail .status-dot    { background: var(--bi-fail); }
+    .status-pending .status-dot { background: var(--bi-pending); }
+    .status-nodata .status-dot  { background: var(--bi-warn); }
 
     /* Upload slot */
-    .slot-card { background: #fff; }
-    .slot-meta { font-size: .82rem; color: var(--bi-grey); }
-    .slot-expected { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    .slot-card { background: var(--bi-surface); }
+    .slot-meta { font-size: .8125rem; color: var(--bi-grey); }
+    .slot-expected { font-family: var(--bs-font-monospace); font-size: .8125rem;
       background: var(--bi-green-light); color: var(--bi-green-dark);
       padding: 1px 6px; border-radius: 6px; }
     .slot-ok    { color: var(--bi-pass); font-weight: 600; }
-    .slot-warn  { color: #B26A00; font-weight: 600; }
-    .slot-example .control-label { font-size: .82rem; color: var(--bi-grey); font-weight: 500; }
+    .slot-warn  { color: var(--bi-warn-dark); font-weight: 600; }
+    .slot-example .control-label { font-size: .8125rem; color: var(--bi-grey); font-weight: 500; }
+    .slot-card .card-header strong { font-weight: 600; }
+    /* Replaces the old bullet-plus-count text appended to .slot-expected
+       (3.5, app.R): a quiet pill so the count reads as metadata, not prose. */
+    .slot-count {
+      display: inline-block; margin-left: 8px; font-size: .75rem; color: var(--bi-grey);
+      background: var(--bi-grey-light); border: 1px solid var(--bi-pending-border);
+      border-radius: 999px; padding: 1px 8px; vertical-align: middle;
+    }
 
-    /* Make Shiny fileInput look like a drop zone */
+    /* Shiny binds drag-and-drop on fileInput()'s own .input-group and toggles
+       shiny-file-input-active / shiny-file-input-over on it while a file is
+       dragged over -- so the padded dashed area IS the .input-group itself.
+       A bigger wrapper around it would look droppable without being
+       droppable: the drop target has to be the element Shiny is actually
+       watching. */
     .dropzone .form-group { margin-bottom: 0; }
-    .dropzone .input-group, .dropzone .custom-file, .dropzone input[type=file] { width: 100%; }
-    .dropzone .btn-file, .dropzone .form-control {
-      border-style: dashed !important; border-width: 2px !important;
-      border-color: var(--bi-pass-border) !important;
+    /* A fileInput() with no width argument gets Shiny's default 300px
+       container; the zone should fill whatever column it sits in, and the
+       .slot-example / .landing-drop rules cap that column instead. */
+    .dropzone .shiny-input-container { width: 100%; }
+    .dropzone .control-label { font-size: .8125rem; font-weight: 500; color: var(--bi-grey); margin-bottom: 6px; }
+    .dropzone .input-group {
+      display: flex; align-items: center; gap: 10px; width: 100%;
+      padding: 14px 16px; border: 2px dashed rgba(0,98,91,.7);
+      border-radius: .625rem; background: var(--bi-surface);
+      transition: background .12s ease, border-color .12s ease;
+    }
+    .dropzone .input-group:hover { border-color: var(--bi-green); }
+    .dropzone .input-group.shiny-file-input-active,
+    .dropzone .input-group.shiny-file-input-over {
+      background: var(--bi-green-light); border-color: var(--bi-accent);
+    }
+    .dropzone .input-group-btn { margin: 0; }
+    .dropzone .btn-file {
+      border: 1px solid var(--bi-green) !important; color: var(--bi-green);
+      background: var(--bi-surface); border-radius: .375rem !important; font-weight: 500;
+      font-size: .875rem; padding: .35rem .8rem;
+    }
+    .dropzone .btn-file:hover { background: var(--bi-green-light); }
+    /* min-width: 0 lets the read-only filename field shrink inside the flex
+       row on a narrow screen (a flex item's default min-width is its content
+       width, which would push the Browse button out of the zone instead);
+       the ellipsis then trims a long filename rather than clipping it. */
+    .dropzone .form-control {
+      border: 0 !important; background: transparent !important; box-shadow: none !important;
+      padding: 0; color: var(--bi-grey); font-size: .9rem; border-radius: 0;
+      min-width: 0; text-overflow: ellipsis;
     }
     /* Suppress the native fileInput progress / 'Upload complete' bar: a finished
        byte transfer is NOT acceptance. Acceptance is shown only by the app's own
        per-slot state after matches_filename() + load_file() succeed and verify. */
     .dropzone .progress, .dropzone .shiny-file-input-progress { display: none !important; }
 
-    .msg-hint { font-size: .82rem; color: var(--bi-grey); }
-    .metric { font-size: 1.4rem; font-weight: 700; color: var(--bi-green-dark); }
+    .msg-hint { font-size: .8125rem; color: var(--bi-grey); line-height: 1.45; }
+
+    /* bslib layout_sidebar() renders one bordered, rounded outer box
+       (.bslib-sidebar-layout) holding the sidebar and the main area -- frame
+       inside frame if the sidebar and the tab card each kept a border of
+       their own too. Make the outer box invisible and let the sidebar and
+       the main tab card each be its own panel instead. */
+    .bslib-sidebar-layout {
+      border: 0; background: transparent; border-radius: 0;
+      --bslib-sidebar-bg: var(--bi-surface); --bslib-sidebar-fg: var(--bi-ink);
+    }
+    .bslib-sidebar-layout > .sidebar {
+      border: 1px solid var(--bi-pending-border); border-radius: .75rem; background: var(--bi-surface);
+    }
+    .bslib-sidebar-layout > .sidebar > .sidebar-content { padding: 44px 18px 18px; gap: 10px; }
+    /* The 44px above only exists to clear bslib's collapse toggle, which
+       overlays the top RIGHT corner -- so on a wide screen the header just
+       keeps clear of it on the right and the two panels start on the same
+       line. Below 768px bslib moves the toggle to the top left, where the
+       full-width clearance still earns its keep. */
+    @media (min-width: 768px) {
+      .bslib-sidebar-layout > .sidebar > .sidebar-content { padding-top: 14px; }
+      .bslib-sidebar-layout > .sidebar .workspace-header { padding-right: 34px; }
+    }
+    /* Same fix as the brandbar's .shiny-html-output:empty rule above -- an
+       empty uiOutput (add_dataset_ui when not editing, validation_report_ui
+       before a check) would otherwise still keep its share of the sidebar's
+       column gap. */
+    .bslib-sidebar-layout > .sidebar > .sidebar-content > .shiny-html-output:empty { display: none; }
+    .bslib-sidebar-layout > .sidebar hr { margin: 8px 0; border-top: 1px solid var(--bi-pending-border); opacity: 1; }
+    .bslib-sidebar-layout > .sidebar .btn.w-100 { padding: .45rem .75rem; font-size: .9375rem; }
+    /* One filled call to action per surface: only Check all datasets keeps
+       the solid fill. Export DTA and the Validation summary download keep
+       their Bootstrap classes -- and so their ids, observers and tests --
+       but read as outlines here, Export DTA in the brand green and the
+       summary in the pass green; the summary's btn-warning state (some
+       datasets never checked) keeps an amber edge so an incomplete run still
+       looks different from a complete one. Bootstrap 5 buttons are painted
+       from their own custom properties, which is what lets a class like
+       btn-primary be re-skinned from outside without a specificity fight. */
+    .bslib-sidebar-layout > .sidebar #export_modal_open {
+      --bs-btn-color: var(--bi-green); --bs-btn-bg: transparent; --bs-btn-border-color: var(--bi-green);
+      --bs-btn-hover-color: #fff; --bs-btn-hover-bg: var(--bi-green); --bs-btn-hover-border-color: var(--bi-green);
+      --bs-btn-active-color: #fff; --bs-btn-active-bg: var(--bi-green-dark); --bs-btn-active-border-color: var(--bi-green-dark);
+    }
+    .bslib-sidebar-layout > .sidebar #dl_validation_summary {
+      --bs-btn-color: var(--bi-pass); --bs-btn-bg: transparent; --bs-btn-border-color: var(--bi-pass);
+      --bs-btn-hover-color: #fff; --bs-btn-hover-bg: var(--bi-pass); --bs-btn-hover-border-color: var(--bi-pass);
+      --bs-btn-active-color: #fff; --bs-btn-active-bg: var(--bi-pass); --bs-btn-active-border-color: var(--bi-pass);
+    }
+    .bslib-sidebar-layout > .sidebar #dl_validation_summary.btn-warning {
+      --bs-btn-color: var(--bi-warn-dark); --bs-btn-border-color: var(--bi-warn);
+      --bs-btn-hover-color: #fff; --bs-btn-hover-bg: var(--bi-warn); --bs-btn-hover-border-color: var(--bi-warn);
+      --bs-btn-active-color: #fff; --bs-btn-active-bg: var(--bi-warn-dark); --bs-btn-active-border-color: var(--bi-warn-dark);
+    }
+    .bslib-sidebar-layout > .main { padding: 0 0 0 20px; }
+    @media (max-width: 767px) { .bslib-sidebar-layout > .main { padding: 12px 0 0; } }
+
+    /* Main tab card + underlined tabs -- four chained classes so this beats
+       Bootstrap's own .nav-tabs .nav-link.active on specificity instead of
+       needing !important. */
+    .bslib-sidebar-layout > .main > .card { border: 1px solid var(--bi-pending-border); border-radius: .75rem; box-shadow: none; }
+    .card { border-color: var(--bi-pending-border); }
+    .card > .card-header {
+      background: var(--bi-surface); color: var(--bi-ink); font-weight: 600; font-size: .9375rem;
+      padding: 10px 16px; border-bottom: 1px solid var(--bi-pending-border);
+    }
+    .card-header .card-header-tabs { margin: -10px -16px; }
+    .card-header .card-header-tabs .nav-link {
+      border: 0; border-bottom: 2px solid transparent; border-radius: 0; margin-bottom: -1px;
+      padding: 12px 16px; color: var(--bi-grey); font-weight: 500; background: transparent;
+    }
+    .card-header .card-header-tabs .nav-link:hover { color: var(--bi-green-dark); }
+    .card-header .card-header-tabs .nav-link.active {
+      color: var(--bi-green-dark); font-weight: 600; background: transparent;
+      border-color: transparent; border-bottom-color: var(--bi-green);
+    }
 
     /* Sidebar workspace header -- DTA identity (title / version / date) */
-    .workspace-header { margin-bottom: 12px; }
+    .workspace-header { margin-bottom: 0; }
     .workspace-header .ws-title {
-      font-weight: 700; font-size: 1.02rem; color: var(--bi-green-dark);
+      font-weight: 600; font-size: 1.0625rem; color: var(--bi-green-dark);
       line-height: 1.25; word-break: break-word;
     }
     .workspace-header .ws-meta {
-      font-size: .8rem; color: var(--bi-grey); margin-top: 4px;
+      font-size: .75rem; color: var(--bi-grey); margin-top: 4px;
       display: flex; gap: 6px; flex-wrap: wrap;
     }
     .workspace-header .ws-pill {
       background: var(--bi-green-light); color: var(--bi-green-dark);
       border-radius: 999px; padding: 1px 9px; font-weight: 600;
     }
+    /* Sentence-case group labels: the sidebar's Datasets list and Export
+       group, and the Metadata cards' Affiliation/Contacts. */
     .section-label {
-      font-size: .72rem; font-weight: 700; letter-spacing: .04em;
-      text-transform: uppercase; color: var(--bi-grey); margin: 2px 0 6px;
+      font-size: .75rem; font-weight: 600; letter-spacing: 0;
+      text-transform: none; color: var(--bi-grey); margin: 6px 0 4px;
     }
+
+    /* Sidebar status summary: a segmented bar (share of datasets per status)
+       plus a legend that only lists the non-zero states. */
+    .status-summary { margin: 2px 0 0; }
+    .status-bar {
+      display: flex; gap: 2px; height: 8px; border-radius: 999px; overflow: hidden;
+      background: var(--bi-pending-border);
+    }
+    .status-seg { display: block; min-width: 6px; }
+    .seg-pass { background: var(--bi-pass); }
+    .seg-fail { background: var(--bi-fail); }
+    .seg-nodata { background: var(--bi-warn); }
+    .seg-pending { background: var(--bi-pending-border); }
+    /* Before anything has been checked the bar would be one grey segment on
+       a grey track -- a rule carrying no information -- so it stays hidden
+       until the first check gives it something to show; the legend still
+       says how many datasets are waiting. */
+    .status-bar:has(> .seg-pending:only-child) { display: none; }
+    .status-legend {
+      display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px;
+      font-size: .8125rem; color: var(--bi-grey);
+    }
+    .status-legend .status-n { font-weight: 600; color: var(--bi-ink); margin-right: 2px; }
+    .status-item { display: inline-flex; align-items: center; gap: 5px; }
+    /* .status-dot already exists above for .status-chip (currentColor) --
+       these come after it and set the background explicitly instead. */
+    .status-item .status-dot { width: 7px; height: 7px; border-radius: 50%; }
+    .st-pass .status-dot { background: var(--bi-pass); }
+    .st-fail .status-dot { background: var(--bi-fail); }
+    .st-nodata .status-dot { background: var(--bi-warn); }
+    .st-pending .status-dot { background: var(--bi-pending-border); }
 
     /* Metadata import errors: DTA-level, so they appear nowhere else in the UI
        (the messages dock is per-dataset). Shown above the metadata form. */
@@ -264,7 +502,7 @@ bi_css <- function() {
       color: var(--bi-fail); border-radius: 8px; padding: 10px 14px;
       margin-bottom: 14px; font-size: .86rem;
     }
-    .md-import-warn-head { font-weight: 700; margin-bottom: 4px; }
+    .md-import-warn-head { font-weight: 600; margin-bottom: 4px; }
     .md-import-warn ul { margin: 0; padding-left: 18px; }
 
     /* Raw YAML syntax-highlighted view (dark editor theme) */
@@ -296,7 +534,7 @@ bi_css <- function() {
          point (app.R), nothing else is needed for the drag itself. */
       min-height: 70vh; overflow: auto;
     }
-    textarea#raw_yaml_editor:focus { border-color: var(--bi-accent); box-shadow: 0 0 0 2px rgba(0,168,134,.25); }
+    textarea#raw_yaml_editor:focus { border-color: var(--bi-accent); box-shadow: 0 0 0 2px var(--bi-accent-glow); }
     .yaml-valid { font-size: .82rem; padding: 7px 10px; border-radius: 8px; margin-bottom: 8px; border: 1px solid transparent; }
     .yaml-valid.ok  { color: var(--bi-pass); background: var(--bi-pass-bg); border-color: var(--bi-pass-border); }
     .yaml-valid.err { color: var(--bi-fail); background: var(--bi-fail-bg); border-color: var(--bi-fail-border); white-space: pre-wrap; }
@@ -306,22 +544,28 @@ bi_css <- function() {
     .loaded-slot-head { margin-bottom: 5px; }
     .loaded-file-row {
       display: flex; align-items: center; gap: 10px;
-      padding: 6px 10px; margin-bottom: 6px;
-      border: 1px solid var(--bi-pending-border); border-radius: 8px; background: #fff;
+      padding: 7px 10px; margin-bottom: 6px;
+      border: 1px solid var(--bi-pending-border); border-left-width: 4px;
+      border-radius: .5rem; background: var(--bi-surface);
     }
+    /* :has() reads the status icon's own class for the rail colour; browsers
+       without :has() support just keep the neutral border-left above. */
+    .loaded-file-row:has(.file-ok) { border-left-color: var(--bi-pass); }
+    .loaded-file-row:has(.file-fail) { border-left-color: var(--bi-fail); }
+    .loaded-file-row:has(.file-unknown) { border-left-color: var(--bi-unknown); }
     .loaded-file-row .file-name { font-weight: 600; color: var(--bi-ink); word-break: break-all; }
     .loaded-file-row .file-table {
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem;
+      font-family: var(--bs-font-monospace); font-size: .8rem;
       color: var(--bi-green-dark); background: var(--bi-green-light);
       padding: 1px 7px; border-radius: 6px; white-space: nowrap;
     }
-    .loaded-file-row .file-status { font-weight: 700; width: 1.2em; text-align: center; flex: none; }
+    .loaded-file-row .file-status { font-weight: 600; width: 1.2em; text-align: center; flex: none; }
     .loaded-file-row .file-ok      { color: var(--bi-pass); }
     .loaded-file-row .file-fail    { color: var(--bi-fail); }
     .loaded-file-row .file-pending { color: var(--bi-grey); }
     /* Validated, but the import axis was never checked -- amber, so it reads
        as neither the green pass nor the red fail. */
-    .loaded-file-row .file-unknown { color: #b8860b; }
+    .loaded-file-row .file-unknown { color: var(--bi-unknown); }
     .loaded-file-row .file-remove {
       margin-left: auto; flex: none; color: var(--bi-fail);
       border: none; background: transparent; padding: 2px 7px; line-height: 1; font-size: 1rem;
@@ -339,39 +583,56 @@ bi_css <- function() {
     .msgs-table table.dataTable thead input,
     .msgs-table table.dataTable thead select { font-size: .78rem; padding: 2px 6px; }
 
-    /* Sidebar dataset navigation: status-tinted rows + name (select) + check icon.
-       The row BACKGROUND encodes status: not-checked (neutral grey), passed
-       (green), failed (red), missing/no-data (orange). Selection is a brand-teal
-       ring so it never collides with the status color. */
-    .dataset-nav-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
+    /* Sidebar dataset navigation: the LEFT RAIL and the icon encode status
+       (not-checked/pass/fail/no-data); the background encodes selection only
+       (a brand tint), so the two never collide. */
+    .dataset-nav-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 2px; }
     .dataset-nav-row {
-      display: flex; align-items: center; gap: 8px; padding: 7px 10px;
-      border: 1px solid var(--bi-pending-border); border-left: 5px solid var(--bi-pending-border);
-      border-radius: 8px; background: #fff;
-      transition: background .12s ease, box-shadow .12s ease, border-color .12s ease;
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 6px 6px 10px;
+      border: 1px solid transparent; border-left: 4px solid var(--bi-pending-border);
+      border-radius: .5rem; background: var(--bi-surface);
+      transition: background .12s ease, border-color .12s ease;
     }
-    .dataset-nav-row.nav-st-pending { background: var(--bi-pending-bg); border-color: var(--bi-pending-border); border-left-color: var(--bi-pending-border); }
-    .dataset-nav-row.nav-st-pass    { background: var(--bi-pass-bg);    border-color: var(--bi-pass-border);    border-left-color: var(--bi-pass); }
-    .dataset-nav-row.nav-st-fail    { background: var(--bi-fail-bg);    border-color: var(--bi-fail-border);    border-left-color: var(--bi-fail); }
-    .dataset-nav-row.nav-st-nodata  { background: #FCF4E6;              border-color: #EBD9B6;                  border-left-color: #C77700; }
+    .dataset-nav-row:hover { background: var(--bi-grey-light); }
+    .dataset-nav-row.active {
+      background: var(--bi-green-light);
+      border-top-color: rgba(0,98,91,.25); border-right-color: rgba(0,98,91,.25);
+      border-bottom-color: rgba(0,98,91,.25); box-shadow: none;
+    }
+    .dataset-nav-row.nav-st-pending { border-left-color: var(--bi-pending-border); }
+    .dataset-nav-row.nav-st-pass    { border-left-color: var(--bi-pass); }
+    .dataset-nav-row.nav-st-fail    { border-left-color: var(--bi-fail); }
+    .dataset-nav-row.nav-st-nodata  { border-left-color: var(--bi-warn); }
     .dataset-nav-row .nav-select {
       flex: 1 1 auto; display: flex; align-items: center; gap: 8px;
       text-decoration: none; color: var(--bi-ink); font-weight: 600; overflow: hidden;
     }
     .dataset-nav-row .nav-select:hover { text-decoration: none; }
-    .dataset-nav-row .nav-name { word-break: break-word; color: var(--bi-ink); }
-    .dataset-nav-row.active { box-shadow: 0 0 0 2px var(--bi-green); }
-    .dataset-nav-row.active .nav-name { color: var(--bi-green-dark); font-weight: 700; }
-    .nav-ic { flex: none; width: 1.15em; text-align: center; font-weight: 700; font-size: .95rem; }
+    .dataset-nav-row .nav-name { word-break: break-word; color: var(--bi-ink); font-weight: 500; }
+    .dataset-nav-row.active .nav-name { color: var(--bi-green-dark); font-weight: 600; }
+    /* Name over id: the id (what every message and download says) stays
+       readable under a name without competing with it. */
+    /* Shiny wraps an actionLink's label in span.action-label; that wrapper,
+       not the link, has to be the row, or the block-level .nav-text below
+       drops onto a line of its own under the status icon. */
+    .dataset-nav-row .nav-select .action-label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .dataset-nav-row .nav-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+    .dataset-nav-row .nav-id {
+      font-family: var(--bs-font-monospace); font-size: .75rem; font-weight: 400;
+      color: var(--bi-grey); word-break: break-all;
+    }
+    .nav-ic { flex: none; width: 1.15em; text-align: center; font-weight: 600; font-size: .95rem; }
     .nav-ic-pass    { color: var(--bi-pass); }
     .nav-ic-fail    { color: var(--bi-fail); }
-    .nav-ic-nodata  { color: #C77700; }
+    .nav-ic-nodata  { color: var(--bi-warn); }
     .nav-ic-pending { color: var(--bi-pending); }
     .dataset-nav-row .nav-check {
-      flex: none; color: var(--bi-pass); border: 1px solid var(--bi-pass-border);
-      background: #fff; padding: 1px 8px; line-height: 1.3; border-radius: 6px; font-size: .85rem;
+      flex: none; color: var(--bi-green); border: 1px solid transparent;
+      background: transparent; padding: 1px 7px; line-height: 1.3;
+      border-radius: .375rem; font-size: .8rem;
     }
-    .dataset-nav-row .nav-check:hover { background: var(--bi-pass-bg); }
+    .dataset-nav-row .nav-check:hover { background: var(--bi-surface); border-color: var(--bi-pass-border); }
 
     /* Add dataset sits directly above Check all datasets (btn-primary, the
        sidebar's actual call to action) -- btn-sm + btn-outline-secondary
@@ -392,27 +653,47 @@ bi_css <- function() {
     /* Non-floating footer: DTAtools version + author + GitHub link. Sits in the
        normal document flow at the bottom of the page (never fixed/floating). */
     .app-footer {
-      margin-top: 26px; padding: 14px 20px; border-top: 1px solid var(--bi-pending-border);
-      background: #fff; color: var(--bi-grey); font-size: .82rem;
-      display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
+      margin-top: 32px; padding: 16px 24px; border-top: 1px solid var(--bi-pending-border);
+      background: var(--bi-surface); color: var(--bi-grey); font-size: .8125rem;
+      display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap;
     }
-    .app-footer .foot-name { font-weight: 700; color: var(--bi-green-dark); }
+    .app-footer .foot-name { font-weight: 600; color: var(--bi-green-dark); }
     .app-footer .foot-ver {
       background: var(--bi-green-light); color: var(--bi-green-dark);
       border-radius: 999px; padding: 1px 9px; font-weight: 600;
     }
-    .app-footer .foot-sep { opacity: .5; }
+    /* foot-sep is now an empty, aria-hidden span (app.R) -- a plain CSS rule
+       draws the 1px divider instead of a Unicode bullet in the markup. */
+    .app-footer .foot-sep { display: inline-block; width: 1px; height: 12px; background: var(--bi-pending-border); opacity: 1; }
     .app-footer a { color: var(--bi-green); text-decoration: none; font-weight: 600; }
     .app-footer a:hover { text-decoration: underline; }
 
-    /* Dataset detail header: dataset DESCRIPTION as the heading, name smaller. */
+    /* Dataset detail header block: wraps .ds-head with the LEFT RAIL for the
+       dataset's own status (app.R sets class = ds-head-block ds-st-<status>
+       on this wrapper -- pending relies on the base rule's own neutral
+       colour, so there is no separate .ds-st-pending). */
+    /* The negative left margin hangs the rail in the card body's own 1rem
+       gutter, so the heading stays on the same left edge as everything
+       below it instead of being pushed 18px inward by rail + padding. */
+    .ds-head-block { border-left: 4px solid var(--bi-pending-border); padding: 2px 0 2px 12px; margin: 4px 0 16px -1rem; }
+    .ds-head-block.ds-st-pass { border-left-color: var(--bi-pass); }
+    .ds-head-block.ds-st-fail { border-left-color: var(--bi-fail); }
+    .ds-head-block.ds-st-nodata { border-left-color: var(--bi-warn); }
+    /* Dataset detail header: dataset NAME as the heading (its id when unnamed),
+       the id as a chip below, the long description under both. */
     .ds-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 6px; }
-    .ds-head .ds-desc { margin: 0; font-weight: 700; color: var(--bi-green-dark); line-height: 1.2; }
+    .ds-head .ds-desc { margin: 0; font-weight: 600; color: var(--bi-green-dark); line-height: 1.2; font-size: 1.375rem; }
     .ds-head .ds-name {
       font-size: .82rem; color: var(--bi-grey);
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--bs-font-monospace);
     }
-    .ds-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+    /* pre-line keeps the paragraphs an author typed; the measure keeps a long
+       description readable on a wide screen. */
+    .ds-long-desc {
+      margin: 8px 0 2px; max-width: 72ch; white-space: pre-line;
+      color: var(--bi-ink); font-size: .9375rem; line-height: 1.5;
+    }
+    .ds-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
 
     /* Dataset Edit menu: one entry point for the three specification editors.
        The rows are icon + title + one line of explanation, so the menu says
@@ -428,13 +709,13 @@ bi_css <- function() {
       padding: 6px;
       margin-top: 6px;
       border: 1px solid var(--bi-pending-border);
-      border-radius: 12px;
+      border-radius: .75rem;
       box-shadow: 0 12px 28px rgba(26, 43, 42, .16);
     }
     .ds-edit-menu .dropdown-header {
       padding: 6px 10px 4px;
-      font-size: .7rem; font-weight: 700; letter-spacing: .07em;
-      text-transform: uppercase; color: var(--bi-grey);
+      font-size: .75rem; font-weight: 600; letter-spacing: 0;
+      text-transform: none; color: var(--bi-grey);
     }
     /* white-space:normal so the description wraps instead of stretching the
        menu; Bootstrap sets nowrap on .dropdown-item. */
@@ -453,7 +734,7 @@ bi_css <- function() {
       width: 30px; height: 30px; border-radius: 8px;
       background: var(--bi-grey-light); font-size: 15px; line-height: 1;
     }
-    .ds-edit-item:hover .ds-edit-icon, .ds-edit-item:focus .ds-edit-icon { background: #fff; }
+    .ds-edit-item:hover .ds-edit-icon, .ds-edit-item:focus .ds-edit-icon { background: var(--bi-surface); }
     .ds-edit-text { display: flex; flex-direction: column; min-width: 0; }
     .ds-edit-title { font-weight: 600; color: var(--bi-ink); line-height: 1.25; }
     .ds-edit-item:hover .ds-edit-title, .ds-edit-item:focus .ds-edit-title {
@@ -477,6 +758,22 @@ bi_css <- function() {
       color: var(--bi-fail);
     }
 
+    /* Modals, menus, notifications share one set of surfaces: rounded
+       corners, a soft shadow, and the same heading/body/footer rhythm. */
+    .modal-content { border: 0; border-radius: .875rem; box-shadow: 0 24px 60px rgba(26,43,42,.22); }
+    .modal-header { padding: 18px 24px 12px; border-bottom: 1px solid var(--bi-pending-border); }
+    .modal-title { font-weight: 600; font-size: 1.125rem; color: var(--bi-green-dark); }
+    .modal-body { padding: 18px 24px; }
+    .modal-body h3, .modal-body h4, .modal-body h5 { font-size: 1rem; font-weight: 600; color: var(--bi-ink); margin: 14px 0 8px; }
+    .modal-footer { padding: 12px 24px 18px; border-top: 1px solid var(--bi-pending-border); }
+    #shiny-notification-panel .shiny-notification {
+      background: var(--bi-surface); color: var(--bi-ink); border: 1px solid var(--bi-pending-border);
+      border-left: 4px solid var(--bi-green); border-radius: .625rem;
+      box-shadow: 0 12px 28px rgba(26,43,42,.16);
+    }
+    #shiny-notification-panel .shiny-notification-error { border-left-color: var(--bi-fail); }
+    #shiny-notification-panel .shiny-notification-warning { border-left-color: var(--bi-warn); }
+
     /* Wider inspect modal + a body that wraps/scrolls instead of overflowing. */
     .modal-xl { max-width: 92vw; }
     .dta-inspect-wrap { overflow-x: auto; max-height: 68vh; }
@@ -497,7 +794,7 @@ bi_css <- function() {
     .dta-row-btn { padding: 1px 7px; margin: 0 2px; line-height: 1.3; }
     .dta-name-chip {
       display: inline-block; padding: 2px 10px; border-radius: 999px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--bs-font-monospace);
       font-size: .78rem; background: var(--bi-grey-light);
       color: var(--bi-green-dark); border: 1px solid var(--bi-pending-border);
     }
@@ -514,7 +811,7 @@ bi_css <- function() {
        silently clips instead) is the fallback for the instant between a
        drag and yaml_ace_resize_js's ResizeObserver callback catching up. */
     .yaml-ace-wrap {
-      border: 1px solid #30363d; border-radius: 8px; overflow: auto;
+      border: 1px solid var(--bi-pending-border); border-radius: .625rem; overflow: auto;
       height: 70vh; min-height: 30vh; resize: vertical;
     }
     /* shinyAce::aceEditor(height = ...) sets that value as a fixed INLINE
@@ -532,36 +829,49 @@ bi_css <- function() {
     /* Column / rule spec editors (inside the Edit modals). */
     .spec-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
     .spec-hint { font-size: .82rem; color: var(--bi-grey); }
-    .spec-form { border: 1px solid var(--bi-pending-border); border-radius: 8px; padding: 12px; background: #fff; margin-top: 10px; }
+    /* Column list searched or sorted: no move arrows (visibility keeps the
+       edit / remove buttons where they were), and a hint to get them back. */
+    .reorder-off-hint { display: none; margin-bottom: 6px; }
+    .dta-reorder-off .reorder-off-hint { display: block; }
+    .dta-reorder-off .dta-move-btn { visibility: hidden; }
+    .spec-form { border: 1px solid var(--bi-pending-border); border-radius: .5rem; padding: 12px; background: var(--bi-surface); margin-top: 10px; }
     .spec-form .form-group { margin-bottom: 8px; }
-    .cond-builder { border: 1px solid var(--bi-pending-border); border-radius: 8px; padding: 10px; margin-bottom: 10px; background: var(--bi-grey-light); }
-    .cond-builder .cond-title { font-weight: 700; font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; color: var(--bi-grey); margin-bottom: 6px; }
+    .cond-builder { border: 1px solid var(--bi-pending-border); border-radius: .5rem; padding: 10px; margin-bottom: 10px; background: var(--bi-grey-light); }
+    .cond-builder .cond-title { font-weight: 600; font-size: .78rem; text-transform: none; letter-spacing: 0; color: var(--bi-grey); margin-bottom: 6px; }
     .cond-row { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 4px; }
     .cond-row .form-group { margin-bottom: 0; flex: 1 1 auto; }
+    /* Every condition row carries its field labels, so whichever row is first
+       after a removal still shows them. Later rows keep theirs for screen
+       readers only (the visually-hidden clip technique, not display:none). */
+    .cond-row:not(:first-child) .control-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
     /* Metadata: section titles + clickable (editable) contact rows. */
-    .md-section-title { font-weight: 700; color: var(--bi-green-dark); margin: 6px 0 8px; }
+    .md-section-title { font-size: 1.0625rem; font-weight: 600; color: var(--bi-green-dark); margin: 4px 0 10px; }
     .contact-item { cursor: pointer; }
     .contact-item:hover { background: var(--bi-green-light); }
     .contact-item .contact-edit-ic { color: var(--bi-grey); font-size: .78rem; margin-left: 8px; white-space: nowrap; }
+    /* Section dividers on the Metadata tab (Details / Sender / Receiver /
+       Version history): more air than a default Bootstrap <hr>, so each
+       section reads as its own block. */
+    .bslib-sidebar-layout .tab-content hr { margin: 20px 0; border-top: 1px solid var(--bi-pending-border); opacity: 1; }
 
     /* meta_field_text(): the read-only counterpart of a textInput() /
        textAreaInput(), shown on the Metadata tab while edit mode is off.
-       Sized to Bootstrap's own .form-label / .form-control rhythm (.5rem
-       label margin, 1rem/1.5 value text with .375rem vertical padding
+       Sized to Bootstrap's own .form-label / .form-control rhythm (.25rem
+       label margin, 1rem/1.5 value text with .25rem vertical padding
        standing in for the control's border) so the tab occupies the same
        vertical space either way and does not visibly jump when the switch
        flips the fields between plain text and inputs. white-space:pre-wrap
        on the value because one of the fields it replaces is a
        textAreaInput(), whose value can contain newlines that a plain
        (nowrap) block would otherwise collapse. */
-    .md-ro-field { margin-bottom: 1rem; }
+    .md-ro-field { margin-bottom: .875rem; }
     .md-ro-label {
-      margin-bottom: .5rem; font-size: .875rem; font-weight: 600; color: var(--bi-grey);
+      margin-bottom: .25rem; font-size: .8125rem; font-weight: 500; color: var(--bi-grey);
     }
     .md-ro-value {
       font-size: 1rem; line-height: 1.5; color: var(--bi-ink);
-      padding: .375rem 0; white-space: pre-wrap; word-break: break-word;
+      padding: .25rem 0; white-space: pre-wrap; word-break: break-word;
     }
 
     /* contact_detail_block(): the read-only counterpart of one contact row,
@@ -576,8 +886,11 @@ bi_css <- function() {
       display: flex; gap: 6px; font-size: .86rem; color: var(--bi-ink);
       margin-bottom: 2px;
     }
-    .contact-detail-label { color: var(--bi-grey); flex: 0 0 auto; min-width: 90px; }
+    .contact-detail-label { color: var(--bi-grey); flex: 0 0 auto; min-width: 96px; }
     .contact-detail-value { word-break: break-word; }
+    /* render_contacts() (app.R) lays contacts out in a Bootstrap .list-group;
+       tint its default border to match the rest of the sheet. */
+    .list-group-item { border-color: var(--bi-pending-border); }
     /* The signature/reviewer flags: same pill treatment as .ws-pill (sidebar
        header) and .foot-ver (footer), so a fact about this contact reads
        consistently with the rest of the app rather than inventing a new look. */
@@ -587,45 +900,51 @@ bi_css <- function() {
       background: var(--bi-green-light); border-radius: 999px; padding: 1px 9px;
     }
 
-    /* Example-file picker: the drop zone with a dashed 'Load an example file'
-       button to its RIGHT, styled to match the dashed filedrop tile. */
-    .slot-example { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
-    .slot-example .dropzone { flex: 0 0 auto; width: 400px; max-width: 100%; }
-    .slot-example-or { display: flex; align-items: center; gap: 10px; }
-    .slot-example-or > span { font-size: .82rem; color: var(--bi-grey); }
+    /* Example-file picker: the drop zone grows to at most 560px and the
+       'or Load an example file' group sits directly to its right. The
+       button is a plain outline: only the drop target itself is dashed now,
+       so the two no longer compete for the eye. flex-end lines the group up
+       with the bottom of the dashed zone; the padding lifts it back to the
+       zone's vertical centre (the zone is about 24px taller than the button). */
+    .slot-example { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; }
+    .slot-example .dropzone { flex: 1 1 320px; max-width: 560px; }
+    .slot-example-or { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; }
+    .slot-example-or > span { font-size: .8125rem; color: var(--bi-grey); }
     .slot-example-btn {
       white-space: nowrap;
-      border-style: dashed !important; border-width: 2px !important;
-      border-color: var(--bi-pass-border) !important;
-      background: #fff !important; color: var(--bi-green-dark) !important;
-      border-radius: 6px; padding: 8px 16px; font-weight: 500;
+      border: 1px solid rgba(0,98,91,.7) !important;
+      background: var(--bi-surface) !important; color: var(--bi-green-dark) !important;
+      border-radius: .5rem; padding: .45rem 1rem; font-weight: 500;
     }
     .slot-example-btn:hover {
       background: var(--bi-green-light) !important;
-      border-color: var(--bi-pass) !important;
+      border-color: var(--bi-green) !important;
     }
 
     /* Floating, foldable validation-messages dock pinned to the viewport bottom.
        Collapsed shows only the bar; expanded reveals the messages table. */
     .msgs-dock {
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 1030;
-      background: #fff; border-top: 2px solid var(--bi-green);
-      box-shadow: 0 -6px 20px rgba(0,0,0,.14);
+      background: var(--bi-surface); border-top: 3px solid var(--bi-green);
+      box-shadow: 0 -8px 24px rgba(26,43,42,.10);
       display: flex; flex-direction: column; max-height: 62vh;
     }
     .msgs-dock-bar {
       display: flex; align-items: center; gap: 12px; cursor: pointer;
-      padding: 8px 18px; background: var(--bi-green-light);
-      border-bottom: 1px solid var(--bi-pending-border); user-select: none;
+      padding: 8px 20px; background: var(--bi-surface);
+      border-bottom: 1px solid transparent; user-select: none;
     }
-    .msgs-dock-title { font-weight: 700; color: var(--bi-green-dark); white-space: nowrap; }
+    /* The bar only draws its divider once the body below it is actually
+       showing -- collapsed, there is nothing to divide it from. */
+    .msgs-dock:not(.collapsed) .msgs-dock-bar { border-bottom-color: var(--bi-pending-border); }
+    .msgs-dock-title { font-weight: 600; color: var(--bi-green-dark); white-space: nowrap; font-size: .9375rem; }
     .msgs-dock-count {
-      background: var(--bi-green); color: #fff; border-radius: 999px;
-      padding: 1px 9px; font-size: .74rem; font-weight: 700;
+      background: var(--bi-green-dark); color: #fff; border-radius: 999px;
+      padding: 1px 9px; font-size: .74rem; font-weight: 600;
     }
-    .msgs-dock-count.zero { background: var(--bi-pending-border); color: var(--bi-grey); }
+    .msgs-dock-count.zero { background: var(--bi-grey-light); color: var(--bi-ink); border: 1px solid var(--bi-pending-border); }
     .msgs-dock-ds {
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--bs-font-monospace);
       font-size: .78rem; color: var(--bi-green-dark);
       background: var(--bi-grey-light); border: 1px solid var(--bi-pending-border);
       border-radius: 999px; padding: 1px 9px;
@@ -633,17 +952,47 @@ bi_css <- function() {
     .msgs-dock-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
     .msgs-dock-dl { display: flex; gap: 6px; }
     .msgs-dock-chevron { color: var(--bi-green-dark); font-size: .8rem; transition: transform .18s ease; }
-    .msgs-dock-body { overflow: auto; padding: 12px 18px 16px; }
+    .msgs-dock-body { overflow: auto; padding: 12px 20px 16px; }
     .msgs-dock.collapsed .msgs-dock-body { display: none; }
     .msgs-dock.collapsed .msgs-dock-chevron { transform: rotate(180deg); }
+    .msgs-table table.dataTable thead th {
+      background: var(--bi-grey-light); color: var(--bi-green-dark); font-weight: 600;
+      border-bottom: 1px solid var(--bi-pending-border);
+    }
+    .msgs-table table.dataTable tbody tr:hover { background: var(--bi-green-light); cursor: pointer; }
     /* Keep the static footer / page content clear of the collapsed dock bar. */
     body { padding-bottom: 56px; }
+    /* On a narrow screen the four download buttons no longer fit beside the
+       title, count and dataset chip: let the bar wrap onto a second row
+       (actions right-aligned under the title) and give the page the extra
+       room at the bottom that the taller bar now covers. */
+    @media (max-width: 900px) {
+      .msgs-dock-bar { flex-wrap: wrap; row-gap: 6px; }
+      .msgs-dock-actions { margin-left: 0; width: 100%; justify-content: flex-end; flex-wrap: wrap; }
+      body { padding-bottom: 104px; }
+    }
+    /* Narrow screens: the three tabs fit one row at about 260px, so keep
+       them there rather than wrapping the active underline onto a second
+       row; the landing alternatives stack full-width. */
+    @media (max-width: 600px) {
+      .card-header .card-header-tabs { flex-wrap: nowrap; }
+      .card-header .card-header-tabs .nav-link { padding: 10px 10px; font-size: .875rem; white-space: nowrap; }
+      .landing-alt { flex-direction: column; align-items: stretch; }
+      .landing-alt-actions { flex-direction: column; }
+      .landing-alt-actions .btn { width: 100%; }
+    }
+    /* bslib ships its sidebar collapse toggle with border: none -- a bare
+       12px chevron on the page ground. Below 768px it is the only way back
+       to the sidebar (and to Check all datasets), so it gets an edge. */
+    .bslib-sidebar-layout .collapse-toggle {
+      border: 1px solid var(--bi-pending-border); background: var(--bi-surface); color: var(--bi-green-dark);
+    }
 
     /* Rule editor: the type is locked (read-only) when editing an existing
        rule -- it is only chosen when the rule is first created. */
     .rule-type-fixed {
       display: block; padding: 6px 10px; border: 1px solid var(--bi-pending-border);
-      border-radius: 6px; background: var(--bi-grey-light); color: var(--bi-grey);
+      border-radius: .5rem; background: var(--bi-grey-light); color: var(--bi-grey);
       font-weight: 500;
     }
 
@@ -652,15 +1001,15 @@ bi_css <- function() {
     .inspect-modal-body { max-height: 72vh; overflow-y: auto; }
     .inspect-summary {
       border: 1px solid var(--bi-pending-border); border-radius: 8px;
-      padding: 12px 14px; margin-bottom: 12px; background: #fafafa;
+      padding: 12px 14px; margin-bottom: 12px; background: var(--bi-grey-light);
     }
     .inspect-summary-head { margin-bottom: 6px; }
     .inspect-badge {
       display: inline-block; padding: 2px 10px; border-radius: 999px;
-      font-size: .72rem; font-weight: 600; color: #fff; letter-spacing: .02em;
+      font-size: .72rem; font-weight: 600; color: #fff;
     }
     .inspect-badge.rule { background: var(--bi-fail); }
-    .inspect-badge.columnspec { background: #b8860b; }
+    .inspect-badge.columnspec { background: var(--bi-unknown); }
     /* Third validation axis (a value unrepresentable in its declared type).
        Its own hue so it is never mistaken for a rule or schema failure. */
     .inspect-badge.import { background: #1f6feb; }
@@ -671,7 +1020,7 @@ bi_css <- function() {
       border-radius: 999px; padding: 1px 8px;
     }
     .inspect-desc-detail {
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--bs-font-monospace);
       font-size: .82rem; color: #333; margin-top: 4px; word-break: break-word;
     }
     .inspect-desc-note { font-size: .78rem; color: var(--bi-grey); margin-top: 3px; }
@@ -683,14 +1032,14 @@ bi_css <- function() {
     .inspect-expected .inspect-box-title { color: var(--bi-green-dark); }
     .inspect-actual .inspect-box-title { color: var(--bi-fail); }
     .inspect-should { font-weight: 600; color: var(--bi-green-dark); word-break: break-word; }
-    .inspect-actual-val { font-weight: 700; font-size: 1.04rem; color: var(--bi-fail); word-break: break-word; }
+    .inspect-actual-val { font-weight: 600; font-size: 1.04rem; color: var(--bi-fail); word-break: break-word; }
     .inspect-actual-loc { font-size: .78rem; color: var(--bi-grey); margin-top: 3px; }
     .inspect-none { color: var(--bi-grey); }
     .inspect-hl-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
     .inspect-hl-table th, .inspect-hl-table td { border: 1px solid var(--bi-pending-border); padding: 3px 7px; text-align: left; }
-    .inspect-hl-table th { background: #fff; color: var(--bi-grey); font-weight: 600; }
-    .inspect-hl-table td.inspect-hl-val { background: #fff; font-weight: 600; color: var(--bi-fail); }
-    .inspect-hl-table td.inspect-hl-row { background: #fff; color: var(--bi-grey); white-space: nowrap; }
+    .inspect-hl-table th { background: var(--bi-surface); color: var(--bi-grey); font-weight: 600; }
+    .inspect-hl-table td.inspect-hl-val { background: var(--bi-surface); font-weight: 600; color: var(--bi-fail); }
+    .inspect-hl-table td.inspect-hl-row { background: var(--bi-surface); color: var(--bi-grey); white-space: nowrap; }
     .inspect-details { margin-top: 4px; }
     .inspect-details > summary { cursor: pointer; color: var(--bi-grey); font-size: .82rem; margin-bottom: 6px; }
 
@@ -734,7 +1083,349 @@ bi_css <- function() {
        when motion is reduced -- it just stops turning. */
     @media (prefers-reduced-motion: reduce) {
       .dta-busy-shown::after { animation: none; opacity: .55; }
+      .tmpl-switch input[type=checkbox], .tmpl-switch input[type=checkbox]::before { transition: none; }
     }
+
+    /* Create-from-template picker and options dialog (template_ui.R).
+
+       The one bold move here is the family tree: a child row hangs from a thin
+       green guide line, and the selected row carries a solid green bar. Every
+       other line is quiet grey on white -- with a few hundred templates the
+       list has to read as a list, not as a wall of cards.
+
+       Collapsing is pure CSS driven by one class the client toggles: a row
+       that is not a family head and whose family is not open is simply not
+       displayed. Search results set .flat on the list, which shows every row
+       and drops the indentation, because a filtered tree is not a tree. */
+    /* Shiny gives every non-inline .shiny-input-container a fixed 300px. In
+       the picker each control takes the column it sits in -- left alone, the
+       template rows (one radio group) filled under half of their own box. */
+    .tmpl-picker .shiny-input-container:not(.shiny-input-container-inline) { width: 100%; }
+    /* Both template dialogs (the picker, then the options) are scrollable
+       dialogs that fill the window height, so the two steps open at the same
+       size and the buttons are always in view. The margin is set here because
+       bslib's Shiny preset makes it 10%, and a percentage margin resolves
+       against the window WIDTH: 190px above the dialog on a 1920px screen,
+       while the dialog's height took 80% of the window's height -- the dialog
+       hung low and gave a fifth of the screen away. */
+    .tmpl-picker-dialog, .tmpl-options-dialog { --bs-modal-margin: 1.5rem; }
+    .tmpl-picker-dialog .modal-content, .tmpl-options-dialog .modal-content { height: 100%; }
+    /* Wide enough for list and detail side by side, but not the full 92vw of
+       other xl dialogs: on a large monitor rows would run to 1700px. */
+    .tmpl-picker-dialog { max-width: min(92vw, 1240px); }
+    /* A flex column from the dialog body down to the list, so the list and the
+       detail take whatever height the search row and any source notices leave
+       -- no reserve to guess. Below 260px the body scrolls instead. */
+    .tmpl-picker-dialog .modal-body, .tmpl-picker-modal,
+    .tmpl-picker-modal > .shiny-html-output, .tmpl-picker,
+    .tmpl-picker-main, .tmpl-picker-main > .shiny-html-output {
+      display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;
+    }
+    /* List and selected template side by side, each scrolling on its own, so
+       the choice and what it means are both in view; stacked when the dialog
+       is too narrow for two readable columns. */
+    .tmpl-picker-body {
+      display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+      grid-template-rows: minmax(0, 1fr); gap: 20px;
+      flex: 1 1 auto; min-height: 260px;
+    }
+    .tmpl-picker-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+    .tmpl-picker-side { min-height: 0; overflow-y: auto; }
+    @media (max-width: 991.98px) {
+      .tmpl-picker-dialog .modal-body, .tmpl-picker-modal,
+      .tmpl-picker-modal > .shiny-html-output, .tmpl-picker { display: block; }
+      .tmpl-picker-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+      .tmpl-picker-list { flex: none; height: 45vh; }
+    }
+    .tmpl-picker-list {
+      border: 1px solid var(--bi-pending-border); border-radius: 8px;
+      padding: 0; background: var(--bi-surface);
+    }
+    .tmpl-picker-list > p.msg-hint:not(.tmpl-count) { padding: 16px; margin: 0; }
+    .tmpl-picker-side {
+      border: 1px solid var(--bi-pending-border); border-radius: 8px;
+      padding: 16px 18px; background: var(--bi-grey-light);
+    }
+    .tmpl-row { border-top: 1px solid var(--bi-pending-border); }
+    .tmpl-row:first-child { border-top: none; }
+    .tmpl-row > label {
+      display: flex; gap: 10px; align-items: flex-start;
+      padding: 10px 14px; margin: 0; cursor: pointer; width: 100%;
+    }
+    .tmpl-row:hover { background: rgba(0,98,91,.03); }
+    .tmpl-row input[type=radio] { margin-top: 5px; accent-color: var(--bi-green); }
+    .tmpl-row:not([data-top]):not(.open) { display: none; }
+    .tmpl-picker-list.flat .tmpl-row { display: block; }
+    .tmpl-row.selected {
+      box-shadow: inset 3px 0 0 var(--bi-green); background: rgba(0,98,91,.06);
+    }
+    /* The whole row takes focus, not just the 13px radio dot. */
+    .tmpl-row:focus-within { outline: 2px solid var(--bi-green); outline-offset: -2px; }
+    .tmpl-entry { flex: 1; min-width: 0; }
+    .tmpl-picker-list:not(.flat) .tmpl-row:not([data-top]) .tmpl-entry {
+      border-left: 2px solid rgba(0,98,91,.35); padding-left: 10px;
+    }
+    .tmpl-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+    .tmpl-label { font-weight: 600; }
+    .tmpl-meta {
+      display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px;
+      margin-top: 1px;
+    }
+    /* Muted, but in the normal face: a monospace id reads as machine output
+       and pulls more weight than the template's own name. */
+    .tmpl-id { color: var(--bi-grey); font-size: .82rem; }
+    .tmpl-version { color: var(--bi-grey); font-size: .82rem; margin-left: auto; white-space: nowrap; }
+    .tmpl-meta .tmpl-lineage { color: var(--bi-grey); font-size: .82rem; }
+    .tmpl-variants { margin-left: auto; font-size: .82rem; color: var(--bi-green); white-space: nowrap; }
+    /* A library name is a label, not a status: an outline chip like the
+       others in the app. Bootstrap's .badge is white text with no fill of its
+       own, which made it invisible on the selected row's light wash. */
+    .badge.tmpl-source {
+      background: var(--bi-surface); color: var(--bi-green-dark); border: 1px solid rgba(0,98,91,.45);
+      font-weight: 500; font-size: .72rem; padding: 2px 8px; border-radius: 999px;
+    }
+    /* Library filter: each library is a pill with its template count; a
+       checked pill takes the green outline and wash. Nothing checked means
+       every library, so the pills only ever narrow. The .shiny-options-group
+       step in each selector outranks bslib's own inline-checkbox rule, which
+       reserves 1.9em on the left for a box that is not drawn here. */
+    .tmpl-source-filter .shiny-input-container-inline .shiny-options-group { gap: 6px; }
+    .tmpl-source-filter .shiny-options-group label.checkbox-inline {
+      position: relative; display: inline-flex; align-items: center; gap: 6px; margin: 0;
+      min-height: calc(1.5em + .75rem + 2px); padding: 0 14px;
+      border: 1px solid var(--bi-pending-border); border-radius: 999px;
+      background: var(--bi-surface); cursor: pointer; line-height: 1.3;
+    }
+    .tmpl-source-filter label.checkbox-inline:hover { border-color: var(--bi-green); }
+    .tmpl-source-filter label.checkbox-inline:has(input:checked) {
+      border-color: var(--bi-green); background: var(--bi-green-light); color: var(--bi-green-dark);
+    }
+    .tmpl-source-filter label.checkbox-inline:focus-within { outline: 2px solid var(--bi-accent); outline-offset: 1px; }
+    /* The pill is the control: the native box is kept for the keyboard and
+       screen readers but drawn as a tick inside the pill instead. The tick
+       hangs off the input itself, not :has(), so a browser without :has()
+       still shows which libraries are checked; only the wash is lost. */
+    .tmpl-source-filter .shiny-options-group input[type=checkbox] {
+      position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none;
+    }
+    .tmpl-source-filter .shiny-options-group input:checked + span {
+      color: var(--bi-green-dark); font-weight: 500;
+    }
+    .tmpl-source-filter .shiny-options-group input:checked + span::before {
+      content: '\\2713\\00a0'; font-weight: 600;
+    }
+    .tmpl-chip-count { margin-left: 6px; color: var(--bi-grey); font-size: .78rem; }
+    .tmpl-source-status { color: var(--bi-warn-dark); margin-bottom: 6px; }
+    /* A CSS hex escape swallows one following space, so the gap after the
+       caret has to be a non-breaking space of its own. */
+    .tmpl-variants::before { content: '\\25B8\\00a0'; }
+    .tmpl-row.open .tmpl-variants::before { content: '\\25BE\\00a0'; }
+    /* A match is a quiet green wash, not the browser's marker yellow. */
+    .tmpl-picker-list mark { background: rgba(0,98,91,.14); color: inherit; padding: 0; }
+    /* Two lines in the list; the detail pane beside it shows the full text. */
+    .tmpl-desc {
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .tmpl-count {
+      position: sticky; top: 0; z-index: 1; margin: 0; padding: 7px 14px;
+      background: var(--bi-grey-light); border-bottom: 1px solid var(--bi-pending-border);
+    }
+    /* Search box, library filter and refresh share one toolbar line where the
+       width allows; the box takes whatever the other two leave. */
+    .tmpl-search-row { display: flex; flex-wrap: wrap; gap: 0 18px; align-items: flex-end; }
+    .tmpl-search-row > .tmpl-search { flex: 1 1 300px; }
+    .tmpl-search-row > .tmpl-source-filter { flex: 0 1 auto; }
+    .tmpl-search-row > .shiny-input-container:not(.tmpl-search) { flex: 0 1 320px; }
+    .modal-footer .tmpl-refresh { color: var(--bi-green); text-decoration: none; padding-left: 0; }
+    .modal-footer .tmpl-refresh:hover { text-decoration: underline; }
+    /* The version picker is a setting of the selected template, not a field
+       of the form: a quiet label, as the drop zones use. */
+    .tmpl-detail .control-label { font-size: .8125rem; font-weight: 500; color: var(--bi-grey); margin-bottom: 4px; }
+    .tmpl-detail-head { margin-bottom: 12px; }
+    .tmpl-detail .tmpl-detail-title { font-size: 1.125rem; margin: 0 0 4px; color: var(--bi-ink); }
+    .tmpl-detail-sub { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+    .tmpl-detail-desc { font-size: .875rem; line-height: 1.5; }
+    .tmpl-detail .section-label { margin-top: 14px; }
+    .tmpl-summary { font-size: .875rem; margin: 0; }
+    /* ---- New DTA from template: the options dialog ------------------------
+       A wide scrollable dialog: title and buttons stay put, a sidebar holds
+       the template's context and the section links, and the form scrolls on
+       its own beside it. Every field is one row -- label and help on the
+       left, control on the right -- so the controls form a single column the
+       eye can run down. */
+    .tmpl-options-dialog { max-width: min(94vw, 1240px); }
+    .tmpl-options-dialog .modal-header { padding: 16px 28px 14px; }
+    .tmpl-options-dialog .modal-title { display: flex; flex-direction: column; gap: 2px; font-size: 1.25rem; }
+    .tmpl-eyebrow { font-size: .8125rem; font-weight: 500; color: var(--bi-grey); }
+    .tmpl-options-dialog .modal-body { padding: 0; overflow: hidden; display: flex; }
+    .tmpl-options-dialog .modal-footer { padding: 12px 28px 16px; }
+    .tmpl-options-dialog .modal-footer .tmpl-back {
+      margin-right: auto; padding-left: 0; color: var(--bi-green); text-decoration: none; font-weight: 500;
+    }
+    .tmpl-options-dialog .modal-footer .tmpl-back:hover { text-decoration: underline; }
+    .tmpl-options-body {
+      flex: 1 1 auto; min-width: 0; min-height: 0;
+      display: grid; grid-template-columns: 272px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr);
+    }
+    .tmpl-aside {
+      overflow-y: auto; padding: 22px 22px 24px; background: var(--bi-grey-light);
+      border-right: 1px solid var(--bi-pending-border);
+      display: flex; flex-direction: column; gap: 22px;
+    }
+    .tmpl-aside .section-label { margin-bottom: 8px; }
+    .tmpl-aside .tmpl-head { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 0; }
+    .tmpl-aside .tmpl-id {
+      font-family: var(--bs-font-monospace); font-size: .8125rem; color: var(--bi-ink);
+      overflow-wrap: anywhere;
+    }
+    .tmpl-aside .tmpl-version { margin-left: 0; }
+    .tmpl-aside .tmpl-lineage { margin: 8px 0 0; }
+    .tmpl-aside-desc { font-size: .8125rem; line-height: 1.5; color: var(--bi-ink); margin: 10px 0 0; }
+    .tmpl-aside-variant { font-weight: 600; color: var(--bi-ink); margin: 0 0 8px; }
+    .tmpl-aside-block .msg-hint { margin-top: 6px; }
+    .tmpl-ds-list { list-style: none; margin: 0; padding: 0; }
+    .tmpl-ds-list li {
+      font-family: var(--bs-font-monospace); font-size: .8125rem; overflow-wrap: anywhere;
+      padding: 5px 10px; margin-bottom: 4px; background: var(--bi-surface);
+      border: 1px solid var(--bi-pending-border); border-radius: .5rem;
+    }
+    .tmpl-toc { display: flex; flex-direction: column; gap: 2px; }
+    .tmpl-toc-link {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 7px 10px; border-radius: .5rem; color: var(--bi-ink); text-decoration: none;
+      border-left: 3px solid transparent; font-size: .9rem;
+    }
+    .tmpl-toc-link:hover { background: rgba(0,98,91,.06); color: var(--bi-green-dark); }
+    .tmpl-toc-link.active {
+      background: var(--bi-surface); border-left-color: var(--bi-green); color: var(--bi-green-dark); font-weight: 600;
+      box-shadow: 0 1px 2px rgba(26,43,42,.08);
+    }
+    .tmpl-toc-link:focus-visible { outline: 2px solid var(--bi-green); outline-offset: 1px; }
+    .tmpl-toc-count {
+      min-width: 1.6rem; padding: 1px 7px; border-radius: 999px; text-align: center;
+      font-size: .75rem; font-weight: 500; color: var(--bi-grey); background: var(--bi-pending-bg);
+    }
+    .tmpl-main { position: relative; overflow-y: auto; padding: 4px 32px 40px; scroll-padding-top: 8px; }
+    .tmpl-sec { padding-top: 22px; }
+    .tmpl-sec + .tmpl-sec { margin-top: 18px; border-top: 1px solid var(--bi-pending-border); }
+    .tmpl-sec-head { margin-bottom: 6px; }
+    .modal-body .tmpl-sec-title { font-size: 1.0625rem; font-weight: 600; color: var(--bi-green-dark); margin: 0 0 2px; }
+    .tmpl-sec-hint { margin: 0; }
+    .modal-body .tmpl-group-title {
+      font-size: .8125rem; font-weight: 600; color: var(--bi-grey); margin: 18px 0 0;
+      padding-bottom: 6px; border-bottom: 1px solid var(--bi-pending-border);
+    }
+    .tmpl-empty { color: var(--bi-grey); margin: 10px 0 0; }
+    .tmpl-field {
+      display: grid; grid-template-columns: minmax(180px, 34%) minmax(0, 1fr);
+      gap: 4px 28px; align-items: start; padding: 14px 0;
+    }
+    .tmpl-opts-grid > .tmpl-field + .tmpl-field { border-top: 1px dashed var(--bi-pending-border); }
+    .tmpl-field-text { padding-top: 7px; min-width: 0; }
+    .tmpl-field-label { display: inline; font-weight: 500; color: var(--bi-ink); margin: 0; }
+    .tmpl-field .tmpl-help { margin-top: 3px; }
+    .tmpl-field-control { min-width: 0; }
+    .tmpl-field-control .form-group, .tmpl-field-control .shiny-input-container { margin-bottom: 0; }
+    .tmpl-field-control .shiny-input-container:not(.shiny-input-container-inline) { width: 100%; }
+    .tmpl-field-control textarea { min-height: 5.5rem; }
+    /* A text or textarea option with suggestions: the picker is a helper,
+       so its label is a quiet caption rather than a second field label. */
+    .tmpl-field-control .control-label { font-size: .8125rem; font-weight: 500; color: var(--bi-grey); margin-bottom: 4px; }
+    .tmpl-field-control .form-group + .form-group { margin-top: 10px; }
+    .tmpl-field-error { margin: 7px 0 0; }
+    .tmpl-req {
+      display: inline-block; margin-left: 8px; padding: 0 7px; border-radius: 999px;
+      font-size: .6875rem; font-weight: 500; line-height: 1.5; vertical-align: 1px;
+      color: var(--bi-green-dark); border: 1px solid rgba(0,98,91,.45);
+    }
+    /* A boolean option is a switch that reads its state: Yes or No. */
+    .tmpl-switch .checkbox { margin: 0; padding-top: 6px; }
+    .tmpl-switch .checkbox label { display: inline-flex; align-items: center; gap: 10px; padding-left: 0; cursor: pointer; }
+    .tmpl-switch input[type=checkbox] {
+      appearance: none; -webkit-appearance: none; flex: none; margin: 0; position: relative;
+      width: 2.5rem; height: 1.4rem; border-radius: 999px; cursor: pointer;
+      background: var(--bi-pending-border); transition: background-color .15s ease;
+    }
+    .tmpl-switch input[type=checkbox]::before {
+      content: ''; position: absolute; top: 3px; left: 3px; width: calc(1.4rem - 6px); height: calc(1.4rem - 6px);
+      border-radius: 50%; background: var(--bi-surface); box-shadow: 0 1px 2px rgba(26,43,42,.3); transition: transform .15s ease;
+    }
+    .tmpl-switch input[type=checkbox]:checked { background: var(--bi-green); }
+    .tmpl-switch input[type=checkbox]:checked::before { transform: translateX(1.1rem); }
+    .tmpl-switch input[type=checkbox]:focus-visible { outline: 2px solid var(--bi-green); outline-offset: 2px; }
+    .tmpl-switch input + span::after { content: 'No'; color: var(--bi-grey); }
+    .tmpl-switch input:checked + span::after { content: 'Yes'; color: var(--bi-ink); font-weight: 500; }
+    /* The carry-over source is a segmented control rather than a radio list. */
+    .tmpl-segmented .shiny-options-group {
+      display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px;
+      background: var(--bi-pending-bg); border-radius: .625rem;
+    }
+    .tmpl-segmented .shiny-input-container-inline .shiny-options-group .radio-inline {
+      margin: 0; padding: 6px 14px; border-radius: .5rem; cursor: pointer;
+      color: var(--bi-grey); font-weight: 500;
+    }
+    .tmpl-segmented .shiny-options-group input[type=radio] { position: absolute; opacity: 0; pointer-events: none; }
+    .tmpl-segmented .shiny-options-group .radio-inline:hover { color: var(--bi-ink); }
+    .tmpl-segmented .shiny-options-group .radio-inline:has(input:checked) {
+      background: var(--bi-surface); color: var(--bi-green-dark); box-shadow: 0 1px 3px rgba(26,43,42,.14);
+    }
+    .tmpl-segmented .shiny-options-group input:checked + span { color: var(--bi-green-dark); }
+    .tmpl-segmented .shiny-options-group .radio-inline:focus-within { outline: 2px solid var(--bi-green); outline-offset: 1px; }
+    .tmpl-carry-fields .shiny-options-group {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 2px 18px; padding-top: 6px;
+    }
+    .tmpl-carry-fields .checkbox { margin: 0; }
+    .tmpl-carry-fields .checkbox label { display: flex; align-items: flex-start; gap: 8px; padding-left: 0; }
+    .tmpl-carry-fields .checkbox input { position: static; flex: none; margin: 4px 0 0; }
+    .tmpl-carry-fields input[type=checkbox] { accent-color: var(--bi-green); }
+    @media (max-width: 991.98px) {
+      .tmpl-options-dialog .modal-body { overflow-y: auto; display: block; }
+      .tmpl-options-body { display: block; }
+      .tmpl-aside { border-right: 0; border-bottom: 1px solid var(--bi-pending-border); }
+      .tmpl-toc { display: none; }
+      .tmpl-main { overflow: visible; padding: 4px 20px 28px; }
+      .tmpl-field { grid-template-columns: minmax(0, 1fr); }
+      .tmpl-field-text { padding-top: 0; }
+    }
+    .tmpl-vocab-bar {
+      display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 14px;
+      align-items: baseline; margin-top: 6px;
+    }
+    .tmpl-vocab-actions a { font-size: .82rem; margin-right: 14px; font-weight: 500; text-decoration: none; }
+    .tmpl-vocab-actions a:hover { text-decoration: underline; }
+    .tmpl-vocab-count { font-size: .82rem; color: var(--bi-grey); }
+    /* Term descriptions inside the selectize dropdown rows. */
+    .vocab-opt-desc { font-size: .8rem; color: var(--bi-grey); white-space: normal; }
+    /* A slot with hundreds of terms chosen scrolls inside its box instead of
+       pushing the dialog's buttons off-screen. */
+    .tmpl-vocab .selectize-input { max-height: 10.5rem; overflow-y: auto; }
+    /* The column editor's term checklist (vocab_term_checklist()). */
+    .vocab-pick { margin-bottom: 8px; }
+    .vocab-pick-head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; margin-bottom: 6px; }
+    .vocab-pick-filter { margin-bottom: 6px; }
+    /* The column editor's 'Choose from vocabulary' button when a vocabulary
+       declares this column: a tinted outline, never a fill (Save column is the
+       one filled button), plus the hint line under it as the non-colour cue. */
+    .col-vocab-open .vocab-hint { margin: 4px 0 0; }
+    .col-vocab-open:has(.vocab-hint) .btn {
+      border-color: var(--bi-green); color: var(--bi-green-dark);
+      background: color-mix(in srgb, var(--bi-green) 12%, white);
+    }
+    .col-vocab-open:has(.vocab-hint) .btn:hover,
+    .col-vocab-open:has(.vocab-hint) .btn:focus-visible {
+      background: color-mix(in srgb, var(--bi-green) 22%, white);
+      color: var(--bi-green-dark);
+    }
+    .vocab-pick-list {
+      max-height: 18rem; overflow-y: auto; padding: 4px 12px;
+      border: 1px solid var(--bi-grey-light); border-radius: .5rem;
+    }
+    .vocab-pick-list .form-group { margin-bottom: 0; }
+    .vocab-pick-list .checkbox { margin: 4px 0; }
+    .vocab-pick-list .checkbox label { width: 100%; }
+    .vocab-pick .vocab-code { font-family: var(--bs-font-monospace); font-weight: 500; }
+    .vocab-pick .vocab-desc { display: block; font-size: .8rem; color: var(--bi-grey); }
     "))
 }
 

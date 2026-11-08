@@ -8,14 +8,16 @@
 }
 \value{
 A character vector of backend names in priority order, possibly
-empty. One or more of \code{"libreoffice"}, \code{"tinytex"} and \code{"pandoc"}.
+empty. One or more of \code{"word"}, \code{"libreoffice"}, \code{"tinytex"} and \code{"pandoc"}.
 }
 \description{
 The single seam every other PDF function consults, so backend detection can
 be exercised (and mocked) independently of the conversion itself.
 }
 \details{
-LibreOffice comes first: it renders the DOCX the way Word does, preserving
+Microsoft Word comes first (Windows only): it is the native renderer, keeps
+running headers and footers, and updates the table of contents and page
+fields. LibreOffice is next: it renders the DOCX the way Word does, preserving
 the flextable column widths, shading and the auto-numbered headings. The
 pandoc routes re-parse the DOCX into pandoc's AST and re-lay it out through
 LaTeX, which is a faithful \emph{text} conversion but loses much of the layout.

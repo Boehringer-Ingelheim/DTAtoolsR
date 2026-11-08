@@ -8,11 +8,39 @@
 # The PR run is the gate; make it a required check in branch protection.
 # Direct pushes (release-only commits on master) are covered by the weekly
 # schedule, which also catches breakage from CRAN dependency updates.
+#
+# TIERS (decided by ci-tier.yml). A pull request into dev gets the fast tier:
+# the `ubuntu-latest (release)` leg only. A pull request into master, one
+# labelled `full-ci`, a manual dispatch and both schedules get the release
+# tier: all five legs. The nightly schedule checks dev, so what the fast tier
+# leaves out is caught within a day rather than at release time.
+#
+# WHY THE SKIP BELOW IS A JOB-LEVEL CONDITIONAL AND NOT `paths-ignore`. Some
+# pull requests cannot possibly change what `R CMD check` reports: #124, a
+# release-finishing pin of four lines of the then app manifest, spent 91
+# minutes of matrix time establishing that four lines of JSON had not broken
+# the package on five platforms. The obvious fix -- a `paths-ignore` on the
+# trigger above -- is not merely imperfect here, it is worse than the waste.
+# The five matrix legs are required status checks in the `master` ruleset, and
+# a workflow skipped by path filtering never reports its contexts at all: they
+# sit at Pending and a docs-only pull request into master could never be
+# merged.
+#
+# GitHub's documented escape is the opposite mechanism -- "if a job within a
+# workflow is skipped due to a conditional, it will report its status as
+# 'Success'". So the workflow keeps triggering on every pull request, and the
+# `changes` job below decides per diff whether the matrix has anything to do.
 on:
   pull_request:
     branches: [master, dev]
+    # `labeled` so that adding `full-ci` re-runs at the release tier at once.
+    # Any other label re-runs the tier the PR already had: wasted minutes, but
+    # never wrong, where skipping would post Success over a failed leg.
+    types: [opened, synchronize, reopened, labeled]
   schedule:
+    # Monday: master. Nightly: dev (must match the checkout `ref:` below).
     - cron: "0 5 * * 1"
+    - cron: "0 2 * * *"
   workflow_dispatch:
 
 name: R-CMD-check
@@ -28,27 +56,63 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Tier and inert-diff classification, shared with qualification.yml and
+  # test-coverage.yaml. The allowlist of inert paths, and the argument for why
+  # it is safe, live in ci-tier.yml.
+  changes:
+    uses: ./.github/workflows/ci-tier.yml
+
   R-CMD-check:
+    needs: changes
+
+    # `!= 'true'`, not `== 'false'`: the default is to run, so an unexpected
+    # output value -- or none at all -- still runs the matrix.
+    #
+    # `!cancelled()` is load-bearing rather than decorative. A job with `needs`
+    # whose `if` contains no status function is skipped outright when its
+    # dependency fails, and a skipped leg reports Success to the ruleset. So
+    # without it, a transient failure in `changes` would silently satisfy all
+    # five required checks having verified nothing. With it, a failed `changes`
+    # leaves `skip` empty, the condition holds, and the matrix runs.
+    if: ${{ !cancelled() && needs.changes.outputs.skip != 'true' }}
+
     runs-on: ${{ matrix.config.os }}
 
+    # These five strings ARE the required status check contexts named in the
+    # `master` ruleset. Renaming a leg silently un-gates it.
     name: ${{ matrix.config.os }} (${{ matrix.config.r }})
 
+    # The fast tier (a pull request into dev) runs one leg, the release tier
+    # all five. Both lists sit here side by side, so a leg cannot be renamed
+    # out of sight. `!= 'fast'` rather than `== 'release'`: if the tier job
+    # failed its output is empty, and the full matrix runs.
     strategy:
       fail-fast: false
       matrix:
-        config:
-          - {os: macos-latest,   r: 'release'}
-          - {os: windows-latest, r: 'release'}
-          - {os: ubuntu-latest,   r: 'devel', http-user-agent: 'release'}
-          - {os: ubuntu-latest,   r: 'release'}
-          - {os: ubuntu-latest,   r: 'oldrel-1'}
+        config: ${{ fromJSON(needs.changes.outputs.tier != 'fast' && '[{"os":"macos-latest","r":"release"},{"os":"windows-latest","r":"release"},{"os":"ubuntu-latest","r":"devel","http-user-agent":"release"},{"os":"ubuntu-latest","r":"release"},{"os":"ubuntu-latest","r":"oldrel-1"}]' || '[{"os":"ubuntu-latest","r":"release"}]') }}
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
+      # `R CMD check` does not set this, so every `skip_on_cran()` test skips
+      # under it unless something does. Six tests are gated that way -- the two
+      # subprocess tests in test-generic-guards.R that are the ONLY way to
+      # observe a package-load failure, and three that run the qualification
+      # runner end to end -- and they are exactly the tests this package most
+      # needs a full check to run. They used to run here only because fourteen
+      # test files each called `Sys.setenv(NOT_CRAN = "true")` at file level,
+      # which leaked into every file sourced after them; when that leak was
+      # cleaned up the six went quiet without failing anything. Declared once,
+      # here, where it is visible: this package is not on CRAN, so run them.
+      NOT_CRAN: true
 
     steps:
+      # The nightly schedule runs master's copy of this file and would check
+      # out master; it asks for dev explicitly. Every other event checks out
+      # its own ref ('' is the action's default).
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.schedule == '0 2 * * *' && 'dev' || '' }}
 
       - uses: r-lib/actions/setup-pandoc@v2.12.1
 

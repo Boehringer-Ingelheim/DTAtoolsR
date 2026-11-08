@@ -7,18 +7,16 @@
 validate_template(path, strict = FALSE, kinds = NULL)
 }
 \arguments{
-\item{path}{A single template file, or a directory. A directory is scanned
-NON-RECURSIVELY for \verb{*.dta-template.yaml}, \verb{*.dta-dataset-template.yaml},
-\verb{*.dta-party.yaml} and \verb{*.dta-vocabulary.yaml} files (and their \code{.yml}
-spellings) -- the same
-filename convention the template engine itself uses
-(\code{dta_template_kind_pattern()}). \code{kinds}, below, only narrows which of
-those files get a report row of their OWN; it never changes how many
-files are considered when resolving a cross-file reference (an
-\verb{extends:}, a \verb{datasets[].template}, a party slot's profile allow-list).
-A template found below the scanned directory's top level is not read at
-all -- it is reported as \code{template_in_subdirectory} rather than silently
-ignored.}
+\item{path}{A template file or a library root (the repository root). For a
+directory, templates are read from the folder of their kind directly
+below it: \verb{templates/}, \verb{parties/} and \verb{vocabulary/}; each scan is
+non-recursive. Files match \verb{*.dta-template.yaml},
+\verb{*.dta-dataset-template.yaml}, \verb{*.dta-party.yaml} or
+\verb{*.dta-vocabulary.yaml} (and their \code{.yml} spellings). \code{kinds} only narrows
+which files get their own report rows, never cross-file resolution.
+A template file in another folder is reported as \code{template_misplaced}
+and one below its own folder as \code{template_in_subdirectory}; neither is
+loaded. A single file is checked in isolation.}
 
 \item{strict}{A single \code{TRUE}/\code{FALSE}. When \code{TRUE}, \code{validate_template()}
 raises an error via \code{\link[cli:cli_abort]{cli::cli_abort()}} summarising every row of severity
@@ -44,17 +42,38 @@ template" picker relies on -- unresolvable \verb{extends:}, an option target
 that does not resolve to a real metadata field, a party slot naming a
 profile that does not exist, a dataset patch naming an absent column, a
 \code{dta_dataset_template} with no \verb{dataset:} body (code \code{"dataset_missing"},
-also caught when a \verb{datasets:} array was authored instead), a scanned
+also caught when a \verb{datasets:} array was authored instead), a dataset with
+no \code{id} (code \code{"dataset_id_missing"}, an error, for an inline dataset and
+for a dataset template alike: an import's \verb{as:} renames a dataset but
+cannot stand in for a missing id) or with a list
+where its \code{id}, \code{name} or \code{description} should be (code
+\code{"dataset_field_invalid"}; a dataset with \verb{name:} but no \verb{id:} has no id,
+since \code{name} is only its label), a scanned
 directory with no template files in it at all, a template kept below the
-scanned directory's top level, and (as a final, comprehensive check)
+scanned directory's folder layout, and (as a final, comprehensive check)
 actually building a DTA from every non-abstract creation template with its
 own default selections -- WITHOUT starting the app. This lets a
 template repository (kept private, on Bitbucket Data Center in production
 and mirrored to GitHub for CI) run its own continuous integration against
 the templates it authors, with nothing more than an R installation of
-DTAtools. See \code{system.file("extdata", "templates", "validate-templates.yml", package = "DTAtools")} for a ready-to-copy GitHub Actions workflow.
+DTAtools. See \code{system.file("extdata", "ci", "validate-templates.yml", package = "DTAtools")} for a ready-to-copy GitHub Actions workflow.
 }
 \details{
+A template library is a repository root with one folder per file kind:
+\verb{templates/} (creation and dataset templates), \verb{parties/}, \verb{vocabulary/}
+and \verb{export-templates/} (Word templates), plus an optional
+\code{dta-app.yaml} directly in the root. Every scan of a folder is
+non-recursive. A template file in the wrong folder is an error (code
+\code{template_misplaced}: the template loader reads only the folder of its
+kind, so the file is invisible), and one nested below the right folder is
+a warning (code \code{template_in_subdirectory}). Pointing \code{path} at one of the
+kind folders instead of at the repository root is a single error (code
+\code{library_subfolder_given}); if that folder is in fact a flat library (files
+directly in it), move its files into \verb{templates/}, \verb{parties/} and
+\verb{vocabulary/} sub-folders instead. Folder names are case-sensitive on the server (Linux), so a
+\verb{Templates/} folder is misplaced there even where your local file system
+finds it.
+
 An otherwise-empty directory is reported as an \code{"error"} (code
 \code{"no_templates"}), not accepted silently: the packaged
 \code{validate-templates.yml} workflow's entire CI job is
@@ -63,8 +82,49 @@ an error row. Point that job at the wrong path -- a typo, a stale working
 directory, a checkout that put the templates one level down -- and, without
 this check, the job goes green having validated nothing: exactly the
 failure a repository linter exists to catch.
+
+The \code{code} column takes these values. Errors (these fail \code{strict = TRUE}):
+\code{parse_failed}, \code{version_unquoted}, \code{target_machine_owned},
+\code{vocab_slot_invalid}, \code{instantiate_failed}, \code{values_from_pattern},
+\code{values_from_invalid}, \code{values_from_terms_invalid}, \code{dataset_missing},
+\code{dataset_id_missing}, \code{dataset_field_invalid}, \code{column_spec_invalid} (a
+column of a dataset template that \code{DTAColumnSpec()} rejects, such as an
+example longer than its declared length), \code{vocabulary_invalid},
+\code{vocabulary_extends_failed}, \code{no_templates}, \code{template_misplaced} (a
+template file outside the folder of its kind), \code{library_subfolder_given}
+(\code{path} is itself one of the kind folders),
+\code{variant_invalid}, \code{prior_versions_invalid} (a malformed entry in a
+creation template's hand-written \verb{prior_versions:}), \code{mixin_invalid} (a
+malformed \verb{mixins:} value, or a named template that is not a valid mixin),
+\code{mixin_conflict} (a key contributed twice, or a mixin an ancestor already
+mixes in), the app-configuration
+errors \code{app_config_invalid} (a bad value in \code{dta-app.yaml}, or a missing
+logo or Word template it names), \code{app_config_duplicate} (both
+\code{dta-app.yaml} and \code{dta-app.yml} in the repository root) and
+\code{app_config_misplaced} (a \code{dta-app.yaml} anywhere but directly in the
+repository root), and the \code{\link[=lint_dta]{lint_dta()}} errors \code{rule_invalid},
+\code{rule_id_duplicate}, \code{rule_column_undeclared}, \code{rule_range_non_numeric},
+\code{rule_condition_operator_invalid}, \code{rule_condition_numeric_on_text},
+\code{rule_condition_value_unfit}, \code{rule_condition_value_outside_values} (only for \code{equals}/\verb{in}; the negated
+operators raise no finding), \code{group_constraint_unknown_condition}.
+The linter codes come from the columns and rules of a dataset template's
+body, and from every instantiated variant of a creation template.
+Warnings: the linter's \code{rules_without_columns}, \code{rule_not_checkable} and
+\code{format_narrower_than_length}, plus \code{kind_unknown}, \code{id_missing}, \code{version_missing},
+\code{version_unparseable}, \code{target_invalid}, \code{party_slot_invalid},
+\code{vocab_slot_unresolved}, \code{dataset_template_unresolved}, \code{patch_incoherent},
+\code{extends_unresolved}, \code{extends_cycle}, \code{mixin_unresolved} (a \verb{mixins:}
+reference that does not resolve within the directory; a warning for the
+same reason as \code{extends_unresolved}), \code{sealed_violation},
+\code{sealed_path_unknown}, \code{values_and_values_from}, \code{values_from_unresolved},
+\code{vocabulary_unresolved}, \code{duplicate_id_version}, \code{template_in_subdirectory}, plus the
+app-configuration warnings \code{app_config_unknown_key} and
+\code{app_config_warning}, and \code{export_template_invalid} (a file in
+\verb{export-templates/} that is not a \code{.docx} Word document, and is therefore
+ignored by the app). The app-configuration and \verb{export-templates/} checks
+run on every directory scan regardless of \code{kinds}.
 }
 \examples{
-issues <- validate_template(system.file("extdata", "templates", package = "DTAtools"))
+issues <- validate_template(system.file("extdata", "library", package = "DTAtools"))
 issues
 }

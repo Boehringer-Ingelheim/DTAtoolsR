@@ -22,8 +22,8 @@ knitr::opts_chunk$set(eval = FALSE, collapse = TRUE, comment = "#>")
 
 ## Why private templates
 
-The `dta-template.yaml` files packaged in `inst/extdata/templates` — including
-`biomarker_gf.dta-template.yaml` — are worked *examples*. They ship in an
+The template files packaged in `inst/extdata/library` — including
+`templates/biomarker_gf.dta-template.yaml` — are worked *examples*. They ship in an
 open-source repository, which means anyone who installs DTAtools can read
 them. A real Data Transfer Specification names a real supplier, a real
 receiving organisation, and real contact people. That content must never live
@@ -98,6 +98,15 @@ is an easy way to get silently mangled in transit. The grammar is:
 [name=]scheme:locator[#ref]; [name=]scheme:locator[#ref]; ...
 ```
 
+Each source points at a **library root**: the directory that holds the
+library's folders (`templates/`, `parties/`, `vocabulary/` and
+`export-templates/`, plus an optional `dta-app.yaml`; see "Where templates
+live" below). This applies to `dir:`, the installed `dta-templates` directory
+of a `pkg:` source, and the checkout of a `git:` source. No source syntax or
+subpath argument is needed. The layout is the same for every scheme, and
+only these folders are read: a flat library, with template files directly at
+the root, is not.
+
 ### `dir:` — a local directory
 
 ```r
@@ -107,7 +116,9 @@ DTATOOLS_TEMPLATE_SOURCES = "site=dir:/srv/dta-templates"
 The locator is a path that must already exist and be readable; `dir:` sources
 are resolved with no network or credential involved at all. Useful for a
 template family kept on the same host as the app, or mounted into the
-container.
+container. The path names the library root, the folder that contains
+`templates/`, `parties/` and the rest; it must not be one of those folders
+itself.
 
 ### `pkg:` — a companion R package
 
@@ -117,9 +128,12 @@ DTATOOLS_TEMPLATE_SOURCES = "acme=pkg:acme.dta.templates"
 
 The locator is an R package name. It must be installed and expose an
 `inst/dta-templates` directory (i.e. `system.file("dta-templates", package =
-"acme.dta.templates")` must resolve). This is the right shape when your
-templates are versioned and released the same way any other internal R
-package is.
+"acme.dta.templates")` must resolve). That directory is a library root with the
+same folders as any other library, for example
+`inst/dta-templates/templates/` and `inst/dta-templates/parties/`. Empty
+folders do not survive `R CMD build`, so ship at least one file in every folder
+you use. This is the right shape when your templates are versioned and released
+the same way any other internal R package is.
 
 ### `git:` — a private git repository
 
@@ -174,18 +188,39 @@ DTAtools::create_template_repo("path/to/my-templates")
 This creates `path/to/my-templates` (recursively, if it does not already
 exist) and writes:
 
-- `README.md` — explains the four files below, and how to point
-  `DTATOOLS_TEMPLATE_SOURCES` at the directory.
+```text
+my-templates/
+  README.md
+  .gitignore
+  dta-app.yaml
+  templates/
+    starter.dta-template.yaml
+    starter_dataset.dta-dataset-template.yaml
+  parties/
+    starter_supplier.dta-party.yaml
+  vocabulary/
+    starter_terms.dta-vocabulary.yaml
+  export-templates/
+    README.md
+  .github/workflows/validate-templates.yml
+```
+
+- `README.md` — the comprehensive authoring guide: all template features,
+  app configuration, validation codes, troubleshooting and migration.
 - `.gitignore`
-- `starter.dta-template.yaml` — a creation template (`kind:
+- `dta-app.yaml` — the optional app configuration, at the repository root (see
+  "Customising the app from the library" below).
+- `templates/starter.dta-template.yaml` — a creation template (`kind:
   dta_creation_template`).
-- `starter_dataset.dta-dataset-template.yaml` — the dataset it imports
+- `templates/starter_dataset.dta-dataset-template.yaml` — the dataset it imports
   (`kind: dta_dataset_template`).
-- `starter_supplier.dta-party.yaml` — a party profile (`kind:
+- `parties/starter_supplier.dta-party.yaml` — a party profile (`kind:
   dta_party_profile`) offered by one of the creation template's party slots.
-- `starter_terms.dta-vocabulary.yaml` — a controlled vocabulary (`kind:
-  dta_vocabulary`) that one of the dataset's columns binds to with
+- `vocabulary/starter_terms.dta-vocabulary.yaml` — a controlled vocabulary
+  (`kind: dta_vocabulary`) that one of the dataset's columns binds to with
   `values_from:`.
+- `export-templates/README.md` — says where Word templates (`.docx` files with `{PLACEHOLDER}` markers) for
+  export go; drop `.docx` files into this folder.
 - CI scaffolding, controlled by the `ci` argument (default `TRUE`, meaning
   `"github"` only): `"github"` writes `.github/workflows/validate-templates.yml`
   (GitHub Actions); `"bitbucket"` writes `bitbucket-pipelines.yml`; `"jenkins"`
@@ -202,42 +237,196 @@ placeholder metadata, keeping the `id@version` references between the files
 whatever you rename.
 
 Pass `examples = FALSE` for a bare scaffold — `README.md`, `.gitignore` and
-whichever CI file(s) `ci` asks for, with none of the four starter template
-files. Pass `ci = FALSE` to skip CI scaffolding entirely. By default,
+whichever CI file(s) `ci` asks for, with none of the starter files and none of
+the folders. Until you add a template, such a repository (and its CI) fails
+validation with `no_templates`. Pass `ci = FALSE` to skip CI scaffolding
+entirely. By default,
 `create_template_repo()` refuses to touch a directory where any file it would
 write already exists — it aborts, naming every conflict, and writes nothing at
 all, rather than leave a repository half-written from two different calls
 whose halves a caller cannot tell apart. Pass `overwrite = TRUE` to replace
 them.
 
-### The directory must be flat
+### Where templates live
 
-Both `validate_template()` and the app's own template loader scan a
-repository **non-recursively**: they list the files directly inside the
-configured directory and go no further. A template file placed in a
-subdirectory is simply invisible to both — not rejected, not warned about by
-the loader, just absent. Organising a growing repository into `by-study/` or
-`by-supplier/` folders is the obvious thing to reach for, and it silently
-empties the picker.
+A library root holds one folder per kind of file, and an optional app
+configuration:
 
-`validate_template()` is the one place that will tell you. It lists the
-directory a second time, recursively, purely to catch what the flat scan
-missed, and reports every hit as `template_in_subdirectory` — severity
-`"warning"`, because keeping an archived or work-in-progress file below the
-root is a legitimate choice and should not fail CI on its own. Keep every
-`.dta-*.yaml` file directly in the directory you point DTAtools at.
+```text
+<library root>/
+  dta-app.yaml          optional app configuration
+  templates/            *.dta-template.yaml and *.dta-dataset-template.yaml
+  parties/              *.dta-party.yaml
+  vocabulary/           *.dta-vocabulary.yaml
+  export-templates/     *.docx Word templates with {PLACEHOLDER} markers, for Word export
+```
+
+The library root is the directory a `dir:`, `pkg:` or `git:` source points at
+and the directory you give `validate_template()`. The same layout applies to
+`options(DTAtools.template_dir = ...)` and the local `./dta-templates`
+directory. The scan of each folder is **non-recursive**, and a file in the
+wrong place is not loaded. The packaged demo library,
+`system.file("extdata", "library", package = "DTAtools")`, uses this layout
+too (without a `dta-app.yaml`).
+
+A dataset entry's `source:` is relative to the creation-template file's
+folder and cannot escape it, so a data file that a dataset template names must
+sit in `templates/`, beside the template that uses it, preserving its
+relative path.
+
+Misplaced files are reported rather than silently ignored. At runtime the app
+writes a warning to the log and shows a note in the template picker (for
+example "starter: templates/starter_supplier.dta-party.yaml - a party profile
+belongs in parties/ (library layout: …)", naming the source and the path
+relative to its root), and an empty picker explains the folder layout.
+Folder names are case-sensitive on the server (Linux), so a `Templates/` folder
+is misplaced there even where your local file system finds it.
+`validate_template()` reports them as rows:
+
+- `template_misplaced` (severity `"error"`): a template file outside its
+  kind's folder, such as one at the root or a party profile in `templates/`.
+  Strict validation therefore fails CI instead of overlooking a migration
+  leftover.
+- `template_in_subdirectory` (`"warning"`): a file below the right folder, for
+  example `templates/by-study/example.dta-template.yaml`. It is invisible to
+  the loader. Archives and work-in-progress sub-folders do not fail CI on
+  their own.
+- `library_subfolder_given` (`"error"`): the path you gave is itself
+  `templates/`, `parties/` or `vocabulary/`. Validate its parent, the library
+  root; if the folder is a flat library (files directly in it), move its files
+  into `templates/`, `parties/` and `vocabulary/` sub-folders instead.
+- `app_config_misplaced` (`"error"`): a `dta-app.yaml` anywhere but the root.
+
+An unrelated Helm `chart/templates/` folder does not become a template library
+just because it has the same folder name: only the directory you point a
+source or the validator at is treated as a library root.
+
+### Customising the app from the library
+
+A library can carry the look and feature set of the app that serves it. Put a
+`dta-app.yaml` at the **root** of the library, next to the `templates/` folder;
+it is not a template, so the scans ignore it, and a copy anywhere else is
+reported as `app_config_misplaced`. Every key is optional, and with no file the app looks as
+it always did, except that no organisation name appears until you set
+`organisation.name`. A realistic example for a read-only deployment that exports
+only to the institute's own Word template:
+
+```yaml
+kind: dta_app_config
+organisation:
+  name: Example Institute
+  unit: Data Management
+branding:
+  app_title: DTA Viewer
+  logo: logo.png          # a file beside dta-app.yaml, at most 1 MB
+colors:
+  primary: "#1F4E79"      # always quote a hex colour: a bare # starts a comment
+  primary_dark: "#12304D"
+links:
+  report_issue: mailto:dm-support@example.org
+  about: false            # false hides a link
+features:
+  editing: false          # read-only; also removes "Create new"
+  raw_yaml_tab: false
+  raw_yaml_editable: false  # already implied by editing: false
+exports:
+  document: [word_template]
+  bundled_word_templates: false
+  word_templates:         # optional: only to relabel or reorder (see below)
+    - file: export-templates/our_dta.docx  # relative to dta-app.yaml
+      label: Our DTA template
+```
+
+**Word templates need no configuration.** Every `.docx` in the library's
+`export-templates/` folder that contains at least one `{PLACEHOLDER}` marker is
+offered automatically in the app's export dialog, labelled with its file name
+without the extension, and the dialog collects them from every configured
+source. These are Word *templates*, filled with the DTA by Word export only
+(PDF goes through Markdown and pandoc): inside a `.docx`, `{DTA_TITLE}`-style
+markers are replaced. A styles-only reference document with no marker would
+export a Word file without your DTA in it, so the app skips a discovered
+`.docx` that has none (and one it cannot read) and logs a warning that names
+the file. Non-`.docx` files, dotfiles and Word lock files (`~$x.docx`) are
+ignored. `exports.word_templates` is only an optional override for label and
+order, and a file listed there is offered whatever it contains; its `file:`
+paths are relative to the folder of `dta-app.yaml`, which is the library root,
+so they start with `export-templates/`. A non-`.docx` file in `export-templates/` is reported by
+`validate_template()` as `export_template_invalid` (a warning).
+
+`document.name` and `document.abbreviation` rename what the app calls its
+documents (for example `DTS` instead of `DTA`); the name becomes the main title
+of every export, with the document's own title beneath it, and the organisation
+appears on the front page and in the running header.
+
+Links must be `http`, `https` or `mailto` URLs. The logo and Word templates are
+files in the library, named by a path relative to `dta-app.yaml` that must not
+leave the library root.
+Disabled features are refused by the server, not merely hidden. A bad value
+never stops the app: it warns and keeps that key's default, and
+`validate_template()` reports the same problem as `app_config_invalid` (an
+unknown key is `app_config_unknown_key`, a warning). A file that cannot be
+parsed at all (invalid YAML, not a mapping, or a `kind:` other than
+`dta_app_config`) is different: the app warns and falls back to the defaults for
+everything, so restrictions such as `editing: false` are not enforced. Run
+`validate_template()` before deploying. When several sources
+define a `dta-app.yaml`, the first one in `DTATOOLS_TEMPLATE_SOURCES` order
+wins as a whole and the others are ignored with a warning. If that source is unreachable, a lower
+library's config or the defaults apply instead. Changes are picked up
+with the template index, that is after "Refresh templates" or
+`DTATOOLS_TEMPLATE_REFRESH_SECONDS`.
+
+The scaffolded `dta-app.yaml` lists every key, commented out with its
+default, and the scaffolded `README.md` section "App configuration
+(`dta-app.yaml`)" is the full key reference.
+
+### Migrating an existing repository
+
+Libraries written for DTAtools 0.25.0 and earlier are **flat**: every file sits
+at the repository root. That layout is no longer read, and neither is the
+mixed layout of an unreleased development build (templates, parties and
+vocabularies together in `templates/`, `dta-app.yaml` inside it). Reorganise
+the repository into the folders above and merge the migration branch:
+
+```sh
+mkdir -p templates parties vocabulary export-templates
+git mv *.dta-party.yaml parties/
+git mv *.dta-vocabulary.yaml vocabulary/
+git mv *.dta-template.yaml *.dta-dataset-template.yaml templates/
+# Move any .yml spellings and the data files that a dataset `source:` names
+# into templates/ as well (beside the template that uses them).
+git mv our_dta.docx export-templates/      # Word templates ({PLACEHOLDER} markers)
+Rscript -e 'DTAtools::validate_template(".", strict = TRUE)'
+```
+
+If your repository was in the mixed `templates/` layout, move the party,
+vocabulary and Word files out of `templates/` into their folders, and move
+`templates/dta-app.yaml` to the repository root, in the same way. Update
+`exports.word_templates:` paths in `dta-app.yaml` to
+`export-templates/<file>.docx` or delete the key (see below).
+
+Update scripts and tests that name individual template paths. Anything left
+in a wrong place is not loaded; `validate_template()` names each such file.
+
+**Deployment needs a switch-over, not an order:** an older app pointed at a
+reorganised repository sees no templates (it scans the root), and a new app
+pointed at an unreorganised one sees none either; with private sources
+configured neither falls back to the packaged demo. Reorganise on a branch,
+test it with a `git:` source that names the branch (`#<branch>`) against the
+new DTAtools version, and merge the branch at the moment the new version goes
+live.
 
 ### The four file kinds
 
 Every file's `kind:` field and its filename suffix must agree; the suffix is
-what a directory scan actually keys off:
+what a directory scan actually keys off, and each kind has a folder it must
+live in:
 
-| Kind | Filename suffix |
-| --- | --- |
-| `dta_creation_template` | `*.dta-template.yaml` |
-| `dta_dataset_template` | `*.dta-dataset-template.yaml` |
-| `dta_party_profile` | `*.dta-party.yaml` |
-| `dta_vocabulary` | `*.dta-vocabulary.yaml` |
+| Kind | Filename suffix | Folder |
+| --- | --- | --- |
+| `dta_creation_template` | `*.dta-template.yaml` | `templates/` |
+| `dta_dataset_template` | `*.dta-dataset-template.yaml` | `templates/` |
+| `dta_party_profile` | `*.dta-party.yaml` | `parties/` |
+| `dta_vocabulary` | `*.dta-vocabulary.yaml` | `vocabulary/` |
 
 (The `.yml` spelling of each suffix is accepted too.)
 
@@ -299,7 +488,7 @@ base:
     error_handling: >-
       Format or content errors are reported by email to the authorized
       contacts and corrected in a follow-up transfer.
-    authorized_for_corrections: TDM
+    authorized_for_corrections: Trial Data Manager (TDM)
 
 options:
   - id: title
@@ -332,6 +521,147 @@ field — `base.metadata`'s own keys are validated the same way, so a typo'd
 field name aborts template creation immediately rather than silently being
 dropped.
 
+### Study identity, agreement clauses and transmission requirements
+
+Keep agreement identity separate from dataset columns and from the document
+header. `study` is a mapping with optional scalar strings `id` and `protocol_id`.
+`sections` is an ordered mapping whose stable keys identify narrative clauses:
+
+```yaml
+base:
+  metadata:
+    study:
+      id: DEMO-001
+    sections:
+      responsibilities:
+        title: Responsibilities
+        text: |
+          The receiver reviews delivered files.
+
+          Discrepancies are reported to the supplier.
+    transmission:
+      extent: cumulative
+      scope: All completed records at the agreed cut-off.
+
+options:
+  - id: study_id
+    label: Study identifier
+    type: text
+    target: metadata.study.id
+  - id: responsibilities
+    label: Responsibilities
+    type: textarea
+    target: metadata.sections.responsibilities.text
+```
+
+Section keys must start with a letter and contain only letters, digits and
+underscores. Each section requires a nonblank `title` and a scalar `text`;
+empty text is permitted for an unfinished draft. Existing nested mapping
+inheritance lets a child override one clause without copying the others.
+Their stored mapping order determines document order; the app can reorder,
+add, edit and remove sections. Plain text is not executable HTML.
+
+Alongside the established transmission fields, optional text entries
+`extent`, `scope`, `packaging`, `security`, `checksum`, `test_requirements`
+and `blinding_requirements` describe the agreed procedures. They do not
+implement those procedures. Unknown existing transmission extensions remain
+supported and are preserved during editing.
+
+No metadata selection implicitly restricts dataset `STUDYID` or laboratory
+values, redacts results, sends files or records an electronic signature.
+Keep such dataset constraints and operational controls explicit.
+
+Default document exports include study identity and sections. A custom Word
+layout can use inline `{STUDY_ID}` and `{PROTOCOL_ID}`, plus standalone
+`{STUDY_TABLE}` and `{AGREEMENT_SECTIONS}` block paragraphs. An existing
+Word template without those tokens is not automatically modified.
+
+### How options are asked for
+
+Every entry in `options:` becomes one control in the "Create new from
+template" dialog, chosen from its `type:` and whether it lists `choices:`. A
+text option with `choices:` is a field you can type into, with a "Choose a
+suggestion" picker that fills it: pick one of the suggestions or type a value
+of your own. Whether typing is allowed follows `allow_custom:` — for
+`type: text` it is allowed unless the template sets `allow_custom: false`;
+for `type: select` it is forbidden unless the template sets
+`allow_custom: true`. Where typing is not allowed the option is a plain
+dropdown of its choices (a `type: textarea` option is always free text). "(leave blank)" is always offered alongside the
+suggestions and writes an empty value.
+
+```yaml
+- id: header
+  label: Header / organization
+  type: text
+  target: metadata.header
+  help: Organization shown in the document header.
+  choices:
+    - Test Company 1
+    - Example Pharma Inc.
+```
+
+A `default:` that is not itself one of the `choices` is pre-filled in the field
+and added to the picker, pre-selected, rather than silently dropped. That is how the ACME deviation
+later in this vignette pre-fills `header:` with "ACME Labs" — a value the
+option above never suggests.
+
+`type: boolean` renders as a checkbox, never a Yes/No dropdown; `textarea`
+and `number` are a multi-line box and a numeric input, as their names
+suggest; and any `help:` text an option carries shows under its control. All
+of it sits in a two-column grid, so a template with a dozen options still
+reads as a short form.
+
+### One agreement with platform-dependent schemas
+
+Use `variants:` when one agreement has mutually exclusive record structures.
+Unlike editable agreement options, this structural choice is mandatory and
+accepts only the declared values. The creation dialog asks for it before
+showing the platform's metadata defaults and suggestions.
+
+```yaml
+kind: dta_creation_template
+id: adjudication
+version: "1.0"
+base:
+  metadata:
+    title: Adjudication agreement
+variants:
+  id: trial_platform
+  label: Trial platform
+  choices:
+    - value: brave
+      label: BRAVE
+      source: {document: Adjudication DTS, version: "5.0"}
+      datasets:
+        - template: adjudication_brave_records@1.0
+    - value: veeva
+      label: Veeva
+      source: {document: Adjudication DTS, version: "5.0"}
+      datasets:
+        - template: adjudication_veeva_records@1.0
+```
+
+Each choice must supply a nonempty `datasets:` sequence, which **replaces**
+the template's dataset list rather than appending to it. Optional `base:` is
+deep-merged over the inherited base; optional `options:` uses the same
+id-keyed merge rules as creation-template inheritance. Thus a choice can
+change a suggestion list without losing its inherited target, label or
+custom/blank behavior. A template may omit top-level datasets when every
+variant supplies them.
+
+Keep the platform independent of the transfer medium: EDT can apply to more
+than one platform and must not determine the subject identifier. Agreement
+fields still permit custom text and `(leave blank)` as configured. Platform
+selection cannot be left unresolved when creating a document; changing it
+returns to platform selection and resets the agreement controls.
+
+The canonical template's `version:` identifies the library definition.
+Record source document versions separately in each choice's `source:` and,
+where appropriate, its metadata defaults. Created documents record the
+chosen value and source under `metadata.template.variant`, with the choice
+also in `metadata.template.selections`. `validate_template()` dry-runs every
+choice, not an arbitrary default.
+
 ## Reusable dataset templates
 
 A creation template does not have to inline its dataset structure. The
@@ -359,8 +689,9 @@ options:
     help: Name or identifier of the data supplier who provides the test results.
 
 dataset:
-  name: gf_data_specs_pattern
+  id: gf_data_specs_pattern
   type: tabular
+  name: Genomic Findings data table with pattern for filename
   files:
     filename: gf_data_small_smirna.tsv
     type: tsv
@@ -380,8 +711,8 @@ The `{template:, as:, options:, patch:}` shape a creation template's
 `datasets:` entry uses to import one of these:
 
 - `template:` — the `id@version` (or bare `id`) of the dataset template.
-- `as:` — rename the built dataset, so the same dataset template can be
-  imported twice into one DTA under two different names.
+- `as:` — give the built dataset a different id, so the same dataset template
+  can be imported twice into one DTA under two different ids.
 - `options:` — selections for the dataset template's own `options:` (here,
   `vendor_name`); anything not selected falls back to that option's
   `default:`.
@@ -412,19 +743,20 @@ yet.
 
 A supplier-specific deviation does not need to restate a whole template family
 just to change a handful of fields. `biomarker_gf_acme.dta-template.yaml`, in
-full, `extends:` the base template above:
+full apart from its explanatory comments, `extends:` the base template above:
 
 ```yaml
 kind: dta_creation_template
 id: biomarker_gf_acme
 label: Biomarker GF DTS (ACME Labs)
 version: "1.0"
-extends: biomarker_gf@1.0
+extends: biomarker_gf@latest
 description: >-
   ACME Labs supplier deviation of biomarker_gf: names ACME as the vendor,
   clarifies GFNAM for ACME, and adds ACME's own internal sample identifier
   column. Everything else -- base metadata, the other 11 options, the party
-  slots -- is inherited unchanged from the parent.
+  slots -- is inherited unchanged from the parent, at whatever version of
+  biomarker_gf is current.
 
 options:
   - id: header
@@ -447,6 +779,43 @@ datasets:
           nullable: Yes
           description: ACME's internal sample identifier, for query resolution.
 ```
+
+### How a family looks in the app
+
+The "Create new from template" picker groups templates into families derived
+from `extends:` alone — no separate configuration. A deviation such as
+`biomarker_gf_acme` sits indented under its base, with an "extends Biomarker
+GF DTS" line under its title, and a chain deeper than one level (a
+vendor-specific deviation of a vendor deviation) nests one step further for
+each generation. Until a member of a family is selected, the family is
+collapsed to its top row with an "n variants" badge; selecting a row expands
+its family in place. An `abstract:` base is never offered as a template of
+its own, but it still names and anchors the family its descendants are shown
+under; those descendants are concrete unless they write `abstract: true`
+themselves, because the flag describes the file that carries it and is not
+inherited.
+
+A base marked `abstract: true` may contain only shared metadata, with no
+`datasets:` section. It still needs a `base:` mapping unless it inherits one
+through `extends:`. A concrete child must supply or inherit at least one
+dataset (inline or reusable); `extends:` alone does not satisfy that
+requirement. Loading a concrete template whose resolved dataset list is
+empty fails, and `validate_template()` reports `instantiate_failed`.
+Abstract bases remain unavailable for direct creation.
+
+Typing in the search box matches the start of any word in the label, id,
+description, and every ancestor's label and id — so "biomarker" finds every
+variant in the family, "acme" finds only the vendor ones, and "one" does not
+drag in every "stand-alone" — with the matched text highlighted and results
+shown as a flat list rather than a tree. The source is not searched; it has
+its own filter. A "Source"
+filter appears next to the search box only when more than one template source
+is configured. Pressing Enter in the search box continues with the selected
+template — the first match, unless you picked another. The panel below the list always describes
+the selection: every version of the selected template, the exact resolved
+chain ("based on …"), and a short summary of what it will ask for — or, for a
+template that fails to load, its error, so a broken file is caught before you
+commit to it rather than after.
 
 The merge asks two questions, and they have the same answers everywhere.
 
@@ -563,10 +932,20 @@ identity the merge uses.
 
 **`sealed:` — this may not change.** A descendant that alters a sealed path
 fails when the chain resolves, whichever way it tried: a `base:` override, a
-`modify:` verb, a `remove:`, an explicit `null`, or replacing the whole section.
-Sealing a section (`sealed: [options]`) fixes its membership *and its order*, so
-adding an entry or reordering with `order:` both fail; sealing
-`options.header.default` leaves every other option free.
+`modify:` verb, a `remove:`, an explicit `null`, or replacing the whole
+section — and the same check catches an `options:` or `party_slots:` entry
+whose `target:`, `effects:`, `effects_all:` or `set:` map would write a
+sealed metadata field once the document is created, even where the option's
+own definition never touches the sealed path directly. Sealing a section
+(`sealed: [options]`) fixes its membership *and its order*, so adding an
+entry or reordering with `order:` both fail; sealing `options.header.default`
+leaves every other option free.
+
+Every structural `variants:` choice is checked too, after applying its metadata,
+options and dataset replacement. A matching parent selector and choice value
+provides the effective baseline, so a sealing ancestor's own variations remain
+allowed when inherited unchanged. A new selector or choice value is checked
+against the parent's shared definition instead.
 
 **`required:` — this may not be left unset.** Checked when a document is
 created, not when the chain resolves, because an abstract parent is *supposed*
@@ -604,6 +983,50 @@ in your repository's CI. And rebasing a document onto a new template version
 does not consult `sealed:`, so a seal is a constraint on template *authors*,
 not yet a guarantee about every document.
 
+### Composing with mixins
+
+`extends:` takes one parent. When a template should also carry an assay block
+and a privacy block, list them under `mixins:`: abstract, flat templates that
+only **add** content.
+
+```yaml
+# assay_smrnaseq@1.0 -- a mixin
+kind: dta_creation_template
+id: assay_smrnaseq
+version: "1.0"
+abstract: true
+base: {}
+datasets:
+  - template: smrnaseq_counts@1.0
+    as: smrnaseq_counts
+```
+
+```yaml
+# a template that uses it
+kind: dta_creation_template
+id: study_x
+version: "1.0"
+extends: company_standard@2.0
+mixins:
+  - privacy_eu@1.0
+  - assay_smrnaseq@1.0
+```
+
+Because a mixin can only add, nothing overrides anything and the order of the
+list does not matter. Anything contributed twice — a `base:` key, an option, a
+dataset, a slot — by the `extends:` chain and a mixin, or by two mixins, is an
+error (`mixin_conflict`); the child resolves it by writing the value itself,
+and may modify or remove any mixin-provided entry with the usual four states
+and verbs. A mixin must be `abstract: true` and may not declare `extends`,
+`mixins`, `sealed`, `required`, `variants` or `order`; its collections are bare
+lists with no `remove:`, and it contains no `null`, so the "`null` removes the
+inherited key" rule does not reach it. Only `base`, `options`, `datasets`,
+`party_slots` and `vocabulary_slots` are contributed, never header fields such
+as `label`. Mixin content is checked against ancestors' `sealed:` paths.
+Descendants inherit the content but not the `mixins:` key, and listing a mixin
+an ancestor already mixes in is a conflict. A template that uses only mixins
+may omit `base:` and `datasets:`.
+
 ## Versioning
 
 Every template — creation, dataset, or party profile — declares its own
@@ -639,7 +1062,7 @@ Pin an exact version instead when a deviation has been agreed against one
 specific release of the standard and must not move until it is re-agreed:
 
 ```yaml
-extends: biomarker_gf@1.0
+extends: biomarker_gf@latest
 ```
 
 The same choice applies to a `datasets:` import. There the default leans the
@@ -672,6 +1095,38 @@ below) fails an unquoted version outright, with the error code
 is checked at severity `"error"`, not merely `"warning"`, because the failure
 mode it prevents is silent and irreversible.
 
+### Versions from before the library
+
+The template picker's history is computed: each library version is built and
+compared with the one before it. A template whose first file in the library is
+5.0 therefore has no history before 5.0, however long its life on paper was.
+Record that past by hand with `prior_versions:`:
+
+```yaml
+kind: dta_creation_template
+id: biomarker_gf
+version: "5.0"
+prior_versions:
+  - version: "4.0"
+    date: 2024-03-01          # optional, YYYY-MM-DD
+    changes: Added the PK dataset.
+  - version: "3.0"
+    changes: Moved to SDTM-style column names.
+```
+
+The picker shows these entries after the first library version, newest first,
+with the text exactly as written. The newest version that declares
+`prior_versions:` with at least one entry is the one read, so a later release
+can add or correct an entry without touching an older file. The block is never
+inherited through `extends:` — a child's history is its own. Every entry must
+be older than the template's first version in the library;
+`validate_template()` reports a malformed entry as `prior_versions_invalid`.
+
+Neither the computed history nor `prior_versions:` has anything to do with
+`base.metadata.version_history`: that is the history of the *document* a
+template creates, copied into every new DTA, and the template's own changes do
+not belong there.
+
 ## Parties
 
 A creation template can offer a "party slot" — a dropdown bound to
@@ -680,7 +1135,9 @@ retyping (or worse, drifting copies of) the same affiliation/contacts block.
 `biomarker_gf.dta-template.yaml`'s `party_slots:` (shown above) declares two
 slots, one per metadata target; a **party profile** (`kind:
 dta_party_profile`) supplies the actual content one of those dropdowns can
-pick. Here is the real `supplier_acme.dta-party.yaml` in full:
+pick. Party profiles live in the library's `parties/` folder; one left
+anywhere else is not loaded and is reported as `template_misplaced`. Here is
+the real `parties/supplier_acme.dta-party.yaml` in full:
 
 ```yaml
 kind: dta_party_profile
@@ -720,7 +1177,7 @@ states its own list:
 
 ```r
 c("receiver", "supplier", "transmission", "error_handling",
-  "authorized_for_corrections")
+  "authorized_for_corrections", "study")
 ```
 
 `title`, `version`, `date`, and `version_history` are *default-off* —
@@ -728,6 +1185,17 @@ deliberately excluded from that default set. They are the ancestor document's
 own identity and revision history, not properties of the supplier/receiver
 relationship; a new document must state its own title and start its own
 version history rather than impersonating the one it came from.
+
+`study` carries over by default because the revision normally concerns the
+same study. `sections` is available as an explicit carry-over choice but is
+not selected by default: old clauses must not silently replace a newer
+template's agreement wording.
+
+During three-way rebase, `sections` is compared and applied as one ordered
+collection. This detects ordering changes and avoids temporarily invalid
+half-written clauses. If both versions changed it, explicitly choose the
+current or target collection; review the clauses before applying that choice.
+This does not change ordinary template inheritance of named section mappings.
 
 Carry-over, party slots, and options are applied in a fixed **precedence
 order** — `base` metadata, then carry-over, then the chosen party profile,
@@ -742,8 +1210,9 @@ A column's permitted values — `values:` — are already enforced: they become 
 JSON-Schema `enum`, and validation fails every row that is not one of them.
 What was missing was a way to write that list *once* and reuse it. A
 **controlled vocabulary** (`kind: dta_vocabulary`, `*.dta-vocabulary.yaml`) is
-that list, versioned and indexed like everything else in the family. The
-shipped `gf_test.dta-vocabulary.yaml`, in full:
+that list, versioned and indexed like everything else in the family.
+Vocabularies live in the library's `vocabulary/` folder. The shipped
+`vocabulary/gf_test.dta-vocabulary.yaml`, in full:
 
 ```yaml
 kind: dta_vocabulary
@@ -801,6 +1270,38 @@ halves to the same vocabulary, so the two columns cannot drift apart:
   values_from: {vocabulary: gf_test@1.0, field: label}   # -> Transcription
 ```
 
+### Naming the columns a vocabulary is for
+
+The app's column editor has a "Choose from vocabulary…" button under a
+column's allowed values. A vocabulary can say which columns it belongs to, so
+that the picker already shows the right one for the column you are editing:
+
+```yaml
+kind: dta_vocabulary
+id: gf_test
+version: "1.0"
+columns:
+  - GFTESTCD               # a bare id gets the codes
+  - id: GFTEST             # the decode half gets the labels
+    field: label
+terms:
+  - code: TRNSCPTN
+    label: Transcription
+```
+
+Column ids are compared without regard to case. The picker then preselects
+the vocabulary and sets "Write as" to codes or labels as declared. If none of
+the column's values are in the vocabulary yet, every term starts ticked. The
+terms appear as a checklist that shows each term's code, label and
+description. For a vocabulary with more than ten terms the checklist has a
+filter, and All and None apply to the terms the filter shows. Values the
+column holds that are not in the vocabulary appear at the top and stay ticked. A column without a declaration still
+gets a suggestion when its current values all come from one vocabulary,
+either all codes or all labels. That covers every column that was built from a
+`values_from:` binding. If several vocabularies contain those values, the
+picker suggests the smallest. `columns:` affects only this suggestion, not
+validation, and a vocabulary does not inherit it through `extends:`.
+
 ### Extending a vocabulary
 
 One vocabulary can build on another. This is *not* the generic `extends:`
@@ -841,16 +1342,24 @@ vocabulary_slots:
     min: 1
 ```
 
-The "Create new from template" modal renders this as a multi-select of the
-vocabulary's terms. `target:` is always
-`datasets.<dataset>.columns.<column>.values`; a slot whose target names a
+The "Create new from template" modal renders this as a searchable
+multi-select: each term is listed as "CODE — Label" with its description
+underneath, and searching a word from the description finds the term too.
+Chosen terms are shown as removable chips inside the box. "All",
+"None" and "Default" links fill or clear the selection in one click, next to
+a live "n of m selected" count. `min:` is shown as "Choose at least n." and
+is enforced when the document is created. An emptied slot means no terms,
+not "back to the default": the control opens holding the default, and
+whatever it holds when the document is created is what is applied. `target:` is always
+`datasets.<dataset id>.columns.<column>.values`; a slot whose target names a
 dataset or column the template does not build fails loudly rather than
 silently doing nothing.
 
 **`mode:` is about authoring freedom, not looser validation.** `closed` offers
 exactly the vocabulary's terms and rejects anything else. `open` additionally
 lets the author type a value the vocabulary does not have — "pick from the
-vocabulary, or use your own" — and the terms they end up with are *still* a
+vocabulary, or use your own", typing the term into the search box and
+pressing Enter to add it — and the terms they end up with are *still* a
 closed `enum` in the produced document. There is deliberately no "advisory"
 mode that would let non-conforming data through: the only way to express that
 today is to emit no `values:` at all, which turns the check for that column
@@ -896,7 +1405,7 @@ Every document built from a creation template — through the app, or via
 a `metadata.template` record: which template `id`/`version` built it, which
 source it came from (`source`, `source_kind`, `resolved_commit` for a `git:`
 source), the resolved file path, a content hash of the fully `extends:`-merged
-definition it was built from, the creation date, its `extends:` lineage, the
+definition it was built from, the creation date, its `extends:` lineage (and the `mixins:` it folded in), the
 `selections` the user actually made, and — for any dataset built from a
 dataset template — that dataset's own template provenance.
 
@@ -937,7 +1446,9 @@ The limits are worth stating plainly, not glossing over:
 
 `validate_template(path, strict = TRUE)` runs the same structural checks the
 app's own "Create new from template" picker relies on — an unresolvable
-`extends:`, an option `target:` that does not resolve to a real metadata
+`extends:` or `mixins:` entry (`extends_unresolved`, `mixin_unresolved`), a
+mixin that is not abstract and add-only, or a key two mixins both contribute
+(`mixin_invalid`, `mixin_conflict`), an option `target:` that does not resolve to a real metadata
 field (or, worse, one that names a machine-owned field like
 `metadata.template`), a party slot naming a profile id that does not exist, a
 dataset patch naming an absent column, an unquoted `version:`, a vocabulary
@@ -945,13 +1456,24 @@ that will not read or whose `extends:` chain cycles, a `values_from:` naming a
 vocabulary that is not there or an `include:` code that is not in it — and, as a
 final and most comprehensive check, actually builds a DTA from every
 non-abstract creation template using its own default selections. `path` may
-be a single file or a directory, scanned non-recursively for
-`*.dta-template.yaml`, `*.dta-dataset-template.yaml`, `*.dta-party.yaml`, and
-`*.dta-vocabulary.yaml` (and their `.yml` spellings).
+be a single file or a library root. A directory is scanned non-recursively in
+each of its folders: `templates/` for `*.dta-template.yaml` and
+`*.dta-dataset-template.yaml`, `parties/` for `*.dta-party.yaml`, and
+`vocabulary/` for `*.dta-vocabulary.yaml` (and their `.yml` spellings),
+plus `export-templates/` for the Word files and `dta-app.yaml` at the root.
 
 ```r
 DTAtools::validate_template(".", strict = TRUE)
 ```
+
+Run from the repository root, this validates every folder and reports files in
+the wrong place: `template_misplaced` (error) for a template file outside its
+kind's folder, `template_in_subdirectory` (warning) for one below the right
+folder, `app_config_misplaced` (error) for a `dta-app.yaml` that is not at the
+root, and `export_template_invalid` (warning) for a non-`.docx` file in
+`export-templates/`. Pointing it at `templates/`, `parties/` or `vocabulary/`
+itself is refused with `library_subfolder_given` (error); validate the parent.
+The shipped CI assets use this same root command.
 
 With `strict = TRUE`, `validate_template()` raises a single error naming every
 row of severity `"error"` and stays silent when there are none — the one line
@@ -961,14 +1483,14 @@ for a human to inspect interactively.
 
 This is also why an otherwise-empty directory is an `"error"` (code
 `no_templates`), not silence. A workflow pointed at the wrong path — a typo, a
-stale working directory, a checkout that put the templates one level down —
-used to return zero rows and pass `strict = TRUE` cleanly, which is the worst
+stale working directory, or templates kept in an unrecognised folder — used to
+return zero rows and pass `strict = TRUE` cleanly, which is the worst
 outcome a linter can produce: green, having validated nothing. It now fails,
 naming the directory it found nothing in.
 
 A ready-to-copy GitHub Actions workflow — checkout, install DTAtools from your
 internal package source, run the check above — ships at
-`system.file("extdata", "templates", "validate-templates.yml", package =
+`system.file("extdata", "ci", "validate-templates.yml", package =
 "DTAtools")`. Copy it to `.github/workflows/validate-templates.yml` in the
 repository that holds your own templates and fill in the one placeholder step
 that installs DTAtools from wherever your organisation hosts it.

@@ -374,15 +374,14 @@ test_that("dta_set_column parses backend/type/format/length out of their string 
   expect_equal(as.numeric(st@length), 8)
 })
 
-test_that("dta_set_column silently drops a non-numeric length instead of storing it", {
+test_that("dta_set_column refuses a non-numeric length instead of dropping it", {
   fn <- app_fn("dta_set_column")
   dta <- app_fixture_dta()
 
   res <- fn(dta, "clinical_data", id = "BADLEN", type = "Char", length = "not-a-number")
 
-  expect_true(res$ok)
-  st <- datasets(res$value, "clinical_data")@specs@columns[["BADLEN"]]@structure
-  expect_null(st@length)
+  expect_false(res$ok)
+  expect_match(res$error, "Length must be a whole number", fixed = TRUE)
 })
 
 test_that("dta_set_column returns ok=FALSE without throwing for an id containing whitespace", {
@@ -394,16 +393,70 @@ test_that("dta_set_column returns ok=FALSE without throwing for an id containing
   expect_true(nzchar(res$error))
 })
 
+test_that("dta_set_column refuses a rename onto an id another column already holds", {
+  fn <- app_fn("dta_set_column")
+  ids_fn <- app_fn("dta_column_ids")
+  dta <- app_fixture_dta()
+
+  # Renaming VISIT to STUDYID would otherwise silently destroy STUDYID.
+  res <- fn(dta, "clinical_data", id = "STUDYID", old_id = "VISIT")
+
+  expect_false(res$ok)
+  expect_match(res$error, "already exists", fixed = TRUE)
+
+  # Nothing was mutated: both columns are still present and distinct.
+  ids <- ids_fn(dta, "clinical_data")
+  expect_true(all(c("STUDYID", "VISIT") %in% ids))
+  cols <- datasets(dta, "clinical_data")@specs@columns
+  expect_equal(cols[["VISIT"]]@label, "Visit")
+  expect_equal(cols[["STUDYID"]]@label, "Study Identifier")
+})
+
+test_that("dta_set_column carries examples and colclass over, since the editor form has no field for them", {
+  fn <- app_fn("dta_set_column")
+  dta <- app_fixture_dta()
+
+  # AGE has no `values`, so `examples` may legally be set alongside it.
+  age_before <- datasets(dta, "clinical_data")@specs@columns[["AGE"]]
+  age_with_extras <- DTAtools::DTAColumnSpec(
+    id = age_before@id, label = age_before@label,
+    type = paste(age_before@structure@backend, age_before@structure@type),
+    nullable = age_before@nullable, description = age_before@description,
+    examples = c(34, 45), colclass = "measurement"
+  )
+  dta@datasets[["clinical_data"]]@specs@columns[["AGE"]] <- age_with_extras
+
+  res <- fn(
+    dta, "clinical_data",
+    id = "AGE", label = "Age (years)", backend = "SAS", type = "Num",
+    nullable = FALSE, description = "updated by the test suite"
+  )
+
+  expect_true(res$ok)
+  col <- datasets(res$value, "clinical_data")@specs@columns[["AGE"]]
+  expect_equal(col@label, "Age (years)")
+  expect_equal(col@description, "updated by the test suite")
+  expect_equal(col@examples, c(34, 45))
+  expect_equal(col@colclass, "measurement")
+
+  yaml_fn <- app_fn("dta_dataset_to_yaml_text")
+  yres <- yaml_fn(res$value, "clinical_data")
+  expect_true(yres$ok)
+  expect_match(yres$value, "examples", fixed = TRUE)
+  expect_match(yres$value, "measurement", fixed = TRUE)
+})
+
 test_that("dta_remove_column drops the column from the id order", {
   fn <- app_fn("dta_remove_column")
   ids_fn <- app_fn("dta_column_ids")
   dta <- app_fixture_dta()
   before <- ids_fn(dta, "clinical_data")
 
-  res <- fn(dta, "clinical_data", "AGE")
+  # BMI is named by no rule; a column a rule uses is refused (test-shinyapp-lint.R).
+  res <- fn(dta, "clinical_data", "BMI")
 
   expect_true(res$ok)
-  expect_equal(ids_fn(res$value, "clinical_data"), setdiff(before, "AGE"))
+  expect_equal(ids_fn(res$value, "clinical_data"), setdiff(before, "BMI"))
 })
 
 test_that("dta_remove_column returns ok=FALSE without throwing for a nonexistent dataset", {
@@ -725,6 +778,56 @@ test_that("dta_remove_contact returns ok=FALSE without throwing for an invalid s
 
   expect_false(res$ok)
   expect_true(nzchar(res$error))
+})
+
+test_that("dta_move_contact swaps a contact with its neighbour and the fields travel with the person", {
+  fn <- app_fn("dta_move_contact")
+  contacts_fn <- app_fn("dta_contacts")
+  dta <- app_fixture_dta()
+  before <- contacts_fn(dta, "receiver")
+
+  res <- fn(dta, "receiver", 1, "down")
+
+  expect_true(res$ok)
+  after <- contacts_fn(res$value, "receiver")
+  # clinical_dta.yaml: Alice Smith, Bob Johnson, Carol Lee, David Kim
+  expect_equal(
+    vapply(after, function(p) p$name, character(1)),
+    c("Bob Johnson", "Alice Smith", "Carol Lee", "David Kim")
+  )
+  expect_equal(after[[2]]$email, "alice.smith@testcompany.com")
+  expect_equal(after[[2]]$phone, "555-123-4567")
+  expect_equal(after[[1]]$email, "bob.johnson@testcompany.com")
+  expect_equal(after[[3]], before[[3]])
+  expect_equal(after[[4]], before[[4]])
+})
+
+test_that("dta_move_contact is a no-op past either end", {
+  fn <- app_fn("dta_move_contact")
+  contacts_fn <- app_fn("dta_contacts")
+  dta <- app_fixture_dta()
+  before <- contacts_fn(dta, "receiver")
+
+  up <- fn(dta, "receiver", 1, "up")
+  down <- fn(dta, "receiver", length(before), "down")
+  bad_index <- fn(dta, "receiver", 99, "up")
+
+  for (res in list(up, down, bad_index)) {
+    expect_true(res$ok)
+    expect_identical(contacts_fn(res$value, "receiver"), before)
+  }
+})
+
+test_that("dta_move_contact returns ok=FALSE without throwing for a bad side or direction", {
+  fn <- app_fn("dta_move_contact")
+
+  bad_side <- fn(app_fixture_dta(), "not_a_side", 1, "down")
+  bad_dir <- fn(app_fixture_dta(), "receiver", 1, "sideways")
+
+  expect_false(bad_side$ok)
+  expect_true(nzchar(bad_side$error))
+  expect_false(bad_dir$ok)
+  expect_true(nzchar(bad_dir$error))
 })
 
 test_that("dta_update_contact updates the given fields and preserves the rest", {

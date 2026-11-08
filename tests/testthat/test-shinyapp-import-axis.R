@@ -12,9 +12,9 @@
 # A tabular dataset with one character and one numeric column. `val` decides
 # whether VAL holds an import error, and nothing else is ever wrong with it --
 # so a red status can only come from the import axis.
-app_test_dataset <- function(val, name = "ds1") {
+app_test_dataset <- function(val, id = "ds1") {
   DTAtools::DTADataSetTabular(
-    name = name,
+    id = id,
     specs = app_fixture_char_num_specs(),
     tables = list(
       t1 = data.frame(
@@ -26,10 +26,10 @@ app_test_dataset <- function(val, name = "ds1") {
   )
 }
 
-app_test_dta <- function(val, name = "ds1") {
+app_test_dta <- function(val, id = "ds1") {
   DTAtools::DTA(
     datasets = DTAtools::check(
-      app_test_dataset(val, name),
+      app_test_dataset(val, id),
       force = TRUE, persist = FALSE, quiet = TRUE
     )
   )

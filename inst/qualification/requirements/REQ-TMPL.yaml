@@ -1,0 +1,917 @@
+area: TMPL
+title: Templates, inheritance and controlled vocabulary
+
+# validate_template() lints a directory of authored YAML without starting the
+# Shiny app; create_template_repo() scaffolds one that already passes it. Both
+# reuse the app's own template engine (inst/shiny/dta_app/R/*.R) rather than a
+# second copy of its logic, so every requirement below is really a requirement
+# about that engine, observed through the two functions this package exports
+# for it. A defect here means a template author's mistake reaches the app
+# picker, or a whole repository of them, instead of failing CI first.
+
+requirements:
+  # ---- validate_template(): shape, discovery, file-level parsing -----------
+
+  - id: REQ-TMPL-001
+    text: >
+      validate_template() shall return a data frame with columns file, kind,
+      id, version, severity, code, message -- present even when zero issues
+      are found -- and severity shall be exactly "error" or "warning" for
+      every row, never a third value.
+    risk: medium
+    category: interface
+    covers: [validate_template]
+    source: R/validateTemplate.R:123-153 (.dta_template_validation_columns, .dta_template_row)
+
+  - id: REQ-TMPL-002
+    text: >
+      A template library shall be a root directory holding dta-app.yaml
+      directly in it and one folder per kind of file: templates/ for creation
+      templates and dataset templates, parties/ for party profiles,
+      vocabulary/ for vocabularies and export-templates/ for Word templates.
+      validate_template() given a directory shall read each kind
+      only from the folder of its kind, directly below the root, by the
+      kind's file suffix (and its .yml spelling), and every such scan shall be
+      non-recursive. A template file below the folder of its kind (for example
+      templates/archive/x.dta-template.yaml) shall be reported as
+      template_in_subdirectory at severity warning, naming the folder to move
+      it to, and shall be neither validated nor used to resolve a reference,
+      because the scan does not see it. A file in the wrong folder is an error
+      as specified by REQ-TMPL-031. There is no fallback layout: nothing is
+      read from the root itself or from any other folder.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: R/validateTemplate.R (.dta_template_list_dir, .dta_template_list_nested, .dta_template_check_placement, validate_template); inst/shiny/dta_app/R/template_index.R (dta_template_kind_subdir, dta_template_kind_subdirs, dta_template_kind_dir, dta_export_templates_subdir)
+
+  - id: REQ-TMPL-003
+    text: >
+      A file that does not parse as YAML at all shall be reported with the
+      code parse_failed at severity "error", carrying the parser's own
+      message.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: R/validateTemplate.R:458-467
+
+  - id: REQ-TMPL-004
+    text: >
+      A kind value outside the four known kinds shall be reported
+      kind_unknown; a missing or empty id shall be reported id_missing; a
+      missing or empty version shall be reported version_missing -- each at
+      severity "warning" and each independently of the other two, so a file
+      wrong in more than one way is not summarised as merely one problem.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: R/validateTemplate.R:469-489
+
+  - id: REQ-TMPL-005
+    text: >
+      A version written as an unquoted YAML scalar shall be reported with the
+      code version_unquoted at severity "error", regardless of whether it
+      also happens to parse as a valid version.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R:273-286 (.dta_template_version_plain_is_exact), 491-499;
+      inst/shiny/dta_app/R/template_core.R:146-172 (dta_template_yaml_handlers),
+      258-260 (dta_template_version_is_exact)
+    notes: >
+      This is the most important code this file emits. yaml::read_yaml()
+      parses an unquoted 1.10 as the double 1.1 -- verified directly:
+      as.character(1.10) is "1", and even format(1.10, nsmall = 1) is "1.1" --
+      so a template author who forgets the quotes is not merely warned about
+      style, they have silently authored a DIFFERENT version than the one
+      written on the page, and every consumer that trusts that string (a
+      resolve_template_ref() @latest pick, an extends: pin, a human reading
+      the file) is now wrong in a way nothing downstream can detect. Severity
+      "error" (not "warning", unlike its siblings id_missing/version_missing)
+      reflects that this is not a missing courtesy field but a value that
+      actively lies.
+
+  - id: REQ-TMPL-006
+    text: >
+      A version that is quoted (so version_unquoted does not apply) but still
+      does not parse as a numeric_version() shall be reported
+      version_unparseable at severity "warning".
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: R/validateTemplate.R:500-512
+
+  - id: REQ-TMPL-007
+    text: >
+      Two files declaring the same kind, id and version shall be reported
+      once, on whichever of the two sorts later under radix file-path order,
+      with the code duplicate_id_version at severity "warning" naming the
+      earlier file.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: R/validateTemplate.R:1070-1103
+    notes: >
+      Ordered by radix file order rather than by discovery order or mtime, so
+      which file is called "the earlier one" does not depend on the machine
+      or filesystem that ran the check -- the same locale-independence
+      reasoning as .dta_template_list_dir()'s own sort() call.
+
+  - id: REQ-TMPL-008
+    text: >
+      A directory in whose kind folders (REQ-TMPL-002) no file of any of the
+      four recognised kinds is found shall be reported no_templates at
+      severity "error", even when the directory is non-empty (holds an
+      unrelated file), because a typo'd path and a genuinely empty template
+      repository are visually indistinguishable and the latter is a CI job
+      that validated nothing. When the directory instead holds template files
+      that are reported template_misplaced or library_subfolder_given
+      (REQ-TMPL-031), those rows already explain why nothing was found and
+      no_templates shall not be reported on top of them.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: R/validateTemplate.R:1105-1131
+
+  - id: REQ-TMPL-009
+    text: >
+      strict = TRUE shall raise a condition summarising every row of severity
+      "error" (and only those rows) when at least one exists, and shall
+      return normally -- with no condition raised -- when the only rows found
+      are warnings.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: R/validateTemplate.R:1173-1192, 1306-1308
+
+  - id: REQ-TMPL-010
+    text: >
+      kinds shall restrict which files receive their own report row, and
+      shall restrict the duplicate_id_version check to that same set of
+      files, but shall never restrict which files are available to resolve a
+      cross-file reference (an extends:, a datasets[].template, a party
+      slot's profile). kinds has no effect when path names a single file.
+      Naming a kind outside the four recognised ones in kinds shall raise a
+      condition listing the known set.
+    risk: medium
+    category: interface
+    covers: [validate_template]
+    source: R/validateTemplate.R:1263-1273, 1281-1291
+    notes: >
+      That kinds also narrows the duplicate check is easy to miss reading the
+      documentation alone: dup_rows is computed from
+      records[report_files], not records[all_files]. Verified directly --
+      two creation templates sharing an id/version stop being reported as
+      duplicates the moment kinds = "dta_vocabulary" excludes both of them
+      from report_files, even though the files themselves are unchanged.
+
+  - id: REQ-TMPL-011
+    text: >
+      validate_template() shall operate only on the path it is given; it
+      shall not consult DTATOOLS_TEMPLATE_SOURCES, DTATOOLS_TEMPLATE_INCLUDE_BUILTIN,
+      DTATOOLS_TEMPLATE_REFRESH_SECONDS, DTATOOLS_TEMPLATE_CACHE_DIR,
+      DTATOOLS_TEMPLATE_GIT_TOKEN, DTATOOLS_TEMPLATE_GIT_USER or
+      DTATOOLS_TEMPLATE_GIT_AUTH -- the environment variables that govern
+      where the bundled Shiny app itself looks for a private template
+      family. Each source those variables configure names a library root in
+      the sense of REQ-TMPL-002 (a directory holding the kind folders), not a
+      folder of one kind; validate_template() reads none of them and takes
+      the library root from its path argument alone.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: >
+      inst/shiny/dta_app/R/template_sources.R:12-18 (banner), 46 (DTATOOLS_TEMPLATE_SOURCES),
+      61 (DTATOOLS_TEMPLATE_INCLUDE_BUILTIN), 71 (DTATOOLS_TEMPLATE_REFRESH_SECONDS),
+      219 (DTATOOLS_TEMPLATE_CACHE_DIR), 248 & 471 (DTATOOLS_TEMPLATE_GIT_TOKEN),
+      295 (DTATOOLS_TEMPLATE_GIT_USER), 296 (DTATOOLS_TEMPLATE_GIT_AUTH);
+      R/validateTemplate.R:311-316 documents the same local-directory-only scope
+      for its own extends resolver.
+    notes: >
+      A private repository's CI job runs `validate_template(".", strict =
+      TRUE)` against exactly the checkout it is given -- none of these seven
+      variables are read anywhere on that call path (verified: every one of
+      them is read by template_sources.R, which validate_template() never
+      sources; the engine files it does source -- template_core.R,
+      template_index.R, template_inherit.R, dataset_template.R,
+      party_profiles.R, vocabulary.R -- are called only for their layout,
+      reader and resolver helpers: template_index.R also defines
+      build_template_index(), which does call dta_template_source_roots(),
+      but validate_template() never calls it). Confirmed empirically too: setting
+      DTATOOLS_TEMPLATE_SOURCES to a nonexistent path and
+      DTATOOLS_TEMPLATE_INCLUDE_BUILTIN to "0" changes nothing about a
+      validate_template() call naming an explicit directory. No network
+      access is exercised by validate_template() either way -- a `git:`
+      source scheme is a DTATOOLS_TEMPLATE_SOURCES-only concept and is not
+      reachable from this function at all.
+
+  # ---- creation-template structural checks ----------------------------------
+
+  - id: REQ-TMPL-012
+    text: >
+      An option (on a creation template or a dataset template) whose target
+      resolves to a metadata field the engine itself owns (metadata.template,
+      metadata.import_issues) shall be reported target_machine_owned at
+      severity "error"; one that resolves to no known metadata field at all,
+      or -- for a dataset template -- is not rooted at "dataset.", shall be
+      reported target_invalid at severity "warning".
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R:542-558, 981-1009;
+      inst/shiny/dta_app/R/template_core.R:267-285 (dta_metadata_machine_fields, dta_template_metadata_fields)
+
+  - id: REQ-TMPL-013
+    text: >
+      A party slot naming a profile id absent from the directory being
+      validated, or one whose target is not exactly "metadata.supplier" or
+      "metadata.receiver", shall be reported party_slot_invalid at severity
+      "warning".
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R:560-578;
+      inst/shiny/dta_app/R/party_profiles.R:145-151, 160-217 (party_slot_target_valid, normalise_party_slots)
+
+  - id: REQ-TMPL-014
+    text: >
+      A vocabulary slot of malformed shape (an invalid target grammar, or a
+      default outside its own offered terms) shall be reported
+      vocab_slot_invalid at severity "error"; one whose vocabulary reference
+      does not resolve within the directory being validated shall be reported
+      vocab_slot_unresolved at severity "warning".
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R:728-792;
+      inst/shiny/dta_app/R/vocabulary.R:536-565, 573-620 (vocabulary_slot_target_parts, normalise_vocabulary_slots)
+
+  - id: REQ-TMPL-015
+    text: >
+      A datasets[].template reference that does not resolve to a dataset
+      template in the directory being validated shall be reported
+      dataset_template_unresolved at severity "warning"; a patch naming a
+      column its target dataset template does not have shall be reported
+      patch_incoherent at severity "warning".
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: R/validateTemplate.R:583-630; inst/shiny/dta_app/R/dataset_template.R:276 (apply_dataset_patch)
+
+  - id: REQ-TMPL-016
+    text: >
+      A dta_dataset_template with no dataset: body shall be reported
+      dataset_missing at severity "error", with a message that specifically
+      names a plural datasets: key when that is what was authored instead --
+      the shape a creation template uses, and the mistake a reader makes
+      converting one kind of file into the other.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: R/validateTemplate.R:949-979
+
+  # ---- controlled-vocabulary column bindings (values_from) -------------------
+
+  - id: REQ-TMPL-017
+    text: >
+      A column declaring both values and values_from shall be reported
+      values_and_values_from at severity "warning" (the binding wins;
+      nothing about the build is ambiguous, only the authoring is);
+      combining values_from with pattern on the same column shall be
+      reported values_from_pattern at severity "error" and skip the rest of
+      that column's binding checks, since a column takes a permitted-value
+      list or a pattern and never both.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: R/validateTemplate.R:846-941 (.dta_template_check_bindings)
+
+  - id: REQ-TMPL-018
+    text: >
+      A malformed values_from mapping (missing its vocabulary: key) shall be
+      reported values_from_invalid at severity "error"; a values_from naming
+      a vocabulary absent from the directory being validated shall be
+      reported values_from_unresolved at severity "warning"; an include or
+      exclude list naming a code the resolved vocabulary does not have shall
+      be reported values_from_terms_invalid at severity "error". A binding
+      whose vocabulary resolves and whose include/exclude name only codes the
+      vocabulary actually has -- including one it inherited via extends: --
+      shall be accepted without comment, expanding into the column's
+      permitted values.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R:846-941;
+      inst/shiny/dta_app/R/vocabulary.R:449-505 (normalise_values_from), 362-420 (vocabulary_terms)
+
+  # ---- extends resolution, the instantiate dry-run, and sealed ---------------
+
+  - id: REQ-TMPL-019
+    text: >
+      extends: naming a reference that does not resolve within the directory
+      being validated shall be reported extends_unresolved at severity
+      "warning"; a chain that revisits a template it has already visited (by
+      resolved id@version, however each hop spelled the reference) shall be
+      reported extends_cycle at severity "warning" rather than recursing
+      without end.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R:632-671;
+      inst/shiny/dta_app/R/template_inherit.R:1087-1274 (resolve_template_inheritance)
+
+  - id: REQ-TMPL-020
+    text: >
+      Whenever the extends chain fails to resolve for any reason (an
+      unresolvable reference or a cycle), a creation template that is not
+      itself abstract shall additionally be reported instantiate_failed at
+      severity "error", because a template that cannot resolve its own base
+      can never be built regardless of what else might be true about it. A
+      template marked abstract: true shall be exempt from this and from the
+      dry-run build entirely, whether or not its own extends chain resolves.
+      An abstract base may omit datasets and provide shared metadata only;
+      it must still provide a base mapping unless it inherits through
+      extends: or mixins:. A concrete child
+      that supplies or inherits at least one valid dataset shall be buildable
+      from that base. A concrete template with no datasets after inheritance
+      resolves shall be reported instantiate_failed at severity "error",
+      including when it declares extends.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R (.dta_template_check_creation);
+      inst/shiny/dta_app/R/template_core.R (read_dta_creation_template,
+      dta_template_finalize_def)
+    notes: >
+      Verified directly that abstract exemption applies even when the SAME
+      template's own extends is unresolvable: an abstract creation template
+      naming a nonexistent parent reports extends_unresolved alone, with no
+      accompanying instantiate_failed row -- the gate is the file's own raw
+      abstract: value, read before either check runs, not the outcome of
+      resolution.
+
+  - id: REQ-TMPL-021
+    text: >
+      A descendant that changes the value at a path an ancestor sealed shall
+      be reported sealed_violation at severity "warning" (and, being an
+      extends-resolution failure, also instantiate_failed per REQ-TMPL-020
+      when the descendant is not abstract). This holds whether the change
+      reaches the sealed field directly in the merged definition tree (a
+      `base:` override, a `modify:` verb, a `remove:`, an explicit null, or a
+      whole-section replacement) or indirectly, through an `options:` or
+      `party_slots:` entry the descendant adds or changes whose `target:`, or
+      whose `effects:`/`effects_all:` (any `set:` map included), would write
+      that sealed field once the template is instantiated -- a seal must hold
+      for every value such an entry lets an author pick, not only whichever
+      happens to be selected at merge time. An entry inherited unchanged from
+      an ancestor is not itself a violation even when its effect reaches a
+      sealed field, because a template's own seals do not bind itself. A
+      sealed path that resolves to nothing in the fully-resolved definition
+      shall be reported sealed_path_unknown at severity "warning", because
+      such a seal protects nothing and only a typo produces one.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R:672-694;
+      inst/shiny/dta_app/R/template_inherit.R:690-749 (dta_template_check_sealed),
+      546-565 (dta_template_path_get), 592-665 (dta_template_entry_metadata_paths,
+      dta_template_entry_seal_paths, dta_template_paths_overlap)
+
+  - id: REQ-TMPL-022
+    text: >
+      Every mergeable section of a template (base, options, datasets,
+      party_slots, vocabulary_slots) shall read the same four states off a
+      child: a key never written shall inherit the parent's content
+      unchanged; an explicit null shall drop the section from the merged
+      result; an empty mapping or sequence shall replace it with nothing;
+      and a non-empty value shall be merged in, with any new content it
+      introduces checked exactly as if it had been authored standalone.
+      Dropping or emptying datasets on a concrete child shall fail the
+      resolved dataset requirement in REQ-TMPL-020.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: >
+      inst/shiny/dta_app/R/template_inherit.R:285-297 (dta_template_section_state),
+      814-828 (dta_template_merge_collection_section)
+    notes: >
+      PINNED, not endorsed: for a collection section, validate_template() and
+      the dry-run build it drives currently cannot tell "explicit null" apart
+      from "empty" -- verified directly on datasets: and on base:. Both states
+      are read correctly and DIFFERENTLY by dta_template_section_state()
+      itself (one returns "drop", the other "empty"), but every downstream
+      consumer in this codebase reads the merged result through `%||%
+      list()`, which collapses NULL and list() to the same value before
+      anything acts on it. A child that means "wipe this on purpose, and I
+      want a reviewer to see that I did" (null) is therefore indistinguishable
+      from one that means the same thing less explicitly ({}/[]) in every
+      place this package currently looks -- including validate_template()'s
+      own report. For datasets, both outcomes fail the concrete dataset
+      requirement in REQ-TMPL-020; neither is an exception just because the
+      child declares extends.
+
+  - id: REQ-TMPL-023
+    text: >
+      resolve_template_inheritance() shall resolve a chain of more than one
+      extends hop, merging from the most distant ancestor toward the child so
+      that a correction made partway up the chain is visible to every
+      descendant below it, including one that never itself mentions the
+      corrected section.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: inst/shiny/dta_app/R/template_inherit.R:1087-1274 (resolve_template_inheritance)
+
+  # ---- controlled vocabulary: extends, cycles, term algebra ------------------
+
+  - id: REQ-TMPL-024
+    text: >
+      A dta_vocabulary declaring neither terms nor extends: shall be reported
+      vocabulary_invalid at severity "error"; extends: naming a vocabulary
+      absent from the directory being validated shall be reported
+      vocabulary_unresolved at severity "warning"; a vocabulary extends chain
+      that revisits a vocabulary it has already visited shall be reported
+      vocabulary_extends_failed at severity "error" on every file
+      participating in the cycle.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R:1014-1068;
+      inst/shiny/dta_app/R/vocabulary.R:200-260 (read_vocabulary), 284-313 (resolve_vocabulary_inheritance)
+
+  - id: REQ-TMPL-025
+    text: >
+      A vocabulary's resolved term set, for the purpose of a values_from
+      include/exclude list, shall be its ancestor's own resolved terms, with
+      any code named in its own remove_terms taken out and any term named in
+      its own add_terms added (replacing an inherited term of the same code
+      in place rather than duplicating it); a code removed by a descendant
+      shall no longer be nameable in include/exclude even though it remains
+      valid in the ancestor vocabulary on its own.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: inst/shiny/dta_app/R/vocabulary.R:314-349 (the term algebra inside resolve_vocabulary_inheritance)
+
+  # ---- create_template_repo() -------------------------------------------------
+
+  - id: REQ-TMPL-026
+    text: >
+      create_template_repo(path, examples = TRUE, ci = TRUE, overwrite =
+      FALSE) shall write .gitignore and README.md at the repository root,
+      and -- when examples is TRUE -- every file of the bundled skeleton
+      inst/extdata/template-repo-skeleton/ at the same relative path,
+      discovered from the skeleton rather than a hard-coded list: dta-app.yaml
+      in the root, starter.dta-template.yaml and
+      starter_dataset.dta-dataset-template.yaml in templates/,
+      starter_supplier.dta-party.yaml in parties/,
+      starter_terms.dta-vocabulary.yaml in vocabulary/, and README.md in
+      export-templates/. examples = FALSE shall write only the scaffolding
+      (.gitignore, README.md, and any CI file ci asks for), with no
+      dta-app.yaml and no folder of any template kind.
+    risk: medium
+    category: functional
+    covers: [create_template_repo]
+    source: R/createTemplateRepo.R (.dta_create_repo_example_files, .dta_create_repo_targets, create_template_repo); inst/extdata/template-repo-skeleton/
+
+  - id: REQ-TMPL-027
+    text: >
+      ci shall accept a single TRUE (shorthand for "github"), FALSE (no CI
+      file at all), or a character vector naming one or more of "github",
+      "bitbucket", "jenkins" (duplicates silently dropped); each selected
+      provider shall write its own file to its own destination --
+      .github/workflows/validate-templates.yml, bitbucket-pipelines.yml, and
+      Jenkinsfile respectively -- copied from the packaged CI assets under
+      inst/extdata/ci/. Any other value for ci shall raise a
+      condition naming the known providers.
+    risk: medium
+    category: interface
+    covers: [create_template_repo]
+    source: R/createTemplateRepo.R (.dta_create_repo_ci_asset_targets, .dta_create_repo_validate_ci)
+
+  - id: REQ-TMPL-028
+    text: >
+      Without overwrite = TRUE, create_template_repo() shall raise a
+      condition naming every file it would have written that already exists
+      at path (including the destinations in dta-app.yaml, templates/,
+      parties/, vocabulary/ and export-templates/), and shall write nothing
+      at all in that case -- not even the
+      files that did not conflict -- because a partially-written repository
+      of cross-referencing templates would leave a caller unable to tell
+      which half they are looking at. overwrite = TRUE shall replace every
+      conflicting file. A path naming an existing file rather than a
+      directory shall be rejected outright, before anything is written,
+      regardless of overwrite.
+    risk: high
+    category: integrity
+    covers: [create_template_repo]
+    source: R/createTemplateRepo.R (create_template_repo pre-write collision check and writer loop)
+
+  - id: REQ-TMPL-029
+    text: >
+      create_template_repo() shall return, invisibly, the normalised absolute
+      path it wrote to.
+    risk: low
+    category: interface
+    covers: [create_template_repo]
+    source: R/createTemplateRepo.R (create_template_repo path_out and invisible return)
+
+  - id: REQ-TMPL-030
+    text: >
+      The packaged demo library inst/extdata/library/ (a library root with
+      templates/, parties/ and vocabulary/ folders) shall validate with zero
+      rows, errors and warnings alike. The bundled template-repository
+      skeleton inst/extdata/template-repo-skeleton/ is a library root in its
+      own right (dta-app.yaml and README.md in the root, and the folders
+      templates/, parties/, vocabulary/ and export-templates/); it, and a
+      repository freshly created from it by create_template_repo(), shall
+      validate with zero errors under strict = TRUE -- because a broken shipped
+      example is copied, unmodified, into every repository a user creates from
+      it. Validating one of the skeleton's kind folders instead of its root
+      shall be the library_subfolder_given error of REQ-TMPL-031, never a
+      clean pass.
+    risk: high
+    category: integrity
+    covers: [validate_template, create_template_repo]
+    source: >
+      inst/extdata/library/; inst/extdata/template-repo-skeleton/;
+      R/createTemplateRepo.R (create_template_repo documentation);
+      R/validateTemplate.R (validate_template, .dta_template_check_placement)
+
+
+  - id: REQ-TMPL-031
+    text: >
+      validate_template() given a directory shall treat it as a library root
+      (REQ-TMPL-002) and apply this placement rule to every file of the four
+      template kinds found anywhere below it (dot-led directories excluded). A
+      file directly in the folder of its kind is loaded and adds no placement
+      row. A file in any other place -- directly in the root, or in the folder
+      of another kind, such as a party profile in templates/ -- shall be
+      reported exactly once as template_misplaced at severity "error", with its
+      path, kind, id and version when readable, and shall be invisible to the
+      validation: it shall not be validated as a template, shall not take part
+      in cross-file resolution and shall not count in the duplicate-id check
+      (the app's template index skips it, REQ-TMPL-043); strict = TRUE shall
+      reject it. The valid files of the same library shall still be loaded and
+      checked. A file below the folder of its kind is the warning of
+      REQ-TMPL-002 instead. There is no legacy layout in which templates sit
+      directly in the root: such a root reports template_misplaced for each
+      of them. When the directory given is itself one of the folders
+      templates/, parties/ or vocabulary/ and none of the folders templates/,
+      parties/, vocabulary/ exists inside it, validate_template() shall report
+      exactly one library_subfolder_given row at severity "error" in place of
+      one row per file, naming the mistake as a sub-folder given instead of
+      its parent, and advising that the files of a flat library be moved into
+      templates/, parties/ and vocabulary/ sub-folders instead; strict = TRUE
+      shall reject it. The messages of template_misplaced and
+      library_subfolder_given shall say that folder names are case-sensitive
+      on the server. The placement rule applies
+      to a directory only: a single file given as path is checked in
+      isolation, with no placement row and no resolution of references to
+      other files.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R (validate_template, .dta_template_check_placement);
+      inst/shiny/dta_app/R/template_index.R (dta_template_kind_subdir,
+      dta_template_kind_subdirs, dta_template_misplaced_files);
+      vignettes/private-templates.Rmd (Where templates live)
+
+  - id: REQ-TMPL-032
+    text: >
+      Creation templates shall accept study and ordered sections in base
+      metadata and as nested option targets. Inheritance shall override a
+      named clause without dropping unrelated clauses. When creating a
+      revision, study shall be included in the default metadata carry-over
+      fields, while sections shall require explicit opt-in to avoid
+      overwriting revised template clauses with old wording. Machine-owned
+      provenance shall remain excluded. Rebase shall compare and apply
+      sections as one atomic ordered collection, including complete
+      additions, removals and order-only changes. A section conflict shall
+      require an explicit choice of the current or target collection,
+      without implicit clause merging or invalid partial records.
+    risk: high
+    category: integrity
+    covers: [validate_template, run_dta_app]
+    source: >
+      inst/shiny/dta_app/R/template_core.R;
+      inst/shiny/dta_app/R/template_create.R;
+      inst/shiny/dta_app/R/template_diff.R
+
+  - id: REQ-TMPL-033
+    text: >
+      A dataset whose id is absent, null or the empty string shall be
+      reported dataset_id_missing at severity "error", both in a
+      dta_dataset_template's dataset: body and when written inline in a
+      creation template, including an abstract one. A dataset whose id, name
+      or description, as written, is anything but a single non-missing
+      scalar (a YAML sequence or mapping, or a missing value) shall be
+      reported dataset_field_invalid at severity "error", with a message
+      naming that key. A dataset with name: but no id: shall be reported
+      dataset_id_missing like any other dataset without an id. When a
+      creation template writes datasets: in the verb form, the entries under
+      add: and modify: shall be checked as datasets, and the verb keys
+      themselves, and the ids under remove: and order:, shall not.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: R/validateTemplate.R (.dta_template_dataset_identity_issue)
+
+  - id: REQ-TMPL-034
+    text: >
+      A column of a dta_dataset_template's dataset: body that DTAColumnSpec()
+      refuses to construct, such as an example longer than its declared
+      length, a value that does not fit its declared type or format, or an
+      invalid pattern, shall be reported column_spec_invalid at severity
+      "error", in a row of its own naming that column and not any column that
+      constructs. A dataset template whose columns all construct shall not be
+      reported. A column of a creation template's inline dataset that
+      DTAColumnSpec() refuses shall be reported instantiate_failed, as for any
+      other build failure, and not additionally as column_spec_invalid.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: R/validateTemplate.R (.dta_template_check_dataset_tpl)
+    notes: >
+      A dataset template is never built on its own, so before the check a
+      column that could not be constructed stayed hidden until some creation
+      template imported the dataset, and was then blamed on that template.
+
+  - id: REQ-TMPL-035
+    text: >
+      The columns and rules of a dta_dataset_template's dataset: body shall be
+      checked together, and each lint_dta() finding shall be reported as a row
+      carrying the linter's own code and severity: a rule naming a column the
+      body does not declare as rule_column_undeclared and a col_range on a
+      text column as rule_range_non_numeric, both at "error", and rules in a
+      body that declares no column as rules_without_columns at "warning",
+      which strict = TRUE shall not abort on. A creation template whose
+      instantiated dataset violates the same invariant shall be reported
+      instantiate_failed at severity "error", and not additionally under the
+      linter's code.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: R/validateTemplate.R (.dta_template_check_dataset_tpl, .dta_template_lint_message)
+    notes: >
+      The class invariant keeps an error out of any DTA that can be built, so
+      a creation template reaches the linter only with warnings; an error
+      surfaces as the build failure it is.
+
+  - id: REQ-TMPL-036
+    text: >
+      A creation template's prior_versions: entry that is not a mapping, has
+      no version, a version that is not a version number, a version not older
+      than the oldest version of the same template id in the directory being
+      validated, a repeated version, a date that is not YYYY-MM-DD,
+      no changes text, or a key other than version, date and changes shall be
+      reported prior_versions_invalid at severity "error", one row per
+      problem naming the entry. A well-formed entry shall not be reported.
+    risk: low
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R (.dta_template_check_creation);
+      inst/shiny/dta_app/R/template_history.R (template_prior_versions)
+    notes: >
+      prior_versions: records the versions a template went through before it
+      entered the library. Those have no file to diff, so the app shows the
+      author's text as written; this check keeps a malformed entry out of CI.
+
+  - id: REQ-TMPL-037
+    text: >
+      A library's app configuration file (dta-app.yaml or dta-app.yml, directly
+      in the library root) shall not be treated as a template. When it holds a
+      value the app would reject -- a colour that is not a #RGB or #RRGGBB hex
+      value, a link that is not an http(s) or mailto URL, a missing logo or
+      Word template file, a path that leaves the library folder, a
+      document.name or document.abbreviation that is not one to three
+      non-empty strings (an abbreviation of at most 12 characters each, and
+      the same number of entries as the name when both are lists), a feature
+      flag such as features.raw_yaml_editable that is not true or false, a
+      wrong kind or YAML that does not parse -- validate_template() shall report
+      app_config_invalid at severity "error", one row per rejected value naming
+      its key. A key the app does not know shall be reported
+      app_config_unknown_key at severity "warning". An app configuration file
+      anywhere but directly in the library root (for example in templates/)
+      shall be reported app_config_misplaced at severity "error", once per
+      such file, because the app reads only the root and the file is invisible;
+      it shall not be parsed. Both spellings, dta-app.yaml and dta-app.yml,
+      directly in the root shall be reported app_config_duplicate at severity
+      "error", once per file. A valid configuration, or none, shall add no rows.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R (.dta_template_check_app_config);
+      inst/shiny/dta_app/R/app_config.R (parse_dta_app_config,
+      dta_app_config_filenames);
+      inst/extdata/template-repo-skeleton/README.md section "App
+      configuration (dta-app.yaml)"
+    notes: >
+      The validator shares the app's parser, so the rule it enforces is the
+      rule the app applies at start-up. The app itself never fails over a
+      bad value: it warns and keeps that key's default. This check exists so
+      the mistake fails CI instead of being found in production.
+
+  # ---- mixins: composition ---------------------------------------------------
+
+  - id: REQ-TMPL-038
+    text: >
+      A creation template may list mixins:, a sequence of distinct, non-empty
+      template references (a single string counts as a one-element list). A
+      mixin shall be an abstract template that contains none of the keys
+      extends, mixins, sealed, required, variants or order, writes its
+      options, datasets, party_slots and vocabulary_slots only as plain
+      sequences with no entry carrying remove, and has no null in a content
+      section or inside base:. Only a mixin's base, options, datasets,
+      party_slots and vocabulary_slots shall be contributed; its label,
+      description, date, id, version and abstract flag shall not be copied. The
+      mixins shall be folded, in the order listed, into the resolved extends:
+      parent (or into nothing when there is none) before the template's own
+      content is merged over the result. The fold is add-only: two mappings
+      under the same base: key merge recursively, but any other collision under
+      one base: path, and any two collection entries with the same key (the
+      id of an option or slot, the identifying key of a dataset), shall be an error and never an override,
+      whichever of the extends chain or another mixin contributed first. A
+      mixin that an ancestor in the extends chain already mixes in shall be
+      an error when listed again. The template itself may modify or remove any
+      entry a mixin contributed, as for any inherited entry. Descendants
+      shall inherit the folded content but not the mixins: key itself, so a
+      descendant's own mixins: apply at its own level only. A template that
+      inherits only through mixins: may omit base: and datasets:.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: >
+      inst/shiny/dta_app/R/template_inherit.R:849-878 (dta_template_mixin_refs),
+      890-938 (dta_template_check_mixin_shape), 954-974
+      (dta_template_merge_disjoint), 984-1078 (dta_template_fold_mixins),
+      1087-1274 (resolve_template_inheritance)
+    notes: >
+      Observable through validate_template() as: a composed template that is
+      concrete is valid only if the fold supplied everything it needs (the
+      dataset requirement in REQ-TMPL-020), so OQ-TMPL-079 pairs the composed
+      child with the same parent without mixins. The conflict case is
+      OQ-TMPL-080 and the invalid-mixin case OQ-TMPL-081. Child modification
+      and removal of mixin entries is OQ-TMPL-084, and re-listing an
+      ancestor's mixin is OQ-TMPL-085.
+
+  - id: REQ-TMPL-039
+    text: >
+      validate_template() shall report a mixins: reference that does not
+      resolve within the directory as mixin_unresolved at severity "warning";
+      a mixins: value that is malformed (not a list of distinct non-empty
+      strings) or a named template that is not a valid mixin as mixin_invalid,
+      and an overlap or a re-listed ancestor mixin as mixin_conflict, each
+      at severity "error". For a creation template that is
+      not abstract each of the three shall additionally be reported
+      instantiate_failed at severity "error"; a template marked abstract: true
+      shall get no instantiate_failed row for any of them, but a malformed
+      mixins: value in its own file is still reported mixin_invalid. Mixin
+      content that reaches a path an ancestor sealed, directly or through the
+      target or effects of an option the mixin adds, shall be reported
+      sealed_violation as for any descendant (REQ-TMPL-021), not as a mixin
+      code.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R (.dta_template_check_creation);
+      inst/shiny/dta_app/R/template_inherit.R:984-1078
+      (dta_template_fold_mixins), 1087-1274 (resolve_template_inheritance);
+      inst/extdata/template-repo-skeleton/README.md (issue-code table)
+    notes: >
+      The condition is classified by its class, before any text test, so an
+      author-chosen id such as "cycle detected" cannot turn a mixin error into
+      extends_cycle.
+
+  - id: REQ-TMPL-040
+    text: >
+      write_template_guide() shall write one readable document per usable
+      (non-abstract) creation template of a library into a folder, named from
+      the template's id and version. Each document shall show every question
+      with its pre-filled answer, every column of the datasets it creates
+      (tagging those the template adds), and a running header and footer on
+      every page carrying the organisation, the template id and version, and
+      "Page X of Y" as page fields. An abstract template shall be refused when
+      requested by id, an existing output file shall not be replaced unless
+      overwrite = TRUE, and a format other than docx or pdf shall be refused.
+      The library is given as its root directory (REQ-TMPL-002), or as one
+      template file, which the guide then covers together with what it refers
+      to; the library of a file is the parent of the folder the file sits in,
+      and only when that folder is the folder of the file's kind. A file
+      anywhere else shall be refused with a condition of class
+      dta_template_guide_no_templates and nothing shall be written.
+    risk: medium
+    category: functional
+    covers: [write_template_guide]
+    source: "R/templateGuide.R; R/templateGuide-collect.R"
+    notes: >
+      Added with the single-file rule: the library root of one template file is
+      the parent of the folder it sits in, found only when that folder is the
+      folder of the file's kind (REQ-TMPL-002). Pinned in OQ-TMPL-099.
+
+  # ---- app: Word templates, layout reporting at run time --------------------
+
+  - id: REQ-TMPL-041
+    text: >
+      The app shall offer as Word export templates every .docx file directly
+      in the export-templates/ folder of each template library root it uses
+      that contains at least one {PLACEHOLDER} marker, with or without a
+      dta-app.yaml in that library. A discovered .docx that contains no
+      placeholder marker, or cannot be read as a Word document, shall not be
+      offered, and a warning shall name it; a file listed under
+      exports.word_templates in dta-app.yaml is offered whatever it contains.
+      An offered template is labelled with its file name without the extension.
+      Within one root the files are taken in file-name order (byte order); across roots they follow
+      the roots' precedence order. A file whose name starts with "." or is a
+      Word lock file (name starting with a tilde followed by a dollar sign),
+      a file that is not a .docx, and a file in a sub-folder of
+      export-templates/ shall not be offered. When two roots provide a file with
+      the same file name, only the file from the earlier root shall be offered,
+      and a warning shall name both files. Entries listed under
+      exports.word_templates in dta-app.yaml shall keep their label and order,
+      come first, and shall not be offered a second time as discovered files.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      inst/shiny/dta_app/R/app_config.R (dta_app_config_discover_word_templates,
+      .dta_app_config_build); inst/shiny/dta_app/R/template_index.R
+      (dta_export_templates_subdir)
+    notes: >
+      Pinned in OQ-TMPL-094 (discovery, labels, order, the ignored files, and
+      the skip of a file without placeholder markers or an unreadable one),
+      OQ-TMPL-095 (precedence between two roots) and OQ-TMPL-096 (configured
+      entries first, even without placeholders, and a library with no
+      dta-app.yaml).
+
+  - id: REQ-TMPL-042
+    text: >
+      validate_template() given a directory shall report every regular file
+      directly in its export-templates/ folder that is not a .docx file as
+      export_template_invalid at severity "warning", with kind
+      dta_export_template, because the app ignores it. A .docx file, a file
+      whose name starts with "." or is a Word lock file (a tilde followed by a
+      dollar sign), a file named README, README.md or
+      README.txt (in any letter case), and a sub-folder shall not be reported;
+      any other file whose name merely begins with README, such as
+      README_old.pdf, shall be. The check shall run whatever kinds is, shall not
+      make strict = TRUE abort on its own, and a library without an
+      export-templates/ folder shall add no row.
+    risk: low
+    category: functional
+    covers: [validate_template]
+    source: R/validateTemplate.R (.dta_template_check_export_templates)
+
+  - id: REQ-TMPL-043
+    text: >
+      When the app builds its template index, a template file that is not in
+      the folder of its kind -- directly in the library root, or in the folder
+      of another kind -- shall not be indexed, and shall be listed in the
+      "warnings" attribute of the index and, separately, in its
+      "layout_warnings" attribute. Each entry shall name the source, the path
+      of the file relative to the source root, the kind of the file in plain
+      words and the folder the file belongs in, and shall contain neither an
+      absolute path nor an internal kind identifier. All layout problems of one
+      build shall additionally be announced by one warning condition. A source
+      whose root is itself one of the folders templates/, parties/ or
+      vocabulary/ with none of the three folders inside it shall be reported
+      once, as a library sub-folder whose parent directory should be used,
+      with the advice to move the files of a flat library into templates/,
+      parties/ and vocabulary/ sub-folders instead. The files in the correct
+      folders of the same root shall still be indexed.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      inst/shiny/dta_app/R/template_index.R (build_template_index,
+      dta_template_misplaced_files, dta_template_layout_warnings,
+      dta_template_warn_layout)
+
+  - id: REQ-TMPL-044
+    text: >
+      A .docx file in export-templates/ that resolves, through a symbolic link,
+      to a location outside the library root shall not be offered as a Word
+      export template, while a regular .docx file in the same folder still is.
+    risk: medium
+    category: security
+    covers: [run_dta_app]
+    source: >
+      inst/shiny/dta_app/R/app_config.R (dta_app_config_discover_word_templates,
+      .cfg_file_in_dir)
+    notes: >
+      The test needs the platform to allow symbolic links and is skipped, with
+      its reason, where it does not (an unprivileged Windows account). It is
+      the only test of this requirement so that the skip leaves REQ-TMPL-041
+      verified.

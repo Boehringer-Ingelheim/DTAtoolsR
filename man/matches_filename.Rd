@@ -16,7 +16,10 @@ handler's stored filename or pattern.}
 }}
 }
 \value{
-A logical value indicating whether the filename matches.
+A logical vector indicating whether the filename matches. With
+\code{pattern = FALSE} it is a single value (does the name equal any
+declared name); with \code{pattern = TRUE} it holds one value per declared
+pattern, so reduce it with \code{any()} before using it in a condition.
 }
 \description{
 Checks if a given filename matches the pattern in a \code{DTAFile} object.

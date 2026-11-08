@@ -1,0 +1,10 @@
+kind: dta_dataset_template
+id: legacy
+version: "1.0"
+dataset:
+  name: ds1
+  description: Dataset one
+  type: tabular
+  files: {filename: one.tsv}
+  columns:
+    - {id: C1, type: SAS Char}

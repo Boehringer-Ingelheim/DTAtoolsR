@@ -5,9 +5,10 @@
 \title{DTADataSet Class}
 \usage{
 DTADataSet(
-  name,
+  id,
   type,
   files = list(),
+  name = NULL,
   description = NULL,
   template_source = NULL,
   template_version = NULL,
@@ -15,7 +16,8 @@ DTADataSet(
 )
 }
 \arguments{
-\item{name}{Character. Name of the container.}
+\item{id}{Character. Identifier of the dataset: its key in a DTA's
+\code{datasets}, in every validation message and in \code{load_file()}.}
 
 \item{type}{Character. Dataset type: either \code{"tabular"}, whose files
 are read and validated against column specifications, or \code{"file"},
@@ -23,14 +25,18 @@ whose files are only checked for presence, readability and non-emptiness.}
 
 \item{files}{a list of DTAFile objects specifying input file information.}
 
-\item{description}{Character or NA. Free-text description of the dataset.}
+\item{name}{Character or NULL. Human-readable name of the dataset, e.g.
+\code{"Demographics"}; shown in place of the \code{id} where one is set.}
 
-\item{template_source}{Character or NA. Source of the template used to
+\item{description}{Character or NULL. Long free-text description of the
+dataset.}
+
+\item{template_source}{Character or NULL. Source of the template used to
 generate the dataset specification.}
 
-\item{template_version}{Character or NA. Version of the template used.}
+\item{template_version}{Character or NULL. Version of the template used.}
 
-\item{template_date}{Character or NA. Date of the template used.}
+\item{template_date}{Character or NULL. Date of the template used.}
 }
 \value{
 An object of class DTADataSet.
@@ -40,9 +46,10 @@ Class to handle data from files
 }
 \examples{
 ds <- DTADataSet(
-  name = "example_dataset",
+  id = "example_dataset",
   type = "file",
-  files = list(create_example_DTAFileCSV())
+  files = list(create_example_DTAFileCSV()),
+  name = "Example dataset"
 )
 ds
 }

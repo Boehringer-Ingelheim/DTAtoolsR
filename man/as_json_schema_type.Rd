@@ -32,6 +32,14 @@ Called on a \code{\link{DTAColumnSpec}} it also accounts for nullability;
 called on the underlying structure it reports the type alone. The base
 \code{\link{DTAColumnSpecStructure}} method aborts, because a structure that
 names no backend cannot say how it should be validated.
+
+A column declared with no \code{type}, \code{format} or \code{length} has no
+\code{@structure} at all, so there is no backend to dispatch on. Such a
+column is still checked on \code{values}/\code{pattern}/\code{nullable} (see
+\code{\link{as_json_schema}()}), so "type" itself must never be the reason a
+present value fails: every JSON base type \code{\link{dta_base_json_type}()}
+can produce is returned, which is a no-op constraint for "type" while
+leaving missingness governed by the same nullable rule as a typed column.
 }
 \examples{
 as_json_schema_type(DTAColumnSpec(id = "AGE", type = "SAS Num"))

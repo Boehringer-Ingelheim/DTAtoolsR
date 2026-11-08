@@ -15,7 +15,11 @@ write_dta(
   include_yaml = FALSE,
   yaml_text = NULL,
   template = NULL,
-  template_variables = NULL
+  template_variables = NULL,
+  document_name = NULL,
+  document_abbreviation = NULL,
+  organisation = NULL,
+  organisation_unit = NULL
 )
 }
 \arguments{
@@ -28,9 +32,14 @@ If NULL, inferred from file extension.}
 
 \item{overwrite}{Logical. Whether to overwrite existing files. Default: FALSE.}
 
-\item{include_signatures}{Logical. Whether to include signature approval section. Default: TRUE.}
+\item{include_signatures}{Logical. Whether to include signature approval
+section. Default: TRUE. Ignored for \code{format = "md"} (no signature section
+is written) and when a \code{template} is supplied.}
 
-\item{signature_list}{List of signatories with name and role fields.}
+\item{signature_list}{List of signatories, each a list with \code{name}, \code{role}
+and optionally \code{organization} (or \code{org}) fields; or a data.frame with
+columns \code{Organization}, \code{Name}, \code{Role}. Used only by the built-in
+DOCX/PDF layout; ignored for \code{format = "md"} and with a \code{template}.}
 
 \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
 
@@ -52,14 +61,34 @@ instead of the built-in layout. Only valid for \code{format = "docx"} or
 \item{template_variables}{Optional named list of additional or overriding
 placeholder values passed to \code{\link[=export_with_template]{export_with_template()}} when \code{template} is
 supplied. Default: \code{NULL}.}
+
+\item{document_name}{Optional character: what this kind of document is
+called, shown as the main title of the export (Word/PDF cover, Markdown
+heading); the DTA's own title follows beneath it. A vector is joined with
+\code{" / "}. \code{NULL} (the default) uses "Data Transfer Agreement". Also fills
+the \code{{DOCUMENT_NAME}} template placeholder.}
+
+\item{document_abbreviation}{Optional single string, the abbreviation of
+\code{document_name}. \code{NULL} (the default) uses "DTA". Fills the
+\code{{DOCUMENT_ABBREVIATION}} template placeholder.}
+
+\item{organisation, organisation_unit}{Optional single strings naming the
+organisation (and unit within it) issuing the document. When given they are
+shown on the cover and in the running header of every later page (Word/PDF)
+or in the top header block (Markdown), and fill the \code{{ORGANISATION_NAME}}
+and \code{{ORGANISATION_UNIT}} template placeholders. \code{NULL} or empty (the
+default) shows nothing.}
 }
 \value{
-Invisibly returns the document object (for chaining), or the output
-file path when a \code{template} is used.
+Invisibly. For \code{format = "docx"} or \code{"pdf"} with the built-in layout,
+the \code{officer} \code{rdocx} document object; when a \code{template} is used, the
+output file path; for \code{format = "md"}, \code{NULL}.
 }
 \description{
 Creates a professionally formatted DOCX, PDF, or Markdown document from a DTA object,
-including metadata, version history, transmission details, and approval signatures.
+including study identity, ordered agreement sections, version history,
+transmission details, and approval signatures. Study and agreement sections
+are omitted when absent. Agreement text is rendered as plain narrative.
 }
 \examples{
 dta <- create_example_DTA()
@@ -79,6 +108,18 @@ out_from_template <- tempfile(fileext = ".docx")
 write_dta(dta, file = out_from_template, template = template, quiet = TRUE)
 file.exists(out_from_template)
 unlink(c(template, out_from_template))
+
+# Name the document and the organisation issuing it
+out_named <- tempfile(fileext = ".md")
+write_dta(
+  dta,
+  file = out_named, quiet = TRUE,
+  document_name = "Data Transmission Specification",
+  document_abbreviation = "DTS",
+  organisation = "Example Pharma", organisation_unit = "Biometrics"
+)
+readLines(out_named, n = 3)
+unlink(out_named)
 }
 \seealso{
 \code{\link[=export_with_template]{export_with_template()}} for the full list of supported placeholders.

@@ -9,11 +9,14 @@
 #' @param specs A specs object.
 #' @param verbose Logical. If TRUE (default), prints validation progress.
 #' @details
-#' Both axes -- the column specs and the rules -- are always evaluated,
-#' and both are reported in a single pass. When the table has column spec errors, the
-#' returned error list additionally carries `rules_valid` and `rule_errors`, and
-#' any rule violations are raised as a warning so they cannot go unnoticed while
-#' the column spec errors are being fixed.
+#' All three axes -- the column specs, the rules and the import typing -- are
+#' always evaluated, and all are reported in a single pass. When the table has
+#' column spec errors, the returned error list additionally carries
+#' `rules_valid`, `rule_errors`, `import_valid`, `n_import_errors` and
+#' `import_errors`, and any rule violations are raised as a warning so they
+#' cannot go unnoticed while the column spec errors are being fixed. A table
+#' that passes the column specs but has rule violations, or values that cannot
+#' be represented in their declared type, aborts instead.
 #'
 #' The column spec axis is reported per check kind -- presence, extra columns,
 #' format, length, values and pattern -- rather than as one verdict, so a
@@ -22,11 +25,13 @@
 #' specs do not describe fails the axis just as an absent declared column does. A check no
 #' column declares reports as `not_applicable`; one the run could not settle
 #' reports as `not_checked`. Neither is a pass.
-#' @return Transformed and checked table (a data.frame) if valid. If the table
-#'   has column spec errors, returns a list with `summarised_error`,
-#'   `full_error`, `columnspec_checks` (the per-check breakdown described
-#'   above), `rules_valid` and `rule_errors`. If the schema is valid but rules
-#'   are violated, aborts.
+#' @return The input table, unchanged, if valid. If the table has column spec
+#'   errors, returns a list with `summarised_error`, `full_error`,
+#'   `columnspec_checks` (the per-check breakdown described above),
+#'   `rules_valid`, `rule_errors`, `import_valid`, `n_import_errors` and
+#'   `import_errors`. If the column specs are satisfied but rules are
+#'   violated, or values cannot be represented in their declared type,
+#'   aborts.
 #' @examples
 #' specs <- DTAColumnSpecCollection(
 #'   columns = list(
@@ -61,7 +66,9 @@ validate_table <- function(specs, table, verbose = TRUE) {
     columnspec_errors["import_errors"] <- list(details$import_errors)
 
     if (length(rule_messages) > 0) {
-      bullets <- c("Rule violations were also found:", rule_messages)
+      # Rule messages can carry YAML- or data-derived text (rule ids, column
+      # names, ...); escape before it reaches cli as bullet content.
+      bullets <- c("Rule violations were also found:", .cli_escape(rule_messages))
       names(bullets) <- c("", rep("x", length(rule_messages)))
       cli::cli_warn(bullets)
     }
@@ -70,7 +77,7 @@ validate_table <- function(specs, table, verbose = TRUE) {
   }
 
   if (length(rule_messages) > 0) {
-    cli::cli_abort(c("Rule violations:", rule_messages))
+    cli::cli_abort(c("Rule violations:", .cli_escape(rule_messages)))
   }
 
   # The import axis fails validation independently of column spec and rules: a value
@@ -92,11 +99,13 @@ validate_table <- function(specs, table, verbose = TRUE) {
 
 
 #' @param specs A [DTAColumnSpecCollection] object.
-#' @param table Data frame or Arrow Table to validate.
+#' @param table A data.frame to validate. Callers holding an Arrow Table
+#'   convert it with `as.data.frame()` first.
 #' @param verbose Logical. Whether to print progress messages. Default `TRUE`.
-#' @param max_errors Integer, or `NULL` (the default) to retain every reported
-#'   error row. Cap on the per-cell error detail held in the returned
-#'   `columnspec_errors$full_error` and `import_errors` frames. Both axes emit
+#' @param max_errors Integer (`Inf` is also accepted), or `NULL` (the default)
+#'   to retain every reported error row. Cap on the per-cell error detail held
+#'   in the returned `columnspec_errors$full_error` and `import_errors` frames.
+#'   Both axes emit
 #'   one row per bad cell, so a wholly mistyped column of a large table produced
 #'   a frame as long as the table -- the streaming path has been bounded against
 #'   exactly that since it existed, and this is the same bound for a table
@@ -108,18 +117,41 @@ validate_table <- function(specs, table, verbose = TRUE) {
 #' @noRd
 #' @keywords internal
 validate_table_detailed <- function(specs, table, verbose = TRUE, max_errors = NULL) {
+  # Guarded here rather than in each entry point, because this is where both
+  # of them arrive: `validate_table()` and the streaming scan's in-memory
+  # fallback.
+  #
+  # Without it, a `specs` that is not a collection -- an empty string from a
+  # path where an object was meant, a NULL coerced to text, a list still being
+  # assembled -- yields no schema, no rules and therefore no errors, and
+  # `validate_table()` returns the table unchanged. That is exactly how this
+  # function reports a delivery with nothing wrong with it, so the caller is
+  # told the data is clean by a run that never looked at it.
+  if (!inherits(specs, "DTAtools::DTAColumnSpecCollection")) {
+    cli::cli_abort(c(
+      "{.arg specs} must be a {.cls DTAColumnSpecCollection}.",
+      x = "Got {.cls {class(specs)[[1]]}}.",
+      i = "Nothing can be validated against a specification that is not one."
+    ))
+  }
+
+  # Decidable from the names, so it is settled before the table is read rather
+  # than at the structural gate near the end of this function -- which reaches
+  # the same refusal, but only after every per-column check has run against a
+  # column set one of whose members was never visible to it.
+  dta_abort_on_duplicate_columns(names(table))
+
   # Read before the table is touched: these were recorded when the table was
   # typed at import, and they ride on the table so they cannot be separated
   # from the data they describe.
   carried_import_issues <- dta_carried_import_issues(table)
 
   # Arrow reads all-empty columns as its `null` type, which converts to a
-  # `vctrs_unspecified` vector in R. jsonlite::toJSON() has no asJSON method for
-  # that class, so serialising such a column would abort validation with
-  # "No method asJSON S3 class: vctrs_unspecified". These columns hold only
-  # missing values, so coerce them to an all-NA character vector (emitted as
-  # JSON `null` via `na = "null"`). The schema still validates them correctly:
-  # nullable columns pass, non-nullable columns are flagged as missing.
+  # `vctrs_unspecified` vector in R. That class has no usable type for the
+  # column checks (it is neither character nor numeric). These columns hold
+  # only missing values, so coerce them to an all-NA character vector. The
+  # checks then validate them correctly: nullable columns pass, non-nullable
+  # columns are flagged as missing.
   unspecified_cols <- vapply(
     table,
     function(col) inherits(col, "vctrs_unspecified"),
@@ -350,6 +382,7 @@ dta_details_ok <- function(details) {
 #' Only retention is capped. Every count and summary a caller reads is taken
 #' from the complete frame before this runs, so truncation can never turn a
 #' failing table into a passing one.
+#'
 #' A `max_errors` that is not a cap at all is an error, not a silent "keep
 #' everything". `NA`, a negative number and a vector of two were each read as
 #' "no cap" here, so a caller that computed the cap wrongly -- `NA` out of an

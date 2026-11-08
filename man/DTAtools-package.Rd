@@ -47,7 +47,8 @@ and \code{\link{write_dataset_metadata}()} does the same for one dataset.
 \code{\link{export_with_template}()} fills a Word template the reader
 authored instead of the built-in layout;
 \code{\link{dta_template_placeholders}()} lists what such a template may
-refer to. PDF output needs an external converter --
+refer to. PDF output needs an external converter (Microsoft Word on Windows,
+LibreOffice, TinyTeX or pandoc) --
 \code{\link{dta_pdf_backend}()} reports which one this machine will use.
 }
 
@@ -81,7 +82,7 @@ starting the app. See \code{vignette("DTAtools")} for a walkthrough and
 session default for \code{load_file(stream =)}, and the size in bytes
 above which \code{"auto"} keeps a file lazy (512 MB by default).}
 \item{\code{DTAtools.stream_block_size}}{Bytes per Arrow read block on a
-delimited file, 1 MiB by default. This, times Arrow's read-ahead, is
+delimited file, 8 MiB by default. This, times Arrow's read-ahead, is
 what governs peak memory during a scan.}
 \item{\code{DTAtools.max_errors}}{How many per-cell error rows are held in
 memory, 10000 by default. Counts and the verdict are exact whatever it

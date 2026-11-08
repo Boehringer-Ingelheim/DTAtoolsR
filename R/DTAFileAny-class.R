@@ -48,7 +48,8 @@
 #'   expected.
 #' @param max_number_of_files Numeric or \code{NULL}; maximum number of files
 #'   expected.
-#' @param info Character or \code{NULL}; free-text description of the file.
+#' @param info Character, list or \code{NULL}; free-text description of the
+#'   file.
 #' @param extensions Character vector or \code{NULL}; allowed file endings. See
 #'   the section above.
 #'
@@ -272,18 +273,13 @@ method(print, DTAFileAny) <- function(x, ...) {
 #' @export
 method(print_info, DTAFileAny) <- function(x) {
   # Duplicated from method(print_info, DTAFile) rather than calling super():
-  # per the TODO on DTAFileTabular's own override, super() does not work here.
+  # this codebase does not use super() (see dta_matches_filename_base()).
   # Duplicating is what lets this method add the "Allowed endings" line no
   # other DTAFile sibling has -- without it, a handler that refuses every
   # `.csv` prints identically to one that accepts anything.
   cli::cli_alert_info("Filename: {x@filename}")
   cli::cli_alert("Pattern: {x@pattern}")
-  if (x@min_number_of_files == x@max_number_of_files) {
-    cli::cli_alert("Number of files: {x@min_number_of_files}")
-  } else {
-    cli::cli_alert("Min number of files: {x@min_number_of_files}")
-    cli::cli_alert("Max number of files: {x@max_number_of_files}")
-  }
+  dta_print_file_count(x)
   endings <- if (is.null(x@extensions)) "any" else paste(x@extensions, collapse = ", ")
   cli::cli_alert("Allowed endings: {endings}")
   invisible(x)

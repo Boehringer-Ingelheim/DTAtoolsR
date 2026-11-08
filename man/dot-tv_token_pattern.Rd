@@ -14,4 +14,24 @@ did: the gate matched \verb{[A-Za-z0-9_]+} while the leftover scan matched
 untouched \emph{and} never reported, silently breaking the documented warning
 contract.
 }
+\details{
+The optional \verb{:ARG} tail (e.g. \code{{COLUMN_SPECS:ADSL}}) lets a block
+placeholder name the one dataset it should render; inline placeholders never
+use it. The tail is \code{*} rather than \code{+} so that an empty argument --
+\verb{\{COLUMN_SPECS:\}}, the shape a deleted dataset name leaves behind -- is still
+token-shaped. With \code{+} it matched nothing at all, so it was neither
+substituted, nor rendered, nor reported: the one outcome this grammar exists
+to prevent.
+
+The optional leading \verb{#}/\code{/} makes a region marker (\verb{\{#DATASETS\}} /
+\verb{\{/DATASETS\}}) token-shaped too, for the same reason: a malformed one --
+unclosed, unopened, or not alone in its paragraph -- must be reported by the
+leftover scan rather than silently left out of the grammar altogether. The
+prefix is deliberately not restricted to the known marker names: any
+\verb{\{#word\}} or \verb{\{/word\}} a template contains is token-shaped, so one that is
+neither a marker nor a value -- a mistyped \verb{\{#DATASET\}}, say -- is named by
+the unresolved-placeholder warning exactly as \code{{customField}} is, instead of
+surviving unreported into a signed document. Before regions existed such
+text was silently left alone.
+}
 \keyword{internal}

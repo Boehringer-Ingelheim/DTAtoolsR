@@ -3,6 +3,7 @@
 ^renv/library$
 ^renv/staging$
 ^renv/settings\.json$
+^\.renvignore$
 ^DTAtoolsR\.Rproj$
 ^\.Rproj\.user$
 ^LICENSE\.md$
@@ -26,6 +27,7 @@ CHANGELOG.md
 ^test_comprehensive\.md$
 ^test_comprehensive\.docx$
 ^test_output\.md$
+^DTA_YAML_GUIDE\.md$
 ^\.tmp
 
 # Exclude temporary templates, renv staging, and user/editor files
@@ -60,3 +62,6 @@ CHANGELOG.md
 
 # Planning directory — never part of the shipped package
 ^thoughts$
+^app\.R$
+^manifest\.json$
+^\.dtatools-lib$

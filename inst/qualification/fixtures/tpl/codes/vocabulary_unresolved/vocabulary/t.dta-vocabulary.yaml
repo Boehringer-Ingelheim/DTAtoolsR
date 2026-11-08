@@ -1,0 +1,4 @@
+kind: dta_vocabulary
+id: vocu1
+version: "1.0"
+extends: nonexistent_parent_voc@1.0

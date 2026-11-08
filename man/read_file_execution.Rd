@@ -17,24 +17,21 @@ read_file_execution(x, ...)
 \item{x}{A \code{DTAFileTSV} object containing file reading parameters.}
 
 \item{...}{A \code{file} argument giving the path to the file to be read, and an
-optional \code{specs} argument: a \code{DTAColumnSpecCollection} whose declared
-types decide how the columns are parsed. Without it every column is
-inferred, as before.}
+optional \code{specs} argument: a \code{DTAColumnSpecCollection}. When supplied,
+every column is read as text and the declared types are applied
+afterwards, in R; without it, column types are inferred.}
 }
 \value{
 An Arrow Table containing the file's contents.
 
-A tibble containing the contents of the file if the filename
-matches; otherwise, returns \code{NULL}.
+An Arrow Table with the file's contents (the base method only
+aborts: it is implemented by the concrete subclasses).
 
-A tibble containing the contents of the file if the filename
-matches; otherwise, returns \code{NULL}.
+An Arrow Table with the file's contents.
 
-A tibble containing the contents of the file if the filename
-matches; otherwise, returns \code{NULL}.
+An Arrow Table with the file's contents.
 
-A tibble containing the contents of the file if the filename
-matches; otherwise, returns \code{NULL}.
+An Arrow Table with the file's contents.
 }
 \description{
 Reads a data file using the parameters specified in a

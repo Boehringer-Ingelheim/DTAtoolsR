@@ -2,7 +2,7 @@ test_that("DTADataSetFile validates readable, non-empty files", {
   path <- tempfile(fileext = ".txt")
   writeLines("hello world", path)
 
-  ds <- DTADataSetFile(name = "notes", paths = path)
+  ds <- DTADataSetFile(id = "notes", paths = path)
   ds <- check(ds, quiet = TRUE)
 
   status <- validation_status(ds)
@@ -25,7 +25,7 @@ test_that("DTADataSetFile reports missing or unreadable files", {
     unlink(path)
   }
 
-  ds <- DTADataSetFile(name = "missing_file", paths = path)
+  ds <- DTADataSetFile(id = "missing_file", paths = path)
   ds <- check(ds, quiet = TRUE)
 
   status <- validation_status(ds)
@@ -50,7 +50,7 @@ test_that("DTADataSetFile flags an existing but empty file", {
   file.create(path)
   on.exit(unlink(path), add = TRUE)
 
-  ds <- check(DTADataSetFile(name = "empty_file", paths = path), quiet = TRUE)
+  ds <- check(DTADataSetFile(id = "empty_file", paths = path), quiet = TRUE)
 
   status <- validation_status(ds)
   expect_false(status$ok)
@@ -72,7 +72,7 @@ test_that("DTADataSetFile keeps two paths that share a basename apart", {
   absent <- file.path(dir_b, "same.txt")
 
   ds <- check(
-    DTADataSetFile(name = "collision", paths = c(present, absent)),
+    DTADataSetFile(id = "collision", paths = c(present, absent)),
     quiet = TRUE
   )
 
@@ -121,7 +121,7 @@ test_that("DTA results and messages combine tabular and file datasets", {
     unlink(missing_path)
   }
 
-  file_ds <- DTADataSetFile(name = "attachment", paths = missing_path)
+  file_ds <- DTADataSetFile(id = "attachment", paths = missing_path)
   dta@datasets[["attachment"]] <- file_ds
 
   dta <- check(dta, persist = FALSE, quiet = TRUE)
@@ -149,7 +149,7 @@ test_that("load_file() binds a path and records the key as basename WITH extensi
   writeLines("content", path)
   on.exit(unlink(path), add = TRUE)
 
-  ds <- DTADataSetFile(name = "delivery", paths = character())
+  ds <- DTADataSetFile(id = "delivery", paths = character())
   # No paths yet; add a handler first
   ds@files <- list(DTAFileAny(filename = basename(path)))
   ds <- load_file(ds, file = path, handler_index = 1)
@@ -170,7 +170,7 @@ test_that("load_file() via DTA-level call reaches a DTADataSetFile dataset", {
   on.exit(unlink(path), add = TRUE)
 
   h <- DTAFileAny(filename = basename(path))
-  ds <- DTADataSetFile(name = "file_ds", files = list(h))
+  ds <- DTADataSetFile(id = "file_ds", files = list(h))
   dta <- DTA(datasets = list(file_ds = ds))
 
   dta2 <- load_file(dta, dataset = "file_ds", file = path, handler_index = 1)
@@ -191,7 +191,7 @@ test_that("a DTA-level load without an explicit name still replaces, not appends
   on.exit(unlink(path), add = TRUE)
 
   ds <- DTADataSetFile(
-    name = "file_ds",
+    id = "file_ds",
     files = list(DTAFileAny(filename = basename(path)))
   )
   dta <- DTA(datasets = list(file_ds = ds))
@@ -211,7 +211,7 @@ test_that("a DTA-level load into a tabular dataset still names the table without
   # not change what a tabular dataset calls its table.
   file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
   ds <- DTADataSetTabular(
-    name = "tab",
+    id = "tab",
     specs = create_example_DTAColumnSpecCollection(1),
     files = list(DTAFileCSV(filename = "clinical_data.csv"))
   )
@@ -236,7 +236,7 @@ test_that("re-loading the same name replaces rather than appends", {
   writeLines("v2", path2)
 
   h <- DTAFileAny(filename = fname)
-  ds <- DTADataSetFile(name = "delivery", files = list(h))
+  ds <- DTADataSetFile(id = "delivery", files = list(h))
   ds <- load_file(ds, file = path1, handler_index = 1)
   ds <- check(ds, quiet = TRUE)
 
@@ -256,7 +256,7 @@ test_that("re-loading the same name replaces rather than appends", {
 
 test_that("load_file() aborts on a non-matching filename", {
   h <- DTAFileAny(filename = "expected.txt")
-  ds <- DTADataSetFile(name = "delivery", files = list(h))
+  ds <- DTADataSetFile(id = "delivery", files = list(h))
 
   expect_error(
     load_file(ds, file = "/some/dir/other.txt", handler_index = 1),
@@ -266,7 +266,7 @@ test_that("load_file() aborts on a non-matching filename", {
 
 test_that("load_file() aborts on an out-of-range handler_index", {
   h <- DTAFileAny(filename = "any.txt")
-  ds <- DTADataSetFile(name = "delivery", files = list(h))
+  ds <- DTADataSetFile(id = "delivery", files = list(h))
 
   expect_error(
     load_file(ds, file = "/dir/any.txt", handler_index = 5),
@@ -293,7 +293,7 @@ test_that("clear_validation() clears a single target and leaves others", {
   writeLines("b", p2)
 
   ds <- check(
-    DTADataSetFile(name = "two_files", paths = c(p1, p2)),
+    DTADataSetFile(id = "two_files", paths = c(p1, p2)),
     quiet = TRUE
   )
   expect_equal(nrow(validation_status(ds)), 2)
@@ -310,7 +310,7 @@ test_that("clear_validation() with no tables clears all", {
   writeLines("x", path)
   on.exit(unlink(path), add = TRUE)
 
-  ds <- check(DTADataSetFile(name = "d", paths = path), quiet = TRUE)
+  ds <- check(DTADataSetFile(id = "d", paths = path), quiet = TRUE)
   expect_equal(nrow(validation_status(ds)), 1)
 
   ds2 <- clear_validation(ds)
@@ -327,7 +327,7 @@ test_that("clear_validation(remove_artifacts=TRUE) unlinks the artifact file", {
   on.exit(unlink(art_dir, recursive = TRUE), add = TRUE)
 
   ds <- check(
-    DTADataSetFile(name = "d", paths = path),
+    DTADataSetFile(id = "d", paths = path),
     persist = TRUE,
     artifact_dir = art_dir,
     quiet = TRUE
@@ -347,7 +347,7 @@ test_that("clear_validation(remove_artifacts=TRUE) unlinks the artifact file", {
 # ---------------------------------------------------------------------------
 
 test_that("validation_status() on an empty DTADataSetFile is a zero-row data.frame", {
-  ds <- DTADataSetFile(name = "empty_ds", paths = character())
+  ds <- DTADataSetFile(id = "empty_ds", paths = character())
   vs <- validation_status(ds)
 
   expect_true(is.data.frame(vs))
@@ -356,7 +356,7 @@ test_that("validation_status() on an empty DTADataSetFile is a zero-row data.fra
 })
 
 test_that("check() on a DTA with an empty DTADataSetFile does not error", {
-  ds <- DTADataSetFile(name = "empty_ds", paths = character())
+  ds <- DTADataSetFile(id = "empty_ds", paths = character())
   dta <- DTA(datasets = list(empty_ds = ds))
 
   # Must not error even though there is nothing to validate
@@ -372,7 +372,7 @@ test_that("DTADataSetFile(paths=f)@files[[1]] is a DTAFileAny", {
   writeLines("x", path)
   on.exit(unlink(path), add = TRUE)
 
-  ds <- DTADataSetFile(name = "d", paths = path)
+  ds <- DTADataSetFile(id = "d", paths = path)
   expect_s3_class(ds@files[[1]], "DTAtools::DTAFileAny")
 })
 
@@ -380,7 +380,7 @@ test_that("DTADataSetFile coerces a reader handler (DTAFileCSV) into a DTAFileAn
   # A file dataset never parses anything, so a reader handler is meaningless
   # here -- it used to construct successfully and then abort deep inside
   # check() with "This method is not implemented", naming the wrong problem.
-  ds <- DTADataSetFile(name = "d", files = list(DTAFileCSV(filename = "a.csv")))
+  ds <- DTADataSetFile(id = "d", files = list(DTAFileCSV(filename = "a.csv")))
 
   expect_s3_class(ds@files[[1]], "DTAtools::DTAFileAny")
   expect_false(inherits(ds@files[[1]], "DTAtools::DTAFileCSV"))
@@ -388,7 +388,7 @@ test_that("DTADataSetFile coerces a reader handler (DTAFileCSV) into a DTAFileAn
 })
 
 test_that("DTADataSetFile coerces a bare DTAFile into a DTAFileAny", {
-  ds <- DTADataSetFile(name = "d", files = list(DTAFile(filename = "a.txt")))
+  ds <- DTADataSetFile(id = "d", files = list(DTAFile(filename = "a.txt")))
 
   expect_s3_class(ds@files[[1]], "DTAtools::DTAFileAny")
   expect_equal(ds@files[[1]]@filename, "a.txt")
@@ -410,7 +410,7 @@ test_that("check() reports undelivered declared targets as failures, not a clean
   writeLines("content", path)
 
   ds <- DTADataSetFile(
-    name = "deliverables",
+    id = "deliverables",
     files = list(
       DTAFileAny(filename = "report.pdf"),
       DTAFileAny(filename = "audit.log"),
@@ -457,7 +457,7 @@ test_that("a declared filename is never resolved against the working directory",
 
   # Nothing has been delivered -- `paths` is empty -- but the cwd happens to
   # contain a real file with the declared name.
-  ds <- DTADataSetFile(name = "d", files = list(DTAFileAny(filename = "report.pdf")))
+  ds <- DTADataSetFile(id = "d", files = list(DTAFileAny(filename = "report.pdf")))
   ds <- check(ds, quiet = TRUE, persist = FALSE)
 
   status <- validation_status(ds)
@@ -471,7 +471,7 @@ test_that("check() does not crash on a handler declaring several file names", {
   # been delivered -- which aborts with a "values must be length 1" error the
   # moment a handler's `filename` carries more than one name.
   ds <- DTADataSetFile(
-    name = "d",
+    id = "d",
     files = list(
       DTAFileAny(filename = c("a.pdf", "b.pdf"), pattern = TRUE, number_of_files = 2)
     )
@@ -487,6 +487,56 @@ test_that("check() does not crash on a handler declaring several file names", {
   expect_false(any(status$ok))
 })
 
+test_that("check() still reports the undelivered name when only one of a handler's two names arrives", {
+  # Before the fix, a handler was "satisfied" (and so contributed nothing to
+  # the missing list) as soon as ANY delivered path matched ANY one of its
+  # declared names -- so delivering a.pdf hid a still-missing b.pdf entirely.
+  dir <- tempfile()
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_a <- file.path(dir, "a.pdf")
+  writeLines("content", path_a)
+
+  ds <- DTADataSetFile(
+    id = "d",
+    files = list(
+      DTAFileAny(filename = c("a.pdf", "b.pdf"), pattern = TRUE, number_of_files = 2)
+    )
+  )
+  ds <- load_file(ds, file = path_a, handler_index = 1)
+  ds <- check(ds, quiet = TRUE, persist = FALSE)
+
+  status <- validation_status(ds)
+  expect_equal(nrow(status), 2)
+  expect_setequal(status$table, c("a.pdf", "b.pdf"))
+  expect_true(status$ok[status$table == "a.pdf"])
+  expect_false(status$ok[status$table == "b.pdf"])
+})
+
+test_that("check() reports both names ok once a handler declaring two names gets both delivered", {
+  dir <- tempfile()
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_a <- file.path(dir, "a.pdf")
+  path_b <- file.path(dir, "b.pdf")
+  writeLines("content", path_a)
+  writeLines("content", path_b)
+
+  ds <- DTADataSetFile(
+    id = "d",
+    files = list(
+      DTAFileAny(filename = c("a.pdf", "b.pdf"), pattern = TRUE, number_of_files = 2)
+    )
+  )
+  ds <- load_file(ds, file = path_a, handler_index = 1)
+  ds <- load_file(ds, file = path_b, handler_index = 1)
+  ds <- check(ds, quiet = TRUE, persist = FALSE)
+
+  status <- validation_status(ds)
+  expect_equal(nrow(status), 2)
+  expect_true(all(status$ok))
+})
+
 # ---------------------------------------------------------------------------
 # load_file() key handling
 # ---------------------------------------------------------------------------
@@ -497,7 +547,7 @@ test_that("load_file() aborts when 'name' diverges from the delivered file's own
   on.exit(unlink(path), add = TRUE)
 
   h <- DTAFileAny(filename = "report.pdf")
-  ds <- DTADataSetFile(name = "d", files = list(h))
+  ds <- DTADataSetFile(id = "d", files = list(h))
 
   expect_error(
     load_file(ds, file = path, handler_index = 1, name = "different.pdf"),
@@ -523,7 +573,7 @@ test_that("redelivering one of two colliding-basename bound paths replaces, not 
   writeLines("b", path_b)
 
   h <- DTAFileAny(filename = "x.pdf")
-  ds <- DTADataSetFile(name = "d", files = list(h))
+  ds <- DTADataSetFile(id = "d", files = list(h))
   # Simulate two already-bound files sharing a basename.
   ds@file_paths <- c(path_a, path_b)
 
@@ -567,7 +617,7 @@ test_that("check() on a file dataset accepts and ignores the tabular scan contro
   writeLines("content", path)
 
   ds <- check(
-    DTADataSetFile(name = "delivery", paths = path),
+    DTADataSetFile(id = "delivery", paths = path),
     quiet = TRUE, persist = FALSE,
     batch_rows = 10L, max_errors = 1L,
     fail_fast = TRUE, on_missing_column = "stop", use_threads = FALSE
@@ -597,7 +647,7 @@ test_that("a file name containing braces checks without aborting", {
   writeLines("content", delivered)
 
   ds <- DTADataSetFile(
-    name = "delivery",
+    id = "delivery",
     paths = delivered,
     files = list(DTAFileAny(filename = "a{b}.txt"), DTAFileAny(filename = "c{d}.txt"))
   )
@@ -622,7 +672,7 @@ test_that("print() and print_short_info() survive braces in the dataset's own na
   path <- file.path(dir, "delivered.txt")
   writeLines("content", path)
 
-  ds <- DTADataSetFile(name = "d{x}", paths = path)
+  ds <- DTADataSetFile(id = "d{x}", paths = path)
 
   out <- dsf_console(expect_invisible(print(ds)))
   expect_match(out, "d{x}", fixed = TRUE)
@@ -647,7 +697,7 @@ test_that("a restored dataset whose artifact directory is gone can still be used
   writeLines("content", path)
 
   ds <- check(
-    DTADataSetFile(name = "delivery", paths = path),
+    DTADataSetFile(id = "delivery", paths = path),
     quiet = TRUE, persist = TRUE, artifact_dir = artifact_dir
   )
   expect_equal(ds@validation_artifact_dir, artifact_dir)

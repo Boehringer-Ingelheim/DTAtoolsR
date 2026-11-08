@@ -13,21 +13,23 @@
 # - future-friendly option model (select/boolean/text/number)
 # -----------------------------------------------------------------------------
 
-# Built-in creation template directory (inside package extdata).
+# Built-in template library root (inside package extdata): holds templates/,
+# parties/ and vocabulary/ folders.
 dta_creation_templates_dir <- function() {
-  system.file("extdata", "templates", package = "DTAtools")
+  system.file("extdata", "library", package = "DTAtools")
 }
 
-# Every directory searched for creation templates, in precedence order:
+# Every library ROOT searched for creation templates, in precedence order
+# (creation templates live in <root>/templates/):
 #
-# 1. getOption("DTAtools.template_dir") -- one or more directories, so a site
+# 1. getOption("DTAtools.template_dir") -- one or more library roots, so a site
 #    or a project can ship its own template family
-# 2. ./dta-templates, for a template kept next to the data it describes
-# 3. the packaged directory
+# 2. ./dta-templates, a library root kept next to the data it describes
+# 3. the packaged library
 #
-# The packaged directory sits inside the installed library, which users cannot
+# The packaged library sits inside the installed library, which users cannot
 # write to and which a reinstall wipes, so it cannot be the only place a
-# template may live. Earlier directories win a basename collision.
+# template may live. Earlier roots win a basename collision.
 dta_creation_template_dirs <- function() {
   dirs <- c(
     as.character(getOption("DTAtools.template_dir") %||% character(0)),
@@ -35,17 +37,18 @@ dta_creation_template_dirs <- function() {
     dta_creation_templates_dir()
   )
   dirs <- dirs[nzchar(dirs)]
-  dirs[dir.exists(dirs)]
+  dirs <- dirs[dir.exists(dirs)]
+  unique(dirs)
 }
 
-# List available creation-template files by basename, across every search
-# directory. Templates end in ".dta-template.yaml" or ".dta-template.yml". A
-# basename present in more than one directory is listed once and resolves to
-# the earliest.
+# List available creation-template files by basename, across every library
+# root's templates/ folder. Templates end in ".dta-template.yaml" or
+# ".dta-template.yml". A basename present in more than one root is listed once
+# and resolves to the earliest.
 list_dta_creation_templates <- function() {
   files <- unlist(
     lapply(
-      dta_creation_template_dirs(),
+      file.path(dta_creation_template_dirs(), "templates"),
       list.files,
       pattern = "\\.dta-template\\.ya?ml$",
       ignore.case = TRUE,
@@ -65,7 +68,7 @@ get_dta_creation_template_path <- function(template_name) {
   }
   nm <- basename(template_name)
   for (dir in dta_creation_template_dirs()) {
-    full <- file.path(dir, nm)
+    full <- file.path(dir, "templates", nm)
     if (file.exists(full)) {
       return(full)
     }
@@ -97,7 +100,12 @@ read_dta_creation_template <- function(template_path) {
     # as "replace the parent's with nothing" -- silently wiping every field the
     # parent set. Absent and empty must stay distinguishable, so absent has to
     # be legal here.
-    inherits_from <- nzchar(as.character(def$extends %||% ""))
+    #
+    # Listing `mixins:` counts as inheriting for the same reason: the mixins
+    # supply the sections. dta_template_mixin_refs() also enforces the list
+    # shape here, so a malformed `mixins:` is a read error, not a late surprise.
+    inherits_from <- nzchar(as.character(def$extends %||% "")) ||
+      length(dta_template_mixin_refs(def)) > 0
 
     if (!is.list(def$base) && !inherits_from) {
       stop("Template must contain a 'base' section.")
@@ -113,7 +121,10 @@ read_dta_creation_template <- function(template_path) {
     if (!("datasets" %in% names(def)) && !is.null(def$base$datasets)) {
       def$datasets <- def$base$datasets
     }
-    if (length(def$datasets %||% list()) == 0 && !inherits_from) {
+    # Abstract bases may provide only shared metadata. A concrete descendant
+    # must still supply or inherit a dataset, checked after resolution below.
+    if (length(def$datasets %||% list()) == 0 && is.null(def$variants) &&
+      !inherits_from && !isTRUE(def$abstract)) {
       stop("Template must define at least one dataset in datasets or base.datasets.")
     }
     # `id` is the one field that is never inherited -- every template file must
@@ -136,11 +147,93 @@ read_dta_creation_template <- function(template_path) {
 # key is how a child says "inherit", and a default written in ahead of the
 # merge turns that into an override with the default.
 dta_template_finalize_def <- function(def) {
+  dta_template_validate_variants(def)
+  if (length(def$datasets %||% list()) == 0 && is.null(def$variants) && !isTRUE(def$abstract)) {
+    cli::cli_abort("Template must define at least one dataset in datasets or base.datasets.")
+  }
   def$label <- as.character(def$label %||% def$id %||% "")
   def$description <- as.character(def$description %||% "")
   def$datasets <- def$datasets %||% list()
   def$options <- def$options %||% list()
   def
+}
+
+# A structural choice is deliberately separate from editable metadata options.
+# Every choice supplies a complete dataset list; there is no implicit platform.
+dta_template_validate_variants <- function(def) {
+  spec <- def$variants
+  if (is.null(spec)) {
+    return(invisible(NULL))
+  }
+  scalar <- function(x) is.character(x) && length(x) == 1L && !is.na(x) && nzchar(x)
+  if (!dta_template_is_mapping(spec) ||
+    length(setdiff(names(spec), c("id", "label", "choices"))) > 0 ||
+    !scalar(spec$id) || is.null(spec$choices) ||
+    !is.list(spec$choices) || length(spec$choices) == 0 || !is.null(names(spec$choices))) {
+    cli::cli_abort("Template variants must declare an id and a sequence of choices.")
+  }
+  if (!is.null(spec$label) && !scalar(spec$label)) {
+    cli::cli_abort("Template variant {.val {spec$id}} must have a nonempty label.")
+  }
+  option_ids <- vapply(def$options %||% list(), function(opt) as.character(opt$id %||% ""), character(1))
+  if (spec$id %in% option_ids) {
+    cli::cli_abort("Template variant {.val {spec$id}} conflicts with a metadata option id.")
+  }
+  values <- character(0)
+  for (choice in spec$choices) {
+    if (!dta_template_is_mapping(choice) || !scalar(choice$value) ||
+      choice$value %in% c("__blank__", "__custom__") ||
+      length(setdiff(names(choice), c("value", "label", "source", "base", "options", "datasets"))) > 0) {
+      cli::cli_abort("Template variant {.val {spec$id}} contains an invalid choice.")
+    }
+    if ((!is.null(choice$label) && !scalar(choice$label)) ||
+      !is.list(choice$datasets) || length(choice$datasets) == 0 ||
+      !is.null(names(choice$datasets)) ||
+      (!is.null(choice$base) && !is.list(choice$base)) ||
+      (!is.null(choice$options) && !is.list(choice$options)) ||
+      (!is.null(choice$source) && !dta_template_is_mapping(choice$source))) {
+      cli::cli_abort("Template variant {.val {spec$id}} choice {.val {choice$value}} must supply datasets and valid metadata/options.")
+    }
+    if (choice$value %in% values) {
+      cli::cli_abort("Template variant {.val {spec$id}} repeats choice {.val {choice$value}}.")
+    }
+    values <- c(values, choice$value)
+    merged_options <- dta_template_merge_options(def$options %||% list(), choice$options %||% list())
+    if (spec$id %in% vapply(merged_options, function(opt) as.character(opt$id %||% ""), character(1))) {
+      cli::cli_abort("Template variant {.val {spec$id}} conflicts with a metadata option id.")
+    }
+  }
+  invisible(NULL)
+}
+
+resolve_template_variant <- function(def, selections = list()) {
+  def <- attr(def, "variant_definition") %||% def
+  dta_template_validate_variants(def)
+  spec <- def$variants
+  if (is.null(spec)) {
+    return(def)
+  }
+  value <- selections[[spec$id]]
+  values <- vapply(spec$choices, function(choice) choice$value, character(1))
+  if (!is.character(value) || length(value) != 1L || is.na(value) || !(value %in% values)) {
+    cli::cli_abort(
+      "Choose a supported value for template variant {.val {spec$id}}: {paste(values, collapse = ', ')}."
+    )
+  }
+  choice <- spec$choices[[match(value, values)]]
+  resolved <- def
+  resolved$base <- if ("base" %in% names(choice)) {
+    dta_template_merge_value(def$base %||% list(), choice$base)
+  } else {
+    def$base
+  }
+  resolved$options <- dta_template_merge_options(def$options %||% list(), choice$options %||% list())
+  resolved$datasets <- choice$datasets
+  attr(resolved, "variant_definition") <- def
+  attr(resolved, "variant_selection") <- list(
+    id = spec$id, value = value, source = choice$source
+  )
+  resolved
 }
 
 # yaml handlers that keep every scalar number as the text the author wrote.
@@ -306,36 +399,55 @@ dta_template_list_fields <- function() {
   )]
 }
 
+# TRUE when `path` resolves to somewhere strictly inside `root`. Both sides are
+# normalized first, so ".." components, mixed slash styles and a symlink or
+# junction pointing out of `root` are all resolved before the comparison. The
+# trailing slash forced onto `root` is what stops a sibling whose name merely
+# starts with it -- "<root>2/x" against root "<root>" -- from counting as
+# inside. `root` itself is therefore NOT under `root`, which no caller needs:
+# a dataset reference always names a file.
+.dta_path_under <- function(path, root) {
+  path <- normalizePath(path, winslash = "/", mustWork = FALSE)
+  root <- normalizePath(root, winslash = "/", mustWork = FALSE)
+  root <- paste0(sub("/+$", "", root), "/")
+  startsWith(path, root)
+}
+
 # Resolve a dataset reference from template YAML.
+#
+# A dataset reference is document content, not configuration: it comes
+# straight out of a template file that may itself have come from anywhere
+# (a git-fetched template repository, a user upload). It may therefore only
+# ever name a file inside the directory the template was found in, or a
+# bundled file by bare name -- never an arbitrary path elsewhere on disk. An
+# absolute ref and any ".." that climbs out of the template directory both
+# resolve to nothing rather than to whatever they happen to point at.
+#
 # Resolution order:
-# 1) absolute path
-# 2) relative to template file directory
-# 3) package extdata root
+# 1) relative to template file directory, and still inside it
+# 2) package extdata root, by basename only
+# source: is relative to the template file's folder (<library root>/templates/);
+# supporting files must stay inside that folder too.
 resolve_template_dataset_path <- function(ref, template_path) {
   if (is.null(ref) || !nzchar(ref)) {
     return("")
   }
-  # 1) absolute only. A bare relative name must NOT be resolved against the
-  # process working directory: the app's cwd is wherever it happened to be
-  # launched from, so a packaged template asking for "gf_dataset.yaml" could
-  # otherwise silently pick up an unrelated file of that name and quietly build
-  # a different DTA. R.utils::isAbsolutePath() gets Windows drive letters and
-  # UNC paths right, which a hand-rolled regex does not.
-  if (R.utils::isAbsolutePath(ref) && file.exists(ref)) {
-    return(normalizePath(ref, winslash = "/", mustWork = TRUE))
-  }
-
-  # 2) relative to template file
+  # 1) relative to template file, and constrained to stay there. A bare
+  # relative name must NOT be resolved against the process working directory:
+  # the app's cwd is wherever it happened to be launched from, so a packaged
+  # template asking for "gf_dataset.yaml" could otherwise silently pick up an
+  # unrelated file of that name and quietly build a different DTA.
   td <- dirname(template_path %||% "")
   if (nzchar(td)) {
     p2 <- file.path(td, ref)
-    if (file.exists(p2)) {
+    if (file.exists(p2) && .dta_path_under(p2, td)) {
       return(normalizePath(p2, winslash = "/", mustWork = TRUE))
     }
   }
 
-  # 3) package extdata root
-  p3 <- system.file("extdata", ref, package = "DTAtools")
+  # 2) package extdata root, by basename -- a reference cannot reach outside
+  # this directory either.
+  p3 <- system.file("extdata", basename(ref), package = "DTAtools")
   if (nzchar(p3) && file.exists(p3)) {
     return(normalizePath(p3, winslash = "/", mustWork = TRUE))
   }
@@ -370,7 +482,9 @@ dta_template_choices <- function(opt) {
 # Returns "" for an option that fans out to several paths -- there is no one
 # value for such an option to inherit.
 dta_template_option_path <- function(opt) {
-  eff <- opt$effects %||% list()
+  # `[[`, not `$`: `$effects` partially matches `effects_all`, which would
+  # stand in for a missing `effects:` and hide the option's `target:`.
+  eff <- opt[["effects"]] %||% list()
   if (length(eff) > 0) {
     # An explicit effects block wins over `target:` in collect_option_effects(),
     # so the inherited default has to follow the same precedence -- otherwise an
@@ -571,6 +685,17 @@ apply_template_metadata_path <- function(dta, path, value) {
         top, path
       ))
     }
+    # An optional identity option left blank means "not supplied", not a
+    # supplied invalid ID. Only these leaf effects interpret blank as removal;
+    # base.metadata.study and direct constructor/YAML input stay strict.
+    if (
+      identical(top, "study") && length(tail_keys) == 1L &&
+        tail_keys %in% c("id", "protocol_id") &&
+        is.character(value) && length(value) == 1L && is.null(dim(value)) &&
+        !is.na(value) && !nzchar(trimws(value, whitespace = "[\\h\\v]"))
+    ) {
+      value <- NULL
+    }
     current <- tryCatch(S7::prop(md, top), error = function(e) NULL) %||% list()
     S7::prop(md, top) <- list_set_path(current, tail_keys, value)
   } else {
@@ -625,7 +750,8 @@ effect_key_candidates <- function(selected_value) {
 collect_option_effects <- function(opt, selected_value) {
   out <- list()
 
-  eff <- opt$effects %||% list()
+  # `[[`, not `$`: see dta_template_option_path() above.
+  eff <- opt[["effects"]] %||% list()
   target <- as.character(opt[["target"]] %||% "")
   if (length(eff) == 0 && nzchar(target)) {
     # `target:` is shorthand for what almost every option actually wants --
@@ -719,20 +845,22 @@ apply_template_expressions <- function(dta) {
 # Build a new DTA object from a creation template + selected option values.
 #
 # `selections` is a named list keyed by option id (unchanged from before this
-# function grew the four arguments below).
+# function grew the five arguments below).
 #
-# The four new arguments each default to exactly what reproduces the ORIGINAL
+# The five new arguments each default to exactly what reproduces the ORIGINAL
 # behaviour of this function -- every one of the 55 tests that predate them
-# calls this with none of the four set, and must keep passing unmodified:
+# calls this with none of the five set, and must keep passing unmodified:
 #
 #   index            when supplied, `datasets:` entries are built via
 #                    build_template_datasets() (template_create.R), which
 #                    additionally understands a `template:` entry (built from
 #                    a dataset template resolved through `index`) on top of
-#                    the three legacy forms. When NULL (the default), dataset
-#                    building takes the ORIGINAL inline code path below,
-#                    verbatim -- so a `template:` entry is simply unreachable
-#                    without an index, exactly as it always has been.
+#                    the three legacy forms. When NULL (the default), the
+#                    index is built on demand (dta_template_index_cached())
+#                    only if a `template:` entry, a vocabulary slot or a
+#                    vocabulary binding needs it; a template using just the
+#                    legacy forms never builds one and takes the ORIGINAL
+#                    inline code path below, verbatim.
 #   carry_over       list(metadata = <DTAMetaData>, fields = <character>) --
 #                    an ancestor document's metadata to carry onto this one
 #                    (see apply_metadata_carry_over(), template_create.R).
@@ -749,12 +877,17 @@ apply_template_expressions <- function(dta) {
 #                    all -- exactly the pre-existing behaviour, since
 #                    @template did not exist as a settable concept before this
 #                    file's own history.
+#   vocab_selections named list, vocabulary slot id -> chosen vocabulary.
+#                    NULL (default) selects nothing, so every slot keeps its
+#                    declared default (see resolve_vocabulary_slot_overrides()).
 #
-# The ORDER these six steps run in is the contract, and is deliberately NOT
+# The ORDER these steps run in is the contract, and is deliberately NOT
 # "whatever order was easiest to bolt on":
 #
 #   1. datasets   2. base.metadata   3. carry-over   4. party slots
 #   5. options    6. ${version}      7. provenance (LAST)
+#
+# (a `required:` check on the selections also runs, as 6a, after ${version}.)
 #
 # Carry-over (3) runs before party slots (4) and options (5) so that a value
 # THIS document's own author actively chooses always beats whatever an
@@ -770,6 +903,7 @@ create_dta_from_template <- function(template_def, template_path, selections = l
                                      vocab_selections = NULL) {
   dta_try({
     if (!is.list(template_def)) stop("Template definition is invalid.")
+    template_def <- resolve_template_variant(template_def, selections)
     # ${today} is known upfront and has to be resolved BEFORE base metadata is
     # applied: metadata.date is a Date property, so an unresolved token would be
     # rejected as an invalid date long before any post-pass could see it.
@@ -980,6 +1114,8 @@ create_dta_from_template <- function(template_def, template_path, selections = l
     # `base.metadata` or an option effect, and routing the ENGINE's own write
     # through the same gate would defeat the very check it exists to enforce.
     if (!is.null(provenance)) {
+      variant <- attr(template_def, "variant_selection")
+      if (!is.null(variant)) provenance$variant <- variant
       # The caller assembles the provenance record BEFORE calling this
       # function, which means its `datasets` section was computed from a
       # separate build. Overwrite it with what step 1 actually produced.

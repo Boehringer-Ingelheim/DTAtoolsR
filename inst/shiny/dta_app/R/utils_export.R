@@ -57,16 +57,27 @@ find_chrome_binary <- function() {
 markdown_to_pdf_via_chrome <- function(md_file, pdf_file,
                                        chrome = find_chrome_binary()) {
   if (!nzchar(chrome)) {
-    stop("No Chrome or Edge browser was found for PDF printing.")
+    cli::cli_abort("No Chrome or Edge browser was found for PDF printing.")
   }
   if (!requireNamespace("rmarkdown", quietly = TRUE) ||
     !rmarkdown::pandoc_available()) {
-    stop("pandoc is not available to render Markdown to HTML.")
+    cli::cli_abort("pandoc is not available to render Markdown to HTML.")
   }
 
   html_file <- sub("\\.[^.]+$", ".html", pdf_file)
   header_file <- tempfile(fileext = ".html")
   writeLines(c(
+    # Defence in depth behind the pandoc reader below: the page may run no
+    # script and load no plugin, whatever reaches it. A meta CSP is what
+    # actually does this -- tested 2026-11-04 with headless Edge:
+    # `--disable-javascript` is not a Chromium switch (scripts still ran), and
+    # `--blink-settings=scriptEnabled=false` blocks scripts but also stops
+    # --print-to-pdf from writing anything.
+    # default-src 'none' also stops every fetch the page could make -- an
+    # image, frame or stylesheet URL planted in document text would otherwise
+    # be requested by the server (SSRF) or read off its disk via file:///.
+    # Only the inline <style> below and pandoc's own inline styles may apply.
+    "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data:; style-src 'unsafe-inline'\">",
     "<style>",
     "@page { margin: 1.6cm; }",
     "body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11pt;",
@@ -81,11 +92,25 @@ markdown_to_pdf_via_chrome <- function(md_file, pdf_file,
   ), header_file)
   on.exit(unlink(c(html_file, header_file), force = TRUE), add = TRUE)
 
+  # md_file is markdown built from document text a third party controls
+  # (metadata title, dataset description, error_handling, contact names,
+  # ...), so the reader is pinned to a dialect without raw passthrough --
+  # left at the default "markdown" reader, a `\input{}` planted in any of
+  # those fields reads a server-side file into the PDF, and a `<script>`
+  # in one runs in the headless browser this HTML is about to be printed by.
+  # Images are dropped as well (pandoc_no_images_filter()): raw passthrough
+  # is off, but markdown image syntax is not raw and still becomes an <img>.
+  no_images <- pandoc_no_images_filter()
+  on.exit(unlink(no_images), add = TRUE)
   rmarkdown::pandoc_convert(
     input = normalizePath(md_file),
+    from = "markdown-raw_tex-raw_html-raw_attribute",
     to = "html5",
     output = html_file,
-    options = c("--standalone", "--include-in-header", header_file)
+    options = c(
+      "--standalone", "--include-in-header", header_file,
+      "--lua-filter", no_images
+    )
   )
 
   udd <- file.path(
@@ -119,40 +144,145 @@ markdown_to_pdf_via_chrome <- function(md_file, pdf_file,
     ok <- tryCatch(print_pdf("--headless"), error = function(e) FALSE)
   }
   if (!isTRUE(ok) || !file.exists(pdf_file)) {
-    stop("The headless browser did not produce a PDF file.")
+    cli::cli_abort("The headless browser did not produce a PDF file.")
   }
   pdf_file
 }
 
-# List available custom templates from the templates directory
-list_available_templates <- function() {
-  templates_dir <- system.file("extdata", "templates", package = "DTAtools")
-  if (!dir.exists(templates_dir)) {
-    return(character(0))
+# Path of a fresh pandoc Lua filter that replaces every image with its alt
+# text; the caller unlinks it. No exported document carries an image of its
+# own, so any image in the markdown came from document text a third party
+# controls -- and pandoc's PDF route downloads a remote image server-side
+# (SSRF) while LaTeX embeds any local image path it is given.
+pandoc_no_images_filter <- function() {
+  path <- tempfile("dta-no-images-", fileext = ".lua")
+  writeLines("function Image(el) return el.caption end", path)
+  path
+}
+
+# The placeholder-token grammar for template files, a sibling of
+# .tv_token_pattern() in R/exportTemplateDocx.R. It differs in two ways: it
+# does not accept the `#`/`/` region-marker prefix (`{#DATASETS}`), and its
+# optional `:DATASET` argument (e.g. `{COLUMN_SPECS:ADSL}`) must be non-empty.
+.template_placeholder_pattern <- "\\{[A-Za-z_][A-Za-z0-9_]*(?::[^{}]+)?\\}"
+
+# Does this .docx contain at least one {PLACEHOLDER} marker?
+#
+# The word-templates directory also holds dta_numbered_template.docx, which is not a
+# fill-in template at all: it is the reference document the *built-in* layout
+# opens for its numbered heading styles, and it contains no placeholders. Offered
+# in the export dialog it produces a Word file with none of the user's DTA in it,
+# silently. Rather than blocklisting that one name -- which would let the next
+# styles-only reference document reintroduce the same trap -- a candidate has to
+# prove it has something to fill.
+#
+# The scan reads paragraph *text*, not the raw XML: Word freely splits a typed
+# placeholder across runs, so a raw grep on document.xml misses tokens that the
+# exporter itself has no trouble with.
+template_has_placeholders <- function(path) {
+  if (is.null(path) || length(path) != 1L || is.na(path) || !nzchar(path) ||
+    !file.exists(path)) {
+    return(FALSE)
   }
-  files <- list.files(templates_dir, pattern = "\\.docx$", full.names = FALSE)
-  sort(files)
+
+  temp_dir <- tempfile("dta_template_scan_")
+  dir.create(temp_dir)
+  on.exit(unlink(temp_dir, recursive = TRUE, force = TRUE), add = TRUE)
+
+  extracted <- tryCatch(
+    utils::unzip(path, exdir = temp_dir),
+    warning = function(w) character(0),
+    error = function(e) character(0)
+  )
+  if (length(extracted) == 0) {
+    return(FALSE)
+  }
+
+  word_dir <- file.path(temp_dir, "word")
+  main <- file.path(word_dir, "document.xml")
+  parts <- c(
+    if (file.exists(main)) main,
+    list.files(
+      word_dir,
+      pattern = "^(header|footer)[0-9]*\\.xml$",
+      full.names = TRUE
+    )
+  )
+
+  texts <- unlist(lapply(parts, function(part) {
+    doc <- tryCatch(xml2::read_xml(part), error = function(e) NULL)
+    if (is.null(doc)) {
+      return(character(0))
+    }
+    xml2::xml_text(xml2::xml_find_all(doc, ".//*[local-name()='p']"))
+  }))
+
+  any(grepl(.template_placeholder_pattern, texts, perl = TRUE))
+}
+
+# Word templates the Export dialog may offer: a named character vector whose
+# values are what the dialog sends back and whose names are the labels shown.
+#   * bundled templates (inst/extdata/word-templates, only those with placeholders),
+#     value = file name -- unless the library config switches them off;
+#   * the library's own .docx files from dta-app.yaml, value = "library:<file
+#     name>" (the prefix keeps the two namespaces apart), label from the config.
+# `cfg` is the normalised app config (R/app_config.R); the default reproduces
+# the stock app.
+list_available_templates <- function(cfg = dta_app_config_defaults()) {
+  out <- character(0)
+  templates_dir <- system.file("extdata", "word-templates", package = "DTAtools")
+  if (isTRUE(cfg$exports$bundled_word_templates) && dir.exists(templates_dir)) {
+    files <- list.files(templates_dir, pattern = "\\.docx$", full.names = FALSE)
+    keep <- vapply(
+      files,
+      function(f) isTRUE(template_has_placeholders(file.path(templates_dir, f))),
+      logical(1)
+    )
+    files <- sort(files[keep], method = "radix")
+    out <- stats::setNames(files, files)
+  }
+  lib <- cfg$exports$word_templates
+  if (!is.null(lib) && nrow(lib) > 0) {
+    values <- paste0("library:", basename(lib$path))
+    first <- !duplicated(values) # two files of one name: the first wins
+    if (!all(first)) {
+      dup <- unique(basename(lib$path)[!first])
+      cli::cli_warn(c(
+        "Word templates with the same file name in the library: only the first is offered.",
+        "i" = "Duplicate file name{?s}: {.file {dup}}."
+      ))
+    }
+    out <- c(out, stats::setNames(values[first], lib$label[first]))
+  }
+  out
 }
 
 # Get full path to a template by name.
 # `template_name` arrives from a selectInput, but a Shiny client is not bound by
 # the offered choices and can send any string over the websocket, so the name is
-# checked for membership in the bundled set rather than pasted into a path. The
+# checked for membership in the offered set rather than pasted into a path. The
 # match is exact, not basename()-normalised: the client must echo one of the
-# offered names verbatim, so any string carrying a path separator fails outright
+# offered values verbatim, so any string carrying a path separator fails outright
 # instead of being silently repaired into a hit. Without this, a traversal would
 # resolve to an arbitrary server-side file that export_with_template() then
-# renders and hands back as a download.
-get_template_path <- function(template_name) {
+# renders and hands back as a download. Library templates resolve to the path
+# the config parser already confined to the library folder.
+get_template_path <- function(template_name, cfg = dta_app_config_defaults()) {
   if (is.null(template_name) || length(template_name) != 1L ||
     is.na(template_name) || !nzchar(template_name)) {
     return(NULL)
   }
-  if (!(template_name %in% list_available_templates())) {
+  if (!(template_name %in% unname(list_available_templates(cfg)))) {
     return(NULL)
   }
-  templates_dir <- system.file("extdata", "templates", package = "DTAtools")
-  full_path <- file.path(templates_dir, template_name)
+  if (startsWith(template_name, "library:")) {
+    lib <- cfg$exports$word_templates
+    hit <- which(paste0("library:", basename(lib$path)) == template_name)
+    full_path <- lib$path[hit[[1]]]
+  } else {
+    templates_dir <- system.file("extdata", "word-templates", package = "DTAtools")
+    full_path <- file.path(templates_dir, template_name)
+  }
   if (file.exists(full_path)) full_path else NULL
 }
 
@@ -162,7 +292,10 @@ embed_yaml_markdown <- function(markdown_text, dta) {
   if (!res$ok) {
     return(markdown_text) # Return unchanged if YAML extraction fails
   }
-  yaml_text <- res$value
+  # An HTML comment ends at the first "-->" (or "--!>"); a value containing
+  # one would close it early and expose everything after it as live markdown
+  # and HTML to whatever renders the file. Only that sequence is altered.
+  yaml_text <- gsub("--(!?)>", "--\\1&gt;", res$value)
   yaml_block <- paste(
     "",
     "<!-- ========== EMBEDDED DTA YAML (Machine-Readable, Do Not Edit) ==========",
@@ -171,6 +304,24 @@ embed_yaml_markdown <- function(markdown_text, dta) {
     sep = "\n"
   )
   paste0(markdown_text, yaml_block)
+}
+
+# Neutralise spreadsheet formulas in a data frame bound for CSV/TSV: a text
+# cell starting with = + - @ (or a tab / carriage return) is executed as a
+# formula when the file is opened in Excel, and these cells carry column names
+# and values straight out of an uploaded data file. A leading apostrophe makes
+# the spreadsheet show the text as text. XLSX is written as typed strings and
+# needs none of this.
+csv_formula_safe <- function(df) {
+  for (nm in names(df)) {
+    x <- df[[nm]]
+    if (is.factor(x)) x <- as.character(x)
+    if (!is.character(x)) next
+    hit <- !is.na(x) & grepl("^[-=+@\t\r]", x)
+    x[hit] <- paste0("'", x[hit])
+    df[[nm]] <- x
+  }
+  df
 }
 
 # Format a single-line summary of datasets
@@ -194,139 +345,68 @@ format_datasets_summary <- function(dta) {
   )
 }
 
-# Format detailed dataset information with specs and rules (markdown format).
-# Uses the app's canonical list-extractors (dta_column_to_list / dta_rule_to_list)
-# so it stays consistent with the editor/YAML view and never coerces raw S7
-# objects to character (which throws "cannot coerce type 'object'").
-format_datasets_detail <- function(dta) {
-  dta_names <- dta_dataset_names(dta)
-  if (length(dta_names) == 0) {
-    return("")
-  }
+# What the Export dialog may offer under an app config. `exports.document`
+# lists the allowed kinds: markdown, markdown_pdf (Markdown rendered to PDF),
+# word (the built-in layout) and word_template (a template picked from the
+# list). A word_template with no template to pick counts as not offered.
+# Returns the dialog's choices plus `allowed()`, the same rule applied to the
+# values export_do receives, so the dialog and the server cannot disagree.
+export_document_options <- function(cfg = dta_app_config_defaults()) {
+  doc <- cfg$exports$document
+  templates <- list_available_templates(cfg)
+  md_plain <- "markdown" %in% doc
+  md_pdf <- "markdown_pdf" %in% doc
+  word_builtin <- "word" %in% doc
+  word_tmpl <- "word_template" %in% doc && length(templates) > 0
+  has_md <- md_plain || md_pdf
+  has_word <- word_builtin || word_tmpl
 
-  lines <- character(0)
+  fmt_choices <- c(
+    if (has_md) c("Markdown" = "markdown"),
+    if (has_word) c("Word Document" = "word")
+  )
+  mode_choices <- c(
+    if (word_builtin) c("Use built-in template" = "builtin"),
+    if (word_tmpl) c("Use custom template" = "custom")
+  )
 
-  for (ds_name in dta_names) {
-    ds <- dta_get_dataset(dta, ds_name)
-    ds_type <- tryCatch(as.character(ds@type)[1], error = function(e) "unknown")
-
-    lines <- c(lines, "", paste0("## Dataset: ", ds_name, " (", ds_type, ")"))
-
-    # File Handlers
-    handlers <- tryCatch(dta_handlers(ds), error = function(e) list())
-    if (length(handlers) > 0) {
-      lines <- c(lines, "", "**File Handlers:**")
-      for (h in handlers) {
-        # handler_expected() returns the declared filename/pattern ONLY -- it
-        # must read back verbatim here, so the allowed-endings restriction (if
-        # any) is surfaced as its own clearly-labelled field below rather than
-        # glued onto the filename (see the handler_expected() comment,
-        # utils_dta.R).
-        expected <- tryCatch(handler_expected(h), error = function(e) "unknown")
-        endings <- tryCatch(handler_endings(h), error = function(e) "")
-        hint <- tryCatch(handler_hint(h), error = function(e) "")
-        count_lbl <- tryCatch(handler_count_label(h), error = function(e) "")
-        kind <- tryCatch(if (handler_is_pattern(h)) "regex" else "exact", error = function(e) "")
-
-        endings_text <- if (length(endings) > 0 && nzchar(endings)) paste0(" (allowed endings: ", endings, ")") else ""
-        hint_text <- if (length(hint) > 0 && nzchar(hint)) paste0(" \u2014 ", hint) else ""
-        count_text <- if (length(count_lbl) > 0 && nzchar(count_lbl)) paste0(" (", count_lbl, ")") else ""
-        kind_text <- if (nzchar(kind)) paste0(" [", kind, "]") else ""
-        lines <- c(lines, paste0("- ", expected, count_text, endings_text, hint_text, kind_text))
-      }
-    }
-
-    # Column Specs
-    cols <- tryCatch(ds@specs@columns, error = function(e) NULL)
-    if (!is.null(cols) && length(cols) > 0) {
-      lines <- c(lines, "", paste0("**Columns (", length(cols), " total):**"))
-      for (col in cols) {
-        l <- tryCatch(dta_column_to_list(col), error = function(e) NULL)
-        if (is.null(l)) next
-        col_id <- l$id %||% ""
-        col_type <- l$type %||% ""
-        nullable_str <- if (isTRUE(l$nullable)) "nullable" else "not null"
-
-        meta <- character(0)
-        if (nzchar(col_type)) meta <- c(meta, col_type)
-        meta <- c(meta, nullable_str)
-        if (!is.null(l$length)) meta <- c(meta, paste0("length ", l$length))
-        meta_str <- paste0(" [", paste(meta, collapse = ", "), "]")
-
-        constraint <- ""
-        if (!is.null(l$values) && length(l$values) > 0) {
-          constraint <- paste0(" | values: ", paste(l$values, collapse = ", "))
-        } else if (!is.null(l$pattern) && nzchar(l$pattern)) {
-          constraint <- paste0(" | pattern: ", l$pattern)
-        }
-
-        desc_text <- if (!is.null(l$description) && nzchar(l$description)) {
-          paste0(": ", l$description)
-        } else {
-          ""
-        }
-        lines <- c(lines, paste0("- **", col_id, "**", meta_str, desc_text, constraint))
-      }
-    }
-
-    # Rules
-    rules <- tryCatch(ds@specs@rules, error = function(e) NULL)
-    if (!is.null(rules) && length(rules) > 0) {
-      lines <- c(lines, "", paste0("**Rules (", length(rules), " total):**"))
-      for (i in seq_along(rules)) {
-        l <- tryCatch(dta_rule_to_list(rules[[i]]), error = function(e) NULL)
-        rule_id <- (l$id %||% "")
-        if (!nzchar(rule_id)) rule_id <- paste0("Rule_", i)
-        detail <- .format_rule_detail(l)
-        desc_text <- if (!is.null(l$description) && nzchar(l$description)) {
-          paste0(" \u2014 ", l$description)
-        } else {
-          ""
-        }
-        lines <- c(lines, paste0("- **", rule_id, ":** ", detail, desc_text))
-      }
-    }
-  }
-
-  if (length(lines) > 0) {
-    paste(lines, collapse = "\n")
+  dd <- cfg$exports$default_document
+  default_format <- if (isTRUE(dd %in% c("markdown", "markdown_pdf")) && has_md) {
+    "markdown"
+  } else if (isTRUE(dd %in% c("word", "word_template")) && has_word) {
+    "word"
+  } else if (length(fmt_choices) > 0) {
+    unname(fmt_choices[[1]])
   } else {
-    ""
+    NA_character_
   }
-}
-
-# Human-readable one-line description of a rule (from dta_rule_to_list()).
-# Mirrors the phrasing used by the in-app rules overview table.
-.format_rule_detail <- function(l) {
-  if (is.null(l)) {
-    return("")
-  }
-  ty <- l$type %||% ""
-  if (identical(ty, "col_condition")) {
-    sprintf(
-      "IF %s THEN %s",
-      .dta_cond_to_text(l$condition),
-      .dta_cond_to_text(l$then)
-    )
-  } else if (identical(ty, "col_range")) {
-    sprintf(
-      "%s in [%s, %s]",
-      paste(l$columns, collapse = ", "),
-      l$min %||% "",
-      l$max %||% ""
-    )
-  } else if (identical(ty, "col_unique")) {
-    sprintf("unique(%s)", paste(l$columns, collapse = ", "))
-  } else if (identical(ty, "group_condition")) {
-    sprintf(
-      "group(%s): %s condition(s), %s constraint(s)",
-      paste(l$group_by %||% character(0), collapse = ", "),
-      length(l$conditions %||% list()),
-      length(l$constraints %||% list())
-    )
-  } else if (nzchar(ty)) {
-    ty
-  } else {
-    ""
-  }
+  list(
+    any = length(fmt_choices) > 0,
+    format_choices = fmt_choices,
+    default_format = default_format,
+    # The PDF checkbox is shown only if both Markdown kinds are allowed; with
+    # markdown_pdf alone the PDF is forced, with markdown alone it is off.
+    pdf_choice = md_plain && md_pdf,
+    pdf_forced = md_pdf && !md_plain,
+    default_pdf = identical(dd, "markdown_pdf") || (md_pdf && !md_plain),
+    mode_choices = mode_choices,
+    default_mode = if (identical(dd, "word_template") && word_tmpl) {
+      "custom"
+    } else if (word_builtin) {
+      "builtin"
+    } else {
+      "custom"
+    },
+    templates = templates,
+    # Is this combination of the dialog's inputs one the config allows?
+    allowed = function(format, as_pdf = FALSE, word_mode = "builtin") {
+      if (identical(format, "markdown")) {
+        if (isTRUE(as_pdf)) md_pdf else md_plain
+      } else if (identical(format, "word")) {
+        if (identical(word_mode, "custom")) word_tmpl else word_builtin
+      } else {
+        FALSE
+      }
+    }
+  )
 }

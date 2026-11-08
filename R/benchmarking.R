@@ -254,9 +254,11 @@ dta_benchmark_report <- function(metrics) {
 #' process to a new high-water mark; when it is `FALSE`, `arrow_call_mb` is a
 #' lower bound on what this call allocated, not a measurement of it -- an
 #' earlier, larger call in the same session may be why nothing "new" showed up
-#' here. If the pool could not be read at all, both `arrow_pool_peak_mb` and
-#' `arrow_call_mb` are `NA` rather than `0`, so an unreadable pool is never
-#' mistaken for an idle one.
+#' here (in that case `arrow_call_mb` is `0`). A failed read of the pool gives
+#' `NA` rather than `0`, so an unreadable pool is never mistaken for an idle
+#' one: `arrow_pool_peak_mb` is `NA` when the read at the end of the call
+#' failed, and `arrow_call_mb` is `NA` when either the read at the start or the
+#' one at the end failed.
 #' @section Side effect of `benchmark = TRUE`:
 #' Measuring the R heap peak accurately requires resetting R's `gc()` peak
 #' counters (`gc(reset = TRUE)`) at the start of the call. This is a

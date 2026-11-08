@@ -4,6 +4,1265 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-11-07
+
+### Added
+
+- A template library can customise the Shiny app that serves it with a
+  `dta-app.yaml` at the library root: organisation name and unit, app and
+  window title, footer text, a logo, the colour scheme, the report-issue, about,
+  repository and documentation links, which start buttons, the raw YAML tab and
+  YAML downloads are offered, a read-only mode (`features.editing: false`),
+  which export formats and validation downloads are offered, and the label and
+  order of the library's own Word templates for "Export DTA". Disabled features are refused by the
+  server, not only hidden. Colours, links and file paths are validated, and a
+  bad value falls back to its default with a warning instead of stopping the
+  app. With several template sources the first `dta-app.yaml` wins as a whole.
+  Every key is optional, and a library without the file looks as before.
+- `dta-app.yaml` can say what the library calls its documents: `document.name`
+  and `document.abbreviation`, each one string or a list of one to three (for
+  example `Data Transfer Agreement` / `DTA`, or both it and `Data Transmission
+  Specification` / `DTS`). The app's labels and notifications ("Create DTA",
+  "Export DTA", "Untitled DTA", ...) use the abbreviation.
+- `write_dta()`, `write_dataset_metadata()` and `write_validation_report()` take
+  `organisation` and `organisation_unit`, and `write_dta()` and
+  `write_dataset_metadata()` take `document_name`
+  (`write_dta()` also `document_abbreviation`). The organisation is shown on the
+  front page and in the running header of Word/PDF exports and in the header
+  block of Markdown and HTML exports. Four new Word template placeholders,
+  `{DOCUMENT_NAME}`, `{DOCUMENT_ABBREVIATION}`, `{ORGANISATION_NAME}` and
+  `{ORGANISATION_UNIT}`, are filled from them. All default to `NULL`.
+- `features.raw_yaml_editable` (default `true`) in `dta-app.yaml`: `false`
+  keeps the Raw YAML tab but makes it read-only, with no "Apply changes"
+  button, and the server refuses applying edited YAML. `features.editing:
+  false` implies it.
+- `validate_template()` checks `dta-app.yaml` with the app's own parser and
+  reports `app_config_invalid` (error), `app_config_unknown_key` and
+  `app_config_warning` (warnings), `app_config_duplicate` (error, both `.yaml`
+  and `.yml` present) and `app_config_misplaced` (error, for a copy anywhere
+  but the library root).
+- `create_template_repo()` scaffolds a `dta-app.yaml` at the repository root
+  with every key commented out next to its default, and its README documents
+  the file.
+- Seven Word template placeholders for the free-text `transmission` fields,
+  which no template could reach before: `{TRANSMISSION_EXTENT}`,
+  `{TRANSMISSION_SCOPE}`, `{TRANSMISSION_PACKAGING}`,
+  `{TRANSMISSION_SECURITY}`, `{TRANSMISSION_CHECKSUM}`,
+  `{TRANSMISSION_TEST_REQUIREMENTS}` and
+  `{TRANSMISSION_BLINDING_REQUIREMENTS}`.
+- Creation templates can compose reusable building blocks with a new
+  `mixins:` key: a list of abstract, flat, add-only templates whose options,
+  datasets, slots and `base:` content are folded in next to the `extends:`
+  parent. Anything contributed twice is an error the child resolves by writing
+  the value itself, so the order of the list never matters. A template that
+  uses only mixins may omit `base:` and `datasets:`. Provenance records the
+  mixins, and `validate_template()` reports `mixin_unresolved` (warning),
+  `mixin_invalid` and `mixin_conflict` (errors).
+
+- `write_template_guide(path, dir)` writes one Word (or PDF) document per usable
+  DTA template into a folder, named `<id>_v<version>_template_guide.<ext>`, for
+  readers who never open the app or a YAML file. Each document has a cover
+  titled with the template, a running header (organisation, "Page X of Y") and
+  footer (template id, version and date; generation date and package version),
+  a question card for every option with its answer type, choices, pre-filled
+  answer and where the answer lands in the DTA, the parties and term lists to
+  choose, the datasets it creates with landscape column tables (columns the
+  template adds or changes are tagged), and what it changes compared with the
+  template it extends. Abstract building blocks get no document and are refused
+  by id; an existing file is not replaced unless `overwrite = TRUE`. The
+  function returns the written paths, named by template id.
+- Microsoft Word is now the preferred PDF backend on Windows, tried before
+  LibreOffice, TinyTeX and pandoc. PDFs from `write_dta()`,
+  `write_dataset_metadata()` and `write_template_guide()` keep their running
+  headers and footers and have their page-number fields updated when Word is
+  installed; the TinyTeX and pandoc routes re-typeset the document and lose them.
+- Word templates for export are discovered automatically: every `.docx` in a
+  library's `export-templates/` folder that contains at least one
+  `{PLACEHOLDER}` marker is offered in the app's export dialog, labelled with
+  its file name without the extension, from every configured source. A `.docx`
+  without markers (a styles-only reference document, which would export a Word
+  file without the DTA in it) or one that cannot be read is skipped with a
+  warning naming it; a file listed under `exports.word_templates` is offered
+  whatever it contains. Other files, dotfiles and Word lock files (`~$x.docx`)
+  are ignored.
+  `exports.word_templates` in `dta-app.yaml` is now only an optional override
+  for label and order, with `file:` paths relative to `dta-app.yaml`'s folder
+  (the library root), for example `export-templates/report.docx`.
+- The app reports template files in the wrong folder: a warning in the log and
+  a note in the template picker ("starter: templates/starter_supplier.dta-party.yaml -
+  a party profile belongs in parties/ (library layout: ...)"), naming the
+  source and the path relative to its root, never an absolute path. A source
+  pointed at a kind folder is reported once, with the advice to move the files
+  of a flat library into `templates/`, `parties/` and `vocabulary/`. An empty
+  picker now explains the folder layout.
+- `validate_template()` reports `template_misplaced` (error, a template file
+  outside its kind's folder, for example at the root or a party in
+  `templates/`), `library_subfolder_given` (error, the path given is itself
+  `templates/`, `parties/` or `vocabulary/`; validate its parent) and
+  `export_template_invalid` (warning, a file in `export-templates/` that is not
+  a `.docx`; `README`, `README.md` and `README.txt` are not reported, other
+  `README*` files are). The messages note that folder names are case-sensitive
+  on the server.
+
+### Changed
+
+- **Breaking:** template libraries are now read from `templates/` (creation
+  and dataset templates), `parties/` (`*.dta-party.yaml`), `vocabulary/`
+  (`*.dta-vocabulary.yaml`) and `export-templates/` (Word `.docx`), with
+  `dta-app.yaml` at the library root. A flat library, the layout of released
+  versions, is no longer read and must be reorganised: move each file into its
+  folder and run `validate_template(".", strict = TRUE)`. The app warns about
+  misplaced files and `validate_template()` reports them. An older app does
+  not read the new layout either, so reorganise on a branch and merge it when
+  the new version goes live.
+- The document name is now the main title of every document-style export, with
+  the DTA's own title beneath it: the Word/PDF cover, the Markdown top
+  heading (`# Data Transfer Agreement`, formerly `# Data Transfer Agreement
+  Metadata`), the dataset specification document, the HTML validation report
+  (`<h1>`; the page `<title>` is unchanged) and the app's validation summary.
+  Without `document_name` the name is "Data Transfer Agreement". A DTA without
+  a title no longer prints an empty `**Title:**` line in Markdown.
+- The app's validation summary heading is now the document name, with
+  "Validation Summary" beneath it.
+- In the template options dialog, a free-text option with exactly one
+  suggestion is now a vertically resizable text box instead of a one-line
+  field.
+- The app's footer no longer shows "Boehringer Ingelheim" by default. Set
+  `organisation.name` (or `branding.footer_label`) in the library's
+  `dta-app.yaml` to show an organisation.
+- Word, PDF and Markdown exports (including the `{VALIDATION_RULES}` and
+  `{DATASETS}` template blocks and `write_dataset_metadata()`) now give every
+  rule its exact definition, not only a description: a monospace YAML
+  `Definition` column in Word/PDF and a fenced YAML block per rule in
+  Markdown. The YAML carries every parameter of the rule and reads back into
+  the same rule. In Word and PDF the nesting is indented with non-breaking
+  spaces (pandoc drops ordinary leading spaces); replace them with spaces
+  before pasting a definition into a YAML file.
+- A column-condition rule that has a description now also shows its
+  `IF ... -> THEN ...` reading in the `Description` column, as group-condition
+  rules already did.
+- Tables written into a user's Word template by block placeholders such as
+  `{DATASETS}` and `{VALIDATION_RULES}` now have a fixed column grid scaled to
+  the template's text width. Before, Word sized the columns from their
+  content, which squeezed the `Rule ID` column next to the long `Definition`
+  column in portrait templates. In a template with several sections, the grid
+  is scaled to the section the table lands in (one column's width in a section
+  of equal columns); a section whose width cannot be determined, such as one
+  with unequal columns, keeps tables at 100% of the text column.
+- The built-in Word/PDF layout of `write_dta()` is redesigned. Every page after
+  the cover carries a running header (DTA title, study ID, "Page X of Y") and
+  footer (document name, version, date of the current version, and in small
+  print the template the document was generated from, e.g. "Template: Biomarker
+  GF DTS (biomarker_gf) · version 1.0 · 2026-11-05"). Headings are numbered
+  flush left (`1`, `1.1`, `1.1.1`) and each chapter is a top-level heading, so
+  datasets no longer sink to `1.10.1.2`. The cover shows a summary of version,
+  date, study, parties and template. Tables share one width and a lighter
+  style, key/value tables lose their "Item | Details" header row, and each
+  party's contacts form one table. The trailing "Generated: …" line is gone.
+- The Word export now shows data it used to drop: template provenance, every
+  contact field (address, company, …), dataset type and template
+  source/version/date, how each tabular file is to be parsed (delimiter,
+  header row, quote, missing values, encoding, line breaks in values), column
+  length, SAS format and R class, every allowed value (no longer cut off after
+  ten), and nested transmission extension values. Transmission fields carry
+  readable labels ("First transfer" rather than `date_first_transfer`).
+
+- The Shiny app's "Export DTA YAML" file name keeps the dots in the version
+  (`..._v1.2.0_<date>.yaml`) instead of turning them into underscores.
+
+- The bundled `clinical_dta_template.docx` is redesigned: a compact title
+  block with a key-facts strip and supplier/receiver cards, numbered sections
+  (agreement and parties, data transmission, datasets, governance), one
+  section per dataset through a `{#DATASETS}` region, and an appendix that
+  sets the embedded YAML specification (`{YAML_EMBEDDED}`) in two columns. It
+  now covers every metadata field, including study, agreement sections,
+  version history and signatures. The template is generated by
+  `.github/scripts/build_clinical_template.R`.
+
+- A DTA created from a template no longer records the option answers
+  (`selections:`, `vocabulary_selections:`) under `metadata.template`; they
+  already appear as the field values they set. Rebasing onto a newer template
+  version reads them back from the document instead, so the answers are kept.
+  Documents that still carry `selections:` rebase exactly as before.
+- `metadata.template` now records the template's `label` and the `date` of the
+  template version (a new optional `date:` field on creation templates, never
+  inherited through `extends:`). `source_ref` holds the full file path only for
+  a local `dir:` source; for git, package and bundled templates it is the path
+  within the source (`templates/<file name>`, or the folder of the template's
+  kind) rather than a machine-specific cache path.
+- In "New DTA from template", an option with a single suggestion (and free
+  text allowed) is a text field pre-filled with that suggestion, edited in
+  place, instead of a one-entry dropdown.
+- In "New DTA from template", a text option with several suggestions is now an
+  editable text field with a "Choose a suggestion" picker that fills it, instead
+  of one dropdown that hid the fact that you could type your own value. The
+  bundled Biomarker GF template's "Error handling" is a multi-line field, and its
+  "Authorized for corrections" offers only "Trial Data Manager (TDM)" (the
+  duplicate "TDM" choice is gone, and it is the new default).
+- In the same dialog, a party dropdown starts on the template's own party,
+  shown by its name, instead of a "(template default: …)" row.
+
+### Fixed
+
+- PDF export through the TinyTeX backend now retries with `xelatex` when
+  `pdflatex` cannot typeset a character, for example the "≠" in the
+  description of a not-equal rule. `write_dta(format = "pdf")` used to fail for
+  such a DTA.
+
+- `validate_template()` no longer rejects a creation template that writes
+  `datasets:` in the verb form (`add:` / `modify:` / `remove:` / `order:`). It
+  walked the verb keys as if they were datasets and reported
+  `dataset_id_missing` for a valid template, so a library using the explicit
+  form could not pass CI. It now checks the entries under `add:` and `modify:`
+  and leaves the ids under `remove:` and `order:` alone.
+- The app's Markdown export with "store as PDF" now always delivers a PDF. On
+  a server with neither a LaTeX engine nor Chrome/Edge it used to give up with
+  "neither produced a PDF. Exporting Markdown instead."; it now falls back to
+  the app's built-in PDF writer, in a simpler layout.
+- The app's built-in PDF writer no longer produces no file where the cairo
+  graphics library is installed but cannot be loaded (macOS without XQuartz).
+  R reports that as a warning and opens no device; it now falls back to the
+  base PDF device like any other cairo failure.
+
+- The app's Markdown export with "Export as PDF" ticked wrote its Markdown
+  into a file named `.pdf` and then asked Pandoc to read and write that one
+  path. When no PDF could be made, the Markdown text was delivered under a
+  `.pdf` name that no PDF viewer can open. The working file is now always
+  Markdown, the PDF is derived from it, and the download is renamed to `.pdf`
+  only once a PDF exists; otherwise the Markdown arrives as `.md`.
+
+- Exported rule text (Word and Markdown) now reads every condition operator in
+  words. `greater`, `less`, `equal`, `not_equal` and `pattern` were printed as
+  the raw key ("'AGE' greater '18'"), and `range` was printed as
+  "one of ('1', '5')", which says something different from an interval.
+  `print()` of a column-condition rule listed operator names where column names
+  belong; it now prints each clause with its column and operator.
+
+- `run_dta_app()` now checks for **shinyjs** up front, with the install hint,
+  instead of failing inside the app, which attaches it unconditionally.
+
+- `print_info()` of an "any" file handler no longer errors when the number of
+  files has no upper (or lower) bound; it prints "unbounded", as the other file
+  handlers do.
+
+- `create_example_DTA()` aborts for an index with no example. Index 2 used to
+  return `NULL` without a message, as did any index past the last example.
+  `get_arrow_type()` now raises package (cli) errors like the rest of the API.
+  `names()` of a column-spec structure no longer fails by reading a `columns`
+  property it does not have. The "not found" error from `files()` named
+  datasets, and `datasets()` printed "datasetss" for two missing names.
+
+- The numbered Word base template no longer silently falls back to a stock
+  template without a 'heading 4' style, which made the export fail later on its
+  first level-4 heading. A missing bundled template now aborts with a
+  reinstall hint. The qualification report's "Evidence inventory" section no
+  longer promises a list of files "below" that it never contained.
+
+- The "Create new from template" dialogs now use the full window height. The
+  template list and its details grow with the window instead of stopping at a
+  fixed height, and both steps open at the same size, no longer hanging low
+  with a wide gap above them.
+
+- The template picker's search box is now empty whenever the picker opens,
+  including after Cancel and after "Back to templates". Previously the old
+  search text came back and silently narrowed the list. "Back to templates"
+  still returns to the template whose options were open.
+
+- The app's "Export DTA YAML" file name now writes version dots as underscores
+  (`..._v1_0_...` instead of `..._v10_...`), so versions `1.0` and `10` no
+  longer produce the same name.
+
+- In the app's rule editor, removing the first IF, THEN, grouped-condition or
+  constraint row no longer leaves the remaining rows without field labels;
+  every row now carries its labels for screen readers and the first row on
+  screen shows them; every row's remove button is now a consistent ×.
+
+- A grouped-condition row removed in the rule editor is no longer offered in
+  the constraints' Left/Right lists; choosing it used to make Save fail with
+  an unknown-condition error, and the lists were not refreshed when a row was
+  removed.
+
+- Platform templates now work with explicit dataset identities. The picker
+  describes the required platform choice rather than reporting no datasets,
+  and multiline suggestion callbacks close correctly so suggestions remain
+  selectable. Computed histories compare every platform explicitly, including
+  changes to followed dependencies, without choosing an implicit default.
+
+- Child creation-template variants can no longer bypass ancestor seals through
+  metadata defaults, option effects or dataset replacement. Unchanged
+  ancestor-authored choices retain their existing seal exemption.
+
+- `pattern` is now applied to numeric columns (it was silently skipped before),
+  declared SAS formats are checked, a whole value beyond the 32-bit integer
+  range in an Int column of a table typed in R is reported as a `type`
+  violation, and an invalid regex no longer aborts `check()` later on; it is
+  reported when the specification is built.
+
+- **All ten open defects in the qualification register are fixed**
+  (DEV-001, 003, 004, 005, 006, 007, 010, 012, 014, 015). Each register entry
+  is closed and its pinning test now asserts the correct behaviour.
+
+- A declared `SAS Int` column no longer silently accepts values outside the
+  32-bit integer range: `5000000000` used to validate completely clean, so a
+  receiving system could narrow and corrupt it with nothing in the transfer
+  record. Such a value is now an import error (`out_of_range`), stored as `NA`
+  with its raw text kept; the column-specification integer check enforces the
+  range too (DEV-006).
+
+- A declared `SAS Int` column is now always stored as an R `integer`. The
+  storage type used to depend on the values in hand, so the in-memory and
+  streaming engines could type the same file differently depending only on how
+  it was batched (DEV-004). **Behaviour change:** a fractional or non-finite
+  value in a declared Int column (e.g. `8.5`) is now an import error
+  (`not_whole`) and becomes `NA` in the typed table. It used to keep the
+  column as a double and be reported only on the column-specification axis.
+
+- A `BESTw.` SAS format with no explicit type now infers `Num` instead of
+  `Int`. `BESTw.` is SAS's general numeric format, and the generated JSON
+  schema used to reject a legitimate decimal such as `1.25` (DEV-001). An
+  explicit `type: Int` with a `BESTw.` format is still accepted.
+
+- `messages()` no longer aborts for a dataset whose specification declares no
+  columns; it returns zero rows. Any loop collecting messages across datasets
+  used to fail outright on such a dataset, with an error that blamed
+  `persist = TRUE` (DEV-005).
+
+- The HTML validation report keeps its click-to-inspect detail when the
+  transfer has a metadata issue. One metadata import error used to strip the
+  detail from every message in the report. Metadata messages now get detail
+  of their own, a failure to build detail for one dataset no longer affects
+  the others, and a message whose detail could not be built says so (DEV-012).
+
+- A questionable metadata date (such as `2026-12-31 at the earliest`, or a
+  top-level date such as `after approval`) no longer turns into a clean one
+  after a single save and reload. The original text is written back, so the
+  import issue is still reported, unless the field has been changed since it
+  was read (DEV-010).
+
+- `export_column_value_table()` now aborts with a package error naming the
+  expected class when given something other than a column specification
+  collection, instead of a raw base R error (DEV-003).
+
+- `write_table_to_file()` now returns `md5sum` as the single checksum string
+  it documents (`NA_character_` when no checksum is requested), plus `n_rows`
+  and `n_cols`. A transfer-integrity check written to the documented contract,
+  such as `if (!is.na(res$md5sum))`, used to fail on a three-element list
+  (DEV-007).
+
+- The Word specification exchange now completes. `export_specs_table()` writes
+  each format with its backend prefix, and `columns_specs_from_word()` accepts
+  an empty Format or Length cell and, for documents written by earlier
+  versions, an unprefixed format. A specification exported to Word could not
+  be read back by the package that wrote it (DEV-014).
+
+- A specification written with `write_columns_to_json()` no longer contains
+  `{}` for unset properties, so it can be read back (DEV-015).
+
+- **A conditional rule whose operator has the wrong number of values is now
+  rejected when it is built.** `equals: [A, B]` used to be compared row by row
+  with recycling, so the verdict depended on row order; `range: [0, 100, 5]`
+  silently dropped the third bound, `range: 25` flagged every row, and a vector
+  `pattern` used only its first element. Such a rule now aborts with a
+  `dta_condition_arity_error` naming the column and operator (and pointing a
+  multi-value `equals` at `in:`). A missing value no longer counts as a
+  bound for the single-value operators or `range`, and `empty:` must be
+  `true` or `false` (any other value used to mean "not empty" silently). A
+  missing member of `in`/`not_in` remains allowed. Specifications that load
+  today are unaffected unless they contain one of these clauses.
+
+- **`columns_specs_from_word()` no longer truncates patterns.** A `#@pattern:`
+  was cut at its first letter "n" (`^(Screening|Baseline)$` came back as
+  `^(Scree`), because the regex's `[^\\n]` excludes the letter, not the line
+  break. The export's six-column layout (no Length column) is now matched by
+  header, and the function is stricter about what it reads. A Nullable cell starting with yes, y
+  or true (in any case) means nullable, and a blank one leaves it unset rather
+  than reading as "no". A table or `colnames` of the wrong width, or a Length
+  cell that is not a number, is an error instead of a misaligned or silent read.
+
+- **A dataset value inside a `{#DATASETS}` region is no longer read as a
+  placeholder** (DEV-016). A description of "Title is {DTA_TITLE}" or
+  "{YAML_EMBEDDED}" now renders as that text. A real block placeholder
+  elsewhere in the template that shares a value's spelling now renders too;
+  it used to be left as text.
+
+- `colspec()` now raises a `dta_colspec_not_found` error for a column name or
+  position the specification does not contain. It used to return `NULL` for an
+  unknown name, silently truncate a fractional position and leak a raw
+  subscript error for one past the end. `get_table()` now rejects a name vector
+  longer than one with its own message, and `column_preview()` reports an empty
+  specification as "not set" and validates `n`.
+
+- The app's "Export as PDF" no longer hands out a title-only page when the
+  document text cannot be generated: the export now fails with the reason.
+
+### Changed
+
+- **Posit Connect now deploys the repository root, and the app runs the
+  DTAtools of the same commit.** Before, Connect deployed
+  `inst/shiny/dta_app/` and installed DTAtools separately from GitHub, at a
+  SHA pinned in that folder's `manifest.json`. The pin was set to the pull
+  request's *base*, so the deployed package never included the change that
+  deployed it. The new root `app.R` installs the deployed checkout with
+  `R CMD INSTALL` (base R only), then serves the app bundled inside that
+  install. The install is cached in the bundle directory under a hash of the
+  package sources, so only the first worker after a deploy pays for it
+  (45–60 s on a Windows dev machine, 2 s warm). That is at Connect's default
+  60 s initial timeout, so raise it in the content's Runtime settings (for
+  example to 180 s).
+  The root `manifest.json` carries no DTAtools entry. `check_manifest.R` now
+  checks that it lists every `Depends`/`Imports` package, because a missing
+  one fails the install on Connect. On Connect (`POSIT_PRODUCT=CONNECT`),
+  `.Rprofile` skips renv activation and turns off Shiny's `R/` autoloading;
+  otherwise Shiny would source the package's `R/` loose before `app.R` runs.
+  `app.R` turns autoloading back on for the app's own helpers.
+  **Migration, once per Connect instance:** create a new Git-backed content
+  item from the repository root (`/`), on `master` and `dev` respectively. Move
+  the vanity URL and content variables (`DTATOOLS_TEMPLATE_*`, …) across, then
+  delete the old item. Connect cannot repoint an existing item to another
+  directory, and the old items stop updating once their manifest is gone.
+- The deploy-pin machinery is gone: `bump_version.R --set-deploy-sha`,
+  `--set-deploy-ref` and `--set-release-sha`, `ref_shape.R`, the
+  `manifest-release-sha` and `manifest-sync` workflows, and the manual pin PR
+  that finished every release. A release no longer touches the manifest, so
+  the recurring `manifest.json` conflict between `master` and `dev` cannot
+  occur. The manifest's only checksum is `app.R`'s: run
+  `bump_version.R --sync-manifest` after editing it, which `r-style` enforces.
+  REQ-ENV-017 (app files match the app manifest) is retired with its test.
+  The app files are still covered by the IQ-ENV-016 baseline.
+- CI is tiered. A pull request into `dev` runs `R CMD check` on
+  `ubuntu-latest (release)` only, the qualification quick scale on Linux only
+  (and only when `R/`, `inst/`, `tests/`, `DESCRIPTION` or `NAMESPACE`
+  changed), and no coverage jobs; style and pre-commit run as before. A pull request into `master`, one labelled `full-ci`, a manual
+  dispatch and a new nightly run on `dev` get the full suite: all five
+  `R CMD check` legs, the qualification standard scale on three operating
+  systems, and both coverage jobs with their floors. The tier is decided once,
+  in `.github/workflows/ci-tier.yml`, which absorbs R-CMD-check's inert-diff
+  classifier. The `push: dev` runs of the qualification and coverage workflows,
+  which repeated the pull request's own run, are gone.
+
+- The bundled Biomarker GF creation template now uses the latest source DTS
+  version, 5.0 (2025-11-28), with a single matching version-history entry.
+
+- Data that passed before may now fail the `format` or `pattern` checks,
+  including numeric columns with a pattern.
+
+- A column spec whose declared `values` or `examples` do not fit its own type,
+  length, format or pattern is now refused when it is built, so older YAML or
+  Word specs and saved sessions with such values no longer load until they are
+  corrected (for example an ISO date example under `DATE9.`, or `TIME8.2` with
+  a fractional-seconds example that needs 11 characters).
+
+- A column specification set whose rules name an undeclared column, repeat a
+  rule id, put a range on a non-numeric column, or compare against a value the
+  column cannot hold is now refused when it is built. Older YAML with such
+  rules no longer loads; `lint_dta()` lists what to fix.
+
+- In the app, deleting a column that rules use is blocked, and renaming a
+  column renames it inside its rules.
+
+- A non-integer `length` in the column form is rejected instead of being
+  silently dropped.
+
+### Added
+
+- A creation template can record the versions it went through before it
+  entered the template library with a hand-written `prior_versions:` block
+  (version, optional date, free-text changes). The picker's history shows them
+  after the first library version, whose computed history has nothing earlier
+  to compare against. `validate_template()` reports a malformed entry as
+  `prior_versions_invalid`.
+
+- `lint_dta()` reports every problem in a DTA YAML file, list or object at
+  once, using the codes of the check catalogue. `strict = TRUE` aborts on
+  errors with the findings attached. The app runs the same check on load,
+  apply and restore, and shows a spec-check list under the YAML editor.
+
+- Column specifications reject `values` and `examples` that do not fit the
+  declared type, length, format or pattern. `validate_template()` reports
+  `column_spec_invalid` for such columns, and the app re-validates loaded data
+  after a column or rule edit.
+
+- `import_specs_from_json()` reads a specification written by
+  `write_columns_to_json()`, rules included, so JSON is no longer a
+  write-only format.
+
+- IF and THEN condition rows in the app's rule editor can now be removed, like
+  grouped-condition rows. Removing the only row empties it instead.
+
+- **"Authorized for corrections" is now a picker in the app.** The Metadata
+  tab offers the Receiver and Supplier contacts to choose from, accepts any
+  other name typed in, and allows several people or none (empty leaves the
+  field unset). A document whose `authorized_for_corrections` is a list is now
+  shown in full instead of only its first entry, in edit and read-only mode
+  alike. A single comma-separated string stays one entry.
+
+- **The validation report now records what it was run over.** The header shows
+  the generation time with its UTC offset, the DTAtools and R versions and the
+  specification's version, and a new Inputs section lists every table and file
+  the verdict rests on: a streamed or file dataset's delivered files with
+  their size and modification time, and an in-memory table's content-hash
+  stamp. Nothing is re-read to produce it.
+
+- **The qualification suite and code coverage now run in CI.** The quick
+  qualification tier runs on every pull request into `dev` or `master` and on
+  every push to `dev`; until now its OQ/PQ cases had never run in CI, because
+  the scheduled workflow fires only from `master`, where it did not yet exist.
+  A new `test-coverage` workflow publishes line coverage of `R/` and the list
+  of lines no test executes. It also measures, separately, the coverage of the
+  package's product code by the qualification suite alone, without the unit
+  tests (75.5% at baseline, with a floor that rises toward 95%); the scope is
+  stated in the validation plan.
+
+- **A computed version history for every creation template.** The app's
+  template picker now shows what changed in the selected version and, behind
+  "Full history", every version of the template since the first. Nothing is
+  written by hand: each version is built exactly as "Create new from
+  template" would build it and compared with its predecessor, covering the
+  template's options and slots, the document metadata and every dataset
+  column. A new release of a template that another one follows (`extends:`,
+  dataset imports or vocabularies referenced bare or as `@latest`) is listed
+  in the follower's history too, because it changes what the follower builds
+  without changing its version number. Pinned references produce no such
+  entry.
+
+- `explain_messages()` prints each validation message in plain language: the
+  violated constraint (for example "Must be one of: 1234, 5678.") next to the
+  offending value, using the same wording as the HTML report. `check()` now
+  points to it when a run finds errors.
+
+- **The column editor opens its vocabulary picker on the right vocabulary.**
+  A vocabulary can name the columns it is for with a new optional `columns:`
+  field: a bare id gets the codes, and `{id: GFTEST, field: label}` gets the
+  labels. "Choose from vocabulary…" then preselects that vocabulary for the
+  column being edited. A column without a declaration is matched by its
+  current values instead, so a column built from a `values_from:` binding finds
+  its vocabulary again. The picker gains a "Write as: Codes / Labels" choice,
+  which lets the decode half of a code/decode pair take the labels. When none
+  of a column's values are in the chosen vocabulary yet, every term starts
+  ticked.
+
+  The picker's terms are now a checklist instead of a box of chips. Each term
+  shows its code, label and description, and the list keeps a fixed height and
+  scrolls, so a 300-term vocabulary no longer pushes the buttons off the
+  screen. From 11 terms up a filter narrows the list. All and None act on the
+  terms shown, and a live count says how many are selected and shown. Values
+  the column already holds that the vocabulary lacks are listed as "Not in this
+  vocabulary" and stay ticked, so adding a term no longer drops them. In the
+  "Create new from template" dialog, a vocabulary choice with hundreds of terms
+  selected now scrolls inside its box instead of growing the dialog. When a
+  vocabulary's `columns:` names the column being edited, the "Choose from
+  vocabulary…" button is highlighted and a line under it says which vocabulary
+  (it follows the column ID as you type; a column whose values already belong
+  to a different vocabulary is not highlighted, because the picker opens on that one). The term filter now matches every
+  word you type, in any order, and takes the cursor as soon as the terms
+  appear, so picking a few terms out of 300 needs no scrolling. The shipped `gf_test`,
+  `gf_tstdtl` and `starter_terms` vocabularies declare their columns.
+  `validate_template()` reports a malformed `columns:` entry as
+  `vocabulary_invalid`.
+
+- Creation templates can offer an explicit structural platform choice before
+  agreement editing. Each choice selects its own datasets, metadata defaults
+  and source suggestions; missing or unsupported choices are rejected.
+  Template validation checks every variant, and document provenance records
+  the selected platform and source revision.
+
+- Creation-template narrative options with source suggestions now retain an
+  editable multiline input; choosing a suggestion or `(leave blank)` updates
+  the value collected by the existing template creation flow.
+
+- **Structured study identity and ordered agreement clauses.** `DTAMetaData`
+  accepts optional `study` identifiers and named `sections` with titles and
+  plain-text paragraphs. They round-trip through YAML and template inheritance
+  without changing dataset constraints. The app provides study editing,
+  section editing/reordering and additional transmission fields for delivery
+  scope, packaging, security, checksums, test transfers and blinding requirements.
+  Default document exports include the new metadata; custom Word templates
+  can use `{STUDY_ID}`, `{PROTOCOL_ID}`, `{STUDY_TABLE}` and
+  `{AGREEMENT_SECTIONS}`. Legacy metadata remains valid, with empty new
+  properties omitted. Study identity carries over by default when drafting a
+  revision; agreement sections require explicit opt-in.
+
+- template libraries are organised into folders by file kind: `templates/`
+  (creation and dataset templates), `parties/`, `vocabulary/` and
+  `export-templates/`, with the optional `dta-app.yaml` at the library root.
+  `validate_template()`, the Shiny app's `dir:`/`pkg:`/`git:` sources, a
+  package's `inst/dta-templates`, `./dta-templates` and
+  `DTAtools.template_dir` all read this layout. The bundled demo library is
+  `system.file("extdata", "library", package = "DTAtools")`; the CI workflow
+  files moved to `extdata/ci/` and the bundled Word templates to
+  `extdata/word-templates/`.
+
+- **A qualification suite that produces audit-grade evidence for an installed
+  copy of the package.** `run_qualification()` runs an installation,
+  operational and performance qualification against the *installed* namespace
+  and writes an evidence bundle: a Validation Summary Report, a requirements
+  traceability matrix, per-step expected-versus-observed records anchored to
+  the file and line that produced them, a record of the environment, a
+  contemporaneous run log, and a hash manifest covering all of it. The suite
+  ships in `inst/qualification/`, so it is available wherever the package is
+  installed, and needs nothing beyond R, the package and `testthat`; reports in
+  HTML, Word and PDF are produced when the tooling for them exists and are
+  recorded as unavailable when it does not.
+
+  It answers a question the developer test suite cannot. Those tests are not
+  installed with the package, are not traced to requirements, and record only
+  whether something held rather than what was expected. This suite states its
+  expected values before it runs, never takes one from a stored snapshot of the
+  software's own output, and keeps a register of known defects that fails the
+  run if a registered defect stops reproducing.
+
+  The suite covers every exported function across fifteen functional areas,
+  from reading a specification to the behaviour of the streaming engine at ten
+  million rows, and its performance stage checks that the same delivery yields
+  the same verdict whatever the scale tier, thread count, batch size or locale.
+  Expected results are computed from how the test data was built rather than
+  recorded from a run, which is what lets a correctness claim survive a change
+  of scale.
+
+  Writing it surfaced a number of defects and documented limitations in the
+  package itself. They are listed in `inst/qualification/deviations.yaml`, each
+  open entry bound to a test that asserts it still occurs, and each reported at
+  every run; a registered defect that stops reproducing fails the run rather
+  than passing quietly. Nothing here changes validation behaviour -- the
+  findings are recorded so that they can be assessed and fixed deliberately.
+
+  Before release, five defects were introduced into the package one at a time
+  to confirm the suite is capable of failing, and each was caught by the test
+  cases whose subject was the behaviour broken. The results are recorded in
+  section 4a of `inst/qualification/docs/validation-plan.md`, including one
+  control that at first did not fire: an equivalent mutation in the branch for
+  a lazily held table whose file has vanished, which no case exercised. That
+  branch is now covered by REQ-ROBUST-017 and OQ-ROBUST-017, and a mutation
+  that changes its behaviour is caught.
+
+  The developer test suite is executed too, when the package was installed
+  with its tests, and reported as supplementary evidence. It runs in a separate
+  process under a time bound, so it cannot influence the qualification and a
+  developer test that blocks cannot stop the run.
+
+  `qualification_requirements()` returns the requirements being verified.
+  See `inst/qualification/README.md` for how to run, review and sign a
+  qualification, and how to verify a bundle has not been altered.
+
+- **Word templates can now emit real tables, not just text.** Every
+  `{PLACEHOLDER}` in a `.docx` template used to resolve to a character string
+  written into a single Word text run, so the richest thing a template could
+  produce was one paragraph with manual line breaks and leading-space
+  indentation. Column specifications and validation rules had no table
+  representation at all — a template could ask for `{TOTAL_COLUMNS}` and
+  `{TOTAL_RULES}`, two integers, and nothing more.
+
+  Nine **block placeholders** now expand to document structure instead:
+  `{COLUMN_SPECS}`, `{VALIDATION_RULES}`, `{FILE_SPECS}`, `{DATASETS}`,
+  `{SUPPLIER_CONTACTS_TABLE}`, `{RECEIVER_CONTACTS_TABLE}`,
+  `{SIGNATURES_TABLE}`, `{VERSION_HISTORY_TABLE}` and
+  `{AUTHORIZED_CORRECTIONS_LIST}`. The first four accept a dataset argument —
+  `{COLUMN_SPECS:ADSL}` renders one dataset, the bare form renders every
+  applicable one under its own heading. They are rendered by the same builders
+  the built-in layout uses, so a templated document and a built-in one now say
+  the same thing about the same `DTA`.
+
+  A block placeholder must be the only text in its paragraph, and must sit in
+  the document body — not inside a sentence, a table cell, a header or a
+  footer. Anything left over is reported in a single warning naming the tokens
+  and why. A `variables` entry of the same name still wins and still renders as
+  plain text, so existing callers are unaffected.
+
+  Tables are sized to 100% of whatever text column the template's page has
+  rather than to a fixed inch width: the built-in layout gives its widest tables
+  landscape pages of their own, but a user template's page geometry is not the
+  exporter's to change. Headings use the template's own `heading N` style when
+  it defines one — so the block joins the template's table of contents — and
+  fall back to direct formatting when it does not.
+
+  `dta_template_placeholders()` reports the block tokens alongside the inline
+  ones, tagged by a `"kind"` attribute.
+
+- **Word templates can repeat a region once per dataset.** A body paragraph
+  holding only `{#DATASETS}`, paired with a later paragraph holding only
+  `{/DATASETS}`, now marks a repeating region: everything between the two —
+  paragraphs and tables alike — is emitted once per dataset the transfer
+  declares, in the transfer's own dataset order, and the marker paragraphs
+  themselves are removed. A transfer with no datasets produces no region at
+  all.
+
+  Six placeholders resolve inside a repetition to that one dataset's own
+  values: `{DATASET_NAME}`, `{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`,
+  `{DATASET_FILE_COUNT}`, `{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}`
+  (the last two are zero for a non-tabular dataset). A dataset block
+  placeholder written bare inside the region — `{COLUMN_SPECS}`,
+  `{VALIDATION_RULES}`, `{FILE_SPECS}` or `{DATASETS}` — binds to the current
+  dataset and contributes only its table, without the heading it would
+  otherwise generate, because the region's own paragraphs are what supply
+  that heading; an explicit `{COLUMN_SPECS:ADSL}` is left exactly as written,
+  the same as it renders anywhere outside a region. A value supplied through
+  `variables` still wins over any marker in every repetition, and images
+  inside a region are repeated with fresh drawing ids (bookmarks, footnote
+  and comment references inside a region are copied as they are).
+
+  A region marker must be the only text in its body paragraph, the same rule
+  a block placeholder already follows, and regions do not nest — an inner
+  `{#DATASETS}` is left as ordinary text. Sequential regions in the same
+  document are fine. A marker that is not alone in its paragraph, or that has
+  no counterpart to open or close it, is left as written and named in the
+  existing warning about block placeholders left unchanged, which now also
+  explains the region rules. The marker prefix is part of the placeholder
+  grammar, so any `{#word}` or `{/word}` a template contains is treated like
+  an unknown placeholder and named in the unresolved-placeholder warning — a
+  mistyped `{#DATASET}` is reported rather than silently left in place, where
+  such text used to pass unnoticed.
+
+  `dta_template_placeholders()` lists `{#DATASETS}` and `{/DATASETS}` with
+  kind `"region"` and the six dataset placeholders with kind `"dataset"`;
+  both keep their description rather than a single value even when called
+  with a transfer, exactly as a block placeholder does.
+- **The app's column editor has a search box.** "Edit columns" now filters
+  the column specs as you type, and the filter stays in place when you edit
+  a column and come back to the list. While the list is searched or sorted
+  by a header, the move arrows are hidden — they swap a column with its
+  neighbour in the specification, which is no longer the row next to it on
+  screen — and a "Show all in spec order" link brings them back. Edit and
+  remove keep working on the filtered list.
+- **Contacts can be reordered in the app.** The Receiver and Supplier people
+  lists have move up/down buttons in edit mode, and the order is saved to the
+  YAML.
+
+- **The app's rule editor has the same search box.** "Edit rules" filters
+  the rules as you type, keeps the filter across edits, and hides the move
+  arrows while the list is searched or sorted, exactly as the column editor
+  does.
+
+### Changed
+
+- **The "Create new from template" options dialog is redesigned.** It is now a
+  wide dialog whose title and buttons stay in view while the form scrolls. A
+  sidebar names the template (id, version, library, lineage, description),
+  lists the datasets it creates and links to each part of the form,
+  highlighting the one being read. Every field is one row, label and help on
+  the left and the control on the right, so the controls line up in a single
+  column. Options are grouped by the metadata block they fill (for example
+  "Transmission"), yes/no options are switches that read "Yes" or "No",
+  required parties and vocabularies carry a "Required" tag, and carry-over is
+  a visible section whose field list only appears once a source is chosen.
+  "Back to templates" moved to the left of the footer.
+
+- **The app's "Export DTA YAML" file name now carries the document version.**
+  The download is named `<title>_v<version>_<date>.yaml`, with the dots of the
+  version removed (version `1.2.0` gives `Title_v120_2026-11-04.yaml`; any
+  other non-alphanumeric character goes too, so `1.2.0-beta` gives `v120beta`).
+  A document without a version keeps the old `<title>_<date>.yaml`.
+
+- **The qualification report no longer calls a requirement with a known
+  defect against it "verified".** A requirement whose test cases all passed
+  but that an open or pending deviation affects is now reported as
+  `verified_with_deviation`, and the traceability matrix names the deviations
+  against it in a new column. SUMMARY.txt, the report and
+  `results/requirements.csv` count these separately from clean verifications.
+  Previously a reproduced defect's binding step passed like any other, so the
+  requirement it contradicts read as verified in section 7 while section 8
+  listed the defect. The verdict rules are unchanged (REQ-CORE-011).
+
+- **The qualification suite now reproduces DEV-002 and DEV-016 itself.** Both
+  were registered as `pending`, so no run checked that they still occur.
+  OQ-VAL-038 binds DEV-002 (an unchanged table with an unnamed-timezone
+  timestamp is revalidated after a rebuild; its `affects` is corrected to
+  REQ-VAL-015, the skip requirement), and OQ-EXPORT-048 binds DEV-016 (an
+  inline placeholder spelled by a dataset value is resolved inside a region).
+
+- **`validate_template()` now rejects a dataset without an `id`.** A dataset
+  template or an inline template dataset whose `id` is absent, null or empty
+  is reported as `dataset_id_missing`, an error. The app already refused to
+  load such a dataset template, even when every import names it with `as:`,
+  but `validate_template()` used to pass it. An `id`, `name` or `description`
+  written as a list or as a missing value is reported as
+  `dataset_field_invalid`, naming the key as written. A dataset in the old
+  shape (`name:` with no `id:`) has no id and is reported the same way.
+
+- **Datasets now have an `id`, a `name` and a `description`.** The identifier
+  a dataset used to carry in `name` is its `id` (the key in a DTA, in every
+  validation message, in `load_file()` and in `{COLUMN_SPECS:<id>}`); `name`
+  is now the human-readable label that `description` used to hold; and
+  `description` is a new long free-text field. `DTADataSet()`,
+  `DTADataSetTabular()` and `DTADataSetFile()` take `id` as their first
+  argument and abort when called without one. **Breaking:** there is no
+  backwards compatibility. YAML written in the old shape -- a dataset with
+  `name:` but no `id:`, including dataset templates and inline template
+  datasets -- is refused with "A dataset needs an `id`" rather than
+  reinterpreted; rename the identifier key to `id:`. (A reinterpretation
+  would also silently turn a new-shape entry that merely forgot `id:` into a
+  different dataset.) A DTA's dataset list must now be keyed by each dataset's
+  `id`. In the app, the sidebar and the dataset heading show the name with the
+  id beneath it, the long description appears under the heading, and the
+  add-dataset and Details dialogs edit all three. Exported documents head a
+  dataset "Name (id)". Word templates gain `{DATASET_ID}` and `{DATASET_IDS}`;
+  `{DATASET_NAME}` and `{DATASET_NAMES}` now render the name (the id where none
+  is set) and `{DATASET_DESCRIPTION}` the long description, so a template that
+  printed `{DATASET_NAME}` for the identifier should switch to `{DATASET_ID}`.
+  A template `patch:` that sets `description` now sets the long description;
+  set `name` for the label. In a template whose inline datasets still use the
+  old shape, its own `sealed:`/`required:` paths into them are remapped along
+  with the fields (`datasets.<x>.description` → `.name`, `.name` → `.id`).
+
+- **The "Create new from template" picker narrows to any number of template
+  libraries.** The source filter was a radio group that could show one
+  library or all of them; it is now a set of library chips, each with its
+  template count, and any combination of them can be checked (nothing checked
+  shows every library). A template whose parent lives in a library that is
+  filtered out is listed at the top level instead of disappearing, and still
+  names the template it extends.
+- The picker is a wider dialog with the template list and the selected
+  template side by side, so its version, lineage, description and what it
+  creates are in view without scrolling. Rows use the full width of the list
+  (they filled under half of it), the library badge on each row is legible
+  (it was white on white), search highlights no longer insert stray spaces,
+  "Refresh templates" moved to the dialog footer, and a double-click on a row
+  goes straight to the options step.
+- Two templates that both extend a template not in the list (an abstract
+  base, or one in a filtered-out library) are separate families again: each
+  counts and expands only its own variants.
+- `create_template_repo()` writes the starter files into `templates/`,
+  `parties/`, `vocabulary/` and `export-templates/` and ships a comprehensive
+  README documenting every template feature, app configuration and validation
+  codes.
+- `template_in_subdirectory` messages name the library folder to move files to.
+
+- **Choosing a template is now a search, not a dropdown.** "Create new from
+  template" used to list every template in one flat dropdown, grouped only by
+  source. The picker now groups templates into families derived from
+  `extends:` and shows them as a collapsible tree: a deviation sits indented
+  under its base with an "extends …" line, and a family collapses to its top
+  row with an "n variants" badge until one of its members is selected.
+  Searching matches the start of any word in the label, id, description and
+  every ancestor's label and id, so "biomarker" finds a whole family, "acme"
+  finds only the vendor deviations, and "one" does not drag in every
+  "stand-alone"; matches are highlighted and shown as a flat list rather
+  than a tree. A "Source" filter appears once more than one template library
+  is configured, and pressing Enter in the search box continues with the
+  selected template — the first match, unless another one was picked. A
+  panel below the list always describes the selection: its versions, the
+  exact resolved lineage ("based on …"), and a summary of what it will ask
+  for — or, for a template that fails to load, its error, shown before *Use
+  this template* can be pressed rather than after. The list itself no longer
+  re-renders on every click, only when the search or the source filter
+  changes, and going back to it keeps the search text and selection intact.
+
+- **Filling in a template got shorter and clearer.** Every option with
+  `choices:` is now one combobox instead of a dropdown padded with
+  "(leave blank)" and "Custom..." rows plus a companion text field: pick a
+  suggestion, choose "(leave blank)", or type a value directly. Typing is
+  allowed only when the template allows it — `allow_custom:` still governs
+  this, and `type: select` is strict by default unless the template opts in
+  with `allow_custom: true` (no bundled template uses `type: select`, so
+  nothing changes for any template shipped today). Boolean options are
+  checkboxes rather than Yes/No dropdowns, and options now lay out in a
+  two-column grid so long forms read shorter. Party slots name the template's
+  own default affiliation instead of an opaque "(use template default)".
+  Vocabulary pickers show each term's description, chosen terms as removable
+  chips, "All", "None" and "Default" links with a live "n of m selected"
+  count, and a "Choose at least n." hint for `min:`; an open-mode slot still
+  lets you type a term and press Enter to add it. The dialog's back button
+  now reads "Back to templates".
+
+- **The app has a calmer, document-like look.** Same workflow, same
+  controls: the masthead is flat deep green with the logo's accent rule, the
+  landing page opens on one large drop target, the sidebar summarises
+  validation as a segmented status bar, and status is shown as a coloured
+  left rail on dataset rows, the dataset header and loaded files instead of
+  tinted backgrounds. Type is IBM Plex Sans with IBM Plex Mono for
+  identifiers, tabs are underlined, and dialogs, menus and notifications share
+  one set of surfaces.
+
+- **A pull request that cannot affect `R CMD check` no longer runs it.**
+  `.github/workflows/R-CMD-check.yaml` gains a `changes` job that classifies
+  the pull request's diff and skips the five-leg matrix when every changed
+  path is inert for the check. The release-finishing manifest pin is the case
+  that prompted it: #124 was four lines of `inst/shiny/dta_app/manifest.json`,
+  and it spent 91 minutes of matrix time across five platforms establishing
+  that four lines of JSON had not broken the package.
+
+  The set of inert paths is an *allowlist*, so a file nobody has classified
+  runs the full matrix by default. It holds `docs/`, `thoughts/`, `.claude/`,
+  `CLAUDE.md`, `CLAUDE.local.md` and `CHANGELOG.md` — every one of which
+  `.Rbuildignore` already keeps out of the built tarball, so the check never
+  sees them at all — plus two paths that do ship: `inst/shiny/dta_app/manifest.json`,
+  a Posit Connect deployment descriptor that no R code, test, roxygen example
+  or vignette reads, and `README.md`, which `R CMD check` reads only under
+  `--as-cran` and only to scan for URLs, reporting what it finds as a note
+  that cannot fail a build configured to error on warnings. `.github/` is
+  deliberately *not* on the list, so a change to the workflows themselves
+  still runs everything.
+
+  This is a job-level conditional rather than `paths-ignore` on the trigger,
+  and the distinction is not a stylistic one. The five matrix legs are
+  required status checks on `master`, and a workflow skipped by path filtering
+  never reports its contexts at all — they would sit at pending and the pull
+  request could never be merged. Since every release ends in a manifest-only
+  pull request into `master`, `paths-ignore` would have deadlocked the release
+  process itself. A job skipped by a conditional reports success, which is why
+  the decision is spent there instead.
+
+  Nothing about what actually gets checked changes. `r-style.yaml` is gated by
+  none of this, so `check_manifest.R` — the check that genuinely validates a
+  manifest-only change — still runs on every pull request.
+
+### Removed
+
+- **Breaking: the legacy rule spellings are gone.** The `check_range`,
+  `check_unique`, `check_col_condition` and `check_group_condition` rule types
+  are no longer accepted; a rule is `col_range`, `col_unique`, `col_condition`
+  or `group_condition`, and `@type` now holds exactly that value. The singular
+  `column:` key on `col_range` / `col_unique` rules is gone too: write
+  `columns:`. `DTARuleFactory()` now rejects any argument that is not an exact
+  argument of the rule's constructor, where it used to let R partially match an
+  abbreviation such as `column` onto `columns`.
+
+### Fixed
+
+- The shipped example specifications and the documentation now write
+  `columns:` on `col_range` / `col_unique` rules; they had relied on partial
+  argument matching to load.
+- "Include YAML in document" is no longer offered with PDF export, where the
+  hidden comment printed as a paragraph of literal text. In the Markdown file,
+  a `-->` inside the YAML no longer ends the comment early: it is written as
+  `--&gt;`, the one change made to the embedded YAML.
+
+- A Markdown export that fell back from PDF is saved as `.md`, not as a
+  `.pdf` file holding Markdown.
+
+- The CI files `create_template_repo()` writes now work once their DTAtools
+  install placeholder is filled in. The GitHub workflow passed
+  `packages: none` to `setup-r-dependencies`, which asks for a package called
+  `none` and failed the job before validation ran; it now installs `remotes`,
+  which the install examples in all three files call and none of them used to
+  install. The Jenkinsfile now installs into a library of its own (set through
+  `R_LIBS`), since Jenkins runs the container as a user who cannot write to
+  the image's site library.
+  The files' header comments no longer describe DTAtools' own deployment as
+  if it were the user's repository, and they list `*.dta-vocabulary.yaml`.
+- The authoring guide `create_template_repo()` writes as `README.md` now
+  covers creation-template `variants:` and lists the `variant_invalid`
+  validator code.
+- `create_template_repo(examples = FALSE)` no longer ends by suggesting
+  `validate_template(path, strict = TRUE)`, which always fails with
+  `no_templates` on a repository with no templates; it says to add templates
+  first.
+- A creation-template option that has both `target:` and `effects_all:`, and no
+  `effects:`, now writes the selected value to its target. Before, the
+  `effects_all:` block took the place of the missing `effects:`, so the value
+  was silently dropped and the option lost its default inherited from
+  `base.metadata`.
+
+- In a `{#DATASETS}` region, a bare `{COLUMN_SPECS}` or `{VALIDATION_RULES}`
+  now renders nothing for a file dataset, instead of a "No tabular datasets."
+  note that was false for a document that has tabular datasets.
+
+- The app's contact editor no longer loses its open dialog when a "closed"
+  report from an earlier dialog reaches the server late. Before, Save in the
+  freshly opened editor could then silently do nothing.
+
+- `inspect()` on a streamed table reads the row context in the same order the
+  validation scan numbered its rows, so the row shown is the row the message
+  names also when the file is read in several batches.
+
+- The Markdown exports escape a dataset's name, description and template
+  fields, as they already did for agreement sections, so a `#` or `*` in them
+  no longer restructures the document.
+
+- Custom Word exports retain complete transmission statements and additional
+  transmission fields rather than truncating or omitting them. Unspecified
+  test-upload and blinding decisions are no longer rendered as an explicit
+  "No"; a supplied `FALSE` still renders as "No".
+
+- metadata-only `abstract: true` creation templates can serve as shared bases
+  without dummy datasets; concrete descendants must still supply or inherit
+  at least one dataset. Empty resolved concrete templates now fail loading
+  and are reported as `instantiate_failed` by `validate_template()`.
+
+- **`run_qualification()` now rejects a bad `scale` or `include_unit_tests` the
+  same way it rejects its other arguments.** Both went through `match.arg()`,
+  whose failure is a base R error: no condition class a caller can match, and a
+  message rendered in the system language, sitting two lines above four
+  arguments that abort with a package condition. A caller could not branch on
+  it portably, and a test could assert nothing about it beyond "some base R
+  error occurred" -- which any unrelated failure in the same call satisfies
+  equally. Both now abort with a package condition naming the argument and its
+  permitted values. The accepted values and the defaults are unchanged.
+
+- **A table carrying the same column name twice is no longer certified clean
+  with one of those columns never checked.** `table[[name]]` returns the first
+  match, so every per-row check inspected one column and never saw the other,
+  while the structural gate compared the declared names against the table's
+  with `setdiff()` -- a set operation, blind to repetition, so three columns
+  bearing two distinct names looked like an exact match for the two that were
+  declared. A delivery whose duplicated column held values that must fail came
+  back with no errors at all. Duplicate names arise in practice from merged
+  extracts, a copy-paste in an export program, or two long names truncating to
+  the same string. Such a table is now refused rather than reported on, because
+  it is not invalid but undecidable: nothing in the package may choose which of
+  the two columns the specification describes. The refusal is reached from the
+  column names, before a row is read, so a large source is not scanned to the
+  end to be told something its header already settled. Tables with distinct
+  column names are unaffected.
+
+- **The validation report's overview no longer says every target passed when
+  the metadata failed.** The summary cards were built from `results()`, which
+  carries one row per dataset target and none for metadata -- so a transfer
+  that was invalid *only* because of a metadata import error, a transmission
+  date carrying trailing text for instance, headlined as one target passed and
+  none failed, with the fault visible solely as a message row further down the
+  same page. The overview is the first thing a reviewer reads and for many it
+  is the only thing, and it disagreed with the transfer's own verdict, which
+  has always counted metadata import errors. The report now carries a row for
+  the metadata axis when, and only when, metadata has something to report. A
+  transfer with sound metadata renders exactly as before.
+
+- **A failed export no longer replaces a good delivery with a header-only
+  file.** `write_table_to_file()` wrote straight to the destination, and base
+  R truncates that file and writes the header before it converts the data
+  columns -- so a conversion that failed partway left a header sitting where a
+  complete export used to be. That is worse than leaving no file: a
+  header-only file still reads as a table, with no rows, and a table with no
+  rows breaks no constraint and so validates perfectly clean. Both the plain
+  and the gzip branch now write to a temporary file beside the destination and
+  put it in place only once the whole table has converted, so a write that
+  cannot finish leaves the previous contents exactly as they were.
+
+- **`validate_table()` no longer reports a clean pass when its specification is
+  not a specification.** This function signals "nothing wrong with this
+  delivery" by returning the table unchanged. A `specs` argument that was not a
+  `DTAColumnSpecCollection` -- a path where an object was meant, a `NULL`
+  coerced along the way, a list still being assembled -- produced no schema, no
+  rules and therefore no errors, and the table came back unchanged. The caller
+  was told the data was clean by a run that had never looked at it, and nothing
+  in the answer distinguished it from a real one. The specification is now
+  checked before anything else, at the point both the in-memory and the
+  streaming paths pass through, and a specification that is not one raises.
+
+- **The bundled Word template no longer prints its own placeholder.**
+  `clinical_dta_template.docx` contains `{DATASETS_DETAIL}`, which was never in
+  the placeholder catalogue and was supplied only by the Shiny app. Exporting
+  with it from plain R — `write_dta(dta, template = ...)` — left the token
+  printed literally and the dataset section empty. `{DATASETS_DETAIL}` is now a
+  recognised alias for the `{DATASETS}` block, so the bundled template produces
+  its dataset section wherever it is used.
+
+- **The export dialog no longer offers a template with nothing to fill in.**
+  "Use custom template" listed every `.docx` under `inst/extdata/templates`,
+  which includes `dta_numbered_template.docx` — the reference document the
+  *built-in* layout opens for its numbered heading styles, and which contains no
+  placeholders at all. Choosing it produced a Word file with none of the user's
+  DTA in it, silently. A template must now prove it contains at least one
+  placeholder to be listed; a blocklisted filename would only have deferred the
+  problem to the next styles-only document dropped in that directory.
+
+- **A deviation of an abstract template no longer inherits `abstract: true`.**
+  `extends:` merged the flag like any other scalar, so every concrete child of
+  an abstract base was refused by *Create new from template* ("is abstract
+  and exists to be extended") unless it wrote `abstract: false` itself, which
+  nothing documented. `abstract:` now describes only the file that carries
+  it, like `id:` and `version:` do.
+
+- **Every modal whose body is built on the server now actually shows it.**
+  Shiny decides whether to render an output from a visibility snapshot taken
+  when the browser binds it, and re-checks that only for the containers it
+  knows about -- a tab, an accordion. Nothing re-checks a modal, and Bootstrap
+  5 shows one behind its backdrop's fade, so the dialog was still invisible at
+  the moment everything inside it was bound: the renders were suspended and
+  their HTML never sent. **Create new from template** was the visible
+  casualty -- the picker opened with an empty body, and *Next* then reported
+  that no template had been selected -- but *Create new*, *Add dataset*, the
+  column/rule/file/details editors and the inline messages that report a
+  rejected value were all blank the same way. The app now re-asserts the
+  visibility of everything inside a dialog once it is really on screen.
+
+- **Repeat clicks on an overloaded server no longer stack up the same
+  dialog.** The button guard released a click after 1.5 seconds of silence
+  from the server; a machine busy enough not to acknowledge the click in that
+  time then let every further click through, and the *Edit contact* dialog
+  opened once per click when the server caught up. The guard now waits five
+  seconds, and the contact editor itself ignores a request for the dialog
+  that is already open -- it learns from the browser when that dialog is
+  closed, dismissed, or replaced, so reopening it deliberately still works.
+
+- **A column spec that declares `values`, `pattern` or `nullable` but no
+  `type`, `format` or `length` had every one of those constraints silently
+  skipped.** Both the materialising and the streaming validation engines built
+  their checks from the column's compiled JSON Schema, and a column with no
+  declared type compiled to no schema at all, so a value list a specification
+  author had written down -- the one thing that column actually constrained --
+  was never checked against the data. Such a column is now checked like any
+  other; a column whose schema still cannot be compiled now raises a warning
+  of class `dta_columnspec_schema_failed` instead of failing silently.
+
+- **`missing_values` on a tabular handler stopped the reader's own defaults
+  from applying.** The declared tokens replaced the readers' default missing
+  set of `""` and `"NA"` instead of adding to it, so a handler that declared,
+  say, `"."` as missing also made a literal `"NA"` in the data stop being
+  treated as missing. Declared tokens now add to the reader defaults rather
+  than replacing them (REQ-FILE-004).
+
+- **A DTA with duplicate, empty or `NA` dataset names is now rejected outright
+  instead of silently validating the wrong one twice.** `check()` looks a
+  dataset up by name, so two datasets sharing a name had the first validated
+  twice and the second never -- and a `datasets` list assembled with no names
+  at all, or with an empty string among them, was just as unrecoverable. The
+  class validator now refuses such a `datasets` list, naming the duplicate
+  names in the message.
+
+- **A file dataset handler that declares several file name patterns no longer
+  hides a missing one behind a delivered match for another.** When
+  `pattern = TRUE`, one delivered file satisfying any of the declared patterns
+  used to mark the whole handler as satisfied, so a second, still-missing
+  pattern was never reported. Every declared pattern with no delivered file
+  matching it is now reported missing on its own. Handlers using
+  `pattern = FALSE`, where several names are alternates for one file, are
+  unaffected.
+
+- **A free-text top-level metadata date now records why it could not be read,
+  instead of disappearing without a trace (closes DEV-009).** The top-level
+  `date` field is `Date`-typed, so a phrase with no leading ISO date -- unlike
+  the same phrase in a transmission date field, which is legitimate free
+  text -- still becomes `NA`, but it now records an import issue for field
+  `"date"` with reason `"not_convertible"`, carrying the original text.
+  `check()` on the DTA now reports metadata as not ok for such a delivery
+  instead of passing a date that was silently discarded. Transmission-date
+  phrases are unchanged.
+
+- **A descendant template can no longer overwrite a metadata field its parent
+  chain sealed through an `options:` or `party_slots:` entry.** Only a direct
+  edit of the definition tree was checked before, so a sealed field reachable
+  through an option's `target:`, `effects:`, `effects_all:` or `set:` map --
+  written only once the template is instantiated and a value is chosen --
+  could still be overwritten from a descendant template with no warning. Such
+  an entry must now be inherited unchanged from the parent that declared it;
+  a violation aborts inheritance resolution with the sealed message, and
+  `validate_template()` reports it under code `sealed_violation`.
+
+- **A failed document export no longer replaces a good file with a corrupt or
+  truncated one.** `write_dta()` (DOCX, Markdown and PDF),
+  `write_dataset_metadata()`, the template-based DOCX writer, and the
+  DOCX-to-PDF conversion all wrote to the destination directly, and each of
+  their backends -- `officer::print()`, `writeLines()`, the PDF converters --
+  truncates or creates its target before the write finishes, so a failure
+  partway left a corrupt or empty file where a good export, possibly untouched
+  for months, used to sit. Every one of these writers now writes to a staging
+  file beside the destination first and puts it in place only once the output
+  is complete and valid; a failed export now leaves an existing destination
+  file byte-for-byte unchanged and no staging file behind.
+
+- **The Shiny app's column and rule editors no longer lose or destroy data
+  silently.** Renaming a column onto an id another column already holds is
+  now refused with "A column named ... already exists." instead of the
+  rename overwriting that column outright; saving a column in the editor no
+  longer drops its examples and column class, since the editor form has no
+  field for either and previously rebuilt the spec from the visible fields
+  alone; and removing a group-condition or group-constraint row in the rule
+  editor now actually removes it, instead of a deleted row's stale inputs
+  being re-read and saved again.
+
+- **`run_qualification()` no longer reports a clean pass over an evidence
+  bundle it failed to write.** A results CSV or `results.json` that could not
+  be written used to either go unnoticed or, for `results.json`, be replaced
+  with a `"{}"` stub that then hashed and verified as if nothing were wrong.
+  Any evidence file that fails to write is now recorded, the verdict is
+  downgraded to `FAIL` (or `FAIL (PARTIAL)`), the missing files are named in
+  `SUMMARY.txt` and the report, and no stub is written or hashed in their
+  place; the remaining evidence, report and hash manifest are still produced.
+
+- **Inspecting one message from a streamed table no longer materialises the
+  whole table.** `inspect()` on a lazily-held (Arrow) table called
+  `as.data.frame()` on the full delivery to show a few rows of context around
+  a single failing row -- exactly the read `check()` had streamed to avoid.
+  Only the columns, and, where a single row is shown, the rows actually
+  needed for that message, are now read; row context on a one-shot stream
+  already consumed by validation is reported as unavailable rather than
+  silently empty.
+
+### Security
+
+- **"Restore previous session" is bound to the signed-in user.** The saved
+  session was found by a random id kept in the browser's local storage, which
+  every other app or page published on the same Posit Connect server can read.
+  Where Connect authenticates viewers, the session file is now also keyed to
+  and checked against the user, so a copied id no longer restores someone
+  else's data. Deployments without authentication still rely on the id alone.
+
+- **Uploaded data no longer stays on the server indefinitely.** The autosave,
+  its tables, the staged copy of every upload and every export are deleted
+  once they are older than `DTATOOLS_SESSION_TTL_HOURS` (default 24) and no
+  live session is using them; exports go when the session ends, and
+  "Start over" deletes everything at once. Autosaving also no longer copies
+  every loaded table in memory and rewrites it to disk on each click: each
+  table is written once and reused until it changes.
+
+- **The PDF export no longer fetches images named in a document.** Markdown
+  image syntax survived the earlier hardening, so a title like
+  `![](http://internal-host/...)` made the server request that URL, and a local
+  image path was embedded in the PDF. Images are now dropped before conversion,
+  and the browser route's page may load nothing at all.
+
+- Template sources whose git locator or `#ref` starts with `-` are rejected:
+  git read them as options, and `--upload-pack=` runs a command.
+
+- Validation messages downloaded as CSV or TSV no longer carry spreadsheet
+  formulas: a cell starting with `=`, `+`, `-` or `@` (often a column name or
+  value from the uploaded data) is prefixed with `'`.
+
+- Export errors show only the error message, no longer the R call with its
+  server paths.
+
+- The app's headless-browser PDF route now blocks scripts with a
+  Content-Security-Policy in the printed page. The `--disable-javascript` flag
+  it passed before is not a Chromium switch and blocked nothing; the switch
+  that does block scripts also stops the browser from printing.
+
+- **The PDF export no longer lets a document's own text act as markup.** A DTA
+  is a file that arrives from outside -- a supplier, a partner lab -- and its
+  free-text fields were written into the intermediate Markdown unchanged. Both
+  PDF routes then read that Markdown with Pandoc's default dialect, which has
+  raw LaTeX and raw HTML passthrough switched on, so a metadata title of
+  `\input{...}` typeset a file from the server into the delivered PDF, and one
+  containing a `<script>` ran in the headless browser that prints the
+  second route's PDF -- a document could reach the network from inside the
+  server. Both conversions now pin the reader to a dialect without raw
+  passthrough, and the browser is started with scripting disabled. Text that
+  looks like markup renders as the text it is.
+
+- **The file, column and rule editors escape the document text they display.**
+  All three tables disabled HTML escaping for the whole table so that a row's
+  action buttons would render, which also handed every other column -- file
+  names, column labels and descriptions, rule descriptions and the values in a
+  rule's conditions -- to the browser as live HTML. Escaping is now disabled
+  for the button column alone.
+
+- **A template's dataset reference can no longer name a file outside the
+  template's own directory.** A `datasets:` entry is document content, not
+  configuration, but it was resolved as an absolute path, or joined to the
+  template directory and followed wherever it led, so a reference could climb
+  out and load an unrelated file into the workspace. A reference now resolves
+  only inside the directory the template was found in, or to a bundled file by
+  bare name; an absolute path resolves nowhere. This is the rule
+  `get_dta_creation_template_path()` already applied to template names.
+
+- **A dataset value that spells a block placeholder renders as text inside a
+  repeating region.** Expanding a `{#DATASETS}` region substitutes each
+  dataset's values, and the pass that decides what is a block placeholder then
+  read those values back as if the template had written them: a dataset
+  described as `{SIGNATURES_TABLE}` grew a real approval-and-signatures table
+  in the document people sign. The two passes now agree that a value is a
+  value, which is the rule the rest of the mechanism already followed.
+
+- **Text taken from a specification could execute as a `cli` format string in
+  a validation failure message.** Rule ids, rule and constraint messages,
+  column names, and template file names and paths all reach a condition
+  message built with `cli`, which treats `{...}` in its input as R code to
+  evaluate -- so a rule id or a template file name containing `{some.expr}`,
+  arbitrary text chosen by whoever wrote the specification or template rather
+  than by the person running validation, was evaluated instead of shown.
+  `validate_rules()`, `validate_table()` and `validate_template(strict = TRUE)`
+  now reproduce such text literally in their condition messages, and so does
+  `summary()` of a qualification result when it prints a failure message.
+
 ## [0.25.0] - 2026-09-07
 
 ### Added

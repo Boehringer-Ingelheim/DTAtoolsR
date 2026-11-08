@@ -8,6 +8,23 @@
 #     metadata.template. A finished specification stays pinned to what it was
 #     actually built from.
 
+# Path of `filename` inside library root `root`, routed by its kind suffix:
+# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
+# for everything else (creation and dataset templates, and the plain data
+# files that sit beside them, which resolve relative to the template).
+# Creates the folder, so a fixture can write straight to the returned path.
+lib_path <- function(root, filename) {
+  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
+    "parties"
+  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
+    "vocabulary"
+  } else {
+    "templates"
+  }
+  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
+  file.path(root, sub, filename)
+}
+
 local_clean_template_env <- function(..., .local_envir = parent.frame()) {
   withr::local_envvar(
     c(
@@ -40,12 +57,12 @@ write_base_ct <- function(root, version, title) {
       sprintf('    title: "%s"', title),
       '    header: "Base header"',
       "datasets:",
-      "  - name: mini_ds",
+      "  - id: mini_ds",
       "    type: file",
       "    files: { filename: mini.csv, type: csv }",
       "options: []"
     ),
-    file.path(root, sprintf("base_%s.dta-template.yaml", gsub("[.]", "_", version)))
+    lib_path(root, sprintf("base_%s.dta-template.yaml", gsub("[.]", "_", version)))
   )
 }
 
@@ -63,7 +80,7 @@ write_deviation <- function(root, ref) {
       "    target: metadata.header",
       '    default: "ACME Labs"'
     ),
-    file.path(root, "acme.dta-template.yaml")
+    lib_path(root, "acme.dta-template.yaml")
   )
 }
 
@@ -122,7 +139,7 @@ test_that("publishing a newer parent moves @latest without editing the deviation
   # Publish a newer standard. The deviation file is NOT touched -- this is the
   # requirement: a supplier template must not need editing every time the base
   # template is updated.
-  deviation_before <- readLines(file.path(root, "acme.dta-template.yaml"))
+  deviation_before <- readLines(lib_path(root, "acme.dta-template.yaml"))
   write_base_ct(root, "1.1", "Title from 1.1")
   app_fn("dta_template_index_invalidate")()
 
@@ -130,7 +147,7 @@ test_that("publishing a newer parent moves @latest without editing the deviation
 
   expect_equal(second$value$lineage, "base_ct@1.1")
   expect_equal(second$value$def$base$metadata$title, "Title from 1.1")
-  expect_equal(readLines(file.path(root, "acme.dta-template.yaml")), deviation_before)
+  expect_equal(readLines(lib_path(root, "acme.dta-template.yaml")), deviation_before)
 })
 
 test_that("a pinned extends does NOT move when a newer parent is published", {
@@ -163,7 +180,7 @@ test_that("a document built from an @latest deviation records the concrete paren
   idx <- index_over(root)
 
   loaded <- app_fn("load_template_definition")("acme_ct@1.0", index = idx)
-  prov <- app_fn("template_provenance")(loaded$value$def, loaded$value, selections = list())
+  prov <- app_fn("template_provenance")(loaded$value$def, loaded$value)
   built <- app_fn("create_dta_from_template")(
     loaded$value$def, loaded$value$path,
     selections = list(), index = idx, provenance = prov
@@ -188,13 +205,13 @@ test_that("a dataset import may also use @latest", {
         sprintf('version: "%s"', version),
         sprintf("label: %s", label),
         "dataset:",
-        "  name: mini_ds",
+        "  id: mini_ds",
         "  type: tabular",
         "  files: { filename: mini.csv, type: csv }",
         "  columns:",
         "    - { id: SUBJID, label: Subject, type: SAS Char, format: SAS $20. }"
       ),
-      file.path(root, sprintf("mini_%s.dta-dataset-template.yaml", gsub("[.]", "_", version)))
+      lib_path(root, sprintf("mini_%s.dta-dataset-template.yaml", gsub("[.]", "_", version)))
     )
   }
   ds("1.0", "Mini v1")
@@ -205,7 +222,7 @@ test_that("a dataset import may also use @latest", {
       "label: Uses latest dataset", "base:", "  metadata:", '    title: "T"',
       "datasets:", "  - template: mini_dst@latest", "options: []"
     ),
-    file.path(root, "uses.dta-template.yaml")
+    lib_path(root, "uses.dta-template.yaml")
   )
   withr::local_envvar(c(DTATOOLS_TEMPLATE_SOURCES = paste0("t=dir:", root)))
   app_fn("dta_template_index_invalidate")()

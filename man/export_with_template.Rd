@@ -39,14 +39,17 @@ Fills a user-authored Word (\code{.docx}) template by replacing placeholder
 markers with values extracted from a \link{DTA} object. Placeholders use a
 single-brace, upper-case convention (for example \code{{DTA_TITLE}} or
 \code{{SUPPLIER_NAME}}) and may appear in the document body, headers, footers and
-table cells.
+table cells. A \verb{\{#DATASETS\}} ... \verb{\{/DATASETS\}} region repeats a span of the
+document body once per dataset in \code{dta}.
 
 The template is treated as an Open Packaging Conventions (OPC) archive: it is
 unzipped, the WordprocessingML text of each paragraph is substituted at the
 XML level (which transparently escapes any special characters such as \code{&},
-\code{<} and \code{>}), and the parts are repackaged into a new \code{.docx}. Because
-substitution operates on the concatenated text of a whole paragraph, it is
-robust to Word splitting a single placeholder across multiple runs.
+\code{<} and \code{>}), and the parts are repackaged into a new \code{.docx}. Placeholders
+are substituted run by run, which preserves each run's formatting. Only when
+Word has split a placeholder across several runs is the paragraph's text
+joined and written into its first run (the other runs are emptied, so
+that paragraph's per-run formatting is lost).
 }
 \details{
 The following placeholders are populated automatically from the DTA metadata
@@ -55,24 +58,76 @@ and reported via a warning.
 
 \describe{
 \item{Agreement}{\code{{DTA_TITLE}}, \code{{DTA_VERSION}}, \code{{DTA_DATE}}, \code{{DTA_HEADER}}}
+\item{Document and organisation}{\code{{DOCUMENT_NAME}} (default "Data Transfer
+Agreement"), \code{{DOCUMENT_ABBREVIATION}} (default "DTA"),
+\code{{ORGANISATION_NAME}} and \code{{ORGANISATION_UNIT}} (empty by default). Called
+directly, \code{\link[=export_with_template]{export_with_template()}} uses these defaults; \code{\link[=write_dta]{write_dta()}}
+fills them from its \code{document_name}, \code{document_abbreviation},
+\code{organisation} and \code{organisation_unit} arguments.}
+\item{Study}{\code{{STUDY_ID}}, \code{{PROTOCOL_ID}}}
 \item{Supplier}{\code{{SUPPLIER_NAME}}, \code{{SUPPLIER_COUNTRY}}, \code{{SUPPLIER_ADDRESS}},
 \code{{SUPPLIER_EMAIL}}, \code{{SUPPLIER_PHONE}}, \code{{SUPPLIER_CONTACTS}}}
 \item{Receiver}{\code{{RECEIVER_NAME}}, \code{{RECEIVER_COUNTRY}}, \code{{RECEIVER_ADDRESS}},
 \code{{RECEIVER_EMAIL}}, \code{{RECEIVER_PHONE}}, \code{{RECEIVER_CONTACTS}}}
 \item{Transmission}{\code{{TRANSMISSION_TYPE}}, \code{{TRANSMISSION_FREQUENCY}},
 \code{{TRANSMISSION_NOTIFICATION}}, \code{{TRANSMISSION_FIRST_TRANSFER}},
-\code{{TRANSMISSION_LAST_TRANSFER}}, \code{{TEST_UPLOAD}}, \code{{BLINDED_TRANSFER}}}
-\item{Data content}{\code{{DATASET_COUNT}}, \code{{DATASET_NAMES}}, \code{{DATASET_TYPES}},
-\code{{TOTAL_COLUMNS}}, \code{{TOTAL_RULES}}}
+\code{{TRANSMISSION_LAST_TRANSFER}}, \code{{TEST_UPLOAD}}, \code{{BLINDED_TRANSFER}},
+\code{{TRANSMISSION_EXTENT}}, \code{{TRANSMISSION_SCOPE}}, \code{{TRANSMISSION_PACKAGING}},
+\code{{TRANSMISSION_SECURITY}}, \code{{TRANSMISSION_CHECKSUM}},
+\code{{TRANSMISSION_TEST_REQUIREMENTS}}, \code{{TRANSMISSION_BLINDING_REQUIREMENTS}}}
+\item{Data content}{\code{{DATASET_COUNT}}, \code{{DATASET_IDS}}, \code{{DATASET_NAMES}}
+(each dataset's name, or its id where no name is set),
+\code{{DATASET_TYPES}}, \code{{TOTAL_COLUMNS}}, \code{{TOTAL_RULES}}}
 \item{Process}{\code{{ERROR_HANDLING}}, \code{{AUTHORIZED_CORRECTIONS}},
 \code{{SIGNATORIES}}, \code{{PROCESS_INFORMATION}}, \code{{VERSION_HISTORY}},
 \code{{GENERATED_DATE}}}
+\item{Block placeholders}{\code{{COLUMN_SPECS}}, \code{{VALIDATION_RULES}},
+\code{{FILE_SPECS}}, \code{{DATASETS}} (each also takes a \verb{:DATASET} argument, e.g.
+\code{{COLUMN_SPECS:ADSL}}, to render one dataset instead of all of them),
+\code{{SUPPLIER_CONTACTS_TABLE}}, \code{{RECEIVER_CONTACTS_TABLE}},
+\code{{SIGNATURES_TABLE}}, \code{{VERSION_HISTORY_TABLE}}, \code{{STUDY_TABLE}},
+\code{{AGREEMENT_SECTIONS}},
+\code{{AUTHORIZED_CORRECTIONS_LIST}}. Unlike the placeholders above, a block
+placeholder is replaced by rendered Word content -- a table, a heading, a
+list -- so it must be the only text in its paragraph, and only in the
+document body (not a header, footer or table cell). A \code{variables} entry
+of the same name still wins and renders as plain text instead.}
+\item{Repeating regions}{A body paragraph whose whole text is
+\verb{\{#DATASETS\}} opens a region, repeated once per dataset in \code{dta}, that
+ends at the next body paragraph whose whole text is \verb{\{/DATASETS\}}; both
+markers must be alone in their paragraph, and a region does not nest.
+Inside each repetition, seven placeholders resolve to that dataset's
+values: \code{{DATASET_ID}}, \code{{DATASET_NAME}} (its id where no name is set),
+\code{{DATASET_TYPE}}, \code{{DATASET_DESCRIPTION}}, \code{{DATASET_FILE_COUNT}},
+\code{{DATASET_COLUMN_COUNT}} and \code{{DATASET_RULE_COUNT}} (the last two are
+\code{0} for a non-tabular dataset). A bare dataset block
+(\code{{COLUMN_SPECS}}, \code{{VALIDATION_RULES}}, \code{{FILE_SPECS}}, \code{{DATASETS}})
+alone in a paragraph of the region is bound to the repetition's dataset
+(a bare \code{{COLUMN_SPECS}} or \code{{VALIDATION_RULES}} renders nothing for a
+non-tabular dataset) and rendered without its generated heading; an
+explicit \code{{COLUMN_SPECS:NAME}} is left as written. A
+malformed marker -- unclosed, unopened, or not alone in its paragraph
+-- is left in place and reported alongside unrendered blocks. A dataset
+value that happens to spell a \emph{block} placeholder renders as the text it
+is, not as that block. The same is not yet true of an \emph{inline}
+placeholder: a value spelling one is substituted again by the pass that
+follows region expansion, so a dataset described as
+\code{"Title is {DTA_TITLE}"} comes out with the title resolved. That is a
+known defect (DEV-016 in \code{inst/qualification/deviations.yaml}), not a
+documented behaviour to rely on -- the two passes are separated by a
+write and a re-read of the document, and only a token's spelling
+survives that, which identifies a block paragraph but not an inline
+placeholder inside a sentence.}
 }
 
-Additional or overriding values can be supplied through \code{variables}; names may
-be given with or without the surrounding braces (\code{"DTA_TITLE"} and
-\code{"{DTA_TITLE}"} are equivalent). User-supplied values take precedence over the
-automatically extracted ones and may introduce entirely new placeholders.
+Additional or overriding values can be supplied through \code{variables}; names
+may be given with or without the surrounding braces (\code{"DTA_TITLE"} and
+\code{"{DTA_TITLE}"} are equivalent). User-supplied values take precedence over
+the automatically extracted ones and may introduce entirely new placeholders.
+Study and agreement sections appear only where their placeholders occur;
+user-owned templates are never extended automatically. The new blocks
+render nothing when the corresponding metadata is empty. Agreement sections
+preserve their stored order and paragraph breaks as plain text.
 }
 \examples{
 # Build a minimal template with officer, then fill it from a DTA.

@@ -4,7 +4,7 @@
 \alias{.normalize_template_variables}
 \title{Normalize a user-supplied variable list to brace-delimited character values}
 \usage{
-.normalize_template_variables(variables, dta = NULL)
+.normalize_template_variables(variables)
 }
 \description{
 Normalize a user-supplied variable list to brace-delimited character values

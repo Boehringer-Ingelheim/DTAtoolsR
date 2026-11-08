@@ -4,21 +4,35 @@
 \alias{.replace_docx_placeholders}
 \title{Replace placeholders in a DOCX template and write a new DOCX}
 \usage{
-.replace_docx_placeholders(template_path, variables, output_path)
+.replace_docx_placeholders(
+  template_path,
+  variables,
+  dta,
+  output_path,
+  quiet = FALSE
+)
 }
 \arguments{
 \item{template_path}{Character. Path to the template \code{.docx}.}
 
 \item{variables}{Named list of brace-delimited placeholder values.}
 
+\item{dta}{A \link{DTA} object, passed through to \code{\link[=.tv_render_blocks]{.tv_render_blocks()}} so a block
+placeholder left alone by the substitution above can be rendered.}
+
 \item{output_path}{Character. Path to the \code{.docx} to create.}
+
+\item{quiet}{Logical. Suppress the warning about block placeholders left
+unchanged. Default \code{FALSE}.}
 }
 \value{
 Invisibly returns \code{output_path}.
 }
 \description{
 Unzips \code{template_path}, substitutes placeholders in the main document part and
-any header/footer parts, repackages the archive to \code{output_path}, and verifies
-the result opens as a valid DOCX.
+any header/footer parts, repackages the archive, verifies the result opens
+as a valid DOCX, and only then moves it to \code{output_path} (via
+\code{\link[=.dta_write_staged]{.dta_write_staged()}}) -- any file already at \code{output_path} is left
+untouched until that last step succeeds.
 }
 \keyword{internal}

@@ -12,10 +12,17 @@
 #' @param group_by Character vector. Columns used to define the groups.
 #' @param conditions Named list of named conditions. Each entry maps a
 #'   condition name to a column-condition mapping in the same shape used by
-#'   `DTARuleColCondition`.
-#' @param constraints List of constraint specifications. Supported constraint
-#'   `type` values are `mutually_exclusive` (alias: `not_both`) and
-#'   `requires` (alias: `implies`).
+#'   `DTARuleColCondition`. Required: at least one uniquely named condition.
+#' @param constraints List of constraint specifications; required and
+#'   non-empty. Supported constraint `type` values are `mutually_exclusive`
+#'   (alias: `not_both`) and `requires` (alias: `implies`). Every constraint
+#'   may carry an `id` (default `constraint_<i>`, `i` being its position, and
+#'   unique across the rule) and a `message`. A `mutually_exclusive` constraint
+#'   names two conditions in `left` and `right`, with optional `left_scope` and
+#'   `right_scope`. A `requires` constraint names `if` and `then` conditions,
+#'   with optional `if_scope` and `then_scope`. Each scope is `"any"` or
+#'   `"all"` and defaults to `"any"`. All condition names must be defined in
+#'   `conditions`.
 #' @return An object of class `DTARuleGroupCondition`.
 #'
 #' @examples
@@ -99,7 +106,7 @@ DTARuleGroupCondition <- S7::new_class(
     new_object(
       DTAtools::DTARule(
         id = id,
-        type = "check_group_condition",
+        type = "group_condition",
         description = description
       ),
       group_by = as.character(group_by),
@@ -118,8 +125,8 @@ DTARuleGroupCondition <- S7::new_class(
     if (!is.null(self@id) && (length(self@id) != 1 || !is.character(self@id) || any(grepl("\\s", self@id)))) {
       cli_abort("@id cannot have whitespaces and needs to be defined.")
     }
-    if (!self@type %in% c("check_group_condition", "group_condition")) {
-      cli_abort("'type' must be 'check_group_condition' or 'group_condition'.")
+    if (!identical(self@type, "group_condition")) {
+      cli_abort("{.arg type} must be {.val group_condition}.")
     }
     if (is.null(self@group_by) || length(self@group_by) < 1 || any(!nzchar(self@group_by))) {
       cli_abort("'group_by' must be a non-empty character vector of columns.")

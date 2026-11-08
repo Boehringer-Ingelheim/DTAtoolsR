@@ -1,0 +1,5 @@
+kind: dta_creation_template
+id: mx_child
+version: "1.0"
+extends: mx_parent@1.0
+mixins: [mx_privacy@1.0, mx_assay@1.0]

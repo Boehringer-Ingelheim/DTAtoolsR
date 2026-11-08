@@ -1,0 +1,169 @@
+# Decides, once and for every heavy workflow, how much CI a run gets. Called by
+# R-CMD-check.yaml, qualification.yml and test-coverage.yaml, so the three can
+# never disagree about what a diff is.
+#
+# Outputs:
+#   tier  "release" or "fast".
+#         release: a pull request into master, a pull request carrying the
+#                  `full-ci` label, a manual dispatch, or a schedule.
+#         fast:    every other pull request (in practice: into dev).
+#   skip  "true" when every changed path is inert for R CMD check (see the
+#         allowlist below). Never "true" outside a pull request.
+#   code  "true" when the diff touches R/, inst/, tests/, DESCRIPTION or
+#         NAMESPACE (or the qualification workflow itself), which is what gates
+#         the qualification suite on the fast tier. Always "true" outside a
+#         pull request.
+#
+# A CALLER MUST TREAT A MISSING OUTPUT AS "RUN EVERYTHING". If this job fails,
+# its outputs are empty; the callers compare with `!= 'fast'` / `!= 'true'` /
+# `!= 'false'` so an empty value lands on the release tier and the full run.
+# Failing toward running the check is the only acceptable direction for this
+# job to be wrong in.
+
+name: ci-tier
+
+on:
+  workflow_call:
+    outputs:
+      tier:
+        value: ${{ jobs.classify.outputs.tier }}
+      skip:
+        value: ${{ jobs.classify.outputs.skip }}
+      code:
+        value: ${{ jobs.classify.outputs.code }}
+
+jobs:
+  # No checkout and no R, so it costs seconds.
+  #
+  # The `skip` list is an ALLOWLIST, and that direction is the whole safety
+  # argument: a path has to be named here to be treated as inert, so a file
+  # nobody has classified runs the full matrix by default. Most entries are
+  # ones `.Rbuildignore` already keeps out of the built tarball -- ^docs$,
+  # ^thoughts$, ^\.claude$, ^CLAUDE\.md$, ^CLAUDE\.local\.md$, ^manifest\.json$
+  # and the unanchored CHANGELOG.md line -- so the check never sees them at
+  # all. (The root manifest.json is the Posit Connect deployment descriptor; it
+  # is validated by check_manifest.R in r-style.yaml, which none of this gates.)
+  # One entry does ship, and has to earn its place:
+  #
+  #   README.md is read by `R CMD check` only under --as-cran, and only to be
+  #   scanned for URLs, which is reported as a NOTE. check-r-package defaults
+  #   to error-on: "warning", so a NOTE cannot fail this build. The worst a
+  #   README-only pull request can hide is a newly broken link, and that
+  #   surfaces again on the next pull request touching anything else, and on
+  #   the scheduled runs.
+  #
+  # .github/** is deliberately NOT inert: a change to a workflow, or to a
+  # script a workflow sources, must re-run the matrix.
+  classify:
+    runs-on: ubuntu-latest
+
+    outputs:
+      tier: ${{ steps.classify.outputs.tier }}
+      skip: ${{ steps.classify.outputs.skip }}
+      code: ${{ steps.classify.outputs.code }}
+
+    steps:
+      - name: Classify this run
+        id: classify
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          FULL_CI: ${{ contains(github.event.pull_request.labels.*.name, 'full-ci') }}
+        run: |
+          set -uo pipefail
+
+          full() {
+            echo "$1"
+            { echo "tier=release"; echo "skip=false"; echo "code=true"; } >>"$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          # The schedules and a manual dispatch have no diff to classify, and
+          # always get the release tier.
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            full "Event is '$EVENT_NAME', not a pull request; release tier, full run."
+          fi
+
+          if [ "$BASE_REF" = "master" ] || [ "$FULL_CI" = "true" ]; then
+            tier=release
+          else
+            tier=fast
+          fi
+          echo "Pull request #$PR_NUMBER into '$BASE_REF' (full-ci label: $FULL_CI): $tier tier."
+
+          # One line per changed file, as "<new path>[TAB]<old path>".
+          #
+          # The REST field is `filename`; `path` is gh's own normalisation in
+          # `gh pr view --json files` and comes back empty from `gh api`.
+          #
+          # `previous_filename` is present only on a rename, and classifying it
+          # too is what stops the one input that would otherwise skip wrongly:
+          # `git mv R/foo.R thoughts/archive/foo.R` reports only the inert NEW
+          # path, so judging that alone would skip the matrix on a pull request
+          # that had just deleted an R source file.
+          if ! entries=$(gh api "repos/$REPO/pulls/$PR_NUMBER/files" --paginate \
+                           --jq '.[] | [.filename, (.previous_filename // empty)] | @tsv'); then
+            full "::warning::Could not list files in PR #$PR_NUMBER; full run."
+          fi
+
+          if [ -z "$entries" ]; then
+            full "::warning::PR #$PR_NUMBER reported no changed files; full run."
+          fi
+
+          # That endpoint "include[s] a maximum of 3000 files" and says nothing
+          # when it truncates, so a very large pull request could present an
+          # all-inert prefix of a diff that is not. Ask the pull request itself
+          # how many files it changed, and refuse to judge a list that does not
+          # account for every one of them.
+          if ! declared=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.changed_files'); then
+            full "::warning::Could not read changed_files for PR #$PR_NUMBER; full run."
+          fi
+
+          listed=$(printf '%s\n' "$entries" | wc -l | tr -d '[:space:]')
+          if [ "$listed" != "$declared" ]; then
+            full "::warning::PR #$PR_NUMBER declares $declared changed files but $listed were listed; full run."
+          fi
+
+          # A herestring, not a pipe: a pipe would run the loop in a subshell
+          # and the flags would not survive it.
+          skip=true
+          code=false
+          while IFS=$'\t' read -r new_path old_path; do
+            for file in "$new_path" "$old_path"; do
+              if [ -z "$file" ]; then
+                continue
+              fi
+              case "$file" in
+                manifest.json) ;;
+                docs/*|thoughts/*|.claude/*) ;;
+                CLAUDE.md|CLAUDE.local.md|README.md|CHANGELOG.md) ;;
+                *)
+                  if [ "$skip" = true ]; then
+                    echo "'$file' can affect R CMD check."
+                  fi
+                  skip=false
+                  ;;
+              esac
+              case "$file" in
+                R/*|inst/*|tests/*|DESCRIPTION|NAMESPACE|\
+                .github/workflows/qualification.yml|.github/workflows/ci-tier.yml|\
+                .github/scripts/qualification_verdict.R)
+                  if [ "$code" = false ]; then
+                    echo "'$file' can affect the qualification suite."
+                  fi
+                  code=true
+                  ;;
+              esac
+            done
+          done <<<"$entries"
+
+          if [ "$skip" = true ]; then
+            echo "Every changed path is inert for R CMD check:"
+            printf '%s\n' "$entries" | sed 's/^/  /'
+          fi
+          echo "tier=$tier skip=$skip code=$code"
+          { echo "tier=$tier"; echo "skip=$skip"; echo "code=$code"; } >>"$GITHUB_OUTPUT"

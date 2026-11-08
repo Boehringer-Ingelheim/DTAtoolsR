@@ -145,6 +145,49 @@ test_that("a qualified top-level date is converted and recorded as an import err
   )
 })
 
+test_that("a top-level date with no leading ISO date is NA and recorded as an import error", {
+  # @date is Date-typed (unlike the transmission dates, which are untyped list
+  # elements and may legitimately stay free text): a phrase with no ISO date at
+  # its start cannot be represented, so it becomes NA -- but, before this fix,
+  # that NA was stored with no import issue at all, so check() on the enclosing
+  # DTA reported metadata_ok = TRUE over a discarded top-level date. DEV-009.
+  md <- DTAMetaData(title = "T", date = "after approval")
+
+  expect_s3_class(md@date, "Date")
+  expect_true(is.na(md@date))
+
+  issues <- metadata_import_errors(md)
+  expect_equal(nrow(issues), 1)
+  expect_true(is.na(issues$row))
+  expect_identical(issues$column, "date")
+  expect_identical(issues$raw, "after approval")
+  expect_identical(issues$declared_type, "Date")
+  expect_identical(issues$reason, "not_convertible")
+})
+
+test_that("a DTA whose top-level date is an unparseable phrase fails check() on the metadata axis", {
+  md <- DTAMetaData(title = "T", date = "after approval")
+  dta <- DTA(datasets = list(create_example_DTADataSetTabular(2)), metadata = md)
+
+  out <- capture.output(dta <- check(dta, persist = FALSE, quiet = TRUE), type = "message")
+  expect_length(out, 0)
+
+  metadata_summary <- attr(dta, "last_metadata_summary")
+  expect_identical(metadata_summary$status, "failed")
+  expect_false(metadata_summary$ok)
+  expect_false(metadata_summary$import_valid)
+  expect_identical(metadata_summary$n_import_errors, 1L)
+  expect_identical(metadata_summary$fields, "date")
+  expect_false(attr(dta, "last_validation_ok"))
+
+  msgs <- messages(metadata(dta), as_tibble = FALSE)
+  expect_equal(nrow(msgs), 1)
+  expect_identical(msgs$source, "import")
+  expect_identical(msgs$target, "metadata")
+  expect_identical(msgs$keyword, "not_convertible")
+  expect_true(grepl("after approval", msgs$message, fixed = TRUE))
+})
+
 test_that("metadata import errors surface through messages()", {
   md <- DTAMetaData(
     title = "Qualified Date",
@@ -324,10 +367,10 @@ test_that("get_authorized_for_corrections returns configured values", {
   auth2 <- get_authorized_for_corrections(md2)
   auth3 <- get_authorized_for_corrections(md3)
 
-  expect_true(is.character(auth2) || is.list(auth2))
-  expect_true(length(auth2) >= 1)
-  expect_type(auth3, "character")
-  expect_true(nchar(auth3) > 0)
+  # create_example_DTAMetaData() hardcodes these values -- assert them
+  # directly rather than just their type and length.
+  expect_identical(auth2, c("Alice Smith", "Bob Johnson"))
+  expect_identical(auth3, "BI Data Management Team")
 })
 
 test_that("get_receiver_reviewers handles reviewer extraction", {
@@ -640,4 +683,67 @@ test_that("as.list(DTAMetaData) keeps a deliberately blank authorized_for_correc
   expect_false("authorized_for_corrections" %in% names(as.list(unset)))
   # An empty receiver IS the unset state for that property, so it stays out.
   expect_false("receiver" %in% names(as.list(blank)))
+})
+
+# DEV-010: an import issue on a metadata date must survive a write and a read.
+.metadata_yaml_round_trip <- function(md) {
+  path <- tempfile(fileext = ".yaml")
+  on.exit(unlink(path), add = TRUE)
+  yaml::write_yaml(as.list(md), path)
+  do.call(DTAMetaData, yaml::read_yaml(path))
+}
+
+test_that("a trailing_residue transmission date keeps its issue across a round trip", {
+  md <- DTAMetaData(
+    title = "t",
+    transmission = list(date_last_transfer = "2026-12-31 at the earliest")
+  )
+  back <- .metadata_yaml_round_trip(md)
+
+  issues <- metadata_import_errors(back)
+  expect_equal(nrow(issues), 1L)
+  expect_identical(issues$reason, "trailing_residue")
+  expect_identical(issues$column, "transmission$date_last_transfer")
+  expect_identical(issues$raw, "2026-12-31 at the earliest")
+  expect_identical(back@transmission$date_last_transfer, as.Date("2026-12-31"))
+})
+
+test_that("a not_convertible top-level date keeps its issue across a round trip", {
+  md <- DTAMetaData(title = "t", date = "after approval")
+  back <- .metadata_yaml_round_trip(md)
+
+  expect_true(is.na(back@date))
+  issues <- metadata_import_errors(back)
+  expect_equal(nrow(issues), 1L)
+  expect_identical(issues$reason, "not_convertible")
+  expect_identical(issues$raw, "after approval")
+})
+
+test_that("a date changed after load is written as the new value, not the old raw text", {
+  md <- DTAMetaData(
+    title = "t",
+    transmission = list(date_last_transfer = "2026-12-31 at the earliest")
+  )
+  md@transmission$date_last_transfer <- as.Date("2027-02-01")
+  expect_identical(as.list(md)$transmission$date_last_transfer, "2027-02-01")
+
+  back <- .metadata_yaml_round_trip(md)
+  expect_equal(nrow(metadata_import_errors(back)), 0L)
+  expect_identical(back@transmission$date_last_transfer, as.Date("2027-02-01"))
+
+  md2 <- DTAMetaData(title = "t", date = "after approval")
+  md2@date <- as.Date("2027-03-04")
+  back2 <- .metadata_yaml_round_trip(md2)
+  expect_equal(nrow(metadata_import_errors(back2)), 0L)
+  expect_identical(back2@date, as.Date("2027-03-04"))
+})
+
+test_that("a clean ISO metadata date is still written as exactly the ISO string", {
+  md <- DTAMetaData(
+    title = "t", date = "2026-01-15",
+    transmission = list(date_last_transfer = "2026-12-31")
+  )
+  out <- as.list(md)
+  expect_identical(out$date, "2026-01-15")
+  expect_identical(out$transmission$date_last_transfer, "2026-12-31")
 })

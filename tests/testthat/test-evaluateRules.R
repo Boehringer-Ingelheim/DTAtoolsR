@@ -122,14 +122,14 @@ test_that("create_example_DTARule helpers create runnable rules", {
   rule <- create_example_DTARuleColCondition()
   expect_true(methods::is(rule, "DTAtools::DTARuleColCondition"))
   expect_equal(rule@id, "rule3")
-  expect_equal(rule@type, "check_col_condition")
+  expect_equal(rule@type, "col_condition")
   expect_equal(rule@condition, list(age = list(equals = 18)))
   expect_equal(rule@then, list(status = list(equals = "adult")))
 
   range_rule <- create_example_DTARuleColRange()
   expect_true(methods::is(range_rule, "DTAtools::DTARuleColRange"))
   expect_equal(range_rule@id, "check_age_range")
-  expect_equal(range_rule@type, "check_range")
+  expect_equal(range_rule@type, "col_range")
   expect_equal(range_rule@columns, "AGE")
   expect_equal(range_rule@min, 18)
   expect_equal(range_rule@max, 65)
@@ -1071,6 +1071,59 @@ test_that("validate_rules passes clean tables and aborts on rule violations", {
     ),
     "Rule 'unique_id' violated: 1 duplicate row"
   )
+})
+
+test_that("validate_rules never evaluates YAML/data-derived text as a cli format string", {
+  # A rule id (or, via dta_unique_violation_message(), any message text built
+  # from user/YAML/data) reaches cli_abort() as BULLET CONTENT, not as the
+  # format string. Before the fix, `bullets` was built with the "!"/"x" names
+  # swapped onto the wrong side (c("Rule violations:" = "!", ...) instead of
+  # c("!" = "Rule violations:", ...)) and without .cli_escape(), so a `{`/`}`
+  # in the id was glue-evaluated in the validating session.
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 12, nullable = FALSE)
+    ),
+    rules = list(
+      DTARuleColUnique(id = "u{stop('evaluated')}", columns = "ID")
+    )
+  )
+
+  err <- tryCatch(
+    suppressMessages(
+      validate_rules(specs, data.frame(ID = c("A001", "A001"), stringsAsFactors = FALSE))
+    ),
+    error = function(e) e
+  )
+  expect_s3_class(err, "rlang_error")
+  # Evaluated, the payload would raise "evaluated" from stop() instead of
+  # reaching this point at all -- so surviving to a literal, unevaluated
+  # match is itself proof the id was never handed to glue as code.
+  expect_true(grepl("u{stop('evaluated')}", conditionMessage(err), fixed = TRUE))
+  expect_true(grepl("^!\\s*Rule violations:", conditionMessage(err)))
+})
+
+test_that("apply_rules never evaluates an unknown rule type as a cli format string (verbose)", {
+  df <- data.frame(ID = c("A001", "A002"), stringsAsFactors = FALSE)
+  rule <- DTARule(id = "r1", type = "bogus_{stop('evaluated')}", description = "")
+
+  msgs <- testthat::capture_messages(
+    results <- apply_rules(list(rule), df, verbose = TRUE)
+  )
+
+  expect_true(any(grepl("Unknown rule type: bogus_{stop('evaluated')}", msgs, fixed = TRUE)))
+  expect_false(results[[1]]$valid)
+})
+
+test_that("apply_rules never evaluates a YAML rule id as a cli format string (verbose)", {
+  df <- data.frame(ID = c("A001", "A002"), stringsAsFactors = FALSE)
+  rule <- DTARuleColUnique(id = "id{no_such_object_xyz}", columns = "ID")
+
+  results <- testthat::capture_messages(apply_rules(list(rule), df, verbose = TRUE))
+  # The rule passes (no duplicates), so the only interpolation exercised here
+  # is the "Rule '{result$id}' passed" verbose line -- a safe pattern already,
+  # pinned so a future edit does not turn it into a format-string call.
+  expect_true(any(grepl("id{no_such_object_xyz}", results, fixed = TRUE)))
 })
 
 test_that("validate_rules returns an empty result when the collection has no rules", {
@@ -2080,4 +2133,114 @@ test_that("print() on the other rule classes already survives braces in id/colum
   out_group <- capture.output(print(group_rule), type = "message")
   expect_true(any(grepl("grp{r}", out_group, fixed = TRUE)))
   expect_true(any(grepl("G{1}, G2", out_group, fixed = TRUE)))
+})
+
+test_that("a condition operator given the wrong number of values is rejected when the rule is built", {
+  # Each of these used to construct, then produce a verdict silently decided by
+  # R's element-wise recycling instead of by the specification.
+  bad_then <- list(
+    equals_vector = list(ARM = list(equals = c("A", "B"))),
+    not_equals_vector = list(ARM = list(not_equals = c("A", "B"))),
+    pattern_vector = list(ARM = list(pattern = c("^A$", "^B$"))),
+    greater_vector = list(AGE = list(greater = c(1, 2))),
+    min_missing = list(AGE = list(min = NA)),
+    range_one = list(AGE = list(range = 25)),
+    range_three = list(AGE = list(range = c(0, 100, 5))),
+    range_missing = list(AGE = list(range = c(0, NA))),
+    in_empty = list(ARM = list(`in` = character(0))),
+    empty_not_logical = list(ARM = list(empty = "yes"))
+  )
+  for (case in names(bad_then)) {
+    expect_error(
+      DTARuleColCondition(
+        id = "r1",
+        condition = list(ARM = list(not_equals = "zzz")),
+        then = bad_then[[case]]
+      ),
+      class = "dta_condition_arity_error",
+      info = case
+    )
+  }
+
+  # The IF side is checked by the same path.
+  expect_error(
+    DTARuleColCondition(
+      id = "r1",
+      condition = list(ARM = list(equals = c("A", "B"))),
+      then = list(AGE = list(greater = 0))
+    ),
+    class = "dta_condition_arity_error"
+  )
+})
+
+test_that("the arity error names the operator and column, and points equals at in:", {
+  err <- tryCatch(
+    DTARuleColCondition(
+      id = "r1",
+      condition = list(VISIT = list(equals = "V1")),
+      then = list(ARM = list(equals = c("A", "B")))
+    ),
+    dta_condition_arity_error = function(e) e
+  )
+  expect_s3_class(err, "dta_condition_arity_error")
+  msg <- conditionMessage(err)
+  expect_match(msg, "equals", fixed = TRUE)
+  expect_match(msg, "ARM", fixed = TRUE)
+  expect_match(msg, "2 values", fixed = TRUE)
+  expect_match(msg, "in:", fixed = TRUE)
+})
+
+test_that("the YAML sequence form and group conditions are checked too", {
+  expect_error(
+    DTARuleColCondition(
+      id = "r1",
+      condition = list(list(VISIT = list(equals = "V1"))),
+      then = list(list(AGE = list(range = 5)))
+    ),
+    class = "dta_condition_arity_error"
+  )
+  expect_error(
+    DTARuleGroupCondition(
+      id = "g1",
+      group_by = "SUBJID",
+      conditions = list(c1 = list(ARM = list(equals = c("A", "B")))),
+      constraints = list(list(type = "requires", `if` = "c1", then = "c1"))
+    ),
+    class = "dta_condition_arity_error"
+  )
+})
+
+test_that("well-formed operator values are unaffected by the arity check", {
+  df <- data.frame(
+    ARM = c("A", "B", "A", "B"), AGE = c(10, 20, 30, 40),
+    D = as.Date(c("2020-01-01", "2020-06-01", "2020-07-01", "2020-12-01")),
+    stringsAsFactors = FALSE
+  )
+  check <- function(then) {
+    rule_check_col_condition(
+      DTARuleColCondition(id = "ok", condition = list(ARM = list(not_equals = "zzz")), then = then),
+      df
+    )$valid
+  }
+  expect_true(check(list(ARM = list(`in` = c("A", "B")))))
+  expect_true(check(list(ARM = list(not_in = "C"))))
+  expect_true(check(list(AGE = list(range = c(10, 40)))))
+  expect_true(check(list(AGE = list(min = 10, max = 40))))
+  expect_true(check(list(AGE = list(greater_equal = 10, less = 41))))
+  expect_true(check(list(ARM = list(pattern = "^[AB]$", empty = FALSE))))
+  # A missing member of `in` is a deliberate idiom -- "A or missing" -- and is
+  # not an arity error.
+  df_na <- df
+  df_na$ARM[2] <- NA
+  ok_na <- rule_check_col_condition(
+    DTARuleColCondition(id = "na_ok", condition = list(AGE = list(greater = 0)), then = list(ARM = list(`in` = c("A", NA)))),
+    df_na
+  )
+  # A, missing and A pass; only the B row fails.
+  expect_false(ok_na$valid)
+  expect_match(ok_na$message, "violated: 1 row")
+  # Date bounds are written as text and parsed against a Date column, so the
+  # range check must not insist on numbers.
+  expect_true(check(list(D = list(range = c("2020-01-01", "2020-12-31")))))
+  expect_false(check(list(AGE = list(range = c(15, 40)))))
 })

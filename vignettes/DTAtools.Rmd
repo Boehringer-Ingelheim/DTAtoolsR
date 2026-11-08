@@ -118,7 +118,7 @@ DTA                              ← top-level agreement container
                                           may restrict the allowed endings
 ```
 
-**Three ways to build any object, from most to least common:**
+**Four ways to build any object, from most to least common:**
 
 1. **`read_dta_from_yaml()`** — a full DTA/DTS (metadata + one or more datasets). The
    recommended entry point for production use — see the Quickstart below.
@@ -139,6 +139,7 @@ DTA                              ← top-level agreement container
 3. `results(x)` — one-row-per-table summary (pass/fail, error counts per axis)
 4. `messages(x)` — one-row-per-error detail table (`source`, column, row, rule, message, `id`)
 5. `inspect(x, id = N)` — deep-dive into a specific error message by its `id`
+6. `explain_messages(x)` — the same findings in plain language: what each value should have been and what it was
 
 ---
 
@@ -178,7 +179,8 @@ tracked elsewhere — read the dataset definition directly with
 `DTAtools`, right after `read_dta_from_yaml()`.
 
 A standalone dataset YAML has exactly the same shape as one entry under a
-DTA's `datasets:` list — `name`, `type`, `files`, `columns`, `rules` — just
+DTA's `datasets:` list — `id`, `type`, `name`, `description`, `files`,
+`columns`, `rules` — just
 without the surrounding `metadata:`/`datasets:` wrapper. The package ships a
 real example of this shape at `inst/extdata/gf_dataset.yaml`; here we build an
 equivalent one by extracting the `clinical_data` entry from `clinical_dta.yaml`
@@ -227,9 +229,15 @@ directly to a column entry in a YAML specification.
 | `values`      |          | Closed list of allowed values (`enum` in JSON Schema)    |
 | `pattern`     |          | Regular expression every value must match                |
 | `description` |          | Free-text description for documentation                  |
+| `examples`    |          | Example values; each must match `pattern`; not allowed together with `values` |
+| `colclass`    |          | Column category, one of `patient_info`, `measurement_patient`, `measurement`, `visit_related`, `date_related`, `study_info`, `wide_format`, `long_format`, `wide_and_long_format` |
 
 > **Note:** `values` and `pattern` are mutually exclusive — a column either has
 > a closed value list or a regex pattern, not both.
+
+Values must fit the declared `format` (for example, `SAS $10.` allows at most
+ten characters), but `BEST` formats are not enforced because they adapt their
+width to the value.
 
 `type` is not documentation: it decides how the column is *read*. A column
 declared `SAS Num` or `SAS Int` is stored as a number, so `"007"` in such a
@@ -354,9 +362,11 @@ colspec(gf_specs, "GFSTAT")
 gf_specs@rules
 ```
 
-> **Nested YAML:** If your specs live inside a larger YAML file under a nested
-> key (e.g. under `DTA: format:`), pass `tag = c("DTA", "format")` to
-> `import_specs_from_yaml()`.
+> **Nested YAML:** `import_specs_from_yaml(file)` only reads top-level
+> `columns:` and `rules:` keys. If your specs live inside a larger YAML file
+> under a nested key (e.g. under `DTA: format:`), read the file with
+> `yaml::read_yaml()`, pick out the sub-list, and pass its columns and rules to
+> `specs_from_list(columns, rules)`.
 
 ### Exporting Specifications to YAML and JSON
 
@@ -376,6 +386,10 @@ unlink(yaml_out)
 json_out <- tempfile(fileext = ".json")
 write_columns_to_json(gf_specs, json_out)
 cat(paste(readLines(json_out, n = 25), collapse = "\n"))
+
+# Read it back with import_specs_from_json()
+gf_specs_json <- import_specs_from_json(json_out)
+length(gf_specs_json@columns) == length(gf_specs@columns)
 unlink(json_out)
 ```
 
@@ -412,7 +426,7 @@ raw_data <- read.csv(csv_path)
 
 # Create the DTADataSetTabular with specs + data, then validate
 ds <- DTADataSetTabular(
-  name   = "clinical_data",
+  id     = "clinical_data",
   specs  = clinical_specs,
   tables = list(clinical_data = raw_data)
 )
@@ -446,7 +460,7 @@ inline_data <- data.frame(
 
 # Combine into a DTADataSetTabular
 inline_ds <- DTADataSetTabular(
-  name   = "inline_example",
+  id     = "inline_example",
   specs  = inline_specs,
   tables = list(my_table = inline_data)
 )
@@ -463,7 +477,7 @@ inline_ds
 2. **Column spec errors** — JSON Schema validation of every row against column types,
    `nullable`, `values`, `pattern`, and `length`.
 3. **Rule errors** — inter-column rules (`col_condition`, `col_range`,
-   `col_unique`).
+   `col_unique`, `group_condition`).
 
 All three are always evaluated, and a failure on any one of them fails the
 table. `check()` **always returns the updated object** — assign the result back.
@@ -620,7 +634,7 @@ err_file <- system.file("extdata", "clinical_data_error_columnspec.csv", package
 raw_err <- read.csv(err_file)
 
 ds_err <- DTADataSetTabular(
-  name   = "clinical_data",
+  id     = "clinical_data",
   specs  = specs(datasets(dta_obj_e, "clinical_data")),
   tables = list(clinical_data = raw_err)
 )
@@ -652,7 +666,7 @@ rule_file <- system.file("extdata", "clinical_data_error_rules.csv", package = "
 raw_rule <- read.csv(rule_file)
 
 ds_rule <- DTADataSetTabular(
-  name   = "clinical_data",
+  id     = "clinical_data",
   specs  = specs(datasets(dta_obj_r, "clinical_data")),
   tables = list(clinical_data = raw_rule)
 )
@@ -701,7 +715,7 @@ import_data <- data.frame(
 )
 
 ds_import <- DTADataSetTabular(
-  name   = "import_demo",
+  id     = "import_demo",
   specs  = import_specs2,
   tables = list(demo = import_data)
 )
@@ -716,7 +730,8 @@ validation_status(ds_import)[, c(
 The three axes are independent: `n_columnspec_errors` and `n_rule_errors` are `0`,
 `n_import_errors` is `1`, and `ok` is `FALSE`.
 
-> **Reading the console output.** `check()` reports all three axes, each under
+> **Reading the console output.** `check()` on an in-memory table reports all
+> three axes (the streaming path does not print the import heading), each under
 > its own heading. The column spec axis prints one line per check kind —
 > presence, format, length, values, pattern — so a failure names the check that
 > failed and the columns it failed in, and a pass says which checks actually
@@ -754,12 +769,18 @@ The stored table holds `NA` in that cell, and the column is numeric as declared:
 as.data.frame(get_table(ds_import, "demo"))
 ```
 
-Two reasons are reported:
+Four reasons are reported:
 
 | `reason` / `keyword` | Meaning                                                                 |
 |----------------------|-------------------------------------------------------------------------|
 | `not_convertible`    | No part of the value fits the declared type, e.g. `"unknown"` as a number |
 | `trailing_residue`   | A prefix of the value fits and the remainder would be dropped, e.g. `"2026-12-31 at the earliest"` as a date |
+| `not_whole`          | A number in a declared integer column is fractional or not finite, e.g. `"8.5"` |
+| `out_of_range`       | A whole number in a declared integer column lies outside the 32-bit integer range, e.g. `"5000000000"` |
+
+A declared integer column is always stored as an R `integer`, so a value that
+cannot be stored that way becomes `NA` and is reported here rather than
+changing the type of the whole column.
 
 ### Import errors in metadata
 
@@ -809,6 +830,7 @@ The most versatile rule type. When `condition` is satisfied for a row, the
 | `less`          | number            | `less: 200`                      |
 | `less_equal`    | number            | `less_equal: 65`                 |
 | `min` / `max`   | number range      | `min: 10` + `max: 100`           |
+| `range`         | `[lo, hi]`, inclusive | `range: [10, 100]`           |
 
 ```yaml
 rules:
@@ -860,13 +882,14 @@ rules:
 
 #### `col_range` — Numeric Range Check
 
-Enforces that all values in a numeric column fall within `[min, max]`.
+Enforces that all values in a numeric column fall within `[min, max]`. The bounds can also be
+given as `range: [18, 65]` in place of `min`/`max`.
 
 ```yaml
 rules:
   - id: age_range
     type: col_range
-    column: AGE
+    columns: AGE
     min: 18
     max: 65
 ```
@@ -881,12 +904,12 @@ rules:
   # Single column uniqueness
   - id: subject_unique
     type: col_unique
-    column: SUBJECT_ID
+    columns: SUBJECT_ID
 
   # Composite key uniqueness: SUBJECT_ID + VISIT must be unique per row
   - id: subject_visit_unique
     type: col_unique
-    column:
+    columns:
       - SUBJECT_ID
       - VISIT
 ```
@@ -1050,12 +1073,12 @@ bad_data <- data.frame(
   VISIT        = c("SCREENING", "BASELINE"),
   AGE          = c(16, 32), # 16 violates age_range (min 18)
   CONSENT      = c("YES", "NO"),
-  CONSENT_DATE = c(NA, NA), # CONSENT=YES but no date: violates consent_requires_date
-  SUBJECT_ID   = c("P01", "P01") # duplicate SUBJECT_ID: violates subject_visit_unique when VISIT differs too
+  CONSENT_DATE = c(NA, NA), # CONSENT=YES but no date: violates consent_requires_date and consent_requires_date_per_subject
+  SUBJECT_ID   = c("P01", "P01") # same subject twice, but the (SUBJECT_ID, VISIT) pairs differ, so subject_visit_unique still passes
 )
 
 ds_bad <- DTADataSetTabular(
-  name   = "demo_rules",
+  id     = "demo_rules",
   specs  = specs_with_rules,
   tables = list(demo = bad_data)
 )
@@ -1342,7 +1365,7 @@ simple_specs <- DTAColumnSpecCollection(columns = list(
 
 # Use the Arrow Table directly in the constructor
 ds_from_file <- DTADataSetTabular(
-  name   = "clinical_from_file",
+  id     = "clinical_from_file",
   specs  = simple_specs,
   files  = list(file_handler), # document the expected file
   tables = list(clinical_data = tbl) # provide the loaded data
@@ -1374,7 +1397,7 @@ cat("Rows loaded:", nrow(loaded), "\n")
 ## `DTADataSetFile`: File Presence and Readability Checks
 
 While `DTADataSetTabular` validates the *content* of a delivered file against a
-column column spec and rules, `DTADataSetFile` answers a more basic question:
+column specification and rules, `DTADataSetFile` answers a more basic question:
 **did the expected files actually arrive, and can we open them?**
 
 Use `DTADataSetFile` when a DTS requires that certain non-tabular files (PDFs,
@@ -1399,7 +1422,7 @@ delivered_csv <- system.file("extdata", "clinical_data.csv", package = "DTAtools
 delivered_tsv <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")
 
 ds_file <- DTADataSetFile(
-  name  = "delivery_check",
+  id    = "delivery_check",
   paths = c(delivered_csv, delivered_tsv)
 )
 ds_file <- check(ds_file)
@@ -1409,7 +1432,7 @@ results(ds_file) # both files pass
 ```{r dataset_file_missing}
 # Introduce a missing file to trigger a failure
 ds_missing <- DTADataSetFile(
-  name  = "delivery_check_fail",
+  id    = "delivery_check_fail",
   paths = c(delivered_csv, "/nonexistent/path/report.pdf")
 )
 ds_missing <- check(ds_missing)
@@ -1438,7 +1461,7 @@ validation time.
 
 ```{r dataset_file_load}
 ds_declared <- DTADataSetFile(
-  name = "declared_delivery",
+  id = "declared_delivery",
   files = list(
     DTAFileAny(filename = "clinical_data.csv", extensions = c("csv", "tsv"))
   )
@@ -1474,16 +1497,19 @@ the full delivery — column-level content *and* file presence — in one `check
 ```{r dta_mixed_types, eval=FALSE}
 # Tabular dataset (column spec validation)
 ds_tab <- DTADataSetTabular(
-  name = "clinical_data",
-  specs = import_specs_from_yaml(
-    system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
-  ),
+  id = "clinical_data",
+  specs = specs(datasets(
+    read_dta_from_yaml(
+      system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+    ),
+    "clinical_data"
+  )),
   tables = list(clinical_data = read.csv(delivered_csv))
 )
 
 # File dataset (presence check)
 ds_fi <- DTADataSetFile(
-  name  = "delivery_manifest",
+  id    = "delivery_manifest",
   paths = c(delivered_csv, delivered_tsv)
 )
 
@@ -1503,7 +1529,8 @@ results(dta_mixed) # one row per dataset
 ### `DTAMetaData`
 
 `DTAMetaData` captures all the administrative information about a DTA:
-title, version, contacts (receiver and supplier), and transmission details.
+title, version, study identity, contacts (receiver and supplier), transmission
+details and ordered narrative agreement sections.
 
 ```{r metadata}
 # Minimal metadata
@@ -1516,6 +1543,17 @@ meta_full <- DTAMetaData(
   version = "2.0",
   date = as.Date("2026-01-15"),
   header = "Boehringer Ingelheim",
+  study = list(id = "DEMO-001", protocol_id = "PROTOCOL-01"),
+  sections = list(
+    responsibilities = list(
+      title = "Responsibilities",
+      text = paste(
+        "The receiver reviews delivered files.",
+        "Discrepancies are reported to the supplier.",
+        sep = "\n\n"
+      )
+    )
+  ),
   receiver = list(
     affiliation = list(name = "External CRO", country = "Germany"),
     contacts = list(
@@ -1543,11 +1581,33 @@ meta_full <- DTAMetaData(
     frequency           = "One-time",
     notification        = "Email",
     date_first_transfer = as.Date("2026-02-01"),
-    date_last_transfer  = as.Date("2026-03-31")
+    date_last_transfer  = as.Date("2026-03-31"),
+    extent              = "cumulative",
+    scope               = "All completed records at the agreed cut-off.",
+    packaging           = "One tab-delimited file per dataset."
   )
 )
 print(meta_full)
 ```
+
+Study identifiers are optional, nonblank strings named `id` and `protocol_id`.
+They do not replace the document `header` or restrict any dataset column.
+`sections` is a named mapping in document order: stable keys begin with a
+letter and contain only letters, digits and underscores; each value contains
+a nonblank `title` and scalar `text`. Empty text is allowed during drafting.
+Unknown or malformed new metadata fields fail validation instead of being
+silently dropped. Empty `study` and `sections` are omitted during YAML export.
+
+The metadata editor exposes study fields, section add/edit/delete/reorder and
+additional transmission text fields: `extent`, `scope`, `packaging`, `security`,
+`checksum`, `test_requirements`, and `blinding_requirements`. Existing custom
+transmission entries are retained. These fields describe agreed procedures;
+they do not execute transfers, security checks, redaction or approvals.
+
+Default Word and Markdown layouts include study and narrative sections.
+Custom Word templates can place `{STUDY_ID}` / `{PROTOCOL_ID}` inline and
+`{STUDY_TABLE}` / `{AGREEMENT_SECTIONS}` as standalone block paragraphs.
+Absent fields do not add empty sections to legacy exports.
 
 ### Constructing a `DTA` Object
 
@@ -1564,7 +1624,7 @@ dta_obj <- DTA(
 )
 print(dta_obj)
 
-# Access datasets by name or index
+# Access datasets by id or index
 datasets(dta_obj, "demographics")
 dta_obj[["vitals"]]
 dta_obj[c(1, 2)] # returns a list of both datasets
@@ -1600,7 +1660,7 @@ raw_full <- read.csv(csv_path_full)
 
 # Create DTADataSetTabular with specs + data
 ds_full <- DTADataSetTabular(
-  name   = "clinical_data",
+  id     = "clinical_data",
   specs  = clinical_sps,
   tables = list(clinical_data = raw_full)
 )
@@ -1626,7 +1686,7 @@ dta_obj_w <- read_dta_from_yaml(
   system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 )
 ds_w <- DTADataSetTabular(
-  name   = "clinical_data",
+  id     = "clinical_data",
   specs  = specs(datasets(dta_obj_w, "clinical_data")),
   tables = list(clinical_data = read.csv(csv_path_w))
 )
@@ -1657,7 +1717,11 @@ Key arguments for `write_table_to_file()`:
 | `compression`         | `"none"`   | `"none"` or `"gzip"`                                   |
 | `get_md5sum`          | `TRUE`     | Compute and print the MD5 checksum of the written file  |
 | `write_md5sum_to_file`| `TRUE`     | Write MD5 + row/column count to a `.md5` sidecar file  |
-| `overwrite`           | `TRUE`     | Whether to overwrite an existing file                  |
+| `arrange_desc`        | `FALSE`    | Sort in descending order                                |
+| `na`                  | `""`       | String written for missing values                       |
+| `quote`               | `FALSE`    | Whether to quote strings and factors                    |
+| `overwrite`           | `FALSE`    | Whether to overwrite an existing file                  |
+| `quiet`               | `FALSE`    | Suppress progress messages                              |
 
 ### Export Spec Table to Word
 
@@ -1727,6 +1791,82 @@ write_dta(dta_from_file, "clinical_dta.docx", template = "my_template.docx")
 Dates in the generated documents are written as ISO 8601 (`YYYY-MM-DD`), so the
 same DTA produces the same document regardless of the machine's locale.
 
+#### What a Word template can ask for
+
+A template is an ordinary `.docx` carrying `{PLACEHOLDER}` markers.
+`dta_template_placeholders()` is the catalogue — call it with no argument for
+descriptions, or with a `DTA` to see what each marker resolves to for that
+object:
+
+```{r template_placeholders_example}
+ph <- dta_template_placeholders()
+kind <- attr(ph, "kind")
+
+head(ph[kind == "inline"], 3)
+ph[kind == "block"]
+ph[kind == "region"]
+```
+
+**Inline** markers resolve to text and may appear anywhere, including
+mid-sentence and in headers and footers. **Block** markers expand to document
+structure — tables, headings, lists — built by the same renderers the built-in
+layout uses, so a templated document and a built-in one say the same thing about
+the same `DTA`.
+
+`{COLUMN_SPECS}`, `{VALIDATION_RULES}`, `{FILE_SPECS}` and `{DATASETS}` take an
+optional dataset argument: `{COLUMN_SPECS:clinical_data}` renders that one
+dataset, and the bare form renders every applicable dataset under its own
+heading.
+
+Three rules govern block markers:
+
+- A block marker must be **the only text in its paragraph**. `Columns:
+  {COLUMN_SPECS}` is left alone, because replacing it with a table would destroy
+  the sentence.
+- It must sit in the **document body** — not a header, a footer, or a table
+  cell.
+- A value supplied through `template_variables` overrides a marker of either
+  kind and is always rendered as text.
+
+Anything left unrendered by those rules is named in a warning, alongside the
+existing report of markers the catalogue does not recognise.
+
+#### Repeating a region per dataset
+
+A paragraph holding only `{#DATASETS}`, paired with a later paragraph holding
+only `{/DATASETS}`, marks a repeating region: everything between the two —
+paragraphs and tables alike — is emitted once per dataset the DTA declares,
+in the DTA's own dataset order, and the marker paragraphs themselves do not
+appear in the output. A DTA with no datasets produces no region at all.
+
+```
+{#DATASETS}
+{DATASET_NAME} ({DATASET_ID})    <- the author's own Heading 2
+{DATASET_DESCRIPTION}
+{FILE_SPECS}
+{COLUMN_SPECS}
+{VALIDATION_RULES}
+{/DATASETS}
+```
+
+Seven placeholders resolve inside a repetition to that one dataset's own
+values: `{DATASET_ID}`, `{DATASET_NAME}` (the id when the dataset has no
+name), `{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`, `{DATASET_FILE_COUNT}`,
+`{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}` (the last two are `0`
+for a non-tabular dataset). A dataset block marker
+written bare inside the region, as `{COLUMN_SPECS}` is above, binds to the
+current dataset and contributes only its table, without the heading it would
+generate outside a region — the region's own paragraphs are what supply the
+heading, as `{DATASET_NAME} ({DATASET_ID})` does here. An explicit
+`{COLUMN_SPECS:clinical_data}` inside a region is unaffected and renders
+exactly as it does anywhere else.
+
+A region marker must be the only text in its paragraph too, and regions do
+not nest — an inner `{#DATASETS}` is left as ordinary text, though sequential
+regions in the same document are fine. A marker that is not alone in its
+paragraph, or that has no counterpart to open or close it, is left as written
+and named in the same warning as an unrendered block marker.
+
 #### PDF output
 
 PDF is produced by building the Word document and converting it, which needs an
@@ -1743,14 +1883,18 @@ dta_pdf_backend()
 #> [1] "tinytex" "pandoc"
 ```
 
-Three backends are tried in order:
+Four backends are tried in order:
 
-1. **LibreOffice** — a `soffice` binary on the `PATH`. Preferred, because it
-   renders the document as Word does and keeps table shading, column widths and
-   heading numbering.
-2. **TinyTeX** — pandoc converts to LaTeX and `tinytex::latexmk()` compiles it,
-   installing any missing LaTeX packages on demand.
-3. **pandoc** with some other PDF engine already installed.
+1. **Microsoft Word** — Windows only, when Word is installed. Preferred, because
+   it renders the document as Word does and keeps table shading, column widths,
+   heading numbering and running headers and footers with updated page fields.
+2. **LibreOffice** — a `soffice` binary on the `PATH`; equally faithful to the
+   Word layout.
+3. **TinyTeX** — pandoc converts to LaTeX and `tinytex::latexmk()` compiles it,
+   installing any missing LaTeX packages on demand. The document is
+   re-typeset, so running headers and footers are lost.
+4. **pandoc** with some other PDF engine already installed; it re-typesets
+   too, with the same losses.
 
 If none is present, install one from R — no administrator rights required:
 
@@ -1796,6 +1940,33 @@ write_validation_report(dta_from_file, "validation_report.html", max_repeats = I
 
 ---
 
+## Template Guide for Non-Programmers
+
+A template library (see `create_template_repo()` and `validate_template()`) is
+a directory of YAML files, kept in `templates/`, `parties/` and `vocabulary/`
+folders. `write_template_guide()` turns it into one Word (or
+PDF) document per usable template, written to a folder, that a study or data
+manager can read without YAML or the app. Building blocks marked `abstract` get
+no document.
+
+```{r template_guide}
+write_template_guide(
+  system.file("extdata", "library", package = "DTAtools"),
+  tempdir(),
+  templates = "biomarker_gf",
+  quiet = TRUE
+)
+```
+
+One document (`<id>_v<version>_template_guide.docx`) has a cover titled with the
+template, and on every page a running header ("Template guide: ...", the
+organisation, "Page X of Y") and a footer with the template id, version and
+date. It lists a question card for each option (what is asked, the choices, the
+pre-filled answer and where the answer lands in the DTA), the parties and term
+lists to choose, and the datasets the template creates with their columns on
+landscape pages, tagging the columns the template adds or changes. The call
+returns the written paths, named by template id.
+
 ## The Shiny Application
 
 `run_dta_app()` starts a browser interface over the same objects: load a DTA
@@ -1813,6 +1984,20 @@ The app needs the suggested packages **shiny**, **bslib** and **DT**; if any is
 missing, `run_dta_app()` says which to install.
 
 ---
+
+## Linting a DTA
+
+`lint_dta()` reports every problem in a DTA definition at once, instead of
+stopping at the first one. It takes a YAML path, a parsed list, or a `DTA`,
+`DTADataSet` or column-spec collection object:
+
+```{r lint-dta, eval = FALSE}
+lint_dta(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
+```
+
+Each finding has a `severity` of `error` or `warning` and a `code`. A clean
+definition gives zero rows. With `strict = TRUE`, the call aborts when there
+are errors.
 
 ## YAML Format Reference
 
@@ -1932,7 +2117,7 @@ rules:
   # AGE must be between 18 and 65 (inclusive)
   - id: age_range
     type: col_range
-    column: AGE
+    columns: AGE
     min: 18
     max: 65
 
@@ -1940,12 +2125,12 @@ rules:
   # SUBJECT_ID must be globally unique
   - id: subject_unique
     type: col_unique
-    column: SUBJECT_ID
+    columns: SUBJECT_ID
 
   # The combination of SUBJECT_ID + VISIT must be unique
   - id: subject_visit_unique
     type: col_unique
-    column:
+    columns:
       - SUBJECT_ID
       - VISIT
 
@@ -2026,9 +2211,10 @@ metadata:
     date_last_transfer: 2026-03-31
 
 datasets:
-  - name: clinical_data
+  - id: clinical_data
     type: tabular
-    description: Clinical subject-level data
+    name: Clinical data
+    description: Subject-level clinical data, one row per subject and visit.
 
     files:
       filename: "clinical_data.*.csv$"
@@ -2067,12 +2253,12 @@ datasets:
     rules:
       - id: age_range
         type: col_range
-        column: AGE
+        columns: AGE
         min: 18
         max: 65
       - id: subject_visit_unique
         type: col_unique
-        column:
+        columns:
           - SUBJECT_ID
           - VISIT
       - id: v03_completed

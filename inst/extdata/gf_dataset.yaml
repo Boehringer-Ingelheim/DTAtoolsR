@@ -1,6 +1,7 @@
-name: gf_data_specs_pattern
+id: gf_data_specs_pattern
 type: tabular
-description: Genomic Findings data table with pattern for filename
+name: Genomic Findings data table
+description: Genomic Findings data, delivered as tab-separated files matched by a filename pattern.
 template_source: GF domain smrnaseq
 template_version: "3.0"
 template_date: 2024-12-17
@@ -279,14 +280,14 @@ rules:
         not_equals: "DF"
   - id: unique_check
     type: col_unique
-    column: 
+    columns: 
       - SUBJIDN
       - VISIT
       - GFSEQID
   - id: GFORRES must have a range
     description: "GFORRES must be between 1 and 10M"
     type: col_range
-    column: GFORRES
+    columns: GFORRES
     min: 0
     max: 100000000
   - id: dependency_check

@@ -14,35 +14,21 @@ options(shiny.maxRequestSize = 1024 * 1024^2) # 1 GB
 # ---------------------------------------------------------------------------
 # UI
 # ---------------------------------------------------------------------------
-brandbar <- div(
-  class = "app-brandbar",
-  tags$img(class = "brand-logo", src = "dtatools_logo_small.png", alt = "DTAtools logo"),
-  div(
-    div(class = "brand-title", "DTAtools"),
-    div(class = "brand-sub", "Data Transfer Agreements (DTA) / Data Transmission Specifications (DTS) \u2014 validation & authoring")
-  ),
-  div(
-    class = "app-actions",
-    uiOutput("edit_gate", inline = TRUE),
-    tags$a(
-      class = "brand-link",
-      href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR/issues",
-      target = "_blank", rel = "noopener noreferrer",
-      "Report issues"
-    ),
-    tags$a(
-      class = "brand-link",
-      href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR#credits",
-      target = "_blank", rel = "noopener noreferrer",
-      "About"
-    ) # ,
-    # tags$a(
-    #  class = "brand-link",
-    #  href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR/blob/master/doc/DTAtools.html",
-    #  target = "_blank", rel = "noopener noreferrer",
-    #  "Documentation"
-    # )
-  )
+# The brand bar and footer are built per request from the library's app config
+# (brandbar_ui()/app_footer_ui() in R/ui_components.R).
+
+# Landing drop target glyph: the logo's document-and-tick motif as an outline,
+# in the brand greens. Inline SVG so it inherits the sheet's colours and needs
+# no extra asset; aria-hidden because the heading beside it carries the text.
+landing_drop_glyph <- paste0(
+  "<svg class='landing-drop-glyph' viewBox='0 0 48 48' fill='none' ",
+  "stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' ",
+  "aria-hidden='true' focusable='false'>",
+  "<path class='glyph-doc' d='M12 6h16l10 10v26H12z'/>",
+  "<path class='glyph-doc' d='M28 6v10h10'/>",
+  "<path class='glyph-doc' d='M18 24h8M18 30h6'/>",
+  "<path class='glyph-tick' d='M25 36l4 4 8-9'/>",
+  "</svg>"
 )
 
 # Non-floating footer: DTAtools version + author + link to the GitHub repo.
@@ -118,18 +104,6 @@ dta_version_label <- function() {
 }
 
 dta_pkg_version <- dta_version_label()
-app_footer <- tags$footer(
-  class = "app-footer",
-  tags$span(class = "foot-name", "DTAtools"),
-  if (nzchar(dta_pkg_version)) tags$span(class = "foot-ver", dta_pkg_version),
-  tags$span(class = "foot-sep", "\u2022"),
-  tags$span("Boehringer Ingelheim"),
-  tags$span(class = "foot-sep", "\u2022"),
-  tags$a(
-    href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR",
-    target = "_blank", rel = "noopener noreferrer", "GitHub repository"
-  )
-)
 
 # Clear a fileInput's text field after an upload is processed (so the control
 # reads empty and is ready for the next drop). Triggered from the server via
@@ -169,6 +143,97 @@ Shiny.addCustomMessageHandler('dta_msgs_dock', function(action){
 });
 "
 
+# Quick actions ("All", "None", "Default") for a vocabulary multi-select in the
+# template options modal: set the selectize control's value from a link's
+# onclick, returning false so the href="#" never navigates.
+#
+# Client-side rather than one observer per slot, because those slots come and
+# go with every modal open: server observers created there would accumulate
+# for the life of the session, one set per open, with nothing to destroy them.
+# Selectize writes the new value back through Shiny's own binding, so the
+# server still sees an ordinary input update -- which is what re-renders the
+# "n of m selected" count next to the links.
+#
+# The link passes ITSELF, not the control's id: the id is built from a slot id
+# a template author chose, and splicing that into a JS string literal would
+# let a private template run script in the app with one well-placed quote.
+# The control is found from the link instead, and the default values ride in
+# a data attribute, which htmltools escapes.
+vocab_set_js <- "
+function DTA_vocabSet(link, what){
+  var box = link && link.closest ? link.closest('.tmpl-vocab') : null;
+  var el = box ? box.querySelector('select') : null;
+  if (!el || !el.selectize) return false;
+  var s = el.selectize;
+  if (what === 'all') s.setValue(Object.keys(s.options));
+  else if (what === 'none') s.clear();
+  else s.setValue((link.dataset.vals || '').split('\\u001f').filter(Boolean));
+  return false;
+}
+
+// The column editor's term checklist (vocab_term_checklist(), R/template_ui.R).
+// While a filter is typed the count also says how many rows are shown, which
+// is what All/None act on.
+function DTA_vocabCount(el){
+  var box = el && el.closest ? el.closest('.vocab-pick') : null;
+  var c = box ? box.querySelector('.vocab-pick-count') : null;
+  if (!c) return;
+  var f = box.querySelector('.vocab-pick-filter');
+  var shown = [].filter.call(box.querySelectorAll('.checkbox'), function(r){ return r.style.display !== 'none'; }).length;
+  c.textContent = box.querySelectorAll('input[type=checkbox]:checked').length + ' of ' +
+    box.querySelectorAll('input[type=checkbox]').length + ' selected' +
+    (f && f.value.trim() ? ' · ' + shown + ' shown' : '');
+}
+function DTA_vocabFilter(input){
+  var box = input.closest('.vocab-pick');
+  if (!box) return;
+  // Every word must occur somewhere in the row (code, label or description,
+  // in any order): the row's text has markup whitespace between those parts, so
+  // one contiguous phrase would miss 'T002 Term'.
+  var words = input.value.toLowerCase().split(/\\s+/).filter(Boolean), shown = 0;
+  box.querySelectorAll('.checkbox').forEach(function(row){
+    var text = row.textContent.toLowerCase();
+    var hit = words.every(function(w){ return text.indexOf(w) >= 0; });
+    row.style.display = hit ? '' : 'none';
+    if (hit) shown++;
+  });
+  var empty = box.querySelector('.vocab-pick-empty');
+  if (empty) empty.style.display = shown ? 'none' : '';
+  DTA_vocabCount(input);
+}
+// Acts on the rows the filter shows, and fires ONE change event: Shiny reads
+// the whole group on any change, so one is enough for every box flipped.
+function DTA_vocabCheck(link, on){
+  var box = link.closest('.vocab-pick');
+  if (!box) return false;
+  var last = null;
+  box.querySelectorAll('.checkbox').forEach(function(row){
+    var cb = row.querySelector('input[type=checkbox]');
+    if (row.style.display !== 'none' && cb && cb.checked !== on) { cb.checked = on; last = cb; }
+  });
+  if (last) last.dispatchEvent(new Event('change', {bubbles: true}));
+  DTA_vocabCount(link);
+  return false;
+}
+document.addEventListener('change', function(e){
+  if (e.target && e.target.closest && e.target.closest('.vocab-pick')) DTA_vocabCount(e.target);
+});
+// Put the cursor in the term filter when the picker's terms appear, so typing
+// starts at once. shiny:value fires BEFORE the new HTML is inserted, hence the
+// timeout. Only when a filter exists (more than 10 terms).
+if (window.jQuery) jQuery(document).on('shiny:value', function(e){
+  if (e.name !== 'col_vocab_terms') return;
+  setTimeout(function(){
+    var f = document.querySelector('.vocab-pick-filter');
+    // Not while the user is choosing the vocabulary: picking another one
+    // re-renders the terms and must not take the focus off that control.
+    var sel = document.getElementById('col_vocab_ref');
+    var box = sel && sel.closest ? sel.closest('.shiny-input-container') : null;
+    if (f && !(box && box.contains(document.activeElement))) f.focus();
+  }, 0);
+});
+"
+
 # Programmatic trigger for the hidden export download button. shinyjs::click()
 # dispatches a jQuery-style event that does NOT invoke an anchor's native
 # download navigation, so a Shiny downloadButton never actually downloads from
@@ -180,6 +245,94 @@ Shiny.addCustomMessageHandler('dta_trigger_download', function(id) {
   var el = document.getElementById(id);
   if (!el) return;
   setTimeout(function(){ el.click(); }, 50);
+});
+"
+
+# Un-suspend the outputs inside a modal once the modal is really on screen.
+#
+# Shiny suspends an output whose element looked hidden when the client bound
+# it, and re-checks that only when something fires an event it listens for --
+# shown.bs.tab for a nav_panel(), shown.bs.collapse for an accordion. There is
+# no such re-check for a modal. Bootstrap 5 then guarantees the bad snapshot:
+# Modal.show() hands _showElement() to the backdrop as a completion callback,
+# so .modal() returns with the dialog still display:none, and Shiny binds the
+# whole dialog -- body and everything the body's own render inserts -- inside
+# that gap. Every output in it is recorded as hidden and suspended forever.
+#
+# Seen in the wild as "creating templates does not work": the picker modal
+# opened with an empty body, because output$template_picker_ui -- the uiOutput
+# holding the search box, library filter and the list/detail panes -- was
+# suspended and its HTML never sent. "Use this template" then found no
+# selection and said so. Every other modal
+# whose body is a uiOutput() (Create new, Add dataset, the file/column/rule/
+# details editors) was dead the same way, as were the inline *_msg outputs
+# that report a rejected value.
+#
+# shown.bs.modal fires after the dialog is on screen, which is after the body
+# and its nested outputs have bound, so ONE sweep covers them all; anything
+# inserted later binds against a visible modal and needs no help. The listener
+# is delegated from `document` (the event bubbles) so it also covers a modal
+# that does not exist yet, and vanilla rather than jQuery so it does not
+# depend on Bootstrap's jQuery bridge still being present.
+#
+# It RE-TAKES the snapshot rather than asserting "visible": an output the modal
+# itself hides -- a conditionalPanel, a second step of a two-step body -- is
+# meant to stay suspended, and forcing it visible would start rendering it. No
+# modal here has one today, which is exactly why a sweep that hard-coded
+# `false` would have looked correct until someone added one.
+#
+# Not outputOptions(suspendWhenHidden = FALSE), which is how the sidebar
+# outputs below solve their own version of this: that takes a list of ids, and
+# the ids at risk here are not enumerable -- a modal body's own render inserts
+# outputs (col_tbl, col_vocab_terms, ...) that bind after the body arrives and
+# race the same fade. Naming only the bodies would leave those broken, and
+# naming everything would keep the editors' tables re-rendering on every data
+# change with no modal open at all.
+#
+# The same listener also honours an `autofocus` attribute inside the dialog,
+# for the same reason it exists at all: Bootstrap 5 moves focus to the dialog
+# element itself as part of showing it, discarding whatever the browser's own
+# autofocus handling had done, so the attribute only takes effect if something
+# re-applies it AFTER the show completes -- and this is already the one thing
+# that runs at exactly that moment. It is what puts the caret in the template
+# picker's search box when the modal opens with its body already rendered.
+modal_unsuspend_js <- "
+document.addEventListener('shown.bs.modal', function (ev) {
+  if (typeof Shiny === 'undefined' || !ev.target.querySelectorAll) return;
+  function hidden(el) {
+    for (var n = el; n && n.nodeType === 1; n = n.parentElement) {
+      if (window.getComputedStyle(n).display === 'none') return true;
+    }
+    return false;
+  }
+  ev.target.querySelectorAll('.shiny-bound-output').forEach(function (el) {
+    if (el.id) {
+      Shiny.setInputValue('.clientdata_output_' + el.id + '_hidden', hidden(el));
+    }
+  });
+  var f = ev.target.querySelector('[autofocus]');
+  if (f) f.focus();
+});
+"
+
+# Report every modal arriving on or leaving the screen, with the kind a
+# showModal() call stamped on it (data-dta-modal, currently only the contact
+# editor's 'edit_contact'). The server closes a dialog in exactly one place it
+# can see -- its own removeModal() -- while Cancel, Esc, a backdrop click and
+# one dialog replacing another all happen in the browser, so without this
+# report the server can never know whether the dialog it is about to open is
+# already open. edit_contact_flow() (server) is the consumer. Bootstrap fires
+# both events on the modal element and they bubble, hence the delegated
+# handler; jQuery strips the namespace, so ev.type is 'shown' or 'hidden'.
+modal_state_js <- "
+$(document).on('shown.bs.modal hidden.bs.modal', '#shiny-modal', function (ev) {
+  if (typeof Shiny === 'undefined' || !Shiny.setInputValue) return;
+  Shiny.setInputValue('dta_modal_state', {
+    event: ev.type,
+    kind: this.getAttribute('data-dta-modal') || '',
+    id: this.getAttribute('data-dta-modal-id') || '',
+    at: Date.now()
+  }, {priority: 'event'});
 });
 "
 
@@ -298,46 +451,62 @@ yaml_ace_resize_js <- "
 })();
 "
 
-ui <- bslib::page_fluid(
-  theme = bi_theme(),
-  shinyjs::useShinyjs(),
-  tags$head(
-    tags$style(bi_css()),
-    tags$script(shiny::HTML(reset_fileinput_js)),
-    tags$script(shiny::HTML(msgs_dock_js)),
-    tags$script(shiny::HTML(download_trigger_js)),
-    tags$script(shiny::HTML(client_id_js)),
-    tags$script(shiny::HTML(yaml_ace_resize_js)),
-    # Unlike the five above, this one is a function in R/ui_components.R
-    # rather than a string here, because its behaviour is worth testing
-    # separately -- see click_guard_script() there, and the test file, for why
-    # double-click protection cannot live on the server at all. Its position
-    # in this list is not load-bearing: it installs a capture-phase listener
-    # on `document`, which runs ahead of every element's own handler whenever
-    # it was registered.
-    click_guard_script()
-  ),
-  brandbar,
-  div(style = "padding: 18px;", uiOutput("main")),
-  app_footer,
-  uiOutput("floating_msgs"),
-  # Off-screen (but still RENDERED) download button for the export modal. It is
-  # triggered programmatically via download_trigger_js. A display:none element
-  # cannot be reliably .click()ed to start a browser download in every browser,
-  # so it is moved off-screen instead of being hidden with display:none.
-  div(
-    style = paste(
-      "position: absolute; left: -9999px; top: -9999px;",
-      "width: 1px; height: 1px; overflow: hidden;"
+# The page is built per request from the library's app config, so a library can
+# retitle, recolour and re-brand it (see R/app_config.R).
+ui_page <- function(cfg) {
+  bslib::page_fluid(
+    theme = bi_theme(cfg$colors),
+    shinyjs::useShinyjs(),
+    tags$head(
+      tags$title(cfg$branding$window_title),
+      tags$style(bi_css(cfg$colors)),
+      tags$script(shiny::HTML(reset_fileinput_js)),
+      tags$script(shiny::HTML(msgs_dock_js)),
+      tags$script(shiny::HTML(vocab_set_js)),
+      tags$script(shiny::HTML(download_trigger_js)),
+      tags$script(shiny::HTML(client_id_js)),
+      tags$script(shiny::HTML(yaml_ace_resize_js)),
+      tags$script(shiny::HTML(modal_unsuspend_js)),
+      tags$script(shiny::HTML(modal_state_js)),
+      # Unlike the eight above, this one is a function in R/ui_components.R
+      # rather than a string here, because its behaviour is worth testing
+      # separately -- see click_guard_script() there, and the test file, for why
+      # double-click protection cannot live on the server at all. Its position
+      # in this list is not load-bearing: it installs a capture-phase listener
+      # on `document`, which runs ahead of every element's own handler whenever
+      # it was registered.
+      click_guard_script()
     ),
-    downloadButton("export_trigger_download", "")
+    brandbar_ui(cfg),
+    div(style = "padding: 18px;", uiOutput("main")),
+    app_footer_ui(cfg, dta_pkg_version),
+    uiOutput("floating_msgs"),
+    # Off-screen (but still RENDERED) download button for the export modal. It is
+    # triggered programmatically via download_trigger_js. A display:none element
+    # cannot be reliably .click()ed to start a browser download in every browser,
+    # so it is moved off-screen instead of being hidden with display:none.
+    div(
+      style = paste(
+        "position: absolute; left: -9999px; top: -9999px;",
+        "width: 1px; height: 1px; overflow: hidden;"
+      ),
+      downloadButton("export_trigger_download", "")
+    )
   )
-)
+}
+
+ui <- function(req) ui_page(dta_app_config())
 
 # ---------------------------------------------------------------------------
 # Server
 # ---------------------------------------------------------------------------
 server <- function(input, output, session) {
+  # The deployment's app config (dta-app.yaml in the template library), read once
+  # per session. Every feature gate below is enforced here on the server, not
+  # only by hiding the control: an input that is not on screen can still be
+  # driven over the websocket.
+  cfg <- dta_app_config()
+
   # --- reactive state (single source of truth) ---------------------------
   rv <- reactiveValues(
     dta = NULL, # the DTA S7 object
@@ -352,9 +521,14 @@ server <- function(input, output, session) {
     is_example = FALSE, # TRUE when the bundled example DTA is loaded (enables example-file pickers)
     md_token = 0, # bump to re-render metadata editor
     contacts_token = 0, # bump to re-render contacts list
+    agreement_sections_token = 0,
+    editing_section = NULL, # list(id) while adding or editing an agreement section
+    removing_section = NULL, # stable ID named in the delete confirmation
     doc_token = 0, # bump ONLY on load/reset/restore -> re-render the main layout
     yaml_msg = NULL, # raw-YAML apply result: NULL | list(ok, error)
+    load_failure = NULL, # last refused file load: NULL | list(name, text, error, findings, nonce)
     editing_contact = NULL, # list(side, index) while a contact edit modal is open
+    editing_contact_nonce = NULL, # data-dta-modal-id of that open contact dialog
     editor_dataset = NULL, # dataset name the file/column/rule editor modal targets
     file_view = "list", # file-handler editor view: "list" | "form"
     file_token = 0, # bump to re-render the file-handler editor body
@@ -364,12 +538,15 @@ server <- function(input, output, session) {
     pending_handler_removal = NULL, # list(index, tables) awaiting a remove confirmation
     col_view = "list", # column editor view: "list" | "form" | "vocab"
     col_vocab_ref = NULL, # last vocabulary picked, so the picker reopens on it
+    col_vocab_sug = NULL, # vocabulary_suggestion() for the column the picker was opened on
     col_token = 0, # bump to re-render the column editor body
     col_edit_id = NULL, # id of the column being edited (NULL = adding new)
     col_prefill = NULL, # list() of the column fields loaded in the form
+    col_search = "", # column-list search text, kept across the editor's re-renders
     rule_view = "list", # rule editor view: "list" | "form"
     rule_token = 0, # bump to re-render the rule editor body
     rule_edit_index = NULL, # index of the rule being edited (NULL = adding new)
+    rule_search = "", # rule-list search text, kept across the editor's re-renders
     rule_prefill = NULL, # list() of the rule fields currently loaded in the form
     meta_token = 0, # bump to re-render the dataset-metadata editor body
     meta_prefill = NULL, # list() of the dataset metadata fields loaded in the form
@@ -378,10 +555,15 @@ server <- function(input, output, session) {
     rule_msg = NULL, # inline rule-editor result: NULL | list(ok, error)
     cond_n = 1L, # condition-builder row count (IF ...)
     then_n = 1L, # condition-builder row count (THEN ...)
+    cond_removed = integer(0), # indices of removed (not just cleared) IF rows
+    then_removed = integer(0), # indices of removed (not just cleared) THEN rows
     gcond_n = 1L, # grouped condition row count
     gconstr_n = 1L, # grouped constraint row count
+    gcond_removed = integer(0), # indices of removed (not just cleared) group condition rows
+    gconstr_removed = integer(0), # indices of removed (not just cleared) group constraint rows
     template_ref = NULL, # "id@version" of the creation template chosen in the picker
-    template_index = NULL, # template index snapshot frozen when "Next" was clicked
+    template_index = NULL, # index snapshot frozen at "Use this template"
+    template_vocab_specs = NULL, # vocabulary slots resolved when the options modal opened
     add_ds_msg = NULL, # inline add-dataset result: NULL | list(ok, error)
     add_ds_token = 0, # bump to re-render the add-dataset modal body
     create_new_msg = NULL, # inline create-new-DTA result: NULL | list(ok, error)
@@ -397,7 +579,7 @@ server <- function(input, output, session) {
   )
 
   # The single gate for every editing surface. Off by default: rv$editing is
-  # created FALSE (below) and isTRUE(FALSE) is FALSE, so the app is read-only
+  # created FALSE (above) and isTRUE(FALSE) is FALSE, so the app is read-only
   # from the first frame -- before any menu row has been clicked.
   #
   # Each surface is gated TWICE: its control is not rendered, and the observer
@@ -427,15 +609,14 @@ server <- function(input, output, session) {
   # writes it, so there is nothing left to compensate for and none of those
   # four calls survive this design.
   #
-  # rv$version_locked survives, but it no longer gates editing. It now only
-  # records that a LOADED document has not yet had a new version created in
-  # this session, which decides emphasis in the Edit menu (e.g. whether
-  # "Create new version" reads as the primary route), not whether editing is
-  # possible at all. A loaded document CAN be edited without creating a new
+  # rv$version_locked survives, but it no longer gates editing and no longer
+  # drives any UI. It only records (and is persisted in the autosave) that a
+  # LOADED document has not yet had a new version created in this session.
+  # A loaded document CAN be edited without creating a new
   # version first -- "Enable edit mode" is a deliberate route to exactly
   # that, recording nothing in the version history when no version entry is
   # open.
-  editing <- reactive(isTRUE(rv$editing))
+  editing <- reactive(isTRUE(rv$editing) && cfg$features$editing)
 
   # Is the landing page showing? rv$structure is NULL there, and a list once a
   # document is open -- often an EMPTY list, for a document with no datasets,
@@ -495,7 +676,7 @@ server <- function(input, output, session) {
   # load/reset/restore.
   output$edit_gate <- renderUI({
     rv$doc_token
-    if (isolate(on_landing())) {
+    if (!cfg$features$editing || isolate(on_landing())) {
       NULL
     } else {
       tagList(
@@ -515,7 +696,7 @@ server <- function(input, output, session) {
   # and closes it. See rv$add_ds_msg / output$add_ds_body for the pattern
   # this mirrors.
   observeEvent(input$create_new_version, {
-    req(rv$dta)
+    req(rv$dta, cfg$features$editing)
     rv$new_version_msg <- NULL
     current <- tryCatch(S7::prop(DTAtools::metadata(rv$dta), "version"), error = function(e) NULL)
     showModal(modalDialog(
@@ -538,7 +719,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$new_version_confirm, {
-    req(rv$dta)
+    req(rv$dta, cfg$features$editing)
     v <- trimws(as.character(input$new_version_value %||% ""))
     if (!nzchar(v)) {
       rv$new_version_msg <- list(ok = FALSE, error = "Enter a version.")
@@ -636,7 +817,7 @@ server <- function(input, output, session) {
   # the websocket. The guard is gone and the row now follows rv$editing; see
   # the WHY comment on edit_menu() (ui_components.R).
   observeEvent(input$enable_edit_mode, {
-    req(rv$dta)
+    req(rv$dta, cfg$features$editing)
     rv$version_locked <- FALSE
     # rv$version_baseline_yaml is deliberately LEFT ALONE. Clearing it looked
     # harmless -- with no entry open, export_dta() writes no summary on this
@@ -669,7 +850,7 @@ server <- function(input, output, session) {
   # closing the modal (leaving what the author typed on screen) or commits
   # and closes it.
   observeEvent(input$create_new_document, {
-    req(rv$dta)
+    req(rv$dta, cfg$features$editing)
     rv$new_document_msg <- NULL
     md <- tryCatch(DTAtools::metadata(rv$dta), error = function(e) NULL)
     cur_v <- tryCatch(S7::prop(md, "version"), error = function(e) NULL)
@@ -694,7 +875,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$create_new_document_confirm, {
-    req(rv$dta)
+    req(rv$dta, cfg$features$editing)
     v <- trimws(as.character(input$new_document_version %||% ""))
     if (!nzchar(v)) {
       rv$new_document_msg <- list(ok = FALSE, error = "Enter a version.")
@@ -755,13 +936,51 @@ server <- function(input, output, session) {
     }
     id
   }
+  # The file is named by dta_session_key(), which folds in session$user where
+  # the platform authenticates the viewer -- see its comment for why the
+  # localStorage id alone is not enough on a shared origin.
   session_file <- function() {
     id <- client_id()
     if (is.null(id)) {
       return(NULL)
     }
-    file.path(tempdir(), paste0("dtatools_app_session_", id, ".rds"))
+    file.path(
+      tempdir(),
+      paste0("dtatools_app_session_", dta_session_key(id, session$user), ".rds")
+    )
   }
+  # Bound tables are kept beside the autosave, one Arrow file each, written
+  # once per table rather than on every autosave (dta_table_store()).
+  table_store <- NULL
+  session_tables <- function() {
+    sf <- session_file()
+    if (is.null(sf)) {
+      return(NULL)
+    }
+    tdir <- sub("[.]rds$", "_tables", sf)
+    if (is.null(table_store) || !identical(attr(table_store, "dir"), tdir)) {
+      table_store <<- structure(dta_table_store(tdir), dir = tdir)
+    }
+    table_store
+  }
+
+  # Every path this session writes user data to, registered process-wide so
+  # the retention sweep spares it while the session is alive. Exports are
+  # deleted when the session ends (nothing can download them after that);
+  # the autosave, its tables and staged uploads stay for 'Restore previous
+  # session' until the sweep ages them out.
+  owned <- list(export = character(0), upload = character(0), autosave = character(0))
+  own <- function(kind, path) {
+    owned[[kind]] <<- unique(c(owned[[kind]], path))
+    assign(session$token, unlist(owned, use.names = FALSE), envir = .dta_live_session_paths)
+  }
+  try(dta_sweep_session_files(), silent = TRUE)
+  session$onSessionEnded(function() {
+    unlink(owned$export, force = TRUE)
+    if (exists(session$token, envir = .dta_live_session_paths, inherits = FALSE)) {
+      rm(list = session$token, envir = .dta_live_session_paths)
+    }
+  })
 
   # Stable id per bound file so its trash button keeps working across renders.
   file_id_env <- new.env(parent = emptyenv()) # "ds\u0001hi\u0001table" -> integer id
@@ -769,6 +988,7 @@ server <- function(input, output, session) {
   file_rm_registry <- new.env(parent = emptyenv()) # button id -> TRUE once observed
   gcond_rm_registry <- new.env(parent = emptyenv()) # grouped-condition remove observers
   gconstr_rm_registry <- new.env(parent = emptyenv()) # grouped-constraint remove observers
+  cond_rm_registry <- new.env(parent = emptyenv()) # IF/THEN condition remove observers
   file_id_counter <- 0L
   get_file_id <- function(dsname, hi, table) {
     key <- paste(dsname, hi, table, sep = "\u0001")
@@ -783,6 +1003,13 @@ server <- function(input, output, session) {
   }
 
   # --- helpers ------------------------------------------------------------
+  # The label a modal title or notification shows for dataset `id`: its name,
+  # else the id itself (also when the dataset is already gone).
+  ds_title <- function(id) {
+    label <- dta_dataset_label(dta_get_dataset(isolate(rv$dta), id))
+    if (length(label) == 1 && nzchar(label)) label else id
+  }
+
   build_structure <- function(dta) {
     names_ds <- dta_dataset_names(dta)
     if (length(names_ds) == 0) {
@@ -802,7 +1029,9 @@ server <- function(input, output, session) {
       })
       list(
         index = i,
-        name = names_ds[i],
+        # What the nav shows. Carried here, not read from rv$dta, so the nav
+        # re-renders only when a label actually changes -- see meta_save.
+        label = dta_dataset_label(ds),
         type = tryCatch(ds@type, error = function(e) NA_character_),
         handlers = handlers
       )
@@ -814,10 +1043,14 @@ server <- function(input, output, session) {
     if (is.null(target)) {
       return(invisible(NULL))
     }
-    try(saveRDS(
+    store <- session_tables()
+    own("autosave", c(target, attr(store, "dir")))
+    saved <- try(saveRDS(
       list(
-        client_id = client_id(),
-        dump = dta_dump_session(isolate(rv$dta)),
+        # Re-checked by restore_session: the file must have been written for
+        # the user now asking for it (NULL == NULL where nobody signs in).
+        user = session$user,
+        dump = store$dump(isolate(rv$dta)),
         yaml_text = isolate(rv$yaml_text),
         structure = isolate(rv$structure),
         active = isolate(rv$active),
@@ -833,6 +1066,29 @@ server <- function(input, output, session) {
       ),
       target
     ), silent = TRUE)
+    # Superseded table files go only once nothing on disk refers to them.
+    if (!inherits(saved, "try-error")) store$commit()
+  }
+
+  # Tell the user a document that just arrived (load, example, template,
+  # restore, applied YAML) still has spec-check findings. Errors cannot get this
+  # far on the load paths -- the readers refuse them -- so this is the warning
+  # channel; the full list stays in the "Spec check" panel under the Raw YAML
+  # editor (output$spec_check), which follows rv$dta.
+  notify_spec_check <- function(dta, what = "Spec check") {
+    f <- dta_lint(dta)
+    if (nrow(f) == 0) {
+      return(invisible(f))
+    }
+    n_err <- sum(f$severity == "error")
+    showNotification(
+      sprintf(
+        "%s: %d error(s), %d warning(s) — see the Raw YAML tab.",
+        what, n_err, nrow(f) - n_err
+      ),
+      type = if (n_err > 0) "error" else "warning", duration = 10
+    )
+    invisible(f)
   }
 
   apply_loaded <- function(dta, yaml_text, dataset_only = FALSE, is_example = FALSE,
@@ -858,8 +1114,9 @@ server <- function(input, output, session) {
     rv$doc_token <- rv$doc_token + 1
     # `versioned` is TRUE for a document LOADED from an existing one (upload,
     # bundled example) as opposed to one just created from a template -- see
-    # the WHY comment on editing() above for the read-only-until-versioned
-    # rule this arms. rv$version_baseline_yaml is captured from `yaml_text`
+    # rv$version_locked records that no version has been created yet, and a
+    # baseline is captured only for such a document. rv$version_baseline_yaml
+    # is captured from `yaml_text`
     # AFTER the wrapped_dataset re-serialisation above, so the baseline is the
     # text the Raw tab actually shows, not whatever the caller originally
     # passed in.
@@ -882,107 +1139,27 @@ server <- function(input, output, session) {
     # is gated purely on editing() and offers no "+ Add dataset" control
     # until edit mode is on. A document LOADED from an existing one keeps
     # the default and arrives read-only; it can still be unlocked from the
-    # Edit menu without creating a version -- rv$version_locked only decides
-    # that menu's emphasis, not whether editing is possible at all.
-    rv$editing <- isTRUE(start_editing)
+    # Edit menu without creating a version -- rv$version_locked does not
+    # affect whether editing is possible.
+    rv$editing <- isTRUE(start_editing) && cfg$features$editing
+    rv$yaml_msg <- NULL
     autosave()
-  }
-
-  # Build one input control for a creation-template option.
-  #
-  # Every non-boolean dropdown offers its suggested `choices` plus a
-  # "(leave blank)" entry and a "Custom..." entry. Choosing "Custom..." reveals
-  # a companion text field next to the dropdown for a free-typed value, so any
-  # option can be a suggestion, blank, or custom text.
-  render_template_option_input <- function(opt, base_metadata = list()) {
-    oid <- as.character(opt$id %||% "")
-    if (!nzchar(oid)) {
-      return(NULL)
-    }
-    iid <- paste0("tmpl_opt_", oid)
-    label <- as.character(opt$label %||% oid)
-    typ <- tolower(as.character(opt$type %||% "text"))
-    def <- dta_template_default(opt, base_metadata)
-    help <- as.character(opt$help %||% "")
-
-    # Sentinel values for the extra dropdown entries.
-    blank_val <- "__blank__"
-    custom_val <- "__custom__"
-
-    # Dropdown with suggestions + "(leave blank)" + "Custom..." and a companion
-    # text field revealed only when "Custom..." is selected.
-    dropdown_with_custom <- function(ch) {
-      def_chr <- if (is.null(def)) "" else as.character(def)[[1]]
-      choices <- c(
-        ch,
-        stats::setNames(blank_val, "(leave blank)"),
-        stats::setNames(custom_val, "Custom...")
-      )
-      in_choices <- nzchar(def_chr) && def_chr %in% unname(ch)
-      selected <- if (in_choices) {
-        def_chr
-      } else if (nzchar(def_chr)) {
-        custom_val
-      } else {
-        blank_val
-      }
-      prefill <- if (!in_choices && nzchar(def_chr)) def_chr else ""
-      cid <- paste0(iid, "_custom")
-      div(
-        class = "tmpl-opt-row",
-        style = "display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;",
-        div(
-          style = "flex:1 1 240px; min-width:200px;",
-          selectInput(iid, label, choices = choices, selected = selected)
-        ),
-        conditionalPanel(
-          condition = sprintf("input['%s'] == '%s'", iid, custom_val),
-          style = "flex:1 1 240px; min-width:200px;",
-          textInput(cid, "Custom value",
-            value = prefill, placeholder = "Type a custom value"
-          )
-        )
-      )
-    }
-
-    ctl <- switch(typ,
-      select = dropdown_with_custom(dta_template_choices(opt)),
-      boolean = {
-        ch <- c("Yes" = "yes", "No" = "no")
-        selectInput(iid, label,
-          choices = ch,
-          selected = if (identical(def, TRUE) || identical(def, "yes")) "yes" else "no"
-        )
-      },
-      textarea = {
-        textAreaInput(iid, label, value = as.character(def %||% ""), rows = 3)
-      },
-      number = {
-        numericInput(iid, label, value = suppressWarnings(as.numeric(def %||% 0)))
-      },
-      # Default: free text. With suggested `choices` it becomes a dropdown with
-      # blank + Custom...; otherwise a plain (already fully custom) text field.
-      {
-        ch <- dta_template_choices(opt)
-        if (length(ch) > 0) {
-          dropdown_with_custom(ch)
-        } else {
-          textInput(iid, label,
-            value = as.character(def %||% ""),
-            placeholder = "Type a value"
-          )
-        }
-      }
-    )
-
-    if (nzchar(help)) {
-      tagList(ctl, div(class = "msg-hint", style = "margin:-8px 0 8px;", help))
-    } else {
-      ctl
-    }
+    notify_spec_check(dta)
   }
 
   # Collect option values from the currently-open template modal.
+  #
+  # A boolean option is a checkboxInput, so its value arrives as TRUE/FALSE.
+  # The old Yes/No dropdown's "yes" is still accepted: it costs one comparison
+  # and covers a restored autosave, or any caller still setting the input by
+  # its former string value.
+  #
+  # Everything else arrives as the literal string the option's field holds --
+  # picked from its suggestions or typed in place, indistinguishable by
+  # design, which is why there is no "__custom__" sentinel to read. Only a
+  # strict dropdown's "(leave blank)" row still needs translating: it is a
+  # real, selectable row precisely so that "no value" is a deliberate choice
+  # rather than an empty box the author may just not have reached yet.
   collect_template_selections <- function(def) {
     out <- list()
     opts <- def$options %||% list()
@@ -993,15 +1170,9 @@ server <- function(input, output, session) {
       val <- input[[iid]]
       typ <- tolower(as.character(opt$type %||% "text"))
       if (identical(typ, "boolean")) {
-        val <- identical(as.character(val %||% ""), "yes")
-      } else {
-        vchr <- as.character(val %||% "")
-        if (identical(vchr, "__custom__")) {
-          # Read the free-typed value from the companion field next to the dropdown.
-          val <- as.character(input[[paste0(iid, "_custom")]] %||% "")
-        } else if (identical(vchr, "__blank__")) {
-          val <- ""
-        }
+        val <- isTRUE(val) || identical(as.character(val %||% ""), "yes")
+      } else if (identical(as.character(val %||% ""), "__blank__")) {
+        val <- ""
       }
       out[[oid]] <- val
     }
@@ -1010,10 +1181,9 @@ server <- function(input, output, session) {
 
   # Collect a user's slot -> profile-id choices from the currently-open
   # options modal. Mirrors collect_template_selections() exactly: an unset
-  # (or "(use template default)") control contributes NOTHING to the returned
-  # list -- apply_party_selections() (party_profiles.R) already treats a
-  # missing entry as "leave this slot's target untouched", which is exactly
-  # what "(use template default)" is supposed to mean.
+  # control, or one still on the template's own party (the "" row), contributes
+  # NOTHING to the returned list -- apply_party_selections() (party_profiles.R)
+  # already treats a missing entry as "leave this slot's target untouched".
   collect_party_selections <- function(def) {
     slots <- normalise_party_slots(def$party_slots)
     out <- list()
@@ -1026,20 +1196,25 @@ server <- function(input, output, session) {
     out
   }
 
-  # The vocabulary-slot counterpart of collect_party_selections(). A slot the
-  # author left empty is OMITTED rather than recorded as character(0), so
-  # vocabulary_slot_values() takes its "fall back to the slot's default"
-  # branch -- the same distinction party slots draw between "no choice made"
-  # and "an explicit choice".
-  collect_vocab_selections <- function(def) {
-    slots <- tryCatch(normalise_vocabulary_slots(def$vocabulary_slots), error = function(e) list())
+  # The vocabulary-slot counterpart of collect_party_selections(), with one
+  # deliberate difference: an EMPTIED control is recorded as character(0), not
+  # omitted. The control opens holding the slot's `default:`, so whatever it
+  # holds at "Create DTA" is the author's answer -- and the "None" link above
+  # it would be a lie if clearing the chips silently put the default back.
+  # vocabulary_slot_values() reads character(0) as "no terms", and refuses it
+  # when `min:` says so, which is exactly what the emptied control shows.
+  #
+  # Only slots that actually rendered a control are read: the records
+  # show_template_options_modal() resolved when the dialog opened. A slot whose
+  # vocabulary could not be resolved has no control and is left out, so
+  # creation still falls back to its default and fails naming the vocabulary,
+  # rather than reporting "0 selected" against a `min:`.
+  collect_vocab_selections <- function() {
     out <- list()
-    for (slot in slots) {
-      val <- as.character(input[[paste0("tmpl_vocab_", slot$id)]] %||% character(0))
-      val <- val[!is.na(val) & nzchar(val)]
-      if (length(val) > 0) {
-        out[[slot$id]] <- val
-      }
+    for (rec in rv$template_vocab_specs$slots %||% list()) {
+      if (!is.null(rec$error)) next
+      val <- as.character(input[[paste0("tmpl_vocab_", rec$slot$id)]] %||% character(0))
+      out[[rec$slot$id]] <- val[!is.na(val) & nzchar(val)]
     }
     out
   }
@@ -1056,9 +1231,10 @@ server <- function(input, output, session) {
     list(id = as.character(t$id %||% ""), version = as.character(t$version %||% ""))
   }
 
-  # Turn the carry-over controls (tmpl_carry_source/_file/_fields, added to
-  # show_template_options_modal() below) into the `carry_over` argument
-  # create_dta_from_template() expects, or a clear error for the confirm
+  # Turn the carry-over controls (tmpl_carry_source/_file/_fields, rendered by
+  # template_options_modal_body() in R/template_ui.R) into the `carry_over`
+  # argument create_dta_from_template() expects, or a clear error for the
+  # confirm
   # handler to surface without closing the modal. "none" -- the only option
   # offered when no document is open -- is not an error: it means create the
   # document with no ancestor at all, same as a template with no carry-over
@@ -1079,7 +1255,7 @@ server <- function(input, output, session) {
     } else {
       f <- input$tmpl_carry_file
       if (is.null(f) || is.null(f$datapath) || !nzchar(f$datapath)) {
-        return(list(ok = FALSE, error = "Choose a DTA YAML file to carry metadata over from."))
+        return(list(ok = FALSE, error = paste("Choose a", cfg$document$abbr, "YAML file to carry metadata over from.")))
       }
       res <- dta_read_yaml(f$datapath)
       if (!isTRUE(res$ok)) {
@@ -1096,158 +1272,123 @@ server <- function(input, output, session) {
   }
 
   # `index` resolves the template's party profiles (template_party_profiles(),
-  # template_create.R) -- NULL only for a caller that never went through the
-  # index at all, which no longer happens from this modal, but is kept
-  # optional so the function degrades to "no party slots offered" rather than
-  # erroring if it ever is.
-  show_template_options_modal <- function(def, index) {
-    opts <- def$options %||% list()
-    slots <- normalise_party_slots(def$party_slots)
-    profiles <- if (!is.null(index)) template_party_profiles(index) else list()
-
-    # One selectInput per party slot: the template's own default (an empty
-    # selection, which apply_party_selections() leaves untouched) plus every
-    # profile eligible for that slot's role/allow-list
-    # (party_profiles_for_slot(), party_profiles.R).
-    party_ui <- if (length(slots) > 0) {
-      tagList(
-        tags$hr(),
-        tags$h6("Parties"),
-        lapply(slots, function(slot) {
-          eligible <- party_profiles_for_slot(profiles, slot)
-          ch <- stats::setNames("", "(use template default)")
-          if (length(eligible) > 0) {
-            ch <- c(ch, stats::setNames(
-              vapply(eligible, function(p) as.character(p$id), character(1)),
-              vapply(eligible, function(p) as.character(p$label %||% p$id), character(1))
-            ))
-          }
-          selectInput(paste0("tmpl_party_", slot$id), slot$label, choices = ch, selected = "")
-        })
-      )
-    }
-
-    # One multi-select per vocabulary slot, seeded with the terms that slot
-    # offers. `create = TRUE` in "open" mode is what makes ONE control serve
-    # both modes: selectize lets the author type a term the vocabulary does
-    # not have, which is exactly "pick from the vocabulary, or use your own",
-    # without a second free-text box to reconcile.
-    #
-    # An unresolvable vocabulary is reported INLINE and leaves the slot out,
-    # rather than aborting the modal: the rest of the template is still
-    # perfectly usable, and a private source that is temporarily unreachable
-    # must not make document creation impossible.
-    vocab_slots <- tryCatch(normalise_vocabulary_slots(def$vocabulary_slots), error = function(e) e)
-    vocab_ui <- if (inherits(vocab_slots, "condition")) {
-      tagList(
-        tags$hr(),
-        tags$h6("Controlled vocabularies"),
-        p(paste("This template's vocabulary slots could not be read:", conditionMessage(vocab_slots)),
-          class = "msg-hint"
-        )
-      )
-    } else if (length(vocab_slots) > 0) {
-      resolve_vocab <- vocabulary_resolver(index)
-      tagList(
-        tags$hr(),
-        tags$h6("Controlled vocabularies"),
-        lapply(vocab_slots, function(slot) {
-          choices <- tryCatch(vocabulary_slot_choices(slot, resolve_vocab), error = function(e) e)
-          if (inherits(choices, "condition")) {
-            return(p(paste0(slot$label, ": ", conditionMessage(choices)), class = "msg-hint"))
-          }
-          codes <- vapply(choices$terms, function(t) t$code, character(1))
-          # "CODE — Label" so the picker is readable, while the VALUE stays the
-          # bare code: the label is authoring metadata and must never leak into
-          # a column's permitted values.
-          labels <- vapply(choices$terms, function(t) {
-            lb <- as.character(t$label %||% "")
-            if (nzchar(lb) && !identical(lb, t$code)) paste0(t$code, " — ", lb) else t$code
-          }, character(1))
-
-          tagList(
-            selectizeInput(
-              paste0("tmpl_vocab_", slot$id), slot$label,
-              choices = stats::setNames(codes, labels),
-              selected = slot$default,
-              multiple = TRUE, width = "100%",
-              options = list(create = identical(slot$mode, "open"))
-            ),
-            if (nzchar(slot$description)) p(slot$description, class = "msg-hint"),
-            if (identical(slot$mode, "open")) {
-              p("You may also type a value that is not in this vocabulary.", class = "msg-hint")
-            }
-          )
-        })
-      )
-    }
-
-    # "From the open document" is offered ONLY when a document is actually
-    # open -- there is nothing to carry over from otherwise -- and is the
-    # default in that case, since a user who already has a document open and
-    # is creating a related one most often wants its relationship metadata to
-    # follow. With no document open, "Don't carry anything over" is both the
-    # only sensible default and the only option besides a file upload.
-    carry_choices <- stats::setNames("none", "Don't carry anything over")
-    if (!is.null(rv$dta)) {
-      carry_choices <- c(carry_choices, stats::setNames("open", "From the open document"))
-    }
-    carry_choices <- c(carry_choices, stats::setNames("file", "From a file"))
-    carry_default <- if (!is.null(rv$dta)) "open" else "none"
-
-    carry_ui <- tagList(
-      tags$hr(),
-      tags$details(
-        tags$summary("Carry over metadata from an existing document"),
-        div(
-          style = "padding:8px 0 0;",
-          radioButtons("tmpl_carry_source", NULL, choices = carry_choices, selected = carry_default),
-          conditionalPanel(
-            condition = "input.tmpl_carry_source == 'file'",
-            fileInput("tmpl_carry_file", "DTA YAML to carry metadata over from",
-              accept = c(".yaml", ".yml")
-            )
+  # template_create.R) and its vocabularies (vocabulary_resolver(),
+  # vocabulary.R) -- NULL only for a caller that never went through the index
+  # at all, which no longer happens from this modal, but is kept optional so
+  # the function degrades to "no party slots offered" rather than erroring if
+  # it ever is.
+  #
+  # `loaded` is the WHOLE load_template_definition() result rather than just
+  # its `def`: the modal's header names the exact id@version, the source it
+  # came from and the resolved `extends` chain the author is about to
+  # instantiate, and none of those survive into the merged definition.
+  #
+  # The body itself is template_options_modal_body() (R/template_ui.R), which
+  # is a pure function of its arguments and tested as one. What has to stay
+  # here is the part that needs the server: one renderText per vocabulary
+  # slot, so the "n of m selected" count follows the control as the author
+  # edits it -- the quick-action links (DTA_vocabSet, head script above) set
+  # the selectize value client-side, Shiny reports the new input, and the
+  # count re-renders from it.
+  #
+  # Re-registering those outputs on every open is deliberate, not a leak:
+  # assigning to output[[id]] REPLACES the previous render rather than adding
+  # a second one, so the set never grows, and a slot belonging to a template
+  # the author has since backed out of simply stops being rendered.
+  show_template_options_modal <- function(loaded, index, variant_selections = NULL) {
+    def <- loaded$value$def
+    rv$template_variant_selections <- variant_selections %||% list()
+    if (!is.null(def$variants)) {
+      if (is.null(variant_selections)) {
+        showModal(modalDialog(
+          title = paste0("Create from template: ", def$label),
+          p("Choose the platform before configuring the agreement. It determines the record schema and applicable suggestions."),
+          template_variant_input(def),
+          footer = tagList(
+            actionButton("template_options_back", "Back to templates"),
+            modalButton("Cancel"),
+            actionButton("template_variant_confirm", "Continue", class = "btn btn-primary")
           ),
-          checkboxGroupInput(
-            "tmpl_carry_fields", "Fields to carry over",
-            choices = stats::setNames(
-              dta_template_metadata_fields(), dta_template_metadata_fields()
-            ),
-            selected = carry_over_default_fields()
-          )
-        )
-      )
-    )
-
-    showModal(modalDialog(
-      title = paste0("Create from template: ", as.character(def$label %||% def$id %||% "template")),
-      if (nzchar(as.character(def$description %||% ""))) {
-        p(as.character(def$description), class = "msg-hint")
-      },
-      if (length(opts) == 0) {
-        p("This template has no configurable options.")
-      } else {
-        tagList(lapply(
-          opts,
-          render_template_option_input,
-          # Resolve ${today} for the preview as well, so the modal never offers
-          # a raw token as a default where the created DTA would carry a date.
-          base_metadata = resolve_template_expressions(
-            def$base$metadata %||% list(),
-            dta_template_today_env()
-          )
+          easyClose = FALSE
         ))
-      },
-      party_ui,
-      vocab_ui,
-      carry_ui,
-      footer = tagList(
-        modalButton("Cancel"),
-        actionButton("template_create_confirm", "Create DTA", class = "btn btn-primary")
+        return(invisible(NULL))
+      }
+      def <- resolve_template_variant(def, variant_selections)
+    }
+    vocab_specs <- template_vocab_slot_specs(def, index)
+    # Kept for collect_vocab_selections(): which slots have a control to read.
+    rv$template_vocab_specs <- vocab_specs
+
+    for (record in vocab_specs$slots %||% list()) {
+      # A slot whose vocabulary could not be resolved renders its error
+      # instead of a control, so there is no input to count and no output id
+      # for the body to have placed.
+      if (!is.null(record$error)) next
+      # local() so each renderText closes over ITS OWN slot: without it every
+      # one of them would read the loop variable's final value.
+      local({
+        rec <- record
+        iid <- paste0("tmpl_vocab_", rec$slot$id)
+        codes <- vapply(rec$items, function(it) as.character(it$value), character(1))
+        output[[paste0(iid, "_count")]] <- renderText({
+          # What the control holds is what will be applied (see
+          # collect_vocab_selections()), so that is what the count describes.
+          # An emptied multi-select reaches the server as NULL, the same as
+          # one not yet bound: both are "0 of n" -- and the control opens
+          # holding the default, so the count never says 0 while chips show.
+          sel <- as.character(input[[iid]] %||% character(0))
+          sel <- sel[!is.na(sel) & nzchar(sel)]
+          # Terms typed by the author in an `open` slot are counted
+          # separately: "2 of 5" alone would silently under-report a
+          # selection that is in fact larger than the vocabulary offers.
+          n_known <- sum(sel %in% codes)
+          n_custom <- length(sel) - n_known
+          txt <- sprintf("%d of %d selected", n_known, length(codes))
+          if (n_custom > 0) paste0(txt, sprintf(", %d custom", n_custom)) else txt
+        })
+      })
+    }
+
+    # The platform chosen in the step before is context for the whole form, so
+    # it sits in the sidebar with the template it refines.
+    variant_ui <- if (!is.null(def$variants)) {
+      div(
+        class = "tmpl-aside-block",
+        div(class = "section-label", as.character(def$variants$label %||% def$variants$id)),
+        p(class = "tmpl-aside-variant", as.character(variant_selections[[def$variants$id]] %||% "")),
+        actionButton("template_variant_back", "Change platform",
+          class = "btn btn-sm btn-outline-secondary"
+        ),
+        div(class = "msg-hint", "Changing it resets the agreement options.")
+      )
+    }
+    dlg <- modalDialog(
+      title = tagList(
+        span(class = "tmpl-eyebrow", paste("New", cfg$document$abbr, "from template")),
+        as.character(def$label %||% def$id %||% "template")
       ),
-      size = "l",
+      template_options_modal_body(
+        def, loaded, index, vocab_specs,
+        has_open_doc = !is.null(rv$dta), aside_extra = variant_ui,
+        doc_abbr = cfg$document$abbr
+      ),
+      footer = tagList(
+        actionButton("template_options_back", "← Back to templates",
+          class = "btn btn-link tmpl-back"
+        ),
+        modalButton("Cancel"),
+        actionButton("template_create_confirm", paste("Create", cfg$document$abbr), class = "btn btn-primary")
+      ),
+      size = "xl",
       easyClose = FALSE
-    ))
+    )
+    # Bootstrap's scrollable dialog keeps the title and the buttons in view
+    # while the form scrolls; modalDialog() has no argument for it.
+    showModal(
+      htmltools::tagQuery(dlg)$find(".modal-dialog")$addClass(
+        "modal-dialog-scrollable tmpl-options-dialog"
+      )$allTags()
+    )
   }
 
   # --- landing: load a DTA YAML ------------------------------------------
@@ -1257,14 +1398,32 @@ server <- function(input, output, session) {
     txt <- tryCatch(paste(readLines(f$datapath, warn = FALSE), collapse = "\n"),
       error = function(e) NULL
     )
-    res <- dta_read_yaml(f$datapath)
+    finish_file_load(dta_read_yaml(f$datapath), txt, f$name)
+  })
+
+  # A load that succeeds replaces the document; one that fails changes NOTHING
+  # (document, autosave, version state) and opens a dialog that lists every
+  # finding beside the file's text, so the author can correct it and load it.
+  # Both the upload and the dialog's "Load corrected YAML" end here, so a
+  # corrected file is loaded exactly like a file that was good to begin with.
+  finish_file_load <- function(res, txt, name) {
     if (!res$ok) {
       showNotification(
-        paste("Could not load DTA YAML:", res$error),
+        paste("Could not load", cfg$document$abbr, "YAML:", res$error),
         type = "error", duration = 10
       )
-      return()
+      if (!is.null(txt) && nzchar(trimws(txt))) {
+        nonce <- (isolate(rv$load_failure$nonce) %||% 0) + 1
+        rv$load_failure <- list(
+          name = name, text = txt, error = res$error,
+          findings = res$findings, nonce = nonce
+        )
+        showModal(dta_load_failure_modal(rv$load_failure))
+      }
+      return(invisible(FALSE))
     }
+    rv$load_failure <- NULL
+    removeModal()
     apply_loaded(res$value, txt,
       dataset_only = isTRUE(res$dataset_only),
       wrapped_dataset = isTRUE(res$wrapped_dataset),
@@ -1272,22 +1431,35 @@ server <- function(input, output, session) {
     )
     showNotification(
       if (isTRUE(res$wrapped_dataset)) {
-        "Dataset loaded into a new DTA \u2014 add metadata to complete it."
+        paste0("Dataset loaded into a new ", cfg$document$abbr, " \u2014 add metadata to complete it.")
       } else {
-        "DTA loaded."
+        paste(cfg$document$abbr, "loaded.")
       },
       type = "message"
     )
+    invisible(TRUE)
+  }
+
+  observeEvent(input$load_corrected_yaml, {
+    lf <- rv$load_failure
+    req(lf)
+    txt <- input[[paste0("load_failure_text_", lf$nonce)]] %||% lf$text
+    if (!nzchar(trimws(txt))) {
+      showNotification("The text is empty — nothing to load.", type = "warning")
+      return()
+    }
+    finish_file_load(dta_read_yaml_text(txt), txt, lf$name)
   })
 
   observeEvent(input$load_example, {
+    req(cfg$features$load_example)
     files <- dta_example_yaml_files()
     if (length(files) == 0) {
       showNotification("No example specifications found.", type = "error")
       return()
     }
     showModal(modalDialog(
-      title = "Load example DTA",
+      title = paste("Load example", cfg$document$abbr),
       radioButtons("example_dta_choice",
         "Choose a bundled example specification:",
         choices = files, selected = files[[1]]
@@ -1301,6 +1473,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$example_dta_load, {
+    req(isTRUE(cfg$features$load_example))
     sel <- input$example_dta_choice
     if (is.null(sel) || length(sel) == 0 || !nzchar(sel)) {
       showNotification("Choose an example specification first.", type = "warning")
@@ -1358,16 +1531,16 @@ server <- function(input, output, session) {
   # sequence a user can actually perform.
 
   observeEvent(input$create_new, {
-    req(on_landing())
+    req(on_landing(), cfg$features$create_blank)
     rv$create_new_msg <- NULL
     rv$create_new_token <- rv$create_new_token + 1
     showModal(modalDialog(
-      title = "Create a new DTA",
+      title = paste("Create a new", cfg$document$abbr),
       uiOutput("create_new_body"),
       easyClose = TRUE,
       footer = tagList(
         modalButton("Cancel"),
-        actionButton("create_new_confirm", "Create DTA", class = "btn btn-primary")
+        actionButton("create_new_confirm", paste("Create", cfg$document$abbr), class = "btn btn-primary")
       )
     ))
   })
@@ -1388,7 +1561,7 @@ server <- function(input, output, session) {
       textInput("create_new_version_value", "Version", value = "1.0", width = "100%"),
       div(
         class = "msg-hint",
-        HTML("The new DTA starts with <b>no datasets</b>. Add them with <b>+ Add dataset</b> once the workspace opens, and fill in the rest of the metadata on the Metadata tab.")
+        HTML(paste0("The new ", htmltools::htmlEscape(cfg$document$abbr), " starts with <b>no datasets</b>. Add them with <b>+ Add dataset</b> once the workspace opens, and fill in the rest of the metadata on the Metadata tab."))
       ),
       uiOutput("create_new_msg")
     )
@@ -1403,7 +1576,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$create_new_confirm, {
-    req(on_landing())
+    req(on_landing(), isTRUE(cfg$features$create_blank))
     title <- trimws(as.character(input$create_new_title %||% "")[1])
     version <- trimws(as.character(input$create_new_version_value %||% "")[1])
     # Every failure below leaves the modal open with what the user typed still
@@ -1438,7 +1611,7 @@ server <- function(input, output, session) {
       versioned = FALSE, start_editing = TRUE
     )
     showNotification(
-      sprintf("New DTA \u201c%s\u201d created.", title),
+      sprintf("New %s \u201c%s\u201d created.", cfg$document$abbr, title),
       type = "message"
     )
   })
@@ -1448,140 +1621,238 @@ server <- function(input, output, session) {
   #
   # Two-step modal, both steps backed by dta_template_index_cached() (template_
   # index.R) rather than the legacy list_dta_creation_templates()/get_dta_
-  # creation_template_path() pair -- those still exist (template_core.R) and
-  # are still used internally (read_dta_creation_template(), load_template_
-  # definition()), but no longer drive the UI directly. That is what makes a
-  # configured private source (template_sources.R) visible here the same way
+  # creation_template_path() pair -- those still exist (template_core.R) but
+  # have no remaining callers in the app; template files are read through
+  # read_dta_creation_template() and load_template_definition(). That is what
+  # makes a configured private source (template_sources.R) visible here the
+  # same way
   # the packaged demo always was, with no separate code path for either:
   #
-  #   1. show_template_picker_modal()/output$template_picker_ui -- choose a
-  #      template (grouped by source) and a version.
-  #   2. show_template_options_modal() -- configure options, party slots and
-  #      metadata carry-over for the chosen template@version.
-
-  # One row per distinct, non-abstract creation-template id: the picker's
-  # first step shows one entry per id, keeping whichever row ranks highest by
-  # version (template_version_rank(), template_index.R) for its label/
-  # description/source -- the SPECIFIC version is a separate control
-  # (template_id_versions(), below). Ordered by source then label, both with
-  # method = "radix": this machine collates under German locale, CI under C
-  # collation, and a user-facing list must not silently depend on which one
-  # built it (the project's pinned "locale collation diverges from CI"
-  # lesson).
-  template_picker_entries <- function(index) {
-    rows <- index[index$kind == "dta_creation_template" & !index$abstract, , drop = FALSE]
-    if (nrow(rows) == 0) {
-      return(rows)
-    }
-    ids <- unique(rows$id)
-    picked <- lapply(ids, function(id) {
-      sub <- rows[rows$id == id, , drop = FALSE]
-      ranks <- template_version_rank(sub$version)
-      top <- order(ranks, decreasing = TRUE, na.last = TRUE)[[1]]
-      sub[top, , drop = FALSE]
-    })
-    out <- do.call(rbind, picked)
-    out <- out[order(out$label, method = "radix"), , drop = FALSE]
-    out <- out[order(out$source_name, method = "radix"), , drop = FALSE]
-    rownames(out) <- NULL
-    out
-  }
-
-  # selectInput() choices grouped into one <optgroup> per source_name -- a
-  # named list of named vectors is shiny's own recipe for optgroups (see
-  # ?shiny::selectInput). `entries` is already ordered by source then label
-  # (template_picker_entries()), so neither the groups nor the rows within
-  # them need re-sorting here.
-  template_picker_grouped_choices <- function(entries) {
-    groups <- unique(entries$source_name)
-    out <- list()
-    for (g in groups) {
-      sub <- entries[entries$source_name == g, , drop = FALSE]
-      out[[g]] <- stats::setNames(sub$id, sub$label)
-    }
-    out
-  }
-
-  # The descriptive reading list shown ABOVE the dropdown: one heading per
-  # source, one row per template naming its label and (when it has one) its
-  # description. The dropdown alone only ever shows a label; a template
-  # author's description would otherwise never be seen before creating a
-  # document from it.
-  template_picker_listing_ui <- function(entries) {
-    groups <- unique(entries$source_name)
-    tagList(lapply(groups, function(g) {
-      sub <- entries[entries$source_name == g, , drop = FALSE]
-      tagList(
-        tags$h6(g),
-        lapply(seq_len(nrow(sub)), function(i) {
-          div(
-            class = "tmpl-entry",
-            tags$strong(sub$label[[i]]),
-            if (nzchar(sub$description[[i]])) {
-              p(class = "msg-hint", style = "margin:0 0 6px;", sub$description[[i]])
-            }
-          )
-        })
-      )
-    }))
-  }
-
-  # Every version of ONE creation-template id, newest first -- the choices
-  # for the "Version:" selectInput. output$template_picker_ui (below) reads
-  # input$template_select_name directly and rebuilds this list every time it
-  # changes, rather than pushing an update via updateSelectInput(): that keeps
-  # the whole picker body ONE declarative render, and is what makes "changing
-  # the template updates the version list" directly observable in the
-  # rendered HTML instead of only in a client-side round trip a test harness
-  # cannot see.
-  template_id_versions <- function(index, id) {
-    rows <- index[index$kind == "dta_creation_template" & index$id == id, , drop = FALSE]
-    if (nrow(rows) == 0) {
-      return(character(0))
-    }
-    ord <- order(template_version_rank(rows$version), decreasing = TRUE, na.last = TRUE)
-    vers <- rows$version[ord]
-    stats::setNames(vers, vers)
-  }
+  #   1. show_template_picker_modal() -- pick a template and a version.
+  #   2. show_template_options_modal() -- fill in options, party slots,
+  #      vocabularies and metadata carry-over for the chosen template@version.
+  #
+  # Step 1 is THREE outputs rather than one, and that split is the design:
+  #
+  #   template_picker_ui      the frame -- stale-source lines, diagnostics,
+  #                           the search box, the library filter and the
+  #                           two-pane body. It depends on the index and the
+  #                           refresh tick ONLY, and reads the search text and
+  #                           the library choice through isolate(), so typing
+  #                           never re-renders the box being typed into (which
+  #                           would move the caret) and clicking a row never
+  #                           re-renders the list under the pointer.
+  #   template_picker_list    the rows. Re-renders on a keystroke or a source
+  #                           change -- exactly what should, and nothing else.
+  #   template_picker_detail  the version dropdown, the resolved `extends`
+  #                           chain and what the template will build, for
+  #                           whichever row is selected.
+  #
+  # Which row IS selected lives in reactives rather than being re-derived at
+  # each use, because three different things need the same answer -- the
+  # detail panel, "Use this template", and the fallback when the user has
+  # typed a search but not clicked anything, where the first visible row is
+  # implied. "Back to templates" relies on the same reactives still holding
+  # after the options modal is dismissed.
+  #
+  # template_picker_loaded() resolves the definition as soon as a row is
+  # selected, not when the button is pressed. That is what lets the detail
+  # panel name the exact resolved lineage, and report a template that cannot
+  # be used, BEFORE the author commits to it. It costs one YAML read plus a
+  # merge, so arrowing through a family stays instant.
 
   show_template_picker_modal <- function() {
-    showModal(modalDialog(
+    # Shiny's client keeps the LAST value of every output and re-inserts it the
+    # moment the output binds again, before any fresh render arrives -- and
+    # then reports the inputs inside that stale copy as if the user had just
+    # set them. Left alone, re-opening this modal after Cancel or "Back to
+    # templates" re-inserts a frame whose search box holds the text of the
+    # previous render and a list whose checked radio is whichever row was
+    # checked when the list was last rendered, and the server takes both as
+    # new input: the search typed before "Use this template" gone, the
+    # selection reverted. Seen happen, not theorised.
+    #
+    # So the picker's outputs render NOTHING while the modal is closed (a
+    # hidden.bs.modal listener in template_picker_scripts() reports the close
+    # as input$template_picker_closed), which leaves nothing stale to
+    # re-insert, and every open re-renders them fresh from the inputs Shiny is
+    # still holding. The tick covers an open while already "open" -- a close
+    # whose report never arrived.
+    #
+    # The search box is the one input that must NOT come back. The server
+    # owns the search text (tmpl_search_text) so that an open starts it empty
+    # no matter what the browser last reported, and no close report is needed.
+    tmpl_picker_open(TRUE)
+    tmpl_search_text("")
+    tmpl_picker_open_tick(tmpl_picker_open_tick() + 1)
+    dlg <- modalDialog(
       title = "Create new from template",
-      p("Select a template, then configure options in the next step.", class = "msg-hint"),
-      uiOutput("template_picker_ui"),
-      footer = tagList(
-        modalButton("Cancel"),
-        actionButton("template_select_next", "Next", class = "btn btn-primary")
+      # Static, so the dialog has its picker width (theme.R) from the first
+      # frame instead of jumping once the output arrives.
+      div(
+        class = "tmpl-picker-modal",
+        p("Pick a template, then fill in its options in the next step.", class = "msg-hint"),
+        uiOutput("template_picker_ui")
       ),
-      size = "l",
+      # Refresh is housekeeping, not a step: it sits apart on the left, where
+      # it is there on every state of the picker, the empty one included.
+      footer = tagList(
+        actionButton(
+          "tmpl_refresh_templates", "Refresh templates",
+          class = "btn btn-link tmpl-refresh me-auto"
+        ),
+        modalButton("Cancel"),
+        actionButton("template_select_next", "Use this template", class = "btn btn-primary")
+      ),
+      size = "xl",
       easyClose = TRUE
-    ))
+    )
+    # Scrollable, like the options dialog, so it fills the window height and
+    # the list grows with it (theme.R) while the buttons stay in view.
+    showModal(
+      htmltools::tagQuery(dlg)$find(".modal-dialog")$addClass(
+        "modal-dialog-scrollable tmpl-picker-dialog"
+      )$allTags()
+    )
   }
 
-  # Bumped by "Refresh templates" (below) to force output$template_picker_ui
-  # to recompute even though dta_template_index_cached() alone would not be
-  # seen as "changed" by the reactive graph -- it is a plain function call
-  # backed by a file-local cache (template_index.R), not a reactive value.
+  # Bumped by "Refresh templates" (below) to force the picker outputs to
+  # recompute even though dta_template_index_cached() alone would not be seen
+  # as "changed" by the reactive graph -- it is a plain function call backed by
+  # a file-local cache (template_index.R), not a reactive value.
   tmpl_refresh_tick <- reactiveVal(0)
+
+  # Bumped by show_template_picker_modal() on every open -- see the comment
+  # there for why a re-bound modal cannot be trusted to show current inputs.
+  tmpl_picker_open_tick <- reactiveVal(0)
+
+  # Whether the picker modal is on screen. While it is not, its three outputs
+  # render NOTHING -- same comment. The close is reported by the browser
+  # (template_picker_scripts(), template_ui.R), because Cancel, Escape and a
+  # click on the backdrop never reach the server any other way.
+  tmpl_picker_open <- reactiveVal(FALSE)
+  observeEvent(input$template_picker_closed, tmpl_picker_open(FALSE))
+
+  # What the picker filters by. input$template_search keeps its last value
+  # after the dialog closes, so it is only copied in while the box is typing;
+  # an open resets this to "" and the freshly rendered, empty box then
+  # reports "" itself. Priority: the Enter key sends the text just before it
+  # clicks "Use this template", and that click must see it.
+  tmpl_search_text <- reactiveVal("")
+  observeEvent(input$template_search, tmpl_search_text(input$template_search %||% ""),
+    ignoreNULL = FALSE, priority = 10
+  )
+
+  # The template "Back to templates" must land on: the one whose options were
+  # just open. With the search gone, an implied selection (search + Enter, no
+  # click) would otherwise fall back to the first row. Dropped as soon as the
+  # list reports a selection, and on every fresh open.
+  tmpl_back_id <- reactiveVal(NULL)
+  observeEvent(input$template_select_name, tmpl_back_id(NULL),
+    ignoreInit = TRUE, priority = 10
+  )
+
+  # One row per distinct, non-abstract creation-template id (template_picker_
+  # entries(), template_index.R), plus the family/depth/lineage/search columns
+  # that make a deviation template visible AS a deviation of its base
+  # (template_picker_lineage(), same file).
+  template_picker_rows <- reactive({
+    tmpl_refresh_tick()
+    idx <- dta_template_index_cached()
+    template_picker_lineage(idx, template_picker_entries(idx))
+  })
+
+  # The library filter is a multi-select, and only the names in it that still
+  # have templates count -- template_picker_restrict_sources() (template_
+  # index.R) says why, and why the tree is rebuilt rather than filtered. Its
+  # own reactive, so a keystroke in the search box re-filters without
+  # rebuilding the tree.
+  template_picker_scoped <- reactive({
+    template_picker_restrict_sources(
+      dta_template_index_cached(), template_picker_rows(),
+      input$template_select_source
+    )
+  })
+
+  template_picker_visible <- reactive({
+    template_picker_filter(template_picker_scoped(), tmpl_search_text())
+  })
+
+  # The user's own choice for as long as it names a row that is still visible,
+  # else the first visible row. Falling back rather than clearing is what lets
+  # "type a search, press Enter" work with no click in between -- and it is
+  # also why a search that hides everything yields NULL, so "Use this
+  # template" warns instead of silently creating from a row nobody can see.
+  template_picker_selected <- reactive({
+    vis <- template_picker_visible()
+    if (nrow(vis) == 0) {
+      return(NULL)
+    }
+    chosen <- as.character(tmpl_back_id() %||% input$template_select_name %||% "")
+    if (nzchar(chosen) && chosen %in% vis$id) chosen else vis$id[[1]]
+  })
+
+  # Same rule one level down: the chosen version while it was chosen FOR this
+  # id, else the newest. The version control is re-rendered per template, but
+  # Shiny still holds the previous template's choice until the new control
+  # reports, and a "1.0" chosen on one template must not carry onto the next
+  # -- which may well have a 1.0 of its own -- and silently open an old
+  # version nobody picked. So the id a version was chosen for is recorded
+  # alongside it, ahead of the outputs that read it (priority).
+  tmpl_version_for <- reactiveVal(NULL)
+  observeEvent(input$template_select_version,
+    {
+      tmpl_version_for(isolate(template_picker_selected()))
+    },
+    priority = 10
+  )
+
+  template_picker_version <- reactive({
+    id <- template_picker_selected()
+    if (is.null(id)) {
+      return(NULL)
+    }
+    vers <- template_id_versions(dta_template_index_cached(), id)
+    v <- as.character(input$template_select_version %||% "")
+    if (nzchar(v) && v %in% vers && identical(tmpl_version_for(), id)) {
+      v
+    } else if (length(vers) > 0) {
+      vers[[1]]
+    } else {
+      NULL
+    }
+  })
+
+  template_picker_loaded <- reactive({
+    id <- template_picker_selected()
+    v <- template_picker_version()
+    if (is.null(id) || is.null(v)) {
+      return(NULL)
+    }
+    load_template_definition(paste0(id, "@", v), index = dta_template_index_cached())
+  })
 
   output$template_picker_ui <- renderUI({
     tmpl_refresh_tick()
+    tmpl_picker_open_tick()
+    if (!isTRUE(tmpl_picker_open())) {
+      return(NULL)
+    }
     idx <- dta_template_index_cached()
     sources <- attr(idx, "sources") %||% list()
-    entries <- template_picker_entries(idx)
+    rows <- template_picker_rows()
 
-    diagnostics <- template_source_diagnostics_ui(sources)
-    refresh_btn <- actionButton(
-      "tmpl_refresh_templates", "Refresh templates",
-      class = "btn btn-sm btn-outline-secondary"
-    )
+    diagnostics <- template_source_diagnostics_ui(sources, attr(idx, "layout_warnings"))
 
-    if (nrow(entries) == 0) {
+    if (nrow(rows) == 0) {
       # Private-replaces-public (template_sources.R): with a private source
       # configured and nothing usable in it, the packaged demo is NOT offered
       # as a fallback -- say so plainly, backed by the diagnostics above
-      # naming exactly which source(s) failed and why.
-      msg <- if (dta_template_private_configured()) {
+      # naming exactly which source(s) failed and why. When the sources loaded
+      # but hold no template files, the usual cause is the folder layout.
+      all_failed <- length(sources) > 0 &&
+        !any(vapply(sources, function(s) isTRUE(s$ok), logical(1)))
+      msg <- if (dta_template_private_configured() && all_failed) {
         p(
           class = "msg-hint",
           paste(
@@ -1591,37 +1862,84 @@ server <- function(input, output, session) {
           )
         )
       } else {
-        p("No creation templates found.")
+        p(
+          class = "msg-hint",
+          paste(
+            "No creation templates were found. A template library keeps its",
+            "files in templates/, parties/ and vocabulary/ folders (Word",
+            "references in export-templates/, dta-app.yaml at the root) --",
+            "check the folder layout of the template source."
+          )
+        )
       }
-      return(tagList(diagnostics, msg, refresh_btn))
+      return(tagList(diagnostics, msg))
     }
 
-    status <- tagList(lapply(sources, template_source_status_row))
-
-    # The template currently highlighted for the version dropdown: the user's
-    # own choice if it still names a real entry, else the first one. This is
-    # what makes changing input$template_select_name rebuild the version list
-    # on the very next render, with no separate observer/updateSelectInput().
-    chosen_id <- as.character(input$template_select_name %||% "")
-    if (!nzchar(chosen_id) || !(chosen_id %in% entries$id)) {
-      chosen_id <- entries$id[[1]]
-    }
-    version_choices <- template_id_versions(idx, chosen_id)
-
-    tagList(
-      status,
+    # Search and libraries on one toolbar; under it the list and the
+    # selected template side by side (stacked on a narrow screen, theme.R), so
+    # what was picked is in view the moment it is picked.
+    div(
+      class = "tmpl-picker",
+      tagList(lapply(sources, template_source_status_row)),
       diagnostics,
-      template_picker_listing_ui(entries),
-      selectInput(
-        "template_select_name", "Template:",
-        choices = template_picker_grouped_choices(entries), selected = chosen_id
+      div(
+        class = "tmpl-search-row",
+        template_picker_search_ui(isolate(tmpl_search_text())),
+        template_picker_source_ui(
+          sort(unique(rows$source_name), method = "radix"),
+          isolate(input$template_select_source),
+          counts = c(table(rows$source_name))
+        )
       ),
-      selectInput(
-        "template_select_version", "Version:",
-        choices = version_choices,
-        selected = if (length(version_choices) > 0) version_choices[[1]] else character(0)
+      div(
+        class = "tmpl-picker-body",
+        div(class = "tmpl-picker-main", uiOutput("template_picker_list")),
+        div(class = "tmpl-picker-side", uiOutput("template_picker_detail"))
       ),
-      refresh_btn
+      template_picker_scripts()
+    )
+  })
+
+  # `selected` is isolated for the same reason the frame isolates the search
+  # text: a click checks the radio in the browser already, so re-rendering the
+  # list to say so would only throw away the focus and scroll position the
+  # user just established -- and would fight the client-side expand/collapse.
+  output$template_picker_list <- renderUI({
+    tmpl_picker_open_tick()
+    if (!isTRUE(tmpl_picker_open())) {
+      return(NULL)
+    }
+    rows <- template_picker_rows()
+    vis <- template_picker_visible()
+    tokens <- template_picker_tokens(tmpl_search_text())
+    template_picker_list_ui(
+      vis,
+      selected = isolate(tmpl_back_id() %||% input$template_select_name),
+      show_source = length(unique(rows$source_name)) > 1,
+      # A search result is a flat list: the matches rarely form whole
+      # families, and indenting a child under a parent that was filtered out
+      # would place it under nothing. Its `extends` line still names the
+      # ancestors, so the context survives the flattening.
+      flat = length(tokens) > 0,
+      tokens = tokens,
+      total = nrow(rows)
+    )
+  })
+
+  output$template_picker_detail <- renderUI({
+    if (!isTRUE(tmpl_picker_open())) {
+      return(NULL)
+    }
+    id <- template_picker_selected()
+    if (is.null(id)) {
+      return(NULL)
+    }
+    idx <- dta_template_index_cached()
+    template_picker_detail_ui(
+      template_picker_loaded(),
+      template_id_versions(idx, id),
+      template_picker_version(),
+      idx
     )
   })
 
@@ -1631,6 +1949,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$create_from_template, {
+    req(cfg$features$create_from_template)
     idx <- dta_template_index_cached()
     entries <- template_picker_entries(idx)
     if (nrow(entries) == 0 && !dta_template_private_configured()) {
@@ -1638,27 +1957,30 @@ server <- function(input, output, session) {
       # exactly today's pre-index behaviour: a notification, no modal.
       showNotification(
         paste(
-          "No creation templates found. Add *.dta-template.yaml files to a",
-          "./dta-templates folder, or point options(DTAtools.template_dir=) at",
-          "a directory of your own."
+          "No creation templates found. Add *.dta-template.yaml files to the",
+          "templates/ folder of a library at ./dta-templates, or point",
+          "options(DTAtools.template_dir=) at a library directory of your own",
+          "(templates/, parties/, vocabulary/ and export-templates/ folders,",
+          "dta-app.yaml at its root)."
         ),
         type = "warning", duration = 8
       )
       return()
     }
+    tmpl_back_id(NULL)
     show_template_picker_modal()
   })
 
   observeEvent(input$template_select_next, {
-    idx <- dta_template_index_cached()
-    tid <- as.character(input$template_select_name %||% "")
-    tver <- as.character(input$template_select_version %||% "")
-    if (!nzchar(tid) || !nzchar(tver)) {
-      showNotification("Choose a template and a version first.", type = "warning")
+    req(isTRUE(cfg$features$create_from_template))
+    # The definition the detail panel is already showing -- NULL only when no
+    # row is visible to select, which is what a search matching nothing looks
+    # like from here.
+    loaded <- template_picker_loaded()
+    if (is.null(loaded)) {
+      showNotification("Pick a template first.", type = "warning")
       return()
     }
-    ref <- paste0(tid, "@", tver)
-    loaded <- load_template_definition(ref, index = idx)
     if (!isTRUE(loaded$ok)) {
       showNotification(paste("Template is invalid:", loaded$error), type = "error", duration = 10)
       return()
@@ -1666,15 +1988,71 @@ server <- function(input, output, session) {
     # Frozen HERE, not re-fetched at confirm time: the options/party/carry-
     # over step must build and create against the EXACT index the user picked
     # from, even if a background "Refresh templates" happens while that step
-    # is open.
-    rv$template_ref <- ref
-    rv$template_index <- idx
+    # is open. The ref comes off the resolved row rather than off the inputs,
+    # so an implied selection (first visible row, never clicked) is recorded
+    # as precisely as an explicit one.
+    rv$template_ref <- paste0(loaded$value$id, "@", loaded$value$version)
+    rv$template_index <- dta_template_index_cached()
     removeModal()
-    show_template_options_modal(loaded$value$def, idx)
+    show_template_options_modal(loaded, rv$template_index)
+  })
+
+  # The "render NOTHING while closed" rule above only works if the render
+  # actually runs, and a suspended output does not run. An output whose
+  # element has left the page can be left suspended -- it is reported hidden
+  # the moment its container binds behind a fade, and nothing un-hides an
+  # element that is gone -- and then the NULL is held back until the output is
+  # visible again, by which time the stale copy has already been re-inserted
+  # and its inputs reported (seen happen). Keeping the three live costs
+  # nothing: they ARE null whenever they are off screen.
+  outputOptions(output, "template_picker_ui", suspendWhenHidden = FALSE)
+  outputOptions(output, "template_picker_list", suspendWhenHidden = FALSE)
+  outputOptions(output, "template_picker_detail", suspendWhenHidden = FALSE)
+
+  # Back to step 1. show_template_picker_modal() re-renders the picker's three
+  # outputs from the inputs Shiny is still holding, so the selection comes
+  # back with them -- dismissing a modal removes controls from the DOM, it
+  # does not clear their input values. The search text is the exception: every
+  # open starts it empty (tmpl_search_text), so the selection is pinned to the
+  # template whose options were open instead.
+  observeEvent(input$template_options_back, {
+    removeModal()
+    show_template_picker_modal()
+    tmpl_back_id(sub("@.*$", "", rv$template_ref %||% ""))
+  })
+
+  observeEvent(input$template_variant_back, {
+    req(rv$template_ref)
+    loaded <- load_template_definition(rv$template_ref, index = rv$template_index)
+    if (!isTRUE(loaded$ok)) {
+      showNotification(loaded$error, type = "error", duration = 10)
+      return()
+    }
+    show_template_options_modal(loaded, rv$template_index)
+  })
+
+  observeEvent(input$template_variant_confirm, {
+    req(rv$template_ref)
+    loaded <- load_template_definition(rv$template_ref, index = rv$template_index)
+    if (!isTRUE(loaded$ok)) {
+      showNotification(loaded$error, type = "error", duration = 10)
+      return()
+    }
+    spec <- loaded$value$def$variants
+    if (is.null(spec)) {
+      return()
+    }
+    selections <- stats::setNames(list(input[[paste0("tmpl_variant_", spec$id)]]), spec$id)
+    checked <- dta_try(resolve_template_variant(loaded$value$def, selections))
+    if (!isTRUE(checked$ok)) {
+      showNotification(checked$error, type = "error", duration = 10)
+      return()
+    }
+    show_template_options_modal(loaded, rv$template_index, selections)
   })
 
   observeEvent(input$template_create_confirm, {
-    req(rv$template_ref)
+    req(isTRUE(cfg$features$create_from_template), rv$template_ref)
     idx <- rv$template_index
 
     loaded <- load_template_definition(rv$template_ref, index = idx)
@@ -1683,10 +2061,16 @@ server <- function(input, output, session) {
       return() # modal stays open
     }
     def <- loaded$value$def
+    resolved <- dta_try(resolve_template_variant(def, rv$template_variant_selections %||% list()))
+    if (!isTRUE(resolved$ok)) {
+      showNotification(resolved$error, type = "error", duration = 10)
+      return()
+    }
+    def <- resolved$value
 
-    sels <- collect_template_selections(def)
+    sels <- c(rv$template_variant_selections %||% list(), collect_template_selections(def))
     party_sel <- collect_party_selections(def)
-    vocab_sel <- collect_vocab_selections(def)
+    vocab_sel <- collect_vocab_selections()
 
     co <- resolve_carry_over()
     if (!isTRUE(co$ok)) {
@@ -1695,10 +2079,10 @@ server <- function(input, output, session) {
     }
 
     prov <- template_provenance(
-      def, loaded$value, sels,
+      loaded$value$def, loaded$value,
       lineage = loaded$value$lineage,
-      carried_over_from = co$carried_over_from,
-      vocab_selections = vocab_sel
+      mixins = loaded$value$mixins,
+      carried_over_from = co$carried_over_from
     )
 
     created <- create_dta_from_template(
@@ -1708,7 +2092,7 @@ server <- function(input, output, session) {
       vocab_selections = vocab_sel
     )
     if (!isTRUE(created$ok)) {
-      showNotification(paste("Could not create DTA from template:", created$error),
+      showNotification(paste("Could not create", cfg$document$abbr, "from template:", created$error),
         type = "error", duration = 10
       )
       return() # LEAVE THE MODAL OPEN so the user does not lose their choices
@@ -1728,7 +2112,7 @@ server <- function(input, output, session) {
       start_editing = TRUE
     )
     showNotification(
-      paste0("New DTA created from template \"", as.character(def$label %||% def$id %||% ""), "\"."),
+      paste0("New ", cfg$document$abbr, " created from template \"", as.character(def$label %||% def$id %||% ""), "\"."),
       type = "message"
     )
   })
@@ -1746,6 +2130,9 @@ server <- function(input, output, session) {
         class = "dataset-nav-list",
         lapply(seq_along(names_ds), function(i) {
           nm <- names_ds[i]
+          # A structure restored from a session saved before labels existed
+          # has none; the id is the right fallback, as everywhere else.
+          label <- rv$structure[[i]]$label %||% nm
           st <- dta_lookup(st_map, nm, "pending")
           # Row background + icon encode status: passed (green), failed (red),
           # missing/no-data (orange), not-checked-yet (neutral grey).
@@ -1784,14 +2171,20 @@ server <- function(input, output, session) {
               class = "nav-select",
               label = tagList(
                 span(class = paste("nav-ic", ic_cls), title = ic_ttl, ic_ch),
-                span(class = "nav-name", nm)
+                span(
+                  class = "nav-text",
+                  span(class = "nav-name", label),
+                  # The id stays visible under a name: it is what every
+                  # validation message and download refers to.
+                  if (!identical(label, nm)) span(class = "nav-id", nm)
+                )
               )
             ),
             actionButton(
               paste0("checkds_", i),
               label = HTML("&#x25B6;"),
               class = "btn btn-sm nav-check",
-              title = sprintf("Check '%s'", nm)
+              title = sprintf("Check '%s'", label)
             )
           )
         })
@@ -1867,9 +2260,21 @@ server <- function(input, output, session) {
   output$add_ds_body <- renderUI({
     rv$add_ds_token
     tagList(
-      textInput("add_ds_name", "Name",
+      textInput("add_ds_id", "ID",
         value = "", width = "100%",
-        placeholder = "e.g. demographics"
+        placeholder = "e.g. dm"
+      ),
+      div(
+        class = "msg-hint", style = "margin:-8px 0 12px;",
+        "Identifies the dataset in the specification, in every validation message and in load_file()."
+      ),
+      textInput("add_ds_name", "Name (optional)",
+        value = "", width = "100%",
+        placeholder = "e.g. Demographics"
+      ),
+      textAreaInput("add_ds_description", "Description (optional)",
+        value = "", width = "100%", rows = 3,
+        placeholder = "What this dataset contains, in words"
       ),
       radioButtons("add_ds_type", "Type",
         choices = c("Tabular" = "tabular", "Files" = "file"),
@@ -1895,21 +2300,23 @@ server <- function(input, output, session) {
     req(editing())
     r <- dta_add_dataset(
       isolate(rv$dta),
+      id = input$add_ds_id,
+      type = input$add_ds_type %||% "tabular",
       name = input$add_ds_name,
-      type = input$add_ds_type %||% "tabular"
+      description = input$add_ds_description
     )
     if (!isTRUE(r$ok)) {
       # The modal stays open with everything the user typed still in it, and
       # nothing in rv changes -- the same contract as meta_save() below.
       # Deliberately NOT bumping rv$add_ds_token here: that is add_ds_body's
-      # only dependency, and re-rendering would reset the name field to "" and
-      # the type back to "tabular", making the user retype a name they can see
+      # only dependency, and re-rendering would reset every field to "" and
+      # the type back to "tabular", making the user retype an ID they can see
       # is wrong rather than correct it in place. output$add_ds_msg reacts to
       # rv$add_ds_msg on its own, so the error still appears.
       rv$add_ds_msg <- list(ok = FALSE, error = r$error)
       return()
     }
-    nm <- trimws(as.character(input$add_ds_name)[1])
+    nm <- trimws(as.character(input$add_ds_id)[1])
     rv$dta <- r$value
     # build_structure() is what registers the new dataset's nav and upload
     # observers, so it has to run before anything can address the new slot.
@@ -1921,7 +2328,10 @@ server <- function(input, output, session) {
     rv$add_ds_msg <- NULL
     sync_yaml_text()
     removeModal()
-    showNotification(sprintf("Dataset '%s' added.", nm), type = "message")
+    showNotification(
+      sprintf("Dataset '%s' added.", ds_title(nm)),
+      type = "message"
+    )
   })
 
   observeEvent(input$remove_dataset, {
@@ -1943,7 +2353,7 @@ server <- function(input, output, session) {
         # tags$b() rather than HTML(sprintf(...)): the name is user-supplied and
         # htmltools escapes a plain string, so a dataset called "<b>x" cannot
         # inject markup here.
-        tags$p("Dataset ", tags$b(ed), " and its specification will be removed from the document."),
+        tags$p("Dataset ", tags$b(ds_title(ed)), " and its specification will be removed from the document."),
         if (n_files > 0) {
           div(class = "msg-hint", sprintf(
             "%d loaded file%s will be unloaded with it.",
@@ -1972,6 +2382,7 @@ server <- function(input, output, session) {
     ed <- isolate(rv$removing_dataset)
     req(ed)
     rv$removing_dataset <- NULL
+    ed_title <- ds_title(ed) # read while the dataset still exists
     r <- dta_remove_dataset(isolate(rv$dta), ed)
     if (!isTRUE(r$ok)) {
       showNotification(paste("Could not remove dataset —", r$error),
@@ -2002,7 +2413,7 @@ server <- function(input, output, session) {
 
     sync_yaml_text()
     removeModal()
-    showNotification(sprintf("Dataset '%s' removed.", ed), type = "message")
+    showNotification(sprintf("Dataset '%s' removed.", ed_title), type = "message")
   })
 
   # --- upload observers (registered once per handler) ---------------------
@@ -2024,7 +2435,8 @@ server <- function(input, output, session) {
     key <- paste0(dsname, "||", hi)
 
     # A dropped file will occupy a table named after it (for tabular datasets,
-    # load_file uses file_path_sans_ext; for file datasets, the basename with
+    # dta_bound_item_name() strips the extension (a gz suffix first); for file
+    # datasets, the basename with
     # extension is kept). This mapping drives overwrite detection and binds.
     ds_type <- tryCatch(ds@type, error = function(e) NA_character_)
     tbl_of <- function(nm) dta_bound_item_name(ds_type, nm)
@@ -2098,6 +2510,7 @@ server <- function(input, output, session) {
       # stage the bytes under the ORIGINAL name first, else a valid file is
       # rejected inside load_file() (failure mode F7).
       staged <- dta_stage_upload(dp, nm)
+      if (!identical(staged, dp)) own("upload", dirname(staged))
       before <- dta_dataset_content_count(dta_get_dataset(rv$dta, dsname))
       res <- dta_load_file(
         rv$dta,
@@ -2140,7 +2553,7 @@ server <- function(input, output, session) {
       autosave()
     }
 
-    # ONE reconciled outcome (Contract C1) with honest counts (C8): never a
+    # ONE reconciled outcome with honest counts: never a
     # success message when nothing was actually bound.
     ow <- if (length(overwritten) > 0) {
       sprintf(" (%d overwritten)", length(overwritten))
@@ -2379,7 +2792,10 @@ server <- function(input, output, session) {
   })
 
   # --- validation ---------------------------------------------------------
-  run_check <- function(dataset = NULL) {
+  # `quiet = TRUE` is for re-checks that an edit triggers rather than the user
+  # pressing Validate: status and messages update as usual, but the "Validation
+  # complete" toast and the messages dock stay out of the way of the editor.
+  run_check <- function(dataset = NULL, quiet = FALSE) {
     req(rv$dta)
     names_ds <- dta_dataset_names(rv$dta)
     targets <- if (is.null(dataset)) names_ds else intersect(dataset, names_ds)
@@ -2402,11 +2818,11 @@ server <- function(input, output, session) {
       return()
     }
 
-    # C7 -- pre-flight: only validate datasets that actually have data bound.
+    # Pre-flight: only validate datasets that actually have data bound.
     ready <- Filter(function(nm) dta_dataset_readiness(rv$dta, nm)$has_data, targets)
     nodata <- setdiff(targets, ready)
 
-    # Mark no-data datasets explicitly; they are never reported as passed (C5).
+    # Mark no-data datasets explicitly; they are never reported as passed.
     if (length(nodata) > 0) {
       st <- rv$status
       for (nm in nodata) st[[nm]] <- "nodata"
@@ -2446,8 +2862,11 @@ server <- function(input, output, session) {
       return()
     }
     autosave()
+    if (quiet) {
+      return(invisible())
+    }
 
-    # ONE reconciled summary (C1/C6) derived from the verified status map.
+    # ONE reconciled summary derived from the verified status map.
     st <- unlist(rv$status)
     n_pass <- sum(st[ready] == "pass", na.rm = TRUE)
     n_fail <- sum(st[ready] == "fail", na.rm = TRUE)
@@ -2505,6 +2924,15 @@ server <- function(input, output, session) {
       "pending"
     }
     rv$status <- st
+  }
+  # A spec edit that can change a verdict (column or rule saved/removed) also
+  # re-validates data that is already loaded, so the status never reads
+  # "pending" for data whose result the new spec already determines. Call it
+  # AFTER sync_yaml_text(): a failing check must not hold up the YAML refresh.
+  recheck_dataset <- function(ed) {
+    if (isTRUE(dta_dataset_readiness(isolate(rv$dta), ed)$has_data)) {
+      run_check(ed, quiet = TRUE)
+    }
   }
 
   # Re-key a dataset's upload records after its file handlers were added,
@@ -2628,9 +3056,11 @@ server <- function(input, output, session) {
     invisible(NULL)
   }
 
-  # The four things every file-handler mutation must do: clear this dataset's
-  # validation, rebuild the slot structure (which is what registers the upload
-  # observers for a new slot), re-render the editor, and re-serialise the YAML.
+  # What every file-handler mutation must do: re-key the dataset's bound uploads
+  # when handlers moved (remap_uploads(), only if `map` is given), clear its
+  # validation, rebuild the slot structure (which registers the upload
+  # observers for a new slot), reset its file inputs, re-render the editor, and
+  # re-serialise the YAML.
   after_handler_change <- function(ed, map = NULL) {
     if (!is.null(map)) remap_uploads(ed, map)
     invalidate_dataset(ed)
@@ -2699,7 +3129,7 @@ server <- function(input, output, session) {
 
   show_file_editor_modal <- function(ed) {
     showModal(modalDialog(
-      title = paste("Edit files —", ed),
+      title = paste("Edit files —", ds_title(ed)),
       size = "xl", easyClose = FALSE,
       uiOutput("file_modal_body"),
       footer = NULL
@@ -2723,7 +3153,10 @@ server <- function(input, output, session) {
 
   # Per-row edit (pencil) + delete (bin) buttons for the editor DT tables.
   # Clicking sets a Shiny input to the 1-based data-row index (priority=event
-  # so re-clicking the same row still fires). Render the column with escape=FALSE.
+  # so re-clicking the same row still fires). The datatable() call escapes
+  # every other column and disables escaping for this one column alone
+  # (escape = -ncol(ov)), because everything else in the frame is document
+  # text and only this generated column is meant to be raw HTML.
   row_action_buttons <- function(edit_input, del_input, n,
                                  up_input = NULL, down_input = NULL) {
     vapply(seq_len(n), function(i) {
@@ -2731,21 +3164,21 @@ server <- function(input, output, session) {
         ""
       } else if (i > 1L) {
         sprintf(
-          "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn\" title=\"Move up\" onclick=\"Shiny.setInputValue('%s', %d, {priority:'event'})\">&#x25B2;</button> ",
+          "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn dta-move-btn\" title=\"Move up\" onclick=\"Shiny.setInputValue('%s', %d, {priority:'event'})\">&#x25B2;</button> ",
           up_input, i
         )
       } else {
-        "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn\" title=\"Move up\" disabled>&#x25B2;</button> "
+        "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn dta-move-btn\" title=\"Move up\" disabled>&#x25B2;</button> "
       }
       down_btn <- if (is.null(down_input)) {
         ""
       } else if (i < n) {
         sprintf(
-          "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn\" title=\"Move down\" onclick=\"Shiny.setInputValue('%s', %d, {priority:'event'})\">&#x25BC;</button> ",
+          "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn dta-move-btn\" title=\"Move down\" onclick=\"Shiny.setInputValue('%s', %d, {priority:'event'})\">&#x25BC;</button> ",
           down_input, i
         )
       } else {
-        "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn\" title=\"Move down\" disabled>&#x25BC;</button> "
+        "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn dta-move-btn\" title=\"Move down\" disabled>&#x25BC;</button> "
       }
       paste0(
         up_btn, down_btn,
@@ -2759,6 +3192,49 @@ server <- function(input, output, session) {
         )
       )
     }, character(1))
+  }
+
+  # A searchable spec list (columns, rules) whose move arrows swap an item with
+  # its neighbour in the SPEC -- which is not the row above or below it once
+  # the view is searched or sorted. So in either state the arrows are hidden
+  # rather than move something the user cannot see; edit and remove carry the
+  # spec index and stay correct throughout. reorder_table_ui() wraps the
+  # output; reorder_table_callback() toggles .dta-reorder-off on that wrapper
+  # and reports the search term as input$<search_input>, which the server's
+  # move guards read.
+  reorder_table_ui <- function(table_id) {
+    div(
+      class = "reorder-wrap",
+      div(
+        class = "spec-hint reorder-off-hint",
+        "Reordering is off while the list is searched or sorted. ",
+        tags$a(href = "#", class = "reorder-reset", "Show all in spec order")
+      ),
+      DT::dataTableOutput(table_id)
+    )
+  }
+
+  reorder_table_callback <- function(search_input) {
+    DT::JS(
+      "var wrap = $(table.table().container()).closest('.reorder-wrap');",
+      "function sync() {",
+      "  wrap.toggleClass('dta-reorder-off',",
+      "    table.search() !== '' || table.order().length > 0);",
+      # DT's own <id>_search report is deduplicated client-side, so re-typing
+      # last session's term after a reopen (which resets the server's copy)
+      # would never reach the move guard.
+      sprintf(
+        "  Shiny.setInputValue('%s', table.search(), {priority: 'event'});",
+        search_input
+      ),
+      "}",
+      "table.on('search.dt order.dt', sync);",
+      "wrap.find('.reorder-reset').off('click').on('click', function(e) {",
+      "  e.preventDefault();",
+      "  table.search('').order([]).draw();",
+      "});",
+      "sync();"
+    )
   }
 
   # ========================= Edit file handlers ===========================
@@ -3020,7 +3496,7 @@ server <- function(input, output, session) {
     }
     DT::datatable(
       ov,
-      rownames = FALSE, selection = "none", escape = FALSE,
+      rownames = FALSE, selection = "none", escape = -ncol(ov),
       class = "display compact", width = "100%",
       options = list(
         pageLength = 8, dom = "tp", scrollX = TRUE,
@@ -3215,9 +3691,12 @@ server <- function(input, output, session) {
     rv$col_edit_id <- NULL
     rv$col_prefill <- list()
     rv$col_msg <- NULL
+    # A fresh editor starts unfiltered: input$col_tbl_search still holds
+    # whatever the last session of this modal typed, for whichever dataset.
+    rv$col_search <- ""
     rv$col_token <- rv$col_token + 1
     showModal(modalDialog(
-      title = paste("Edit columns \u2014", rv$active),
+      title = paste("Edit columns \u2014", ds_title(rv$active)),
       size = "xl", easyClose = FALSE,
       uiOutput("col_modal_body"),
       footer = NULL
@@ -3240,7 +3719,7 @@ server <- function(input, output, session) {
             "Use the pencil to edit a column or the bin to remove it. Any change resets this dataset's validation."
           )
         ),
-        DT::dataTableOutput("col_tbl"),
+        reorder_table_ui("col_tbl"),
         tags$hr(),
         div(style = "text-align:right;", modalButton("Close"))
       )
@@ -3262,14 +3741,29 @@ server <- function(input, output, session) {
             class = "msg-hint"
           )
         } else {
+          refs <- paste0(vocabs$id, "@", vocabs$version)
+          # Open on the vocabulary meant for THIS column; only when nothing
+          # points at one, on the last one used (if it is still offered).
+          sug <- isolate(rv$col_vocab_sug)
+          last <- isolate(rv$col_vocab_ref)
           tagList(
             selectInput("col_vocab_ref", "Vocabulary",
-              choices = stats::setNames(
-                paste0(vocabs$id, "@", vocabs$version),
-                paste0(vocabs$label, " (", vocabs$id, "@", vocabs$version, ")")
-              ),
-              selected = isolate(rv$col_vocab_ref), width = "100%"
+              choices = stats::setNames(refs, paste0(vocabs$label, " (", refs, ")")),
+              selected = sug$ref %||% (if (isTRUE(last %in% refs)) last), width = "100%"
             ),
+            if (!is.null(sug)) {
+              p(
+                paste0(
+                  "Suggested: ", sug$ref, " — ",
+                  if (identical(sug$reason, "declared")) {
+                    paste0("it lists column ", trimws(pf$id %||% ""), ".")
+                  } else {
+                    "it holds every value this column already lists."
+                  }
+                ),
+                class = "msg-hint"
+              )
+            },
             uiOutput("col_vocab_terms"),
             p(
               paste(
@@ -3330,11 +3824,24 @@ server <- function(input, output, session) {
               textAreaInput("col_values", "Allowed values (one per line)",
                 value = g("values"), width = "100%", rows = 3
               ),
-              actionButton("col_vocab_open", "Choose from vocabulary…",
-                class = "btn btn-sm btn-outline-secondary"
+              # The hint below it is what makes the button read as
+              # "suggested" (theme.R styles the button off it), and it is the
+              # visible, non-colour half of that cue.
+              div(
+                class = "col-vocab-open",
+                actionButton("col_vocab_open", "Choose from vocabulary…",
+                  class = "btn btn-sm btn-outline-secondary",
+                  `aria-describedby` = "col_vocab_hint"
+                ),
+                uiOutput("col_vocab_hint")
               )
             ),
-            textInput("col_pattern", "Pattern (regex)", value = g("pattern"), width = "100%")
+            tagList(
+              textInput("col_pattern", "Pattern (regex)", value = g("pattern"), width = "100%"),
+              textAreaInput("col_examples", "Examples (one per line)",
+                value = g("examples"), width = "100%", rows = 2
+              )
+            )
           ),
           textAreaInput("col_desc", "Description", value = g("description"), width = "100%", rows = 2)
         ),
@@ -3373,13 +3880,21 @@ server <- function(input, output, session) {
     }
     DT::datatable(
       ov,
-      rownames = FALSE, selection = "none", escape = FALSE,
+      rownames = FALSE, selection = "none", escape = -ncol(ov),
       class = "display compact", width = "100%",
       options = list(
-        pageLength = 8, dom = "tp", scrollX = TRUE,
-        columnDefs = list(list(orderable = FALSE, targets = ncol(ov) - 1L))
-      )
+        pageLength = 8, dom = "ftp", scrollX = TRUE,
+        search = list(search = isolate(rv$col_search)),
+        columnDefs = list(list(
+          orderable = FALSE, searchable = FALSE, targets = ncol(ov) - 1L
+        ))
+      ),
+      callback = reorder_table_callback("col_tbl_search")
     )
+  })
+
+  observeEvent(input$col_tbl_search, {
+    rv$col_search <- input$col_tbl_search %||% ""
   })
 
   output$col_editor_msg <- renderUI({
@@ -3425,13 +3940,105 @@ server <- function(input, output, session) {
       nullable = isTRUE(input$col_nullable),
       values = input$col_values %||% "",
       pattern = input$col_pattern %||% "",
+      examples = input$col_examples %||% "",
       description = input$col_desc %||% ""
     )
   }
 
+  # The column's current permitted values, as the form holds them: one per line.
+  value_lines <- function(x) {
+    v <- trimws(strsplit(x %||% "", "\n")[[1]])
+    v[nzchar(v)]
+  }
+  col_prefill_values <- function() value_lines(isolate(rv$col_prefill)$values)
+
+  # --- column editor: say when a vocabulary is made for this column ---
+  #
+  # Only a DECLARED relation counts (the vocabulary's `columns:` names the
+  # column), drifted values included: the picker's other reason, "every value
+  # fits", also fires for any column already built from a vocabulary and for
+  # short code sets like Y/N, where it would be a lasting claim with nothing
+  # behind it. It is one vocabulary_suggestion() call, so the hint and the
+  # picker cannot name different vocabularies.
+  #
+  # Note: this resolves every vocabulary per call (see vocabulary_suggestion()).
+  # Memoising the resolver would have to be tied to the index BUILD, not to an
+  # equal index, or "Refresh templates" would stop re-reading edited files.
+  col_vocab_hint_for <- function(id, values) {
+    if (!nzchar(trimws(id))) {
+      return(NULL)
+    }
+    tryCatch(
+      {
+        idx <- dta_template_index_cached()
+        vocabs <- list_template_index_entries(idx, kind = "dta_vocabulary")
+        if (NROW(vocabs) == 0) {
+          return(NULL)
+        }
+        refs <- paste0(vocabs$id, "@", vocabs$version)
+        sug <- vocabulary_suggestion(id, values, refs, vocabulary_resolver(idx))
+        if (!identical(sug$reason, "declared")) {
+          return(NULL)
+        }
+        list(ref = sug$ref, label = as.character(vocabs$label[[match(sug$ref, refs)]]))
+      },
+      error = function(e) NULL
+    )
+  }
+
+  col_vocab_hint_val <- reactiveVal(NULL)
+
+  # Whenever the editor changes view or loads a column: from the prefill, which
+  # is what the form is about to show.
+  observeEvent(rv$col_token, {
+    col_vocab_hint_val(
+      if (identical(rv$col_view, "form") && editing()) {
+        pf <- rv$col_prefill %||% list()
+        col_vocab_hint_for(as.character(pf$id %||% ""), col_prefill_values())
+      }
+    )
+  })
+
+  # While the form is open: from what is typed. Created once, here, not per
+  # modal; and not while another view shows, where input$col_id still holds the
+  # removed form's last value.
+  col_form_d <- debounce(reactive(list(input$col_id, input$col_values)), 500)
+  observeEvent(col_form_d(),
+    {
+      req(identical(rv$col_view, "form"), editing())
+      col_vocab_hint_val(col_vocab_hint_for(input$col_id %||% "", value_lines(input$col_values)))
+    },
+    ignoreInit = TRUE
+  )
+
+  # No id on the paragraph: the output's own container carries col_vocab_hint,
+  # and the button's aria-describedby points at it. The label comes from a
+  # template author, so it goes through htmltools' escaping like any text.
+  output$col_vocab_hint <- renderUI({
+    rv$col_token
+    h <- col_vocab_hint_val()
+    if (is.null(h)) {
+      return(NULL)
+    }
+    p(
+      class = "msg-hint vocab-hint",
+      "Suggested vocabulary for this column: ", tags$strong(h$label), paste0(" (", h$ref, ")")
+    )
+  })
+
   observeEvent(input$col_vocab_open, {
     req(editing())
     rv$col_prefill <- snapshot_col_form()
+    # Once per open, not per render: the body names it and the terms below
+    # take its Codes/Labels choice from it.
+    idx <- dta_template_index_cached()
+    vocabs <- list_template_index_entries(idx, kind = "dta_vocabulary")
+    rv$col_vocab_sug <- if (NROW(vocabs) > 0) {
+      vocabulary_suggestion(
+        rv$col_prefill$id, col_prefill_values(),
+        paste0(vocabs$id, "@", vocabs$version), vocabulary_resolver(idx)
+      )
+    }
     rv$col_msg <- NULL
     rv$col_view <- "vocab"
     rv$col_token <- rv$col_token + 1
@@ -3443,11 +4050,20 @@ server <- function(input, output, session) {
     rv$col_token <- rv$col_token + 1
   })
 
-  # The terms of whichever vocabulary is selected, pre-ticked with any of them
-  # the column already lists -- so re-opening the picker on a column that was
-  # built from this vocabulary shows the current selection rather than a blank
-  # form.
+  # The Codes/Labels choice and the terms of whichever vocabulary is selected,
+  # pre-ticked with any of them the column already lists, by code or by label
+  # -- so re-opening the picker on a column that was built from this vocabulary
+  # (its code or its decode half) shows the current selection. When the column
+  # lists none of them -- a new column, or a different vocabulary -- every term
+  # is ticked, because the whole vocabulary is what a column usually wants.
+  #
+  # Deliberately not dependent on input$col_vocab_field: flipping codes/labels
+  # must not throw away terms the user has already picked. It IS dependent on
+  # rv$col_token, which every open of the picker bumps: the suggestion often
+  # selects the same vocabulary as last time, so input$col_vocab_ref alone
+  # would leave the previous column's ticks on screen.
   output$col_vocab_terms <- renderUI({
+    rv$col_token
     ref <- input$col_vocab_ref
     req(ref)
     resolve <- vocabulary_resolver(dta_template_index_cached())
@@ -3457,22 +4073,45 @@ server <- function(input, output, session) {
       return(p(paste("Vocabulary", ref, msg), class = "msg-hint"))
     }
 
-    codes <- vapply(vocab$terms, function(t) as.character(t$code), character(1))
-    labels <- vapply(vocab$terms, function(t) {
-      lb <- as.character(t$label %||% "")
-      if (nzchar(lb) && !identical(lb, t$code)) paste0(t$code, " — ", lb) else t$code
-    }, character(1))
+    codes <- vapply(vocab$terms %||% list(), function(t) as.character(t$code), character(1))
+    if (length(codes) == 0) {
+      return(p(paste("Vocabulary", ref, "has no terms."), class = "msg-hint"))
+    }
+    decodes <- vocabulary_values(vocab, field = "label")
+    current <- col_prefill_values()
+    hit <- codes %in% current | decodes %in% current
+    extras <- setdiff(current, c(codes, decodes))
 
-    current <- trimws(strsplit(isolate(rv$col_prefill)$values %||% "", "\n")[[1]])
-    selectizeInput("col_vocab_terms_sel", "Terms",
-      choices = stats::setNames(codes, labels),
-      selected = intersect(codes, current[nzchar(current)]),
-      multiple = TRUE, width = "100%",
-      # `create = TRUE`: the column editor is the free-form surface of the app,
-      # so a value the vocabulary does not have is allowed here by default --
-      # "pick from the vocabulary, or use your own". A template's slot is where
-      # a closed list is enforced.
-      options = list(create = TRUE)
+    # The suggestion's field for the suggested vocabulary; for any other, labels
+    # only when the column already holds labels and no codes of it.
+    sug <- isolate(rv$col_vocab_sug)
+    field <- if (identical(sug$ref, ref)) {
+      sug$field
+    } else if (any(decodes %in% current) && !any(codes %in% current)) {
+      "label"
+    } else {
+      "code"
+    }
+
+    tagList(
+      # A vocabulary without labels has nothing to choose between.
+      if (!identical(codes, decodes)) {
+        radioButtons("col_vocab_field", "Write as",
+          choiceNames = list(
+            paste0("Codes (e.g. ", codes[[1]], ")"),
+            paste0("Labels (e.g. ", decodes[[1]], ")")
+          ),
+          choiceValues = list("code", "label"),
+          selected = field, inline = TRUE
+        )
+      },
+      vocab_term_checklist(
+        "col_vocab_terms_sel", vocab$terms,
+        # The column's own values stay ticked beside its terms; a column that
+        # shares nothing with this vocabulary gets all of it instead.
+        selected = if (any(hit)) c(extras, codes[hit]) else codes,
+        extras = extras
+      )
     )
   })
 
@@ -3482,6 +4121,24 @@ server <- function(input, output, session) {
     if (length(sel) == 0) {
       rv$col_msg <- list(ok = FALSE, error = "Select at least one term, or go back without applying.")
       return()
+    }
+    vocab <- tryCatch(
+      vocabulary_resolver(dta_template_index_cached())(input$col_vocab_ref),
+      error = function(e) NULL
+    )
+    codes <- vapply(vocab$terms %||% list(), function(t) t$code, character(1))
+    # A vocabulary with no terms renders no checklist, but Shiny keeps the last
+    # one's selection: never write that stale selection under this vocabulary.
+    if (length(codes) == 0) {
+      rv$col_msg <- list(ok = FALSE, error = "This vocabulary has no terms to use.")
+      return()
+    }
+    # The decode half of a code/decode pair (GFTEST beside GFTESTCD) wants the
+    # labels. A value the vocabulary does not have stays as it is.
+    if (identical(input$col_vocab_field, "label")) {
+      hit <- match(sel, codes)
+      ok <- !is.na(hit)
+      sel[ok] <- as.character(vocabulary_values(vocab, field = "label"))[hit[ok]]
     }
     rv$col_vocab_ref <- input$col_vocab_ref
     pf <- isolate(rv$col_prefill) %||% list()
@@ -3534,10 +4191,15 @@ server <- function(input, output, session) {
     rv$col_token <- rv$col_token + 1
     sync_yaml_text()
     showNotification(sprintf("Removed column \u201c%s\u201d.", ids[[idx]]), type = "message")
+    recheck_dataset(ed)
   })
 
   observeEvent(input$col_up_click, {
     req(editing())
+    # The arrows are hidden under a search; refuse one driven over the
+    # websocket too. (A sorted view is not reported, but a move there is still
+    # a correct move in spec order.)
+    req(!nzchar(rv$col_search))
     idx <- as.integer(input$col_up_click)
     ed <- isolate(rv$editor_dataset)
     req(ed)
@@ -3558,6 +4220,7 @@ server <- function(input, output, session) {
 
   observeEvent(input$col_down_click, {
     req(editing())
+    req(!nzchar(rv$col_search))
     idx <- as.integer(input$col_down_click)
     ed <- isolate(rv$editor_dataset)
     req(ed)
@@ -3599,7 +4262,14 @@ server <- function(input, output, session) {
       nullable = isTRUE(input$col_nullable),
       values = if (length(vals)) vals else NULL,
       pattern = input$col_pattern, description = input$col_desc,
-      old_id = isolate(rv$col_edit_id)
+      old_id = isolate(rv$col_edit_id),
+      # NULL (field not on the page) keeps the column's examples; otherwise
+      # exactly what the field holds, so a stale example can be cleared here.
+      examples = if (is.null(input$col_examples)) {
+        NULL
+      } else {
+        strsplit(input$col_examples, "\n", fixed = TRUE)[[1]]
+      }
     )
     if (!isTRUE(r$ok)) {
       rv$col_msg <- list(ok = FALSE, error = r$error)
@@ -3612,6 +4282,7 @@ server <- function(input, output, session) {
     rv$col_token <- rv$col_token + 1
     sync_yaml_text()
     showNotification("Column saved.", type = "message")
+    recheck_dataset(ed)
   })
 
   # ============================= Edit rules ===============================
@@ -3619,23 +4290,34 @@ server <- function(input, output, session) {
   # a single text box whose meaning depends on the operator (see the hint under
   # the builder). Values come from the prefill only (fresh renders happen on
   # token bumps where prefill is authoritative; insertUI rows keep DOM state).
+  # Labels are rendered on every row; theme.R hides all but the first row's
+  # visually (screen readers keep them), so the first remaining row shows them
+  # after a removal.
   one_cond_row <- function(prefix, i, cols, pf = list(col = "", op = "equals", val = "")) {
     cid <- paste0(prefix, "_col_", i)
     oid <- paste0(prefix, "_op_", i)
     vid <- paste0(prefix, "_val_", i)
     div(
+      id = paste0(prefix, "_row_", i),
       class = "cond-row",
-      selectInput(cid, if (i == 1) "Column" else NULL,
+      selectInput(cid, "Column",
         choices = c("(select)" = "", cols),
         selected = pf$col %||% "", width = "100%"
       ),
-      selectInput(oid, if (i == 1) "Operator" else NULL,
+      selectInput(oid, "Operator",
         choices = dta_condition_operators(),
         selected = pf$op %||% "equals", width = "100%"
       ),
-      textInput(vid, if (i == 1) "Value" else NULL,
+      textInput(vid, "Value",
         value = pf$val %||% "", width = "100%",
         placeholder = "5 | a, b | 0, 99 | true"
+      ),
+      actionButton(
+        paste0(prefix, "_remove_", i),
+        "×",
+        class = "btn btn-sm btn-outline-danger",
+        title = "Remove this row",
+        `aria-label` = "Remove this row"
       )
     )
   }
@@ -3707,8 +4389,10 @@ server <- function(input, output, session) {
     txt
   }
   collect_cond <- function(prefix, n) {
+    removed <- isolate(rv[[paste0(prefix, "_removed")]])
     out <- list()
     for (i in seq_len(max(1L, n))) {
+      if (i %in% removed) next
       col <- trimws(input[[paste0(prefix, "_col_", i)]] %||% "")
       if (!nzchar(col)) next
       op <- input[[paste0(prefix, "_op_", i)]] %||% "equals"
@@ -3729,6 +4413,34 @@ server <- function(input, output, session) {
     }
     out
   }
+  visible_cond_rows <- function(prefix) {
+    removed <- isolate(rv[[paste0(prefix, "_removed")]])
+    n <- isolate(rv[[paste0(prefix, "_n")]])
+    Filter(function(i) {
+      !(i %in% removed) && !is.null(input[[paste0(prefix, "_op_", i)]])
+    }, seq_len(max(1L, n)))
+  }
+  ensure_cond_remove_observer <- function(prefix, i) {
+    bid <- paste0(prefix, "_remove_", i)
+    if (isTRUE(cond_rm_registry[[bid]])) {
+      return(invisible(NULL))
+    }
+    cond_rm_registry[[bid]] <- TRUE
+    observeEvent(input[[bid]],
+      {
+        if (length(visible_cond_rows(prefix)) <= 1) {
+          updateSelectInput(session, paste0(prefix, "_col_", i), selected = "")
+          updateSelectInput(session, paste0(prefix, "_op_", i), selected = "equals")
+          updateTextInput(session, paste0(prefix, "_val_", i), value = "")
+        } else {
+          removeUI(selector = paste0("#", prefix, "_row_", i))
+          key <- paste0(prefix, "_removed")
+          rv[[key]] <- c(isolate(rv[[key]]), i)
+        }
+      },
+      ignoreInit = TRUE
+    )
+  }
 
   one_group_cond_row <- function(i, cols, pf = list(name = "", col = "", op = "equals", val = "")) {
     rid <- paste0("gcond_row_", i)
@@ -3740,26 +4452,28 @@ server <- function(input, output, session) {
     div(
       id = rid,
       class = "cond-row",
-      textInput(nid, if (i == 1) "Condition name" else NULL,
+      textInput(nid, "Condition name",
         value = pf$name %||% "", width = "100%",
         placeholder = "c1_failed"
       ),
-      selectInput(cid, if (i == 1) "Column" else NULL,
+      selectInput(cid, "Column",
         choices = c("(select)" = "", cols),
         selected = pf$col %||% "", width = "100%"
       ),
-      selectInput(oid, if (i == 1) "Operator" else NULL,
+      selectInput(oid, "Operator",
         choices = dta_condition_operators(),
         selected = pf$op %||% "equals", width = "100%"
       ),
-      textInput(vid, if (i == 1) "Value" else NULL,
+      textInput(vid, "Value",
         value = pf$val %||% "", width = "100%",
         placeholder = "5 | a, b | 0, 99 | true"
       ),
       actionButton(
         bid,
-        if (i == 1) "Remove" else "×",
-        class = "btn btn-sm btn-outline-danger"
+        "×",
+        class = "btn btn-sm btn-outline-danger",
+        title = "Remove this row",
+        `aria-label` = "Remove this row"
       )
     )
   }
@@ -3792,7 +4506,9 @@ server <- function(input, output, session) {
 
   collect_group_conditions <- function(n) {
     out <- list()
+    removed <- isolate(rv$gcond_removed)
     for (i in seq_len(max(1L, n))) {
+      if (i %in% removed) next
       nm <- trimws(input[[paste0("gcond_name_", i)]] %||% "")
       col <- trimws(input[[paste0("gcond_col_", i)]] %||% "")
       if (!nzchar(nm) || !nzchar(col)) next
@@ -3839,49 +4555,53 @@ server <- function(input, output, session) {
     div(
       id = rowid,
       class = "cond-row",
-      textInput(cid, if (i == 1) "Constraint id" else NULL,
+      textInput(cid, "Constraint id",
         value = pf$id %||% "", width = "100%",
         placeholder = paste0("constraint_", i)
       ),
-      selectInput(tid, if (i == 1) "Type" else NULL,
+      selectInput(tid, "Type",
         choices = c("mutually_exclusive", "requires"),
         selected = ctype,
         width = "100%"
       ),
-      selectInput(lid, if (i == 1) "Left / IF" else NULL,
+      selectInput(lid, "Left / IF",
         choices = c("(select)" = "", cond_names),
         selected = left_name,
         width = "100%"
       ),
-      selectInput(rid, if (i == 1) "Right / THEN" else NULL,
+      selectInput(rid, "Right / THEN",
         choices = c("(select)" = "", cond_names),
         selected = right_name,
         width = "100%"
       ),
-      selectInput(lsid, if (i == 1) "Left/IF scope" else NULL,
+      selectInput(lsid, "Left/IF scope",
         choices = c("any", "all"),
         selected = pf$left_scope %||% pf$if_scope %||% "any",
         width = "100%"
       ),
-      selectInput(rsid, if (i == 1) "Right/THEN scope" else NULL,
+      selectInput(rsid, "Right/THEN scope",
         choices = c("any", "all"),
         selected = pf$right_scope %||% pf$then_scope %||% "any",
         width = "100%"
       ),
-      textInput(mid, if (i == 1) "Message" else NULL,
+      textInput(mid, "Message",
         value = pf$message %||% "", width = "100%"
       ),
       actionButton(
         bid,
-        if (i == 1) "Remove" else "×",
-        class = "btn btn-sm btn-outline-danger"
+        "×",
+        class = "btn btn-sm btn-outline-danger",
+        title = "Remove this row",
+        `aria-label` = "Remove this row"
       )
     )
   }
 
   visible_group_condition_rows <- function() {
     out <- integer(0)
+    removed <- isolate(rv$gcond_removed)
     for (i in seq_len(max(1L, isolate(rv$gcond_n)))) {
+      if (i %in% removed) next
       if (!is.null(input[[paste0("gcond_name_", i)]])) {
         out <- c(out, i)
       }
@@ -3891,12 +4611,27 @@ server <- function(input, output, session) {
 
   visible_group_constraint_rows <- function() {
     out <- integer(0)
+    removed <- isolate(rv$gconstr_removed)
     for (i in seq_len(max(1L, isolate(rv$gconstr_n)))) {
+      if (i %in% removed) next
       if (!is.null(input[[paste0("gconstr_type_", i)]])) {
         out <- c(out, i)
       }
     }
     out
+  }
+
+  # Distinct non-blank names of the grouped-condition rows still on screen,
+  # offered by the constraint Left/Right selectors. Removed rows are skipped
+  # explicitly: Shiny keeps a removed input's last value, so without the skip
+  # a removed row's name stays selectable and Save rejects it as an unknown
+  # condition. rv$gcond_n and rv$gcond_removed are read reactively on purpose
+  # (unlike visible_group_condition_rows(), which isolates), so the observer
+  # that refreshes the selectors re-runs when a row is removed.
+  current_group_condition_names <- function() {
+    rows <- setdiff(seq_len(max(1L, rv$gcond_n)), rv$gcond_removed)
+    nms <- vapply(rows, function(i) trimws(input[[paste0("gcond_name_", i)]] %||% ""), character(1))
+    unique(nms[nzchar(nms)])
   }
 
   find_condition_dependencies <- function(condition_name, excluding_row) {
@@ -3979,6 +4714,7 @@ server <- function(input, output, session) {
           clear_group_condition_row(i)
         } else {
           removeUI(selector = paste0("#gcond_row_", i))
+          rv$gcond_removed <- c(isolate(rv$gcond_removed), i)
         }
         rv$rule_msg <- NULL
       },
@@ -4000,6 +4736,7 @@ server <- function(input, output, session) {
           clear_group_constraint_row(i)
         } else {
           removeUI(selector = paste0("#gconstr_row_", i))
+          rv$gconstr_removed <- c(isolate(rv$gconstr_removed), i)
         }
         rv$rule_msg <- NULL
       },
@@ -4020,7 +4757,9 @@ server <- function(input, output, session) {
 
   collect_group_constraints <- function(n) {
     out <- list()
+    removed <- isolate(rv$gconstr_removed)
     for (i in seq_len(max(1L, n))) {
+      if (i %in% removed) next
       ctype <- trimws(input[[paste0("gconstr_type_", i)]] %||% "")
       left <- trimws(input[[paste0("gconstr_left_", i)]] %||% "")
       right <- trimws(input[[paste0("gconstr_right_", i)]] %||% "")
@@ -4074,9 +4813,15 @@ server <- function(input, output, session) {
     rv$then_n <- 1L
     rv$gcond_n <- 1L
     rv$gconstr_n <- 1L
+    rv$cond_removed <- integer(0)
+    rv$then_removed <- integer(0)
+    rv$gcond_removed <- integer(0)
+    rv$gconstr_removed <- integer(0)
+    # A fresh editor starts unfiltered (see edit_cols).
+    rv$rule_search <- ""
     rv$rule_token <- rv$rule_token + 1
     showModal(modalDialog(
-      title = paste("Edit rules \u2014", rv$active),
+      title = paste("Edit rules \u2014", ds_title(rv$active)),
       size = "xl", easyClose = FALSE,
       uiOutput("rule_modal_body"),
       footer = NULL
@@ -4099,7 +4844,7 @@ server <- function(input, output, session) {
             "Use the pencil to edit a rule or the bin to remove it. Any change resets this dataset's validation."
           )
         ),
-        DT::dataTableOutput("rule_tbl"),
+        reorder_table_ui("rule_tbl"),
         tags$hr(),
         div(style = "text-align:right;", modalButton("Close"))
       ))
@@ -4143,7 +4888,7 @@ server <- function(input, output, session) {
     } else if (identical(rt, "col_range")) {
       tagList(
         selectInput("rule_col_single", "Column",
-          choices = c("(select)" = "", cols),
+          choices = c("(select)" = "", dta_numeric_column_ids(isolate(rv$dta), ed)),
           selected = (pf$columns %||% "")[1], width = "100%"
         ),
         layout_columns(
@@ -4153,7 +4898,7 @@ server <- function(input, output, session) {
         ),
         div(
           class = "cond-hint",
-          "A range rule checks ONE column against a minimum and/or maximum."
+          "A range rule checks ONE numeric (Num or Int) column against a minimum and/or maximum."
         )
       )
     } else if (identical(rt, "col_unique")) {
@@ -4282,13 +5027,21 @@ server <- function(input, output, session) {
     }
     DT::datatable(
       ov,
-      rownames = FALSE, selection = "none", escape = FALSE,
+      rownames = FALSE, selection = "none", escape = -ncol(ov),
       class = "display compact", width = "100%",
       options = list(
-        pageLength = 8, dom = "tp", scrollX = TRUE,
-        columnDefs = list(list(orderable = FALSE, targets = ncol(ov) - 1L))
-      )
+        pageLength = 8, dom = "ftp", scrollX = TRUE,
+        search = list(search = isolate(rv$rule_search)),
+        columnDefs = list(list(
+          orderable = FALSE, searchable = FALSE, targets = ncol(ov) - 1L
+        ))
+      ),
+      callback = reorder_table_callback("rule_tbl_search")
     )
+  })
+
+  observeEvent(input$rule_tbl_search, {
+    rv$rule_search <- input$rule_tbl_search %||% ""
   })
 
   output$rule_editor_msg <- renderUI({
@@ -4313,6 +5066,10 @@ server <- function(input, output, session) {
     rv$then_n <- 1L
     rv$gcond_n <- 1L
     rv$gconstr_n <- 1L
+    rv$cond_removed <- integer(0)
+    rv$then_removed <- integer(0)
+    rv$gcond_removed <- integer(0)
+    rv$gconstr_removed <- integer(0)
     rv$rule_view <- "form"
     rv$rule_token <- rv$rule_token + 1
   })
@@ -4341,6 +5098,10 @@ server <- function(input, output, session) {
     rv$then_n <- max(1L, length(cond_to_rows(f$then)))
     rv$gcond_n <- max(1L, length(flatten_group_conditions(f$conditions)))
     rv$gconstr_n <- max(1L, length(flatten_group_constraints(f$constraints)))
+    rv$cond_removed <- integer(0)
+    rv$then_removed <- integer(0)
+    rv$gcond_removed <- integer(0)
+    rv$gconstr_removed <- integer(0)
     rv$rule_view <- "form"
     rv$rule_token <- rv$rule_token + 1
   })
@@ -4363,10 +5124,13 @@ server <- function(input, output, session) {
     rv$rule_token <- rv$rule_token + 1
     sync_yaml_text()
     showNotification("Rule removed.", type = "message")
+    recheck_dataset(ed)
   })
 
   observeEvent(input$rule_up_click, {
     req(editing())
+    # Same guard as col_up_click: no move under a search.
+    req(!nzchar(rv$rule_search))
     idx <- as.integer(input$rule_up_click)
     ed <- isolate(rv$editor_dataset)
     req(ed)
@@ -4386,6 +5150,7 @@ server <- function(input, output, session) {
 
   observeEvent(input$rule_down_click, {
     req(editing())
+    req(!nzchar(rv$rule_search))
     idx <- as.integer(input$rule_down_click)
     ed <- isolate(rv$editor_dataset)
     req(ed)
@@ -4424,6 +5189,11 @@ server <- function(input, output, session) {
       ui = one_cond_row("then", isolate(rv$then_n), cols)
     )
   })
+  observe({
+    req(identical(rv$rule_view, "form"))
+    for (i in seq_len(max(1L, rv$cond_n))) ensure_cond_remove_observer("cond", i)
+    for (i in seq_len(max(1L, rv$then_n))) ensure_cond_remove_observer("then", i)
+  })
 
   observeEvent(input$gcond_add, {
     ed <- isolate(rv$editor_dataset)
@@ -4437,16 +5207,10 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$gconstr_add, {
-    cond_names <- character(0)
-    for (i in seq_len(max(1L, isolate(rv$gcond_n)))) {
-      nm <- trimws(input[[paste0("gcond_name_", i)]] %||% "")
-      if (nzchar(nm)) cond_names <- c(cond_names, nm)
-    }
-    cond_names <- unique(cond_names)
     rv$gconstr_n <- isolate(rv$gconstr_n) + 1L
     insertUI("#gconstr_rows",
       where = "beforeEnd",
-      ui = one_group_constraint_row(isolate(rv$gconstr_n), cond_names)
+      ui = one_group_constraint_row(isolate(rv$gconstr_n), current_group_condition_names())
     )
   })
 
@@ -4461,12 +5225,7 @@ server <- function(input, output, session) {
       ensure_gconstr_remove_observer(i)
     }
 
-    cond_names <- character(0)
-    for (i in seq_len(max(1L, rv$gcond_n))) {
-      nm <- trimws(input[[paste0("gcond_name_", i)]] %||% "")
-      if (nzchar(nm)) cond_names <- c(cond_names, nm)
-    }
-    cond_names <- unique(cond_names)
+    cond_names <- current_group_condition_names()
 
     for (i in seq_len(max(1L, rv$gconstr_n))) {
       left_id <- paste0("gconstr_left_", i)
@@ -4521,6 +5280,10 @@ server <- function(input, output, session) {
       rv$then_n <- 1L
       rv$gcond_n <- 1L
       rv$gconstr_n <- 1L
+      rv$cond_removed <- integer(0)
+      rv$then_removed <- integer(0)
+      rv$gcond_removed <- integer(0)
+      rv$gconstr_removed <- integer(0)
       rv$rule_msg <- NULL
       rv$rule_token <- rv$rule_token + 1
     },
@@ -4629,6 +5392,7 @@ server <- function(input, output, session) {
     rv$rule_token <- rv$rule_token + 1
     sync_yaml_text()
     showNotification("Rule saved.", type = "message")
+    recheck_dataset(ed)
   })
 
   # ======================= Edit dataset metadata ==========================
@@ -4653,7 +5417,7 @@ server <- function(input, output, session) {
       # of ds_edit_menu() opens (ui_components.R), and its title should read
       # like the label the user just clicked, not the internal name the
       # server-side code still uses for the concept (edit_meta, rv$meta_*).
-      title = paste("Edit details —", ed),
+      title = paste("Edit details —", ds_title(ed)),
       size = "l", easyClose = FALSE,
       uiOutput("meta_modal_body"),
       footer = NULL
@@ -4679,26 +5443,34 @@ server <- function(input, output, session) {
     tagList(
       div(
         class = "spec-form",
-        textInput("meta_name", "Dataset name",
-          value = g("name"), width = "100%",
-          placeholder = "vitals"
+        textInput("meta_id", "Dataset ID",
+          value = g("id"), width = "100%",
+          placeholder = "vs"
         ),
         div(
           class = "msg-hint", style = "margin:-8px 0 12px;",
           paste(
-            "The name identifies the dataset in the specification, in every",
-            "validation message and in the exported documents. Renaming it",
+            "The ID identifies the dataset in the specification, in every",
+            "validation message and in the exported documents. Changing it",
             "clears this dataset's validation, because results recorded under",
-            "the old name no longer describe it."
+            "the old ID no longer describe it."
           )
         ),
+        textInput("meta_name", "Name",
+          value = g("name"), width = "100%",
+          placeholder = "Vital signs"
+        ),
+        div(
+          class = "msg-hint", style = "margin:-8px 0 12px;",
+          "Shown as the heading of this dataset's page and in the dataset list; the ID is shown when it is empty."
+        ),
         textAreaInput("meta_description", "Description",
-          value = g("description"), width = "100%", rows = 2,
+          value = g("description"), width = "100%", rows = 4,
           placeholder = "What this dataset contains, in words"
         ),
         div(
           class = "msg-hint", style = "margin:-8px 0 12px;",
-          "Shown as the heading of this dataset's page when set."
+          "Shown under the heading of this dataset's page."
         ),
         tags$h6("Template", style = "margin-top:4px;"),
         div(
@@ -4747,6 +5519,7 @@ server <- function(input, output, session) {
     req(ed)
     r <- dta_set_dataset_meta(
       isolate(rv$dta), ed,
+      id = input$meta_id,
       name = input$meta_name,
       description = input$meta_description,
       template_source = input$meta_template_source,
@@ -4760,30 +5533,32 @@ server <- function(input, output, session) {
       return()
     }
 
-    new_name <- trimws(as.character(input$meta_name %||% "")[1])
-    renamed <- !identical(new_name, ed)
+    new_id <- trimws(as.character(input$meta_id %||% "")[1])
+    renamed <- !identical(new_id, ed)
     rv$dta <- r$value
 
     # ORDER MATTERS: the state migration has to land before anything reads the
-    # dataset by name again -- invalidate_dataset() looks its status up by name,
+    # dataset by id again -- invalidate_dataset() looks its status up by id,
     # and every output keyed off rv$active re-renders as soon as it changes.
     if (renamed) {
-      rename_dataset_state(ed, new_name)
-      # A rename does not change what the data IS, but every stored validation
-      # record carries the dataset name it was checked under, so results left
-      # in place would report a dataset that no longer exists. The description
-      # and template fields take no part in validation, so editing only those
-      # deliberately leaves a passed check passed.
-      invalidate_dataset(new_name)
-      # Only a rename touches rv$structure -- it is keyed by name and caches
-      # each dataset's name, so the nav list would otherwise keep showing the
-      # old one. Assigning it re-renders every structure-dependent output
-      # (dataset nav, detail panel and its file inputs), which is why the
-      # column and rule editors never touch it and why a description-only edit
-      # here must not either. It does NOT rebuild the whole workspace:
-      # output$main depends only on rv$doc_token (load/reset/restore).
-      rv$structure <- build_structure(rv$dta)
+      rename_dataset_state(ed, new_id)
+      # A new id does not change what the data IS, but every stored validation
+      # record carries the dataset id it was checked under, so results left in
+      # place would report a dataset that no longer exists. The name,
+      # description and template fields take no part in validation, so editing
+      # only those deliberately leaves a passed check passed.
+      invalidate_dataset(new_id)
     }
+    # rv$structure is keyed by id and caches each dataset's label, so an id or
+    # name change must reach it or the nav keeps showing the old one. Assigning
+    # it re-renders every structure-dependent output (dataset nav, detail panel
+    # and its file inputs), which is why the column and rule editors never touch
+    # it. Here it is assigned unconditionally on purpose: reactiveValues drops an
+    # assignment identical to the stored value, so a description- or
+    # template-only edit -- which leaves the structure identical -- still
+    # re-renders nothing. It does NOT rebuild the whole workspace: output$main
+    # depends only on rv$doc_token (load/reset/restore).
+    rv$structure <- build_structure(rv$dta)
 
     rv$meta_msg <- NULL
     sync_yaml_text()
@@ -4854,9 +5629,9 @@ server <- function(input, output, session) {
   })
 
   # The dock's download buttons, in their own output rather than inline in
-  # output$floating_msgs: the dock is deliberately rendered once per structure
-  # so the DT inside stays stable, and therefore cannot react to validation
-  # state -- but these buttons must.
+  # output$floating_msgs: the dock is deliberately rendered once per loaded
+  # document so the DT inside stays stable, and therefore cannot react to
+  # validation state -- but these buttons must.
   #
   # Before a check has been run there is nothing to export. Exporting anyway
   # would hand back a file that reads as a clean result ("No validation
@@ -4898,29 +5673,39 @@ server <- function(input, output, session) {
       )
     }
 
+    # Only the formats the library's config allows get a button.
+    fmt_on <- function(f) f %in% cfg$exports$validation_messages
     tagList(
-      dl_btn("dl_msgs_csv", "CSV", active_ok, if (active_ok) {
-        sprintf("Download the validation messages for %s as CSV", ds)
-      } else {
-        sprintf("Run a check on %s first -- there are no results to export yet", ds)
-      }),
-      dl_btn("dl_msgs_tsv", "TSV", active_ok, if (active_ok) {
-        sprintf("Download the validation messages for %s as TSV", ds)
-      } else {
-        sprintf("Run a check on %s first -- there are no results to export yet", ds)
-      }),
-      dl_btn("dl_msgs_xlsx", "XLSX", active_ok, if (active_ok) {
-        sprintf("Download the validation messages for %s as XLSX", ds)
-      } else {
-        sprintf("Run a check on %s first -- there are no results to export yet", ds)
-      }),
+      if (fmt_on("csv")) {
+        dl_btn("dl_msgs_csv", "CSV", active_ok, if (active_ok) {
+          sprintf("Download the validation messages for %s as CSV", ds)
+        } else {
+          sprintf("Run a check on %s first -- there are no results to export yet", ds)
+        })
+      },
+      if (fmt_on("tsv")) {
+        dl_btn("dl_msgs_tsv", "TSV", active_ok, if (active_ok) {
+          sprintf("Download the validation messages for %s as TSV", ds)
+        } else {
+          sprintf("Run a check on %s first -- there are no results to export yet", ds)
+        })
+      },
+      if (fmt_on("xlsx")) {
+        dl_btn("dl_msgs_xlsx", "XLSX", active_ok, if (active_ok) {
+          sprintf("Download the validation messages for %s as XLSX", ds)
+        } else {
+          sprintf("Run a check on %s first -- there are no results to export yet", ds)
+        })
+      },
       # Named apart from the sidebar's "Validation summary": this is the
       # message-level report, that one is the per-dataset outcome.
-      dl_btn("dl_msgs_html", "Report", any_ok, if (any_ok) {
-        "Download the full validation message report"
-      } else {
-        "Run a check first -- there are no results to report yet"
-      })
+      if (fmt_on("html")) {
+        dl_btn("dl_msgs_html", "Report", any_ok, if (any_ok) {
+          "Download the full validation message report"
+        } else {
+          "Run a check first -- there are no results to report yet"
+        })
+      }
     )
   })
 
@@ -5018,16 +5803,16 @@ server <- function(input, output, session) {
   output$dl_msgs_csv <- downloadHandler(
     filename = function() paste0(msgs_dl_base(), ".csv"),
     content = function(file) {
-      req(msgs_active_checked())
-      utils::write.csv(msgs_dl_df(), file, row.names = FALSE, na = "")
+      req(msgs_active_checked(), "csv" %in% cfg$exports$validation_messages)
+      utils::write.csv(csv_formula_safe(msgs_dl_df()), file, row.names = FALSE, na = "")
     }
   )
   output$dl_msgs_tsv <- downloadHandler(
     filename = function() paste0(msgs_dl_base(), ".tsv"),
     content = function(file) {
-      req(msgs_active_checked())
+      req(msgs_active_checked(), "tsv" %in% cfg$exports$validation_messages)
       utils::write.table(
-        msgs_dl_df(), file,
+        csv_formula_safe(msgs_dl_df()), file,
         sep = "\t", row.names = FALSE, na = "", qmethod = "double"
       )
     }
@@ -5035,7 +5820,7 @@ server <- function(input, output, session) {
   output$dl_msgs_xlsx <- downloadHandler(
     filename = function() paste0(msgs_dl_base(), ".xlsx"),
     content = function(file) {
-      req(msgs_active_checked())
+      req(msgs_active_checked(), "xlsx" %in% cfg$exports$validation_messages)
       if (!requireNamespace("writexl", quietly = TRUE)) {
         showNotification(
           "XLSX export needs the 'writexl' package. Install it, or use CSV / TSV.",
@@ -5062,9 +5847,12 @@ server <- function(input, output, session) {
   output$dl_msgs_html <- downloadHandler(
     filename = function() paste0(report_dl_base(), ".html"),
     content = function(file) {
-      req(msgs_any_checked())
+      req(msgs_any_checked(), "html" %in% cfg$exports$validation_messages)
       tryCatch(
-        DTAtools::write_validation_report(rv$dta, file, overwrite = TRUE, quiet = TRUE),
+        do.call(DTAtools::write_validation_report, c(
+          list(rv$dta, file, overwrite = TRUE, quiet = TRUE),
+          dta_app_export_args(cfg)[c("document_name", "organisation", "organisation_unit")]
+        )),
         error = function(e) {
           showNotification(
             paste("Could not build the validation report:", conditionMessage(e)),
@@ -5160,6 +5948,7 @@ server <- function(input, output, session) {
         r[["columnspec_params.pattern"]],
         r[["columnspec_columnspec"]]
       )),
+      format = paste0("fit SAS format ", .first_nonempty(r[["columnspec_columnspec"]])),
       required = "the value must be present (not missing)",
       additionalProperties = "no such column to be present: the specs do not declare it",
       .first_nonempty(r[["columnspec_message"]], r[["message"]], "(see message)")
@@ -5472,17 +6261,19 @@ server <- function(input, output, session) {
     provenance_ui <- template_provenance_block(tryCatch(S7::prop(md, "template"), error = function(e) NULL))
     date_val <- tryCatch(S7::prop(md, "date"), error = function(e) NULL)
     tr <- dta_transmission(dta)
+    study <- S7::prop(md, "study")
     trf <- function(k) {
       v <- tr[[k]]
       if (is.null(v)) "" else if (inherits(v, "Date")) format(v, "%Y-%m-%d") else as.character(v)[1]
     }
     # Read-only renders static text instead of form controls. Only the LEAF
     # controls swap; every div, layout_columns, card and section title below is
-    # shared, so the tab keeps its shape when the switch flips and there is one
+    # shared, so the tab keeps its shape when edit mode toggles and there is one
     # layout to maintain rather than two.
     #
     # editing() is deliberately NOT isolated -- this render has to re-run when
-    # the switch changes. rv$dta stays isolated, as before, so typing in a field
+    # edit mode (editing()) toggles. rv$dta stays isolated, as before, so typing
+    # in a field
     # still does not rebuild the form under the cursor.
     ro <- !editing()
     f_text <- function(id, label, value, ...) {
@@ -5521,6 +6312,13 @@ server <- function(input, output, session) {
           ))
         },
         f_text("md_header", "Header / organization", getf("header"), width = "100%")
+      ),
+      tags$hr(),
+      div(class = "md-section-title", "Study"),
+      layout_columns(
+        col_widths = c(6, 6),
+        f_text("md_study_id", "Study ID", study[["id"]] %||% "", width = "100%"),
+        f_text("md_protocol_id", "Protocol ID", study[["protocol_id"]] %||% "", width = "100%")
       ),
       tags$hr(),
       div(class = "md-section-title", "Parties"),
@@ -5610,6 +6408,35 @@ server <- function(input, output, session) {
           )
         }
       ),
+      layout_columns(
+        col_widths = c(6, 6),
+        f_area("tr_extent", "Transfer extent", trf("extent"), width = "100%", rows = 2),
+        f_area("tr_scope", "Transfer scope", trf("scope"), width = "100%", rows = 2)
+      ),
+      layout_columns(
+        col_widths = c(6, 6),
+        f_area("tr_packaging", "Packaging", trf("packaging"), width = "100%", rows = 2),
+        f_area("tr_security", "Security", trf("security"), width = "100%", rows = 2)
+      ),
+      f_text("tr_checksum", "Checksum requirements", trf("checksum"), width = "100%"),
+      layout_columns(
+        col_widths = c(6, 6),
+        f_area("tr_test_requirements", "Test transfer requirements",
+          trf("test_requirements"),
+          width = "100%", rows = 3
+        ),
+        f_area("tr_blinding_requirements", "Blinding requirements",
+          trf("blinding_requirements"),
+          width = "100%", rows = 3
+        )
+      ),
+      tags$hr(),
+      div(
+        class = "md-section-title d-flex justify-content-between align-items-center",
+        tags$span("Agreement sections"),
+        if (!ro) actionButton("agreement_add", "Add section", class = "btn btn-sm btn-outline-primary")
+      ),
+      uiOutput("agreement_sections"),
       tags$hr(),
       div(class = "md-section-title", "Error handling & corrections"),
       f_area("md_error_handling", "Error handling",
@@ -5617,11 +6444,28 @@ server <- function(input, output, session) {
         width = "100%", rows = 2,
         placeholder = "How data/format errors are handled and communicated."
       ),
-      f_text("md_authorized", "Authorized for corrections",
-        getf("authorized_for_corrections"),
-        width = "100%",
-        placeholder = "Contact(s) authorized to request corrections"
-      ),
+      if (ro) {
+        meta_field_text("Authorized for corrections", paste(dta_authorized_values(dta), collapse = ", "))
+      } else {
+        tagList(
+          selectizeInput("md_authorized", "Authorized for corrections",
+            choices = dta_authorized_choices(dta),
+            selected = dta_authorized_values(dta),
+            multiple = TRUE, width = "100%",
+            # delimiter: selectize splits typed and pasted text on its
+            # delimiter, which defaults to ",", so "Lastname, Firstname" would
+            # become two people. Names do not contain ";".
+            options = list(
+              create = TRUE, delimiter = ";", plugins = list("remove_button"),
+              placeholder = "Pick contacts or type a name"
+            )
+          ),
+          div(
+            class = "msg-hint", style = "margin:-8px 0 10px;",
+            "Choose Receiver or Supplier contacts, type any other name and press Enter (separate several with ;), or leave empty when nobody is named."
+          )
+        )
+      },
       # Only true while editing; in read-only there is nothing to save.
       if (!ro) {
         div(
@@ -5637,7 +6481,7 @@ server <- function(input, output, session) {
   #
   # req(editing()) here is the server half of the read-only gate. The controls
   # not being rendered is not sufficient on its own: these fields save through a
-  # 700ms debounce, so a value typed just before the switch is flipped off still
+  # 700ms debounce, so a value typed just before "Stop editing" is chosen still
   # flushes afterwards, and an input driven straight over the websocket arrives
   # whatever is on screen. Both write into the document without this.
   #
@@ -5673,11 +6517,28 @@ server <- function(input, output, session) {
       )
     }
   }
+  save_study <- function(field, value) {
+    req(editing(), rv$dta)
+    r <- dta_set_study_field(rv$dta, field, value)
+    if (r$ok) {
+      rv$dta <- r$value
+      sync_yaml_text()
+    } else {
+      showNotification(paste("Could not update study", field, "\u2014", r$error), type = "error")
+    }
+  }
+  for (.field in c("id", "protocol_id")) {
+    local({
+      FIELD <- .field
+      inid <- if (FIELD == "id") "md_study_id" else "md_protocol_id"
+      d <- debounce(reactive(input[[inid]]), 700)
+      observeEvent(d(), save_study(FIELD, d()), ignoreInit = TRUE)
+    })
+  }
   title_d <- debounce(reactive(input$md_title), 700)
   version_d <- debounce(reactive(input$md_version), 700)
   header_d <- debounce(reactive(input$md_header), 700)
   errh_d <- debounce(reactive(input$md_error_handling), 700)
-  auth_d <- debounce(reactive(input$md_authorized), 700)
   # title and version are REQUIRED (non-nullable); block saves of empty/blank values
   observeEvent(title_d(),
     {
@@ -5697,7 +6558,36 @@ server <- function(input, output, session) {
   )
   observeEvent(header_d(), save_md("header", header_d()), ignoreInit = TRUE)
   observeEvent(errh_d(), save_md("error_handling", errh_d()), ignoreInit = TRUE)
-  observeEvent(auth_d(), save_md("authorized_for_corrections", auth_d()), ignoreInit = TRUE)
+  # ignoreNULL = FALSE: a multiple selectize emptied by the user sends NULL,
+  # which must unset the field. The guard makes a re-render (document load,
+  # edit toggle) a no-op instead of a spurious edit that would show in the
+  # version-history change summary. It compares as SETS on purpose: selectize
+  # reports its initial selection in option (DOM) order -- Receiver, Supplier,
+  # then manual entries -- not in the stored order, so identical() would
+  # rewrite a document just by opening it. The picker has no drag-to-reorder,
+  # so a set comparison cannot miss a real edit. No debounce: selectize emits
+  # on discrete picks, not per keystroke.
+  observeEvent(input$md_authorized,
+    {
+      req(rv$dta)
+      v <- trimws(as.character(input$md_authorized %||% character(0)))
+      v <- unique(v[!is.na(v) & nzchar(v)])
+      if (!setequal(v, dta_authorized_values(rv$dta))) save_md("authorized_for_corrections", v)
+    },
+    ignoreInit = TRUE,
+    ignoreNULL = FALSE
+  )
+  # Contacts feed the picker's options; keep them current while editing.
+  observeEvent(rv$contacts_token,
+    {
+      req(editing(), rv$dta)
+      updateSelectizeInput(session, "md_authorized",
+        choices = dta_authorized_choices(rv$dta),
+        selected = dta_authorized_values(rv$dta)
+      )
+    },
+    ignoreInit = TRUE
+  )
   observeEvent(input$md_date,
     {
       v <- input$md_date
@@ -5722,6 +6612,160 @@ server <- function(input, output, session) {
   observeEvent(tr_last_d(), save_tr("date_last_transfer", tr_last_d()), ignoreInit = TRUE)
   observeEvent(input$tr_test_upload, save_tr("test_upload", dta_choice_to_flag(input$tr_test_upload)), ignoreInit = TRUE)
   observeEvent(input$tr_blinded, save_tr("blinded_transfer", dta_choice_to_flag(input$tr_blinded)), ignoreInit = TRUE)
+  for (.field in c("extent", "scope", "packaging", "security", "checksum", "test_requirements", "blinding_requirements")) {
+    local({
+      FIELD <- .field
+      inid <- paste0("tr_", FIELD)
+      d <- debounce(reactive(input[[inid]]), 700)
+      observeEvent(d(), save_tr(FIELD, d()), ignoreInit = TRUE)
+    })
+  }
+
+  # --- ordered agreement sections -----------------------------------------
+  output$agreement_sections <- renderUI({
+    rv$md_token
+    rv$agreement_sections_token
+    req(isolate(rv$dta))
+    sections <- DTAtools::metadata(isolate(rv$dta))@sections
+    ro <- !editing()
+    if (length(sections) == 0L) {
+      return(div(class = "msg-hint", "No agreement sections."))
+    }
+    tags$ol(
+      class = "list-group",
+      lapply(seq_along(sections), function(i) {
+        id <- names(sections)[[i]]
+        section <- sections[[id]]
+        tags$li(
+          class = "list-group-item",
+          div(
+            class = "d-flex justify-content-between align-items-center",
+            tags$strong(section[["title"]]),
+            if (!ro) {
+              div(
+                class = "d-flex gap-2",
+                actionButton(paste0("agreement_edit_", id), "Edit", class = "btn btn-sm btn-outline-primary"),
+                if (i > 1L) actionButton(paste0("agreement_up_", id), "Move up", class = "btn btn-sm btn-outline-secondary"),
+                if (i < length(sections)) actionButton(paste0("agreement_down_", id), "Move down", class = "btn btn-sm btn-outline-secondary"),
+                actionButton(paste0("agreement_remove_", id), "Remove", class = "btn btn-sm btn-outline-danger")
+              )
+            }
+          ),
+          div(class = "msg-hint", id),
+          div(style = "white-space:pre-wrap;", section[["text"]])
+        )
+      })
+    )
+  })
+
+  save_section_result <- function(r) {
+    req(editing(), rv$dta)
+    if (!r$ok) {
+      showNotification(paste("Could not update agreement sections \u2014", r$error), type = "error")
+      return(FALSE)
+    }
+    rv$dta <- r$value
+    rv$agreement_sections_token <- rv$agreement_sections_token + 1
+    sync_yaml_text()
+    TRUE
+  }
+
+  agreement_edit_flow <- function(id = NULL) {
+    req(editing(), rv$dta)
+    section <- if (is.null(id)) list() else DTAtools::metadata(rv$dta)@sections[[id]]
+    if (is.null(section)) {
+      showNotification("The section being edited no longer exists.", type = "error")
+      return()
+    }
+    rv$editing_section <- list(id = id)
+    showModal(modalDialog(
+      title = if (is.null(id)) "Add agreement section" else "Edit agreement section",
+      textInput("agreement_id", "Stable ID",
+        value = id %||% "",
+        placeholder = "e.g. transfer_scope"
+      ),
+      div(class = "msg-hint", "Start with a letter; use only letters, digits and underscores."),
+      textInput("agreement_title", "Title", value = section[["title"]] %||% ""),
+      textAreaInput("agreement_text", "Text", value = section[["text"]] %||% "", rows = 8, width = "100%"),
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("agreement_save", "Save section", class = "btn btn-primary")
+      ),
+      easyClose = TRUE
+    ))
+  }
+  observeEvent(input$agreement_add, agreement_edit_flow())
+  observeEvent(input$agreement_save, {
+    req(editing(), rv$dta, rv$editing_section)
+    r <- dta_save_agreement_section(
+      rv$dta, input$agreement_id, input$agreement_title, input$agreement_text,
+      previous_id = rv$editing_section$id
+    )
+    if (save_section_result(r)) {
+      rv$editing_section <- NULL
+      removeModal()
+    }
+  })
+  observeEvent(input$agreement_remove_confirm, {
+    req(editing(), rv$dta, rv$removing_section)
+    if (save_section_result(dta_remove_agreement_section(rv$dta, rv$removing_section))) {
+      rv$removing_section <- NULL
+      removeModal()
+    }
+  })
+  observeEvent(rv$doc_token,
+    {
+      rv$editing_section <- NULL
+      rv$removing_section <- NULL
+    },
+    ignoreInit = TRUE
+  )
+
+  agreement_registry <- new.env(parent = emptyenv())
+  observe({
+    rv$md_token
+    rv$agreement_sections_token
+    req(isolate(rv$dta))
+    for (id in names(DTAtools::metadata(isolate(rv$dta))@sections)) {
+      for (action in c("edit", "remove", "up", "down")) {
+        inid <- paste0("agreement_", action, "_", id)
+        if (!is.null(agreement_registry[[inid]])) next
+        agreement_registry[[inid]] <- TRUE
+        local({
+          ID <- id
+          ACTION <- action
+          INID <- inid
+          observeEvent(input[[INID]],
+            {
+              req(editing(), rv$dta)
+              if (ACTION == "edit") {
+                agreement_edit_flow(ID)
+              } else if (ACTION == "remove") {
+                section <- DTAtools::metadata(rv$dta)@sections[[ID]]
+                if (is.null(section)) {
+                  showNotification("The section to remove no longer exists.", type = "error")
+                  return()
+                }
+                rv$removing_section <- ID
+                showModal(modalDialog(
+                  title = "Remove agreement section?",
+                  tagList("Remove ", tags$b(section[["title"]]), " (", ID, ")?"),
+                  footer = tagList(
+                    modalButton("Cancel"),
+                    actionButton("agreement_remove_confirm", "Remove", class = "btn btn-danger")
+                  ),
+                  easyClose = TRUE
+                ))
+              } else {
+                save_section_result(dta_move_agreement_section(rv$dta, ID, ACTION))
+              }
+            },
+            ignoreInit = TRUE
+          )
+        })
+      }
+    }
+  })
 
   # --- people / contacts --------------------------------------------------
   # Shared field set so the Add and Edit person modals capture the SAME details
@@ -5784,9 +6828,22 @@ server <- function(input, output, session) {
               span(class = "contact-edit-ic", "\u270E edit")
             )
           ),
-          actionButton(
-            paste0("rm_", side, "_", i), "Remove",
-            class = "btn btn-sm btn-outline-danger"
+          div(
+            class = "d-flex gap-1",
+            actionButton(
+              paste0("mvup_", side, "_", i), "▲",
+              class = "btn btn-sm btn-outline-secondary dta-row-btn dta-move-btn",
+              title = "Move up", `aria-label` = "Move up", disabled = i == 1L
+            ),
+            actionButton(
+              paste0("mvdn_", side, "_", i), "▼",
+              class = "btn btn-sm btn-outline-secondary dta-row-btn dta-move-btn",
+              title = "Move down", `aria-label` = "Move down", disabled = i == length(cs)
+            ),
+            actionButton(
+              paste0("rm_", side, "_", i), "Remove",
+              class = "btn btn-sm btn-outline-danger"
+            )
           )
         )
       })
@@ -5794,27 +6851,77 @@ server <- function(input, output, session) {
   }
 
   # Open a pre-filled modal to edit one contact's details.
+  #
+  # A repeat request for the dialog that is already open is dropped, not
+  # re-shown. The click guard (click_guard_script(), ui_components.R) swallows
+  # a double-click on a healthy server, but a starved one can take longer to
+  # acknowledge the first click than the guard holds the link, and then every
+  # further click a waiting user makes lands in one burst once the server
+  # catches up. Each showModal() in that burst would tear the dialog down and
+  # put it back -- the "popped up several times" the guard exists to prevent
+  # -- so the second and later requests for the same contact return here.
+  #
+  # rv$editing_contact is the record of which contact's dialog is open. It is
+  # set here, cleared by a successful Save (below), and cleared by the
+  # client's modal-state report (dta_modal_state, observer below) for every
+  # way a dialog can leave the screen that the server never sees itself:
+  # Cancel, Esc, the backdrop, or another dialog taking its place. The
+  # data-dta-modal stamp is what lets that report tell this dialog from any
+  # other, and the per-open data-dta-modal-id nonce is what lets it tell THIS
+  # opening from an earlier one whose 'hidden' report arrives late.
+  contact_modal_seq <- 0L
   edit_contact_flow <- function(side, index) {
     req(editing())
+    target <- list(side = side, index = index)
+    if (identical(rv$editing_contact, target)) {
+      return()
+    }
     p <- dta_contact_at(isolate(rv$dta), side, index)
     if (is.null(p)) {
       return()
     }
-    rv$editing_contact <- list(side = side, index = index)
-    showModal(modalDialog(
-      title = paste("Edit", side, "contact"),
-      contact_modal_inputs("edit_contact", p),
-      div(
-        class = "msg-hint",
-        "Separate multiple roles with commas. Other fields on this person (e.g. signature flags) are preserved."
+    rv$editing_contact <- target
+    contact_modal_seq <<- contact_modal_seq + 1L
+    nonce <- paste0("contact-", contact_modal_seq)
+    rv$editing_contact_nonce <- nonce
+    showModal(tagAppendAttributes(
+      modalDialog(
+        title = paste("Edit", side, "contact"),
+        contact_modal_inputs("edit_contact", p),
+        div(
+          class = "msg-hint",
+          "Separate multiple roles with commas. Other fields on this person (e.g. signature flags) are preserved."
+        ),
+        footer = tagList(
+          modalButton("Cancel"),
+          actionButton("confirm_edit_contact", "Save", class = "btn btn-primary")
+        ),
+        easyClose = TRUE
       ),
-      footer = tagList(
-        modalButton("Cancel"),
-        actionButton("confirm_edit_contact", "Save", class = "btn btn-primary")
-      ),
-      easyClose = TRUE
+      `data-dta-modal` = "edit_contact",
+      `data-dta-modal-id` = nonce
     ))
   }
+
+  # The browser's report of a modal arriving or leaving (modal_state_js, top
+  # of this file). The record is cleared only by news about the dialog it
+  # describes: that very opening going away ('hidden' with its nonce), or a
+  # dialog of another kind being shown in its place. A 'hidden' from any
+  # earlier dialog -- including an earlier contact dialog -- can arrive after
+  # the server has already opened the next one, and clearing on it would
+  # leave Save with no record and nothing to do. A Save clears the record
+  # itself; its removeModal()'s 'hidden' then finds nothing to clear.
+  observeEvent(input$dta_modal_state, {
+    st <- input$dta_modal_state
+    closed <- identical(st$event, "hidden") &&
+      !is.null(rv$editing_contact_nonce) &&
+      identical(as.character(st$id %||% ""), rv$editing_contact_nonce)
+    replaced <- identical(st$event, "shown") && !identical(st$kind, "edit_contact")
+    if (closed || replaced) {
+      rv$editing_contact <- NULL
+      rv$editing_contact_nonce <- NULL
+    }
+  })
 
   observeEvent(input$confirm_edit_contact, {
     req(editing())
@@ -5838,6 +6945,7 @@ server <- function(input, output, session) {
     if (r$ok) {
       rv$dta <- r$value
       rv$editing_contact <- NULL
+      rv$editing_contact_nonce <- NULL
       rv$contacts_token <- rv$contacts_token + 1
       sync_yaml_text()
       removeModal()
@@ -5863,7 +6971,7 @@ server <- function(input, output, session) {
     g <- function(k) aff[[k]] %||% ""
     # Same leaf-swap rule as the metadata form above: the layout is shared, only
     # the controls differ. Reading editing() here is also what gives the two
-    # renderUI wrappers below their dependency on the switch.
+    # renderUI wrappers below their dependency on editing().
     ro <- !editing()
     ff <- function(id, label, value, ...) {
       if (ro) meta_field_text(label, value) else textInput(id, label, value = value, ...)
@@ -5917,7 +7025,7 @@ server <- function(input, output, session) {
     }
   }
 
-  # dynamic remove observers for contacts
+  # dynamic edit/move/remove observers for contacts
   contact_rm_registry <- new.env(parent = emptyenv())
   observe({
     rv$contacts_token
@@ -5934,6 +7042,32 @@ server <- function(input, output, session) {
             EID <- edid
             observeEvent(input[[EID]], edit_contact_flow(SIDE, IDX), ignoreInit = TRUE)
           })
+        }
+        for (dir in c("up", "dn")) {
+          mvid <- paste0("mv", dir, "_", side, "_", i)
+          if (is.null(contact_rm_registry[[mvid]])) {
+            contact_rm_registry[[mvid]] <- TRUE
+            local({
+              SIDE <- side
+              IDX <- i
+              DIR <- if (dir == "up") "up" else "down"
+              ID <- mvid
+              observeEvent(input[[ID]],
+                {
+                  req(editing())
+                  r <- dta_move_contact(rv$dta, SIDE, IDX, DIR)
+                  if (r$ok) {
+                    rv$dta <- r$value
+                    rv$contacts_token <- rv$contacts_token + 1
+                    sync_yaml_text()
+                  } else {
+                    showNotification(r$error, type = "error")
+                  }
+                },
+                ignoreInit = TRUE
+              )
+            })
+          }
         }
         rmid <- paste0("rm_", side, "_", i)
         if (is.null(contact_rm_registry[[rmid]])) {
@@ -6035,8 +7169,37 @@ server <- function(input, output, session) {
         " Valid — document applied."
       )
     } else {
-      div(class = "yaml-valid err", HTML("&#x2716;"), " ", m$error)
+      # With a findings table (a refused document) list every finding on its
+      # own line; the error text alone is one wrapped paragraph.
+      if (is.data.frame(m$findings) && nrow(m$findings) > 0) {
+        div(
+          class = "yaml-valid err", HTML("&#x2716;"),
+          " Not applied — the specification has errors:",
+          dta_findings_ui(m$findings)
+        )
+      } else {
+        div(class = "yaml-valid err", HTML("&#x2716;"), " ", m$error)
+      }
     }
+  })
+
+  # The standing "Spec check": every finding of the loaded document, errors
+  # and warnings, kept current as it is edited. Follows rv$dta only -- never
+  # rv$doc_token, so it cannot rebuild output$main -- and renders NULL when
+  # clean so nothing stale is left in the DOM.
+  output$spec_check <- renderUI({
+    if (is.null(rv$dta)) {
+      return(NULL)
+    }
+    f <- dta_lint(rv$dta)
+    if (nrow(f) == 0) {
+      return(NULL)
+    }
+    div(
+      class = "spec-check",
+      div(class = "section-label", "Spec check"),
+      dta_findings_ui(f)
+    )
   })
 
   # Push text into the Raw YAML editor (Ace when available, else textarea).
@@ -6056,8 +7219,16 @@ server <- function(input, output, session) {
   # The Raw YAML tab is a full-document write path, so it is gated like every
   # other editing surface: the buttons are not rendered, the Ace editor is put
   # into readOnly, and the apply observer re-checks.
+  yaml_editable <- reactive(editing() && isTRUE(cfg$features$raw_yaml_editable))
+
   output$yaml_edit_hint <- renderUI({
-    if (!editing()) {
+    if (!yaml_editable()) {
+      if (editing()) {
+        return(div(
+          class = "msg-hint",
+          HTML("The raw YAML is <b>read-only</b> in this deployment.")
+        ))
+      }
       return(div(
         class = "msg-hint",
         HTML("This document is <b>read-only</b>. Turn on <b>Edit mode</b> (top right) to change it.")
@@ -6070,7 +7241,7 @@ server <- function(input, output, session) {
   })
 
   output$yaml_edit_actions <- renderUI({
-    if (!editing()) {
+    if (!yaml_editable()) {
       return(NULL)
     }
     div(
@@ -6081,7 +7252,7 @@ server <- function(input, output, session) {
   })
 
   observe({
-    ro <- !editing()
+    ro <- !yaml_editable()
     if (requireNamespace("shinyAce", quietly = TRUE)) {
       shinyAce::updateAceEditor(session, "raw_yaml_editor", readOnly = ro)
     } else if (ro) {
@@ -6092,7 +7263,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$apply_yaml, {
-    req(editing())
+    req(editing(), cfg$features$raw_yaml_tab, isTRUE(cfg$features$raw_yaml_editable))
     txt <- input$raw_yaml_editor %||% ""
     if (!nzchar(trimws(txt))) {
       rv$yaml_msg <- list(ok = FALSE, error = "The editor is empty — nothing to apply.")
@@ -6100,13 +7271,18 @@ server <- function(input, output, session) {
     }
     res <- dta_read_yaml_text(txt)
     if (!isTRUE(res$ok)) {
-      rv$yaml_msg <- list(ok = FALSE, error = res$error %||% "Invalid YAML or DTA.")
+      rv$yaml_msg <- list(
+        ok = FALSE, error = res$error %||% "Invalid YAML or DTA.",
+        findings = res$findings
+      )
       showNotification(paste("YAML not applied:", res$error), type = "error", duration = 10)
       return()
     }
     # Smart reconcile: keep uploads for datasets whose file handlers are
-    # unchanged, keep validation only when columns/rules are also unchanged,
-    # and drop uploads for datasets that were removed from the document.
+    # unchanged, and re-key them (dta_match_handlers()) when handlers changed,
+    # unloading only records whose handler is gone. Keep validation only when
+    # columns/rules are also unchanged, and drop uploads for datasets that were
+    # removed from the document.
     new_dta <- res$value
     old_dta <- isolate(rv$dta)
     old_uploads <- isolate(rv$uploads)
@@ -6116,6 +7292,7 @@ server <- function(input, output, session) {
     old_names <- if (is.null(old_dta)) character(0) else dta_dataset_names(old_dta)
 
     new_uploads <- list()
+    recheck <- character(0) # datasets whose data survived a changed spec
     new_status <- stats::setNames(rep("pending", length(new_names)), new_names)
     for (nm in new_names) {
       if (!(nm %in% old_names)) next # brand-new dataset -> fresh, pending
@@ -6145,6 +7322,7 @@ server <- function(input, output, session) {
       )
       if (!isTRUE(tr$ok)) next
       new_dta <- tr$value
+      if (!specs_same) recheck <- c(recheck, nm)
 
       # Upload records are keyed by handler POSITION, and a re-parsed document
       # may have reordered or replaced entries as easily as appended one. Match
@@ -6225,12 +7403,15 @@ server <- function(input, output, session) {
     rv$yaml_msg <- list(ok = TRUE, error = NULL)
     showNotification(
       if (isTRUE(res$wrapped_dataset)) {
-        "Dataset YAML wrapped into a new DTA (loaded files kept where a slot remains for them)."
+        paste0("Dataset YAML wrapped into a new ", cfg$document$abbr, " (loaded files kept where a slot remains for them).")
       } else {
-        "DTA YAML applied (loaded files kept where a slot remains for them)."
+        paste(cfg$document$abbr, "YAML applied (loaded files kept where a slot remains for them).")
       },
       type = "message"
     )
+    notify_spec_check(new_dta)
+    # Data kept under a changed spec is re-validated against it, once.
+    if (length(recheck) > 0) run_check(recheck)
   })
 
   # --- export -------------------------------------------------------------
@@ -6239,12 +7420,6 @@ server <- function(input, output, session) {
     con <- file(file, "wb")
     on.exit(close(con))
     writeLines(enc2utf8(text), con, useBytes = TRUE)
-  }
-  yaml_export_stub <- function() {
-    md <- tryCatch(DTAtools::metadata(rv$dta), error = function(e) NULL)
-    ttl <- tryCatch(as.character(S7::prop(md, "title"))[1], error = function(e) NULL)
-    base <- if (!is.null(ttl) && nzchar(ttl)) gsub("[^A-Za-z0-9]+", "_", ttl) else "DTA"
-    base
   }
 
   # The document as it should be WRITTEN OUT: the live document, with the open
@@ -6280,9 +7455,9 @@ server <- function(input, output, session) {
   }
 
   output$dl_yaml <- downloadHandler(
-    filename = function() paste0(yaml_export_stub(), "_", Sys.Date(), ".yaml"),
+    filename = function() dta_yaml_export_filename(rv$dta),
     content = function(file) {
-      req(rv$dta)
+      req(rv$dta, cfg$features$dta_yaml_download)
       res <- dta_to_yaml_text(export_dta())
       if (!res$ok) {
         showNotification(paste("YAML export failed:", res$error), type = "error", duration = 10)
@@ -6297,7 +7472,7 @@ server <- function(input, output, session) {
       paste0(gsub("[^A-Za-z0-9]+", "_", nm), "_", Sys.Date(), ".yaml")
     },
     content = function(file) {
-      req(rv$dta, rv$active)
+      req(rv$dta, rv$active, cfg$features$dataset_yaml_download)
       res <- dta_dataset_to_yaml_text(rv$dta, rv$active)
       if (!res$ok) {
         showNotification(paste("Dataset YAML export failed:", res$error),
@@ -6311,8 +7486,9 @@ server <- function(input, output, session) {
   output$dl_docx <- downloadHandler(
     filename = function() paste0("DTA_", Sys.Date(), ".docx"),
     content = function(file) {
-      req(rv$dta)
-      res <- dta_export(export_dta(), file, "docx")
+      # No button points here, but the URL is reachable: honour the export gate.
+      req(rv$dta, export_choices$allowed("word", word_mode = "builtin"))
+      res <- dta_export(export_dta(), file, "docx", doc_args = dta_app_export_args(cfg))
       if (!res$ok) {
         showNotification(paste("Word export failed:", res$error), type = "error", duration = 10)
         stop(res$error)
@@ -6327,29 +7503,61 @@ server <- function(input, output, session) {
     file_name = NULL
   )
 
+  # What the library's config lets the export dialog offer, and the one place
+  # the dialog's inputs are turned into an effective choice. The server does
+  # not trust the client to have honoured the dialog: a missing input (control
+  # not rendered) falls back to the configured default, and a forced PDF is
+  # forced here, not only in the markup.
+  export_choices <- export_document_options(cfg)
+  export_selection <- function() {
+    list(
+      format = input$export_format %||% export_choices$default_format,
+      as_pdf = if (export_choices$pdf_forced) {
+        TRUE
+      } else if (export_choices$pdf_choice) {
+        isTRUE(input$export_as_pdf)
+      } else {
+        FALSE
+      },
+      word_mode = input$export_word_mode %||% export_choices$default_mode
+    )
+  }
+
   # Open export modal
   observeEvent(input$export_modal_open, {
-    req(rv$dta)
-    templates <- list_available_templates()
+    req(rv$dta, export_choices$any)
+    templates <- export_choices$templates
 
     modal_content <- div(
       # No heading here: modalDialog() renders `title` as the dialog's own
       # header, so an h4 repeating those words printed the dialog name twice,
       # one line above the other. Every other modal here relies on `title`
       # alone.
-      p("Choose the format and options for your DTA export."),
+      p(paste0("Choose the format and options for your ", cfg$document$abbr, " export.")),
       h5("Format", class = "text-muted"),
       radioButtons("export_format", NULL,
-        choices = c("Markdown" = "markdown", "Word Document" = "word"),
-        selected = "word"
+        choices = export_choices$format_choices,
+        selected = export_choices$default_format
       ),
       # Markdown options
       conditionalPanel(
         condition = "input.export_format == 'markdown'",
         hr(),
         h5("Markdown Options", class = "text-muted"),
-        checkboxInput("export_as_pdf", "Export as PDF (via Pandoc)", value = FALSE),
-        checkboxInput("export_include_yaml_md", "Include YAML in document (hidden at end)", value = FALSE)
+        if (export_choices$pdf_choice) {
+          checkboxInput("export_as_pdf", "Export as PDF (via Pandoc)", value = export_choices$default_pdf)
+        } else {
+          # One kind only: keep the input (the YAML option below reads it) but
+          # do not offer a choice. export_selection() decides server-side.
+          shinyjs::hidden(checkboxInput("export_as_pdf", NULL, value = export_choices$pdf_forced))
+        },
+        if (export_choices$pdf_forced) p("The document is exported as PDF (via Pandoc).", class = "text-muted"),
+        # A PDF cannot hide the YAML (see export_do), so the option is only
+        # offered for a Markdown file.
+        conditionalPanel(
+          condition = "!input.export_as_pdf",
+          checkboxInput("export_include_yaml_md", "Include YAML in document (hidden at end)", value = FALSE)
+        )
       ),
       # Word options
       conditionalPanel(
@@ -6357,16 +7565,16 @@ server <- function(input, output, session) {
         hr(),
         h5("Word Document Options", class = "text-muted"),
         radioButtons("export_word_mode", NULL,
-          choices = c("Use built-in template" = "builtin", "Use custom template" = "custom"),
-          selected = "builtin"
+          choices = export_choices$mode_choices,
+          selected = export_choices$default_mode
         ),
         conditionalPanel(
           condition = "input.export_word_mode == 'custom'",
           if (length(templates) > 0) {
             selectInput("export_template_select",
               "Available templates:",
-              choices = stats::setNames(templates, templates),
-              selected = templates[1]
+              choices = templates,
+              selected = templates[[1]]
             )
           } else {
             p("No custom templates available.", class = "text-muted")
@@ -6393,8 +7601,9 @@ server <- function(input, output, session) {
   # Export filename preview
   output$export_filename_preview <- renderText({
     req(rv$dta)
-    ext <- if (input$export_format == "markdown") {
-      if (isTRUE(input$export_as_pdf)) ".pdf" else ".md"
+    sel <- export_selection()
+    ext <- if (identical(sel$format, "markdown")) {
+      if (sel$as_pdf) ".pdf" else ".md"
     } else {
       ".docx"
     }
@@ -6409,6 +7618,11 @@ server <- function(input, output, session) {
   # Execute export
   observeEvent(input$export_do, {
     req(rv$dta)
+    sel <- export_selection()
+    if (!isTRUE(export_choices$allowed(sel$format, sel$as_pdf, sel$word_mode))) {
+      showNotification("This export format is not available in this deployment.", type = "error")
+      return()
+    }
 
     stem <- dta_export_stem(rv$dta)
     # Computed ONCE: export_dta() re-parses the version baseline and runs a
@@ -6418,38 +7632,48 @@ server <- function(input, output, session) {
 
     tryCatch(
       {
-        if (input$export_format == "markdown") {
+        if (identical(sel$format, "markdown")) {
           # Markdown export
-          ext <- if (isTRUE(input$export_as_pdf)) ".pdf" else ".md"
-          filename <- paste0(stem, ext)
+          # Named for what is delivered: Markdown unless a PDF is actually
+          # produced below, which renames it.
+          filename <- paste0(stem, ".md")
           # The browser fetches the file on a LATER request, so the path it
           # waits on must be unique. Deriving it from title and date meant two
           # untitled exports on the same day shared one path, and whichever
           # session wrote last was the one both downloads received.
           # `filename` still decides what the browser saves it as.
-          output_file <- tempfile(pattern = "dta-export-", fileext = ext)
+          output_file <- tempfile(pattern = "dta-export-", fileext = ".md")
+          own("export", output_file)
 
           # write_dta() throws on error (caught below); it does not return $ok.
-          DTAtools::write_dta(doc, output_file, format = "md", overwrite = TRUE, quiet = TRUE)
+          do.call(DTAtools::write_dta, c(
+            list(doc, output_file, format = "md", overwrite = TRUE, quiet = TRUE),
+            dta_app_export_args(cfg)
+          ))
 
-          # Optionally embed YAML
-          if (isTRUE(input$export_include_yaml_md)) {
+          # The YAML is embedded as an HTML comment, which only a .md file
+          # can hide: the PDF routes read with raw HTML disabled, so the
+          # comment would print as a paragraph of literal text. The checkbox
+          # is therefore not offered alongside PDF, and a value it kept from
+          # before PDF was ticked is ignored -- also when the PDF falls back
+          # to Markdown.
+          if (isTRUE(input$export_include_yaml_md) && !sel$as_pdf) {
             md_text <- readLines(output_file, warn = FALSE)
             md_text <- paste(md_text, collapse = "\n")
             md_text <- embed_yaml_markdown(md_text, doc)
             writeLines(enc2utf8(md_text), output_file, useBytes = TRUE)
           }
 
-          # Convert to PDF if requested, trying two routes so it works with or
-          # without a LaTeX install:
+          # Convert to PDF if requested, best route first:
           #   1. pandoc + a real PDF engine (LaTeX/TinyTeX/wkhtmltopdf) - best
           #      typography when it is available.
           #   2. headless Chrome/Edge printing the rendered HTML - needs no
           #      LaTeX and no extra R packages, just an installed browser.
-          # If neither route yields a PDF, fall back to delivering the Markdown
-          # file so the export still succeeds (and still downloads).
-          if (isTRUE(input$export_as_pdf)) {
+          #   3. R's own PDF device - needs nothing, so it always runs.
+          # Only if all three fail is the Markdown file delivered instead.
+          if (sel$as_pdf) {
             pdf_file <- sub("\\.md$", ".pdf", output_file)
+            own("export", pdf_file)
             pdf_ok <- FALSE
             has_pandoc <- requireNamespace("rmarkdown", quietly = TRUE) &&
               rmarkdown::pandoc_available()
@@ -6458,10 +7682,28 @@ server <- function(input, output, session) {
             if (has_pandoc && has_pdf_engine()) {
               pdf_ok <- tryCatch(
                 {
-                  rmarkdown::pandoc_convert(
-                    input = normalizePath(output_file),
-                    to = "pdf",
-                    output = pdf_file
+                  # output_file is markdown built from document text a third
+                  # party controls (metadata title, dataset description,
+                  # error_handling, contact names, ...), so the reader is
+                  # pinned to a dialect without raw passthrough -- left at
+                  # the default "markdown" reader, a `\input{}` planted in
+                  # any of those fields reads a server-side file into the
+                  # PDF, and a `<script>` in one runs in whatever headless
+                  # browser ends up rendering it (wkhtmltopdf included).
+                  # Markdown image syntax survives that reader, so the
+                  # filter drops images too: pandoc would otherwise fetch
+                  # a planted http(s) URL from the server, and LaTeX would
+                  # embed any image file on the server's disk.
+                  no_images <- pandoc_no_images_filter()
+                  tryCatch(
+                    rmarkdown::pandoc_convert(
+                      input = normalizePath(output_file),
+                      from = "markdown-raw_tex-raw_html-raw_attribute",
+                      to = "pdf",
+                      output = pdf_file,
+                      options = c("--lua-filter", no_images)
+                    ),
+                    finally = unlink(no_images)
                   )
                   file.exists(pdf_file)
                 },
@@ -6477,14 +7719,21 @@ server <- function(input, output, session) {
                   markdown_to_pdf_via_chrome(output_file, pdf_file, chrome = chrome)
                   file.exists(pdf_file) && file.info(pdf_file)$size > 0
                 },
-                error = function(e) {
-                  showNotification(
-                    paste0("Browser-based PDF failed (", conditionMessage(e), ")."),
-                    type = "warning",
-                    duration = 8
-                  )
-                  FALSE
-                }
+                error = function(e) FALSE
+              )
+            }
+
+            # Route 3: R's own PDF device (dta_markdown_to_pdf(), the same
+            # renderer dta_export_pdf() falls back to). Needs no external
+            # tool, so a server with neither LaTeX nor a browser -- Posit
+            # Connect, typically -- still gets a PDF, in a simpler layout.
+            if (!isTRUE(pdf_ok)) {
+              pdf_ok <- tryCatch(
+                {
+                  dta_markdown_to_pdf(readLines(output_file, warn = FALSE), pdf_file)
+                  dta_is_pdf(pdf_file)
+                },
+                error = function(e) FALSE
               )
             }
 
@@ -6492,11 +7741,14 @@ server <- function(input, output, session) {
               output_file <- pdf_file
               filename <- sub("\\.md$", ".pdf", filename)
             } else {
+              # Only PDF is offered here (exports.document has markdown_pdf but not
+              # markdown): delivering a .md would hand out a format the
+              # deployment chose not to offer, so nothing is delivered.
+              if (!"markdown" %in% cfg$exports$document) {
+                cli::cli_abort("Could not produce a PDF on this server, and plain Markdown is not available in this deployment.")
+              }
               showNotification(
-                paste0(
-                  "PDF export needs a LaTeX engine or a Chrome/Edge browser, ",
-                  "and neither produced a PDF. Exporting Markdown instead."
-                ),
+                "Could not produce a PDF on this server. Exporting Markdown instead.",
                 type = "warning",
                 duration = 10
               )
@@ -6510,21 +7762,31 @@ server <- function(input, output, session) {
           filename <- paste0(stem, ".docx")
           # Unique for the same reason as the markdown branch above.
           output_file <- tempfile(pattern = "dta-export-", fileext = ".docx")
+          own("export", output_file)
 
-          if (input$export_word_mode == "custom") {
+          if (identical(sel$word_mode, "custom")) {
             template_name <- input$export_template_select
-            template_path <- get_template_path(template_name)
+            template_path <- get_template_path(template_name, cfg)
             if (is.null(template_path)) {
-              stop("Template file not found. It may have been deleted.")
+              cli::cli_abort("Template file not found. It may have been deleted.")
             }
 
             # Prepare template variables (dataset/specs content). Always supply
             # {YAML_EMBEDDED} so the placeholder is cleanly filled (or blanked)
             # rather than left as literal text in the document.
+            #
+            # {DATASETS_DETAIL} is deliberately NOT supplied here: it is now a
+            # block placeholder that export_with_template() itself renders as
+            # real Word tables. Adding a "{DATASETS_DETAIL}" entry to
+            # `variables` would override that block back to flat text, which
+            # would silently undo this feature for the app.
             variables <- list(
               "{DATASETS_SUMMARY}" = format_datasets_summary(doc),
-              "{DATASETS_DETAIL}" = format_datasets_detail(doc),
-              "{YAML_EMBEDDED}" = ""
+              "{YAML_EMBEDDED}" = "",
+              "{DOCUMENT_NAME}" = cfg$document$label,
+              "{DOCUMENT_ABBREVIATION}" = cfg$document$abbr,
+              "{ORGANISATION_NAME}" = cfg$organisation$name,
+              "{ORGANISATION_UNIT}" = cfg$organisation$unit
             )
 
             # Add YAML if requested
@@ -6553,11 +7815,14 @@ server <- function(input, output, session) {
               res_yaml <- dta_to_yaml_text(doc)
               if (isTRUE(res_yaml$ok)) yaml_text <- res_yaml$value
             }
-            DTAtools::write_dta(
-              doc, output_file,
-              format = "docx", overwrite = TRUE, quiet = TRUE,
-              include_yaml = !is.null(yaml_text), yaml_text = yaml_text
-            )
+            do.call(DTAtools::write_dta, c(
+              list(
+                doc, output_file,
+                format = "docx", overwrite = TRUE, quiet = TRUE,
+                include_yaml = !is.null(yaml_text), yaml_text = yaml_text
+              ),
+              dta_app_export_args(cfg)
+            ))
           }
 
           export_state$file_path <- output_file
@@ -6572,8 +7837,10 @@ server <- function(input, output, session) {
         showNotification("Document exported successfully", type = "message", duration = 5)
       },
       error = function(e) {
+        # The message only: as.character(e) also carries the deparsed call,
+        # which shows the browser server-side paths and internals.
         showNotification(
-          paste("Export failed:", as.character(e)),
+          paste("Export failed:", conditionMessage(e)),
           type = "error",
           duration = 12
         )
@@ -6604,12 +7871,13 @@ server <- function(input, output, session) {
     st <- unlist(rv$status)
     validated <- names(st)[st %in% c("pass", "fail")]
     ok <- length(validated) > 0 && all(st[validated] == "pass")
-    if (!isTRUE(ok)) {
+    if (!isTRUE(ok) || !cfg$exports$validation_summary) {
       return(NULL)
     }
     complete <- length(validated) == length(st)
+    # No divider of its own: this button belongs to the sidebar's Export
+    # group, whose label sits above the two export buttons it follows.
     tagList(
-      tags$hr(),
       downloadButton("dl_validation_summary", "Validation summary",
         class = if (complete) "btn btn-success w-100" else "btn btn-warning w-100",
         title = if (complete) {
@@ -6630,8 +7898,13 @@ server <- function(input, output, session) {
       paste0("validation_summary_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".html")
     },
     content = function(file) {
-      req(rv$dta)
-      html <- dta_build_validation_report(rv$dta, rv$status)
+      req(rv$dta, cfg$exports$validation_summary)
+      args <- dta_app_export_args(cfg)
+      html <- dta_build_validation_report(
+        rv$dta, rv$status,
+        document_name = args$document_name, organisation = args$organisation,
+        organisation_unit = args$organisation_unit
+      )
       writeLines(html, file, useBytes = TRUE)
     }
   )
@@ -6640,7 +7913,7 @@ server <- function(input, output, session) {
   observeEvent(input$reset_app, {
     showModal(modalDialog(
       title = "Start over?",
-      "This clears the loaded DTA and all uploads from this session.",
+      paste("This clears the loaded", cfg$document$abbr, "and all uploads from this session."),
       footer = tagList(
         modalButton("Cancel"),
         actionButton("confirm_reset", "Start over", class = "btn btn-danger")
@@ -6666,7 +7939,14 @@ server <- function(input, output, session) {
     rv$version_note <- ""
     rv$new_version_msg <- NULL
     rv$editing <- FALSE
+    # "Start over" is the user's own wipe: everything holding their data
+    # goes now rather than at the end of the retention window.
     try(unlink(session_file() %||% character(0)), silent = TRUE)
+    try(session_tables()$clear(), silent = TRUE)
+    unlink(c(owned$upload, owned$export), recursive = TRUE, force = TRUE)
+    owned$upload <<- character(0)
+    owned$export <<- character(0)
+    own("autosave", character(0)) # re-register what is left
     removeModal()
   })
 
@@ -6678,20 +7958,24 @@ server <- function(input, output, session) {
     type_txt <- if (!is.null(s) && !is.na(s$type)) s$type else ""
     ds <- dta_get_dataset(rv$dta, rv$active)
     desc <- tryCatch(ds@description, error = function(e) NULL) %||% ""
-    heading <- if (nzchar(desc)) desc else rv$active
+    heading <- dta_dataset_label(ds)
+    if (!nzchar(heading)) heading <- rv$active
     div(
+      class = paste0("ds-head-block ds-st-", st),
       div(
         class = "ds-head",
         tags$h4(class = "ds-desc", heading)
       ),
       div(
         style = "display:flex; align-items:center; gap:8px; margin-bottom:6px; flex-wrap:wrap;",
-        # Every dataset carries a tag with its name (alongside the type tag),
-        # so the dataset is always clearly identified on the Datasets page.
-        tags$span(class = "dta-name-chip", rv$active),
+        # Every dataset carries a tag with its id (alongside the type tag), so
+        # the dataset is always clearly identified on the Datasets page --
+        # also when the heading above is its name.
+        tags$span(class = "dta-name-chip", title = "Dataset ID", rv$active),
         if (nzchar(type_txt)) tags$span(class = "status-chip status-pending", type_txt),
         status_chip(st)
-      )
+      ),
+      if (nzchar(desc)) tags$p(class = "ds-long-desc", desc)
     )
   })
 
@@ -6779,7 +8063,7 @@ server <- function(input, output, session) {
       title <- if (dataset_only) {
         dta_dataset_names(rv$dta)[1] %||% "Dataset"
       } else {
-        "Untitled DTA"
+        paste("Untitled", cfg$document$abbr)
       }
     }
     version <- getf("version")
@@ -6805,12 +8089,43 @@ server <- function(input, output, session) {
     np <- sum(st == "pass")
     nf <- sum(st == "fail")
     nd <- sum(st == "nodata")
+    # Datasets with data bound but never checked, plus datasets with no
+    # status at all: everything the three counts above do not cover.
+    npend <- max(n - np - nf - nd, 0L)
+    # One bar segment per non-zero state, sized by its share of the datasets.
+    seg <- function(k, cls) {
+      if (k > 0) span(class = paste("status-seg", cls), style = sprintf("flex: %d 1 0;", k))
+    }
+    item <- function(k, cls, label) {
+      if (k > 0) {
+        span(
+          class = paste("status-item", cls),
+          span(class = "status-dot"), span(class = "status-n", k), label
+        )
+      }
+    }
     div(
-      style = "display:flex; gap:18px; margin-bottom:8px; flex-wrap:wrap;",
-      div(div(class = "metric", n), div(class = "slot-meta", "datasets")),
-      div(div(class = "metric", np), div(class = "slot-meta", "passed")),
-      div(div(class = "metric", nf), div(class = "slot-meta", "failed")),
-      div(div(class = "metric", nd), div(class = "slot-meta", "no data"))
+      class = "status-summary",
+      div(
+        class = "status-bar", role = "img",
+        `aria-label` = sprintf(
+          "%d passed, %d failed, %d without data, %d not checked",
+          np, nf, nd, npend
+        ),
+        seg(np, "seg-pass"), seg(nf, "seg-fail"),
+        seg(nd, "seg-nodata"), seg(npend, "seg-pending")
+      ),
+      div(
+        class = "status-legend",
+        span(
+          class = "status-total",
+          span(class = "status-n", n), if (n == 1) " dataset" else " datasets"
+        ),
+        item(np, "st-pass", " passed"),
+        item(nf, "st-fail", " failed"),
+        item(nd, "st-nodata", " no data"),
+        item(npend, "st-pending", " not checked")
+      )
     )
   })
 
@@ -6834,7 +8149,7 @@ server <- function(input, output, session) {
   #
   # edit_gate lives in the brandbar, outside output$main, so it never races
   # the workspace DOM swap itself -- but it re-renders exactly when a document
-  # loads (rv$version_locked flips), which is the same moment a fresh page
+  # loads (rv$doc_token bumps), which is the same moment a fresh page
   # visit's own visibility snapshot can be unreliable, so it is included here
   # for the same belt-and-braces reason as the sidebar outputs above.
   for (sidebar_output in c(
@@ -6888,7 +8203,7 @@ server <- function(input, output, session) {
             div(
               tags$strong("Expected: "),
               tags$span(class = "slot-expected", h$expected),
-              tags$span(class = "slot-meta", paste0("  \u2022  ", h$count))
+              tags$span(class = "slot-count", h$count)
             )
           ),
           card_body(
@@ -6936,10 +8251,12 @@ server <- function(input, output, session) {
         # dataset (req(!is.null(s)) above), so this reads it rather than
         # re-deriving the type from rv$active/rv$dta a second time.
         if (editing()) ds_edit_menu(s$type),
-        downloadButton("dl_ds_yaml", "Export DataSet YAML",
-          class = "btn btn-outline-primary",
-          title = "Download this dataset's specification as YAML"
-        )
+        if (cfg$features$dataset_yaml_download) {
+          downloadButton("dl_ds_yaml", "Export DataSet YAML",
+            class = "btn btn-outline-primary",
+            title = "Download this dataset's specification as YAML"
+          )
+        }
       ),
       # div(
       #  class = "msg-hint", style = "margin:-6px 0 12px;",
@@ -6992,37 +8309,54 @@ server <- function(input, output, session) {
         sf <- session_file()
         !is.null(sf) && file.exists(sf)
       }
-      card(
-        max_height = "620px",
-        card_header(tags$h3("Load a DTA / DTS specification file", style = "margin:0;")),
-        card_body(
-          p(
-            "Drag and drop a DTA / DTS settings ", tags$code(".yaml"),
-            " file to begin, or load the bundled example."
-          ),
+      # The row exists only if the library offers at least one way to start
+      # (restoring a session is core, not configurable).
+      start_buttons <- list(
+        if (cfg$features$create_blank) {
+          actionButton("create_new", "Create new", class = "btn btn-outline-primary")
+        },
+        if (cfg$features$create_from_template) {
+          actionButton("create_from_template", "Create new from template", class = "btn btn-primary")
+        },
+        if (cfg$features$load_example) {
+          actionButton("load_example", "Load example", class = "btn btn-outline-primary")
+        },
+        if (restore_available) {
+          actionButton("restore_session", "Restore previous session",
+            class = "btn btn-outline-secondary"
+          )
+        }
+      )
+      start_buttons <- Filter(Negate(is.null), start_buttons)
+      div(
+        class = "landing",
+        div(
+          class = "landing-hero",
+          tags$h1(class = "landing-title", cfg$branding$landing_headline),
+          p(class = "landing-lede", cfg$branding$landing_lede)
+        ),
+        div(
+          class = "landing-drop",
+          HTML(landing_drop_glyph),
+          tags$h2(class = "landing-drop-title", if (isTRUE(cfg$document$custom)) paste("Load a", cfg$document$abbr, "file") else "Load a DTA / DTS specification file"),
           div(
-            class = "msg-hint", style = "margin:-6px 0 8px;",
-            "A full DTA (with metadata) or a standalone dataset spec is accepted; ",
-            "a dataset-only file is loaded without a Metadata section."
+            class = "landing-drop-hint",
+            "A full DTA with metadata or a standalone dataset specification is accepted. A dataset-only file opens without a Metadata section."
           ),
           div(
             class = "dropzone",
-            fileInput("dta_file", "Drop or choose a .yaml / .yml file",
+            fileInput("dta_file", "Drop a .yaml / .yml file here, or browse",
               accept = c(".yaml", ".yml"), width = "100%"
             )
-          ),
-          div(
-            style = "display:flex; gap:10px; margin-top:8px;",
-            actionButton("create_new", "Create new", class = "btn btn-outline-primary"),
-            actionButton("create_from_template", "Create new from template", class = "btn btn-primary"),
-            actionButton("load_example", "Load example", class = "btn btn-outline-primary"),
-            if (restore_available) {
-              actionButton("restore_session", "Restore previous session",
-                class = "btn btn-outline-secondary"
-              )
-            }
           )
-        )
+        ),
+        if (length(start_buttons) > 0) {
+          div(
+            class = "landing-alt",
+            span(class = "landing-alt-label", "Other ways to start"),
+            div(class = "landing-alt-actions", start_buttons)
+          )
+        }
       )
     } else {
       # Workspace
@@ -7035,8 +8369,13 @@ server <- function(input, output, session) {
           uiOutput("add_dataset_ui"),
           actionButton("check_all", "Check all datasets", class = "btn btn-primary w-100"),
           tags$hr(),
-          downloadButton("dl_yaml", "Export DTA YAML", class = "btn btn-outline-primary w-100"),
-          actionButton("export_modal_open", "Export DTA", class = "btn btn-primary w-100", style = "margin-top: 6px;"),
+          div(class = "section-label", "Export"),
+          if (cfg$features$dta_yaml_download) {
+            downloadButton("dl_yaml", paste("Export", cfg$document$abbr, "YAML"), class = "btn btn-outline-primary w-100")
+          },
+          if (export_choices$any) {
+            actionButton("export_modal_open", paste("Export", cfg$document$abbr), class = "btn btn-primary w-100")
+          },
           uiOutput("validation_report_ui"),
           tags$hr(),
           actionButton("reset_app", "Start over", class = "btn btn-outline-danger w-100")
@@ -7047,54 +8386,57 @@ server <- function(input, output, session) {
           panels <- list(
             nav_panel("Datasets", uiOutput("dataset_detail")),
             nav_panel("Metadata", uiOutput("metadata_editor")),
-            nav_panel(
-              "Raw YAML",
-              div(
-                class = "yaml-edit-bar",
-                uiOutput("yaml_edit_hint"),
-                uiOutput("yaml_edit_actions")
-              ),
-              uiOutput("yaml_validation_msg"),
-              if (requireNamespace("shinyAce", quietly = TRUE)) {
+            if (cfg$features$raw_yaml_tab) {
+              nav_panel(
+                "Raw YAML",
                 div(
-                  class = "yaml-ace-wrap",
-                  shinyAce::aceEditor(
-                    "raw_yaml_editor",
-                    value = isolate(rv$yaml_text) %||% "",
-                    mode = "yaml", theme = "tomorrow_night",
-                    # The CSS (.yaml-ace-wrap, theme.R) is what actually governs
-                    # the rendered height once the wrapper is draggable -- see
-                    # yaml_ace_resize_js above -- but this stays a realistic
-                    # initial value in its own right, matching it, rather than
-                    # relying entirely on the !important override.
-                    height = "70vh", fontSize = 13,
-                    showLineNumbers = TRUE, wordWrap = FALSE,
-                    debounce = 100, autoComplete = "disabled",
-                    # Born in the correct state: the observe() below only
-                    # fires on later editing() changes (it is not
-                    # re-triggered by loading a document), and it messages an
-                    # input id that does not exist yet the first time it runs
-                    # -- this editor lives inside output$main, which is still
-                    # showing the landing card at server start.
-                    readOnly = !isolate(editing())
+                  class = "yaml-edit-bar",
+                  uiOutput("yaml_edit_hint"),
+                  uiOutput("yaml_edit_actions")
+                ),
+                uiOutput("yaml_validation_msg"),
+                uiOutput("spec_check"),
+                if (requireNamespace("shinyAce", quietly = TRUE)) {
+                  div(
+                    class = "yaml-ace-wrap",
+                    shinyAce::aceEditor(
+                      "raw_yaml_editor",
+                      value = isolate(rv$yaml_text) %||% "",
+                      mode = "yaml", theme = "tomorrow_night",
+                      # The CSS (.yaml-ace-wrap, theme.R) is what actually governs
+                      # the rendered height once the wrapper is draggable -- see
+                      # yaml_ace_resize_js above -- but this stays a realistic
+                      # initial value in its own right, matching it, rather than
+                      # relying entirely on the !important override.
+                      height = "70vh", fontSize = 13,
+                      showLineNumbers = TRUE, wordWrap = FALSE,
+                      debounce = 100, autoComplete = "disabled",
+                      # Born in the correct state: the observe() below only
+                      # fires on later editing() changes (it is not
+                      # re-triggered by loading a document), and it messages an
+                      # input id that does not exist yet the first time it runs
+                      # -- this editor lives inside output$main, which is still
+                      # showing the landing card at server start.
+                      readOnly = !isolate(yaml_editable())
+                    )
                   )
-                )
-              } else {
-                # A plain <textarea> is natively resizable (a drag handle in
-                # the bottom-right corner, no CSS needed), unlike Ace -- so
-                # this fallback only needs the taller starting point. Same
-                # born-in-the-correct-state reasoning as the Ace editor above:
-                # the observe() that calls shinyjs::disable()/enable() only
-                # reacts to later editing() changes, and messages an input id
-                # that is not in the DOM yet the first time it runs -- so this
-                # has to start disabled itself when not editing.
-                ta <- textAreaInput("raw_yaml_editor",
-                  label = NULL,
-                  value = isolate(rv$yaml_text), width = "100%", rows = 28
-                )
-                if (isolate(editing())) ta else shinyjs::disabled(ta)
-              }
-            )
+                } else {
+                  # A plain <textarea> is natively resizable (a drag handle in
+                  # the bottom-right corner, no CSS needed), unlike Ace -- so
+                  # this fallback only needs the taller starting point. Same
+                  # born-in-the-correct-state reasoning as the Ace editor above:
+                  # the observe() that calls shinyjs::disable()/enable() only
+                  # reacts to later editing() changes, and messages an input id
+                  # that is not in the DOM yet the first time it runs -- so this
+                  # has to start disabled itself when not editing.
+                  ta <- textAreaInput("raw_yaml_editor",
+                    label = NULL,
+                    value = isolate(rv$yaml_text), width = "100%", rows = 28
+                  )
+                  if (isolate(yaml_editable())) ta else shinyjs::disabled(ta)
+                }
+              )
+            }
           )
           do.call(navset_card_tab, Filter(Negate(is.null), panels))
         }
@@ -7113,23 +8455,31 @@ server <- function(input, output, session) {
       showNotification("Could not restore the previous session.", type = "error")
       return()
     }
-    # Defence in depth behind the per-browser filename: refuse a payload that
-    # does not carry this browser's own id, so a stale or planted file under a
-    # guessed name cannot be loaded into someone else's session.
-    if (!identical(saved$client_id, client_id())) {
-      showNotification("Cannot restore a session saved by a different browser.", type = "error")
+    # The filename already folds in session$user (dta_session_key()); this
+    # is the backstop for a file that reached that name anyway -- e.g. one
+    # written while signed in as someone else and then copied or planted.
+    if (!identical(saved$user, session$user)) {
+      showNotification("Cannot restore a session saved by a different user.", type = "error")
       return()
     }
-    # Prefer the saveRDS-safe dump (arrow tables collected to data.frames);
-    # fall back to a legacy `dta` field for older session files.
+    # Prefer the saveRDS-safe dump (tables as Arrow files, or data.frames in
+    # older session files); fall back to a legacy `dta` field.
     restored <- if (!is.null(saved$dump)) {
-      tryCatch(dta_restore_session(saved$dump), error = function(e) NULL)
+      tryCatch(
+        dta_restore_session(saved$dump, table_dir = attr(session_tables(), "dir")),
+        error = function(e) NULL
+      )
     } else {
       saved$dta
     }
     if (is.null(restored)) {
       showNotification("Could not restore the previous session.", type = "error")
       return()
+    }
+    if (!is.null(saved$dump)) {
+      store <- session_tables()
+      store$adopt(restored, saved$dump)
+      own("autosave", c(sf, attr(store, "dir")))
     }
     rv$dta <- restored
     rv$yaml_text <- saved$yaml_text
@@ -7178,11 +8528,9 @@ server <- function(input, output, session) {
     rv$is_example <- isTRUE(saved$is_example)
     # A session file written before the versioning feature existed has none
     # of these fields. The fallback is to treat the restored document as a
-    # gated load -- version_locked = TRUE, editing switched off -- rather
-    # than silently editable: read-only-until-versioned is this app's
-    # standing posture for anything it did not itself just create, and an
-    # older session reopening editable by default would be a quiet regression
-    # of that rule rather than a neutral default.
+    # loaded one that has not yet had a version created (version_locked =
+    # TRUE, with a baseline taken from the saved yaml_text below). Editing is
+    # restored separately from saved$editing further down.
     rv$version_locked <- if (is.null(saved$version_locked)) TRUE else isTRUE(saved$version_locked)
     # %||% cannot tell "this field is absent because the session file
     # predates the versioning feature" from "the field is present and
@@ -7213,11 +8561,14 @@ server <- function(input, output, session) {
     # before this field existed: isTRUE(NULL) is FALSE, so an absent
     # saved$editing restores as not-editing for free -- the conservative
     # default, with no explicit is.null() check needed.
-    rv$editing <- isTRUE(saved$editing)
+    rv$editing <- isTRUE(saved$editing) && cfg$features$editing
     rv$md_token <- rv$md_token + 1
     rv$contacts_token <- rv$contacts_token + 1
     rv$doc_token <- rv$doc_token + 1
     showNotification("Previous session restored.", type = "message")
+    # A restored RDS object skips every constructor, so it is checked here
+    # rather than trusted; the findings stay listed in the Spec check panel.
+    notify_spec_check(restored, "Restored session")
   })
 }
 

@@ -6,15 +6,40 @@
 # system.file() calls inside the app helpers resolve bundled assets correctly
 # under both devtools::test() and R CMD check).
 
+# Detach this test from any template source configured on the developer's
+# machine, for the tests that build from the REAL bundled biomarker_gf
+# template. That template imports a dataset template and declares vocabulary
+# slots, so create_dta_from_template() takes the `needs_index` branch in
+# template_core.R and falls back to the ambient dta_template_index_cached().
+# An exported DTATOOLS_TEMPLATE_SOURCES flips that index into private-only
+# mode -- "private replaces public" -- dropping the packaged directory these
+# tests read from, and they fail locally while CI stays green.
+#
+# Only the two variables that decide the ROOT SET are cleared, not the seven
+# that test-shinyapp-template-sources.R's local_clean_template_env() clears:
+# the rest tune git fetching, which cannot matter once no source is
+# configured. This file is about template_core.R, not about source resolution.
+local_packaged_templates_only <- function(.local_envir = parent.frame()) {
+  withr::local_envvar(
+    c(
+      DTATOOLS_TEMPLATE_SOURCES = NA,
+      DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = NA
+    ),
+    .local_envir = .local_envir
+  )
+}
+
 # ---- dta_creation_templates_dir / list_dta_creation_templates / get_dta_creation_template_path ----
 
-test_that("dta_creation_templates_dir() resolves to a directory that exists", {
+test_that("dta_creation_templates_dir() resolves to a library root that exists", {
   fn <- app_fn("dta_creation_templates_dir")
   dir <- fn()
 
   expect_true(nzchar(dir))
   expect_true(dir.exists(dir))
-  expect_true(file.exists(file.path(dir, "biomarker_gf.dta-template.yaml")))
+  # A library ROOT: the template sits in its templates/ folder, not beside it.
+  expect_true(file.exists(file.path(dir, "templates", "biomarker_gf.dta-template.yaml")))
+  expect_false(file.exists(file.path(dir, "biomarker_gf.dta-template.yaml")))
 })
 
 test_that("list_dta_creation_templates() finds the real bundled template", {
@@ -33,7 +58,7 @@ test_that("get_dta_creation_template_path() resolves the real bundled template t
   expect_equal(
     normalizePath(result, winslash = "/"),
     normalizePath(
-      system.file("extdata", "templates", "biomarker_gf.dta-template.yaml", package = "DTAtools"),
+      system.file("extdata", "library", "templates", "biomarker_gf.dta-template.yaml", package = "DTAtools"),
       winslash = "/"
     )
   )
@@ -54,7 +79,7 @@ test_that("get_dta_creation_template_path() returns NULL for an unknown template
 
 test_that("read_dta_creation_template() parses the real bundled template", {
   real_path <- system.file(
-    "extdata", "templates", "biomarker_gf.dta-template.yaml",
+    "extdata", "library", "templates", "biomarker_gf.dta-template.yaml",
     package = "DTAtools"
   )
   expect_true(nzchar(real_path))
@@ -86,7 +111,7 @@ test_that("read_dta_creation_template() fails when 'kind' is missing", {
       "base:",
       "  metadata: {}",
       "datasets:",
-      "  - name: x",
+      "  - id: x",
       "    type: file",
       "    files: {filename: a.csv, type: csv}"
     ),
@@ -110,7 +135,7 @@ test_that("read_dta_creation_template() fails when 'base' is missing", {
     c(
       "kind: dta_creation_template",
       "datasets:",
-      "  - name: x",
+      "  - id: x",
       "    type: file",
       "    files: {filename: a.csv, type: csv}"
     ),
@@ -157,7 +182,7 @@ test_that("dta_template_metadata_fields() lists the exact allowed DTAMetaData fi
     c(
       "title", "version", "date", "header",
       "version_history", "receiver", "supplier", "transmission",
-      "error_handling", "authorized_for_corrections"
+      "error_handling", "authorized_for_corrections", "study", "sections"
     )
   )
 })
@@ -191,7 +216,7 @@ test_that("dta_template_list_fields() names the container metadata fields", {
   list_fields <- app_fn("dta_template_list_fields")
   expect_setequal(
     list_fields(),
-    c("version_history", "receiver", "supplier", "transmission")
+    c("version_history", "receiver", "supplier", "transmission", "study", "sections")
   )
   # authorized_for_corrections is a union of character, list and NULL, and
   # defaults to NULL, so it must stay a scalar field. Getting this wrong turns a
@@ -236,6 +261,7 @@ test_that("${version} reaches version_history after the options are applied", {
   # never called, so metadata.version took the chosen value while
   # version_history[[1]]$version kept the literal "${version}". Nothing caught
   # it because no test overrode version and then read the history back.
+  local_packaged_templates_only()
   create <- app_fn("create_dta_from_template")
   read_tpl <- app_fn("read_dta_creation_template")
   path <- app_fn("get_dta_creation_template_path")("biomarker_gf.dta-template.yaml")
@@ -255,6 +281,7 @@ test_that("${version} reaches version_history after the options are applied", {
 })
 
 test_that("${today} resolves to the creation date, not a literal token", {
+  local_packaged_templates_only()
   create <- app_fn("create_dta_from_template")
   read_tpl <- app_fn("read_dta_creation_template")
   path <- app_fn("get_dta_creation_template_path")("biomarker_gf.dta-template.yaml")
@@ -339,7 +366,8 @@ test_that("get_dta_creation_template_path() prefers an earlier directory and can
   tmp <- tempfile()
   dir.create(tmp)
   on.exit(unlink(tmp, recursive = TRUE, force = TRUE), add = TRUE)
-  shadow <- file.path(tmp, "biomarker_gf.dta-template.yaml")
+  dir.create(file.path(tmp, "templates"))
+  shadow <- file.path(tmp, "templates", "biomarker_gf.dta-template.yaml")
   writeLines("kind: dta_creation_template", shadow)
 
   old <- options(DTAtools.template_dir = tmp)
@@ -354,19 +382,20 @@ test_that("get_dta_creation_template_path() prefers an earlier directory and can
 
 # ---- resolve_template_dataset_path -----------------------------------------
 
-test_that("resolve_template_dataset_path() resolves an absolute path directly", {
+test_that("resolve_template_dataset_path() does not resolve an absolute path", {
   tmp_dir <- tempfile()
   dir.create(tmp_dir)
   on.exit(unlink(tmp_dir, recursive = TRUE, force = TRUE), add = TRUE)
   ds_file <- file.path(tmp_dir, "dataset.yaml")
-  writeLines("name: x", ds_file)
+  writeLines("id: x", ds_file)
 
   fn <- app_fn("resolve_template_dataset_path")
-  # template_path points somewhere else entirely -- the absolute ref must win
-  # without even consulting it.
+  # An absolute ref names a file outside the template's own directory, so it
+  # is no longer honored -- see the dedicated path-traversal test below for
+  # the rest of that contract.
   result <- fn(ds_file, "/some/unrelated/dir/template.yaml")
 
-  expect_equal(result, normalizePath(ds_file, winslash = "/", mustWork = TRUE))
+  expect_identical(result, "")
 })
 
 test_that("resolve_template_dataset_path() resolves a path relative to the template file", {
@@ -374,7 +403,7 @@ test_that("resolve_template_dataset_path() resolves a path relative to the templ
   dir.create(tmp_dir)
   on.exit(unlink(tmp_dir, recursive = TRUE, force = TRUE), add = TRUE)
   ds_file <- file.path(tmp_dir, "dataset.yaml")
-  writeLines("name: x", ds_file)
+  writeLines("id: x", ds_file)
   template_path <- file.path(tmp_dir, "template.yaml") # need not exist
 
   fn <- app_fn("resolve_template_dataset_path")
@@ -412,6 +441,39 @@ test_that("resolve_template_dataset_path() returns '' when the reference resolve
   fn <- app_fn("resolve_template_dataset_path")
   expect_equal(fn("does-not-exist-anywhere.yaml", template_path), "")
   expect_equal(fn("", template_path), "")
+})
+
+test_that("a template dataset reference cannot escape the template directory", {
+  root <- tempfile()
+  dir.create(root)
+  on.exit(unlink(root, recursive = TRUE, force = TRUE), add = TRUE)
+  tpl_dir <- file.path(root, "tpl")
+  dir.create(tpl_dir)
+  tpl <- file.path(tpl_dir, "t.yaml")
+  writeLines("kind: dta_creation_template", tpl)
+  ds <- file.path(tpl_dir, "ds.yaml")
+  writeLines("id: x", ds)
+  secret <- file.path(root, "secret.yaml")
+  writeLines("id: secret", secret)
+
+  fn <- app_fn("resolve_template_dataset_path")
+  under <- app_fn(".dta_path_under")
+
+  # Regression half: the legitimate sibling must still resolve, or the guard
+  # below is too strict to be usable.
+  legit <- fn("ds.yaml", tpl)
+  expect_true(file.exists(legit))
+  expect_true(under(legit, tpl_dir))
+
+  expect_identical(fn("../secret.yaml", tpl), "")
+  expect_identical(fn("..\\secret.yaml", tpl), "")
+
+  climb <- paste(rep("..", 8), collapse = "/")
+  expect_identical(fn(file.path(climb, "Windows/win.ini"), tpl), "")
+
+  # The branch this removed: an absolute path to a file that genuinely exists
+  # must not resolve either.
+  expect_identical(fn(normalizePath(secret, winslash = "/", mustWork = TRUE), tpl), "")
 })
 
 # ---- dta_template_choices / default / allow_custom -------------------------
@@ -534,6 +596,23 @@ test_that("collect_option_effects() appends effects_all to the per-value effects
   )
 })
 
+test_that("an option with `target:` and only `effects_all:` still writes its target", {
+  # `opt$effects` partially matched `effects_all`, so the effects_all block
+  # stood in for `effects:` and the `target:` shorthand was never applied.
+  opt <- list(
+    target = "metadata.title",
+    effects_all = list(list(path = "metadata.header", value = "H"))
+  )
+  expect_equal(
+    app_fn("collect_option_effects")(opt, "My Title"),
+    list(
+      list(path = "metadata.title", value = "__selection__"),
+      list(path = "metadata.header", value = "H")
+    )
+  )
+  expect_equal(app_fn("dta_template_option_path")(opt), "metadata.title")
+})
+
 # ---- apply_template_metadata_path --------------------------------------
 
 test_that("apply_template_metadata_path() sets a scalar metadata field", {
@@ -588,8 +667,9 @@ test_that("apply_template_metadata_path() rejects an unsupported metadata top-le
 # ---- create_dta_from_template -------------------------------------------
 
 test_that("create_dta_from_template() builds a DTA from the real bundled template", {
+  local_packaged_templates_only()
   real_path <- system.file(
-    "extdata", "templates", "biomarker_gf.dta-template.yaml",
+    "extdata", "library", "templates", "biomarker_gf.dta-template.yaml",
     package = "DTAtools"
   )
   read_fn <- app_fn("read_dta_creation_template")
@@ -607,6 +687,15 @@ test_that("create_dta_from_template() builds a DTA from the real bundled templat
   expect_true(result$ok)
   expect_null(result$error)
   expect_equal(names(result$value@datasets), "gf_data_specs_pattern")
+  # The dataset arrives with its id and its name (label) as the dataset
+  # template wrote them, and no long description, since that template sets none
+  # -- its migration to `id:` was kept content-preserving on purpose, so the
+  # refactor-equivalence test in test-bundled-templates.R still compares like
+  # with like.
+  ds <- result$value@datasets[[1]]
+  expect_equal(ds@id, "gf_data_specs_pattern")
+  expect_equal(ds@name, "Genomic Findings data table with pattern for filename")
+  expect_null(ds@description)
 
   md <- metadata(result$value)
   # selection override applied
@@ -621,7 +710,10 @@ test_that("create_dta_from_template() accepts a plain string dataset reference",
   dir.create(tmp_dir)
   on.exit(unlink(tmp_dir, recursive = TRUE, force = TRUE), add = TRUE)
   writeLines(
-    c("name: mini_ds", "type: file", "files:", "  filename: mini.csv", "  type: csv"),
+    c(
+      "id: mini_ds", "type: file", "name: Mini dataset",
+      "files:", "  filename: mini.csv", "  type: csv"
+    ),
     file.path(tmp_dir, "dataset.yaml")
   )
   template_path <- file.path(tmp_dir, "template.yaml") # need not exist on disk
@@ -633,6 +725,32 @@ test_that("create_dta_from_template() accepts a plain string dataset reference",
 
   expect_true(result$ok)
   expect_equal(names(result$value@datasets), "mini_ds")
+  expect_equal(result$value@datasets[["mini_ds"]]@id, "mini_ds")
+  expect_equal(result$value@datasets[["mini_ds"]]@name, "Mini dataset")
+})
+
+test_that("create_dta_from_template() refuses a referenced dataset file without an id", {
+  # A `name:` without `id:` is no longer read as the identifier: there is no
+  # old shape to fall back on, so the file is refused rather than reshaped.
+  tmp_dir <- tempfile()
+  dir.create(tmp_dir)
+  on.exit(unlink(tmp_dir, recursive = TRUE, force = TRUE), add = TRUE)
+  writeLines(
+    c(
+      "name: mini_ds", "type: file", "description: Mini dataset",
+      "files:", "  filename: mini.csv", "  type: csv"
+    ),
+    file.path(tmp_dir, "dataset.yaml")
+  )
+  template_path <- file.path(tmp_dir, "template.yaml")
+
+  template_def <- list(base = list(), datasets = list("dataset.yaml"))
+  create_fn <- app_fn("create_dta_from_template")
+
+  result <- create_fn(template_def, template_path, selections = list())
+
+  expect_false(result$ok)
+  expect_match(result$error, "needs an", fixed = TRUE)
 })
 
 test_that("create_dta_from_template() accepts a {source: ...} dataset reference", {
@@ -640,7 +758,7 @@ test_that("create_dta_from_template() accepts a {source: ...} dataset reference"
   dir.create(tmp_dir)
   on.exit(unlink(tmp_dir, recursive = TRUE, force = TRUE), add = TRUE)
   writeLines(
-    c("name: mini_ds", "type: file", "files:", "  filename: mini.csv", "  type: csv"),
+    c("id: mini_ds", "type: file", "files:", "  filename: mini.csv", "  type: csv"),
     file.path(tmp_dir, "dataset.yaml")
   )
   template_path <- file.path(tmp_dir, "template.yaml")
@@ -660,8 +778,10 @@ test_that("create_dta_from_template() accepts an inline dataset definition", {
   template_def <- list(
     base = list(),
     datasets = list(list(
-      name = "inline_ds",
+      id = "inline_ds",
       type = "file",
+      name = "Inline dataset",
+      description = "Defined in the template itself.",
       files = list(filename = "mini2.csv", type = "csv")
     ))
   )
@@ -671,6 +791,10 @@ test_that("create_dta_from_template() accepts an inline dataset definition", {
 
   expect_true(result$ok)
   expect_equal(names(result$value@datasets), "inline_ds")
+  ds <- result$value@datasets[["inline_ds"]]
+  expect_equal(ds@id, "inline_ds")
+  expect_equal(ds@name, "Inline dataset")
+  expect_equal(ds@description, "Defined in the template itself.")
 })
 
 test_that("create_dta_from_template() fails without throwing when a dataset reference cannot be resolved", {
@@ -691,7 +815,7 @@ test_that("create_dta_from_template() rejects an unknown base.metadata field wit
   dir.create(tmp_dir)
   on.exit(unlink(tmp_dir, recursive = TRUE, force = TRUE), add = TRUE)
   writeLines(
-    c("name: mini_ds", "type: file", "files:", "  filename: mini.csv", "  type: csv"),
+    c("id: mini_ds", "type: file", "files:", "  filename: mini.csv", "  type: csv"),
     file.path(tmp_dir, "dataset.yaml")
   )
   template_path <- file.path(tmp_dir, "template.yaml")
@@ -916,7 +1040,7 @@ test_that("a non-list base is rejected whether or not the template extends", {
 
 required_fixture <- function(dir) {
   writeLines(
-    c("name: mini_ds", "type: file", "files:", "  filename: mini.csv", "  type: csv"),
+    c("id: mini_ds", "type: file", "files:", "  filename: mini.csv", "  type: csv"),
     file.path(dir, "dataset.yaml")
   )
   list(
@@ -1007,4 +1131,52 @@ test_that("every unfilled required path is named at once, not one per run", {
   expect_false(result$ok)
   expect_match(result$error, "base.metadata.header", fixed = TRUE)
   expect_match(result$error, "options.header.default", fixed = TRUE)
+})
+
+# ---- mixins at read time -----------------------------------------------------
+
+read_yaml_text <- function(lines) {
+  tmp <- tempfile(fileext = ".yaml")
+  writeLines(lines, tmp)
+  withr::defer(unlink(tmp, force = TRUE), envir = parent.frame())
+  app_fn("read_dta_creation_template")(tmp)
+}
+
+test_that("read_dta_creation_template() lets a mixins-only template omit base and datasets", {
+  res <- read_yaml_text(c(
+    "kind: dta_creation_template",
+    "id: only_mixins",
+    "mixins: [a@1.0, b]"
+  ))
+
+  expect_true(res$ok, info = res$error)
+  expect_identical(res$value$mixins, c("a@1.0", "b"))
+})
+
+test_that("read_dta_creation_template() accepts a single mixin string", {
+  res <- read_yaml_text(c("kind: dta_creation_template", "id: t", "mixins: a@1.0"))
+  expect_true(res$ok, info = res$error)
+})
+
+test_that("read_dta_creation_template() still demands base when there are neither extends nor mixins", {
+  res <- read_yaml_text(c("kind: dta_creation_template", "id: t", "mixins: []"))
+  expect_false(res$ok)
+  expect_equal(res$error, "Template must contain a 'base' section.")
+})
+
+test_that("read_dta_creation_template() rejects malformed mixins: values", {
+  bad <- list(
+    number = "mixins: 7",
+    mapping = c("mixins:", "  a: b"),
+    nested = c("mixins:", "  - [a, b]"),
+    blank = c("mixins:", "  - a", "  - ''"),
+    duplicate = "mixins: [a@1.0, a@1.0]"
+  )
+  for (nm in names(bad)) {
+    res <- read_yaml_text(c(
+      "kind: dta_creation_template", "id: t", "base: {}", "datasets: [x]", bad[[nm]]
+    ))
+    expect_false(res$ok, info = nm)
+    expect_match(res$error, "mixins", fixed = TRUE, info = nm)
+  }
 })

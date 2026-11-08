@@ -136,7 +136,7 @@ specs <- DTAColumnSpecCollection(columns = list(
 ))
 
 ds <- DTADataSetTabular(
-  name = "import_demo",
+  id = "import_demo",
   specs = specs,
   tables = list(demo = data.frame(
     SUBJECT_ID = c("SUBJ0001", "SUBJ0002"),
@@ -313,7 +313,7 @@ expresses) is to be finalised together with the framework list.*
 The package bundles a complete example agreement
 (`inst/extdata/clinical_dta.yaml`) and matching example deliveries, used
 throughout this manuscript. **[Benchmark input files are generated
-synthetically by the script referenced above; the generator and its seed will
+synthetically by the scripts in the repository's `benchmarks/` directory (for example `bench_streaming.R`, which fixes its seed with `set.seed(7)`); the final generator and seed will
 be published with the benchmark results.]**
 
 ## Code availability

@@ -22,9 +22,10 @@
 #                                           dataset_template.R.
 #
 # create_dta_from_template() (template_core.R) is extended, not replaced, to
-# call these when a caller supplies an `index` -- every caller that does not
-# (all 55 pre-existing tests) takes the exact code path that predates this
-# file, byte-identical.
+# call these when it has an `index` -- supplied by the caller or built on demand
+# when a `template:` entry or vocabulary slot needs one. A template using only
+# the legacy dataset forms, with no index, takes the exact code path that
+# predates this file, byte-identical.
 #
 # `%||%` and `dta_try()` are already bound in the app helper environment (see
 # utils_dta.R) -- not redefined here, same convention as every other template
@@ -112,6 +113,8 @@ load_template_definition <- function(ref, index = NULL, kind = "dta_creation_tem
     list(
       def = def,
       lineage = resolved$lineage,
+      mixins = resolved$mixins,
+      kind = row$kind[[1]],
       path = row$path[[1]],
       source_name = row$source_name[[1]],
       source_kind = row$source_kind[[1]],
@@ -163,22 +166,14 @@ template_dataset_entry_kind <- function(ref) {
 # template.R) and reproducing the three legacy forms exactly as create_dta_
 # from_template() has always built them.
 #
-# `selections` is accepted for symmetry with create_dta_from_template()'s own
-# top-level option selections, but is NOT threaded into a `template:` entry's
-# own dataset-template options today -- those come only from that entry's OWN
-# `options:` map, which is the literal, static contract the spec describes
-# ("build_dataset_from_template() with that entry's options and patch and
-# as"). A creation template wanting a dataset's option to track a top-level
-# user choice has to say so explicitly via its own option effects, not an
-# implicit fallback here; wiring one up implicitly, with no test describing
-# its precedence against an explicit `options:` entry, would be a guess this
-# file has no business making. `template_path` is NOT one of the four
-# arguments the calling convention advertises, but the three legacy forms
-# cannot resolve a dataset path "relative to the template file" without it --
-# it defaults to NULL, under which those two branches degrade to exactly what
-# resolve_template_dataset_path() already does with a NULL template_path
-# (absolute-path and package-extdata resolution still work; the
-# relative-to-template-file branch simply never matches).
+# `selections` resolves a structural variant before building its datasets.
+# Dataset-template options still come only from each entry's static `options:`
+# map, not from implicit propagation of creation metadata options.
+# `template_path` locates the `path:`/`source:` dataset files relative to the
+# template file. It defaults to NULL, under which
+# resolve_template_dataset_path() skips the relative-to-template-file lookup
+# and only the package-extdata lookup by bare name can succeed (there is no
+# absolute-path branch to fall back on).
 #
 # Returns list(datasets = <list of DTADataSet objects>, provenance = <list,
 # one entry per "template" dataset entry, in encounter order>). The legacy
@@ -186,6 +181,7 @@ template_dataset_entry_kind <- function(ref) {
 # to record, unlike an entry built from a dataset template.
 build_template_datasets <- function(def, index, selections, source_label = NULL, template_path = NULL,
                                     vocab_overrides = list()) {
+  def <- resolve_template_variant(def, selections)
   # Mirrors create_dta_from_template()'s own ${today} handling: only base$
   # datasets (the legacy `base.datasets` fallback) is expression-resolved --
   # the preferred top-level `datasets:` never was, and changing that now would
@@ -203,7 +199,7 @@ build_template_datasets <- function(def, index, selections, source_label = NULL,
   # column.
   resolve_vocab <- vocabulary_resolver(index)
 
-  # Names of the datasets a vocabulary slot could actually have reached. Only
+  # Ids of the datasets a vocabulary slot could actually have reached. Only
   # the two branches that hold a PLAIN dataset list contribute: a `path:`/
   # `source:` entry reads a finished DTA spec straight into S7 objects, and a
   # slot cannot write into one of those. Checked after the loop so a slot whose
@@ -244,7 +240,7 @@ build_template_datasets <- function(def, index, selections, source_label = NULL,
 
       ds_plain <- apply_vocabulary_slot_overrides(built$value$dataset, vocab_overrides)
       ds <- DTAtools::dta_dataset_from_list(ds_plain)
-      built_names <- c(built_names, as.character(ds_plain$name %||% ""))
+      built_names <- c(built_names, as.character(ds_plain$id %||% ""))
       provenance[[length(provenance) + 1L]] <- built$value$provenance
     } else if (identical(entry_kind, "path")) {
       # Verbatim from create_dta_from_template()'s original character branch.
@@ -278,9 +274,9 @@ build_template_datasets <- function(def, index, selections, source_label = NULL,
       # DTAColumnSpec objects, which know nothing of `values_from` -- an
       # unexpanded binding would reach do.call(DTAColumnSpec, x) and fail
       # there, naming an "unused argument" rather than the template.
-      ref <- expand_column_vocabularies(ref, resolve_vocab, dataset_name = ref$name)
+      ref <- expand_column_vocabularies(ref, resolve_vocab, dataset_name = ref$id)
       ref <- apply_vocabulary_slot_overrides(ref, vocab_overrides)
-      built_names <- c(built_names, as.character(ref$name %||% ""))
+      built_names <- c(built_names, as.character(ref$id %||% ""))
       tf <- tempfile(fileext = ".yaml")
       yaml_txt <- yaml::as.yaml(ref, indent = 2, line.sep = "\n")
       writeLines(yaml_txt, tf, useBytes = TRUE)
@@ -341,9 +337,13 @@ template_party_profiles <- function(index) {
 # The metadata fields carried over from an ancestor document BY DEFAULT when a
 # caller does not state its own list.
 #
-# receiver/supplier/transmission/error_handling/authorized_for_corrections
+# receiver/supplier/transmission/error_handling/authorized_for_corrections/study
 # describe the RELATIONSHIP the document is about, which does not change just
 # because a new version is being drafted from a template.
+#
+# sections can be carried over when a caller names them in `fields`, but they
+# are NOT in this default list: old clauses must not silently overwrite a
+# revised template's agreement text.
 #
 # title/version/date/version_history are DELIBERATELY excluded: they are the
 # ancestor document's own identity and revision history, not properties of
@@ -351,7 +351,7 @@ template_party_profiles <- function(index) {
 # version_history -- carrying the old one's forward would make the new
 # document impersonate the old one instead of superseding it.
 carry_over_default_fields <- function() {
-  c("receiver", "supplier", "transmission", "error_handling", "authorized_for_corrections")
+  c("receiver", "supplier", "transmission", "error_handling", "authorized_for_corrections", "study")
 }
 
 # Copy `fields` of `source_meta` (a DTAMetaData) onto `dta`.
@@ -411,13 +411,12 @@ apply_metadata_carry_over <- function(dta, source_meta, fields) {
 # a fast CHANGE DETECTOR, not a cryptographic digest -- labelling it as one
 # would overstate what it actually guarantees.
 #
-# `selections` is NEVER omitted, even when it is an empty list(): the rebase
-# feature reconstructs the ancestor definition's effective state FROM this
-# field, and an omitted key is indistinguishable from "this document predates
-# recording selections at all" -- which cannot be trusted the same way as
-# "this document recorded that zero options were overridden."
+# Option answers (selections, vocabulary selections) are deliberately NOT
+# recorded: they are already visible as the field values they produced, and
+# repeating them under metadata.template is noise in the user's document.
+# rebase_plan() (template_diff.R) re-derives them from the document itself.
 #
-# Every other field is omitted rather than written empty (see
+# Every field is omitted rather than written empty (see
 # .template_provenance_is_empty()), so a document built from a plain local
 # "dir:" source -- no lineage, no dataset-template entries, no ancestor -- gets
 # a clean, minimal provenance block instead of a wall of NA/empty keys.
@@ -432,40 +431,59 @@ apply_metadata_carry_over <- function(dta, source_meta, fields) {
 # template that genuinely extends nothing. An explicit `lineage =` still wins,
 # which is what rebase_plan() relies on to keep a document's OWN trail rather
 # than adopting the target template's.
-template_provenance <- function(def, meta, selections,
+template_provenance <- function(def, meta,
                                 lineage = meta$lineage %||% character(0),
-                                ds_provenance = list(), carried_over_from = NULL,
-                                vocab_selections = NULL) {
+                                mixins = meta$mixins %||% character(0),
+                                ds_provenance = list(), carried_over_from = NULL) {
+  # The date of THIS template version (its own `date:`, never inherited --
+  # see resolve_template_inheritance()). yaml reads an unquoted date as Date.
+  date <- def$date
+  if (inherits(date, "Date")) date <- format(date)
   full <- list(
     id = as.character(meta$id %||% def$id %||% ""),
+    label = def$label,
     version = as.character(meta$version %||% def$version %||% ""),
+    date = if (is.null(date)) NULL else as.character(date),
     source = meta$source_name,
     source_kind = meta$source_kind,
-    # The resolved file path is the most specific "which file, exactly" trace
-    # available at this point -- more useful for tracking down a provenance
-    # question than re-stating the id@version already recorded above.
-    source_ref = meta$path,
+    source_ref = template_provenance_source_ref(meta),
     resolved_commit = meta$resolved_commit,
     content_hash = paste0("hash:", rlang::hash(def)),
     created = Sys.Date(),
     lineage = if (length(lineage) > 0) as.character(lineage) else NULL,
-    selections = selections %||% list(),
-    # A SIBLING of `selections`, not an entry inside it. Rebase reconstructs
-    # an ancestor by replaying `selections` through the template's `options:`,
-    # and a differently-shaped key smuggled into that map would be replayed as
-    # an option id that does not exist. Omitted entirely when the template
-    # offered no vocabulary slots, so an unaffected document's provenance
-    # block does not grow an empty key.
-    vocabulary_selections = if (length(vocab_selections %||% list()) > 0) vocab_selections else NULL,
+    mixins = if (length(mixins) > 0) as.character(mixins) else NULL,
     datasets = if (length(ds_provenance) > 0) ds_provenance else NULL,
     carried_over_from = carried_over_from
   )
 
-  protected <- c("id", "version", "created", "content_hash", "selections")
+  protected <- c("id", "version", "created", "content_hash")
   keep <- vapply(
     names(full),
     function(nm) nm %in% protected || !.template_provenance_is_empty(full[[nm]]),
     logical(1)
   )
   full[keep]
+}
+
+# Which file, exactly. A full path only means something for a `dir:` source
+# the user configured themselves; a git clone, an installed package or the
+# bundled templates sit at a machine-specific path, so those record the file's
+# path within the source: <kind folder>/<file name> (templates/, parties/,
+# vocabulary/), because a library keeps each kind in its own folder and scans
+# it non-recursively (build_template_index()). `meta$kind` is the template's
+# kind; a `meta` without one (hand-built) is a creation template.
+template_provenance_source_ref <- function(meta) {
+  path <- meta$path
+  if (.template_provenance_is_empty(path)) {
+    return(NULL)
+  }
+  user_dir <- identical(meta$source_kind, "dir") && !identical(meta$source_name, "builtin")
+  if (user_dir) {
+    path
+  } else {
+    file.path(
+      dta_template_kind_subdir(meta$kind %||% "dta_creation_template"),
+      basename(path)
+    )
+  }
 }

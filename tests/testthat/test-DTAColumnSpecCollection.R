@@ -78,6 +78,11 @@ test_that("permitted values a YAML parser turned into numbers are flagged", {
   columns_quoted <- columns
   columns_quoted[[1]]$values <- c("1.10", "2.00")
   expect_no_warning(specs_from_list(columns_quoted))
+
+  # A column with no declared type is not a text column, so its numeric
+  # values are not flagged either.
+  columns_untyped <- list(list(id = "VISIT", values = c(1, 2)))
+  expect_no_warning(specs_from_list(columns_untyped))
 })
 
 test_that("specs_from_list(NULL) means no columns declared, not an error", {
@@ -94,7 +99,7 @@ test_that("specs_from_list(NULL) means no columns declared, not an error", {
 test_that("dta_dataset_from_list() builds a tabular dataset with no columns", {
   # Reachable by deleting a dataset's last column in the app's column editor,
   # and by every newly added dataset, which starts with none.
-  ds <- dta_dataset_from_list(list(name = "d", type = "tabular"))
+  ds <- dta_dataset_from_list(list(id = "d", type = "tabular"))
 
   expect_s3_class(ds, "DTAtools::DTADataSetTabular")
   expect_length(ds@specs@columns, 0)
@@ -108,7 +113,7 @@ test_that("a tabular dataset with no columns survives a full DTA YAML round trip
   dta_list <- list(
     metadata = list(title = "Round trip", version = "1.0"),
     datasets = list(
-      list(name = "empty_ds", type = "tabular")
+      list(id = "empty_ds", type = "tabular")
     )
   )
   yaml_text <- yaml::as.yaml(dta_list)

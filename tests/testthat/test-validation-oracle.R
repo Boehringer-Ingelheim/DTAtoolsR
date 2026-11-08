@@ -130,6 +130,178 @@ test_that("each error is attributed to a stable source, row and column", {
   expect_snapshot_value(located, style = "json2")
 })
 
+# ---- hand-derived companions to the two snapshots above ---------------------
+#
+# The snapshots above pin whatever validate_table_detailed() currently
+# returns. Nothing stops a wrong count or a mis-attributed row from being
+# accepted the first time snapshot_accept() runs, because the expectation is
+# CAPTURED from a run rather than checked against one. The tests below assert
+# the same axis facts and error attribution against values worked out by hand
+# from how each fixture in helper-validation-corpus.R is built -- see the
+# comment on each corpus case for what it is designed to violate and why.
+
+test_that("columnspec-axis errors are pinned to the row, column and keyword the fixture implies", {
+  # Every expectation below is read off the fixture in
+  # helper-validation-corpus.R and traced by hand through
+  # dta_check_column_spec() (R/columnSpecChecks.R) -- not observed from a run.
+  expected <- list(
+    # MISSING is absent from the table entirely. A missing required column is
+    # an OBJECT-level finding: dta_columnspec_errors() reports it once per row
+    # of the 2-row table (R/columnSpecChecks.R), and -- because it is a fact
+    # about the table's shape rather than a cell -- it carries no `column`,
+    # only the constraint name inside `message`.
+    columnspec_required = list(row = c(1L, 2L), column = NA_character_, keyword = "required"),
+
+    # AGE is declared "SAS Num" (JSON type "number"), but the fixture hands it
+    # to the validator as an R CHARACTER column: c("30", "not-a-number"). The
+    # type check classifies a column by its R class as a WHOLE, not value by
+    # value, so both rows fail -- including "30", which merely looks numeric.
+    columnspec_type = list(row = c(1L, 2L), column = "AGE", keyword = "type"),
+
+    # ID allows 4 characters. "A001" is exactly 4 (fine); "TOO-LONG" is 8, so
+    # only row 2 fails.
+    columnspec_maxlength = list(row = 2L, column = "ID", keyword = "maxLength"),
+
+    # SEX permits c("M", "F") -- 2 values, so the generated schema uses "enum"
+    # (a single permitted value uses "const" instead; see DTAColumnSpec's
+    # as_json_schema() method). "M" is allowed, "X" is not.
+    columnspec_enum = list(row = 2L, column = "SEX", keyword = "enum"),
+
+    # CODE must match 3 letters then 3 digits. "ABC123" matches; "bad!!!" does
+    # not. Both strings are exactly 6 characters -- CODE's declared length --
+    # so this is not also a maxLength hit.
+    columnspec_pattern = list(row = 2L, column = "CODE", keyword = "pattern"),
+
+    # ID is non-nullable, so its allowed JSON type is "string" alone -- "null"
+    # is added to the type list ONLY when nullable = TRUE (see
+    # as_json_schema_type() for DTAColumnSpec). Row 2's NA therefore fails the
+    # TYPE check, not a dedicated "required"/"nullable" keyword: "type" is
+    # what this case actually produces despite its name.
+    columnspec_nullable = list(row = 2L, column = "ID", keyword = "type")
+  )
+
+  corpus <- vc_corpus()
+  for (case_name in names(expected)) {
+    want <- expected[[case_name]]
+    details <- vc_details(corpus[[case_name]])
+
+    expect_false(details$columnspec_valid, info = case_name)
+    expect_true(details$rules_valid, info = case_name)
+    expect_true(details$import_valid, info = case_name)
+    expect_equal(details$n_columnspec_errors, length(want$row), info = case_name)
+    expect_equal(details$n_rule_errors, 0, info = case_name)
+    expect_equal(details$n_import_errors, 0, info = case_name)
+
+    flat <- vc_flat(details)
+    expect_equal(flat$row, want$row, info = case_name)
+    expect_equal(flat$column, rep(want$column, length(want$row)), info = case_name)
+    expect_equal(flat$keyword, rep(want$keyword, length(want$row)), info = case_name)
+  }
+})
+
+test_that("rule-axis errors count failed rules, not failed rows, and carry no row or column", {
+  # n_rule_errors is length(Filter(!valid, rule_results)) in
+  # validate_table_detailed() (R/validationFunctions.R): one count per RULE
+  # OBJECT that failed, regardless of how many rows within it were bad. And
+  # every rule-sourced row of as.data.frame() sets row/column to NA
+  # unconditionally (R/validationFunctions.R, as.data.frame.dta_validation_details)
+  # -- only `rule_id` identifies which rule failed, because a rule violation is
+  # a claim about a whole column or a whole group, not about one cell.
+  cases <- list(
+    # AGE = c(18, 70, 17, 71) against range [18, 70]. 18 and 70 sit on the
+    # inclusive bounds (fine); 17 and 71 do not -- 2 rows violate, but it is
+    # still exactly ONE rule that failed.
+    age_range = "rule_range",
+    # (SUBJ, VISIT) = (A,V1), (A,V1), (B,V1). Rows 1 and 2 collide, so 1
+    # duplicate -- still one failed rule.
+    subj_visit = "rule_unique",
+    # IF AGE >= 18 THEN STATUS == "OK". Row 1 (AGE 20, OK) holds; row 2 (AGE
+    # 20, BAD) breaks the THEN; row 3 (AGE 10) never triggers the IF. One
+    # violating row is still one failed rule.
+    adult_status = "rule_condition",
+    # Group SUBJ="A" (rows 1-2) has REASND="BROKEN" in row 1 (satisfies
+    # "failed") AND a row with REASND empty plus ORRES populated in row 2
+    # (satisfies "reported") -- both hold for the SAME group, which is exactly
+    # what "mutually_exclusive" forbids. Group SUBJ="B" (row 3) only satisfies
+    # "reported". One group violates -- one failed rule.
+    grp_exclusive = "rule_group_exclusive",
+    # Group SUBJ="A" satisfies "failed" (REASND="BROKEN"), but STAT="DONE"
+    # never satisfies "not_done" ("NOT DONE") anywhere in the group, so the
+    # implication breaks. Group SUBJ="B" never satisfies "failed" at all, so
+    # the implication holds vacuously. One group violates -- one failed rule.
+    grp_requires = "rule_group_requires"
+  )
+
+  corpus <- vc_corpus()
+  for (rule_id in names(cases)) {
+    case_name <- cases[[rule_id]]
+    details <- vc_details(corpus[[case_name]])
+
+    expect_true(details$columnspec_valid, info = case_name)
+    expect_false(details$rules_valid, info = case_name)
+    expect_true(details$import_valid, info = case_name)
+    expect_equal(details$n_columnspec_errors, 0, info = case_name)
+    expect_equal(details$n_rule_errors, 1, info = case_name)
+    expect_equal(details$n_import_errors, 0, info = case_name)
+
+    flat <- vc_flat(details)
+    expect_equal(flat$rule_id, rule_id, info = case_name)
+    expect_equal(flat$row, NA_integer_, info = case_name)
+    expect_equal(flat$column, NA_character_, info = case_name)
+  }
+})
+
+test_that("a text-typed numeric column fails all three axes when validated without the reader", {
+  # VAL is declared "SAS Num" but the fixture hands the validator an R
+  # CHARACTER column: c("10", "abc", "", NA) -- exactly the same shape as
+  # columnspec_type above, and that is not incidental to the import axis this
+  # case is named for.
+  #
+  #   columnspec: every non-NA value ("10", "abc", "") is the wrong JSON type
+  #   for a number column -- rows 1-3. Row 4 is a genuine NA, and VAL is
+  #   nullable = TRUE, so it is not flagged.
+  #
+  #   rule: dta_as_numeric_strict() converts "10" cleanly (10, inside [0,
+  #   100]) and treats "" and NA as MISSING (ignored by the range check, per
+  #   "Range rules evaluate inclusive bounds and ignore missing values" in
+  #   test-evaluateRules.R) -- but "abc" is UNCONVERTIBLE, and an
+  #   unconvertible value counts as a violation, not a silently-ignored
+  #   missing one (see "Range rules treat an unconvertible value as a
+  #   violation" in the same file). So val_range fails on "abc" alone.
+  #
+  #   import: the same "abc" is the one value dta_rule_import_errors() cannot
+  #   represent as a number.
+  #
+  # This is a property of testing the corpus directly against
+  # validate_table_detailed(), which never types the table. The read-path test
+  # below shows the SAME fixture, read and coerced through the real pipeline,
+  # failing on the import axis ALONE -- which is what the case's name
+  # actually promises.
+  details <- vc_details(vc_corpus()$import_unconvertible)
+  expect_false(details$columnspec_valid)
+  expect_false(details$rules_valid)
+  expect_false(details$import_valid)
+  expect_equal(details$n_columnspec_errors, 3)
+  expect_equal(details$n_rule_errors, 1)
+  expect_equal(details$n_import_errors, 1)
+
+  flat <- vc_flat(details)
+  columnspec_rows <- flat[flat$source == "columnspec", ]
+  expect_equal(columnspec_rows$row, c(1L, 2L, 3L))
+  expect_equal(columnspec_rows$column, rep("VAL", 3))
+  expect_equal(columnspec_rows$keyword, rep("type", 3))
+
+  rule_row <- flat[flat$source == "rule", ]
+  expect_equal(rule_row$rule_id, "val_range")
+  expect_equal(rule_row$row, NA_integer_)
+  expect_equal(rule_row$column, NA_character_)
+
+  import_row <- flat[flat$source == "import", ]
+  expect_equal(import_row$row, 2L)
+  expect_equal(import_row$column, "VAL")
+  expect_equal(import_row$keyword, "not_convertible")
+})
+
 # ---- full report including message text (expected to churn at P1) -----------
 
 test_that("the flattened validation report is unchanged", {
@@ -330,6 +502,80 @@ test_that("the read and import-typing path produces stable verdicts", {
   rownames(facts) <- NULL
 
   expect_snapshot_value(facts, style = "json2")
+})
+
+# ---- hand-derived companion to the read-path snapshot above -----------------
+
+test_that("the read and coercion pipeline reproduces the direct-path verdict for already-typed cases", {
+  # vc_roundtrip() (defined above) writes the fixture to CSV and reads it back
+  # through dta_read_delim_normalized() + dta_coerce_table_to_specs() -- the
+  # real pipeline validate_table() sees via load_file(). Where the fixture's R
+  # values already match their declared type (a numeric column held as real R
+  # numbers, a character column holding ordinary non-empty text), coercion has
+  # nothing to fix, so the roundtrip should reproduce the direct-path facts
+  # derived in the tests above exactly.
+  expected <- list(
+    clean = list(columnspec_valid = TRUE, rules_valid = TRUE, import_valid = TRUE),
+    rule_range = list(columnspec_valid = TRUE, rules_valid = FALSE, import_valid = TRUE),
+    columnspec_maxlength = list(columnspec_valid = FALSE, rules_valid = TRUE, import_valid = TRUE)
+  )
+
+  corpus <- vc_corpus()
+  for (case_name in names(expected)) {
+    want <- expected[[case_name]]
+    got <- vc_roundtrip(corpus[[case_name]])
+
+    expect_true(got$read_ok, info = case_name)
+    expect_equal(got$columnspec_valid, want$columnspec_valid, info = case_name)
+    expect_equal(got$rules_valid, want$rules_valid, info = case_name)
+    expect_equal(got$import_valid, want$import_valid, info = case_name)
+  }
+})
+
+test_that("the read and coercion pipeline changes the verdict when the fixture itself is not yet typed", {
+  # columnspec_type and import_unconvertible both hand the validator a
+  # CHARACTER column against a declared Num spec (see the direct-path tests
+  # above). Through the real pipeline that text is coerced to numbers BEFORE
+  # validation runs, which resolves the whole-column type mismatch -- so the
+  # axis facts genuinely differ from the direct path here, not merely the
+  # message text the file header warns will churn.
+
+  # Direct path: 2 columnspec errors (both rows are the wrong JSON type),
+  # import_valid = TRUE (nothing was ever typed, so nothing was recorded as
+  # unrepresentable). After coercion: "30" converts cleanly, "not-a-number"
+  # does not and becomes NA plus one carried import issue. AGE is declared
+  # non-nullable, so that NA is now the ONE remaining columnspec error
+  # (failing "type" because null is not allowed there) rather than two
+  # whole-column mismatches -- and the import axis, clean on the direct path,
+  # now fails because coercion recorded the value it could not represent.
+  type_rt <- vc_roundtrip(vc_corpus()$columnspec_type)
+  expect_true(type_rt$read_ok)
+  expect_false(type_rt$columnspec_valid)
+  expect_true(type_rt$rules_valid)
+  expect_false(type_rt$import_valid)
+  expect_equal(type_rt$n_columnspec_errors, 1)
+  expect_equal(type_rt$n_rule_errors, 0)
+  expect_equal(type_rt$n_import_errors, 1)
+
+  # Direct path: fails all 3 axes (see above). After coercion, VAL becomes a
+  # genuine numeric column: "10" -> 10, "abc" -> NA (the one import issue).
+  # The row that was originally an R NA is dropped before coercion even runs:
+  # VAL is this case's only column, so a missing VAL is an entirely blank CSV
+  # line, and "a row whose every field is empty is dropped by the CSV reader"
+  # (pinned above). The empty-STRING row survives that same read, because
+  # write.csv() quotes it as `""` rather than leaving a blank line -- only 3
+  # of the original 4 rows reach coercion. VAL is nullable, so neither
+  # remaining NA fails the columnspec axis, and rule_check_range() ignores
+  # missing values -- so once the text is properly typed, only the import
+  # axis fails, which is what this case's name and axis label actually claim.
+  import_rt <- vc_roundtrip(vc_corpus()$import_unconvertible)
+  expect_true(import_rt$read_ok)
+  expect_true(import_rt$columnspec_valid)
+  expect_true(import_rt$rules_valid)
+  expect_false(import_rt$import_valid)
+  expect_equal(import_rt$n_columnspec_errors, 0)
+  expect_equal(import_rt$n_rule_errors, 0)
+  expect_equal(import_rt$n_import_errors, 1)
 })
 
 test_that("dta_as_numeric_strict never flags typed columns as unconvertible", {

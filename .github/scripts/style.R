@@ -8,11 +8,11 @@
 # Two things live here that a bare `styler::style_pkg()` does not do.
 #
 # 1. inst/ is styled too. style_pkg() visits .R under R/, tests/, data-raw/
-#    and demo/, plus the root .Rprofile and vignettes/ -- 121 files here -- and
+#    and demo/, plus the root .Rprofile and vignettes/, and
 #    it never descends into inst/. That is where this project's entire Shiny
-#    app and template engine live: 15 files, ~17k lines, more R code than R/
-#    itself. Without the second call all of it is invisible to the check,
-#    which is exactly how an unstyled
+#    app, template engine and qualification suite live -- a large body of R
+#    code, comparable in size to R/ itself. Without the second call all of it
+#    is invisible to the check, which is exactly how an unstyled
 #    `for (eng in engines) if (...) {` survived in utils_dta.R until someone
 #    happened to run style_file() by hand. style_dir() takes the same
 #    arguments and the same tidyverse_style, so the two calls cannot enforce

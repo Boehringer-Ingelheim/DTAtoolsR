@@ -2,12 +2,13 @@
 % Please edit documentation in R/exportTemplateDocx.R
 \name{.tv_scalar}
 \alias{.tv_scalar}
-\title{Coerce a metadata value to a single-line display string}
+\title{Coerce a metadata value to a scalar display string}
 \usage{
 .tv_scalar(x, default = "")
 }
 \description{
 Dates render in ISO 8601 (\code{YYYY-MM-DD}) so a template filled on a German
 workstation and one filled on an English CI runner produce identical text.
+Only explicit logical TRUE/FALSE values render Yes/No; NA stays unspecified.
 }
 \keyword{internal}

@@ -1,0 +1,77 @@
+// Validates the templates in templates/ (auto-detected; a template file left
+// at the root fails the build).
+// -----------------------------------------------------------------------------
+// CI for a PRIVATE DTAtools template repository -- Jenkins declarative
+// pipeline.
+//
+// This is the one to use for Bitbucket SERVER / DATA CENTER (or any other
+// Bitbucket deployment with no Pipelines feature). For Bitbucket CLOUD, use
+// bitbucket-pipelines.yml instead (`create_template_repo(path, ci =
+// "bitbucket")` writes it).
+//
+// Lives at `Jenkinsfile` in the root of the repository that holds your
+// `*.dta-template.yaml` / `*.dta-dataset-template.yaml` / `*.dta-party.yaml`
+// / `*.dta-vocabulary.yaml` files.
+//
+// Unlike a GitHub Actions workflow, this file has no `on:` block -- Jenkins
+// does not read triggers from a Jenkinsfile. On Bitbucket Data Center, the
+// trigger is configured on the Jenkins job itself (the Bitbucket Server
+// webhook, or a Multibranch Pipeline scanning Bitbucket Server via the
+// Bitbucket Server Source plugin); a reader coming from GitHub Actions will
+// look for an `on:` block here and not find one.
+// -----------------------------------------------------------------------------
+
+pipeline {
+    // Runs inside a container with R already present, so the Jenkins host
+    // itself needs nothing but Docker. An organisation with a hardened build
+    // image should swap this `image` for their own rather than pulling from
+    // Docker Hub on every run.
+    agent {
+        docker { image 'rocker/r-ver:4.4' }
+    }
+
+    // Jenkins runs the container as its own uid, which cannot write to the
+    // image's site library, so packages go to a library of their own. It is
+    // set through R_LIBS, not R_LIBS_USER: rocker's Renviron.site puts the
+    // site library in R_LIBS unless R_LIBS is already set, and R searches
+    // R_LIBS first, so install.packages() would still pick the unwritable
+    // site library. It sits outside the workspace because an installed
+    // DTAtools carries template files of its own, which validate_template(".")
+    // would otherwise find below the repository root and report.
+    environment {
+        R_LIBS = '/tmp/R-library'
+    }
+
+    stages {
+        stage('Install dependencies') {
+            steps {
+                // R drops a library directory from its path if it does not exist.
+                sh 'mkdir -p "$R_LIBS"'
+
+                // `remotes` is only for the install examples below; DTAtools'
+                // own Imports come with DTAtools itself.
+                sh 'Rscript -e \'install.packages("remotes")\'' // skip if already baked into the image
+
+                /* -----------------------------------------------------------
+                 * PLACEHOLDER: install DTAtools from your internal package
+                 * repository. This is deliberately NOT filled in -- the
+                 * source (an internal Artifactory/RSPM mirror, a Bitbucket
+                 * Data Center remote via remotes::install_git(), or a
+                 * pre-built package baked into a custom build image) is
+                 * specific to your organisation. Replace the line below with
+                 * whichever of those applies. A couple of common shapes:
+                 *
+                 *   Rscript -e 'remotes::install_git("https://bitbucket.example.com/scm/proj/DTAtoolsR.git")'
+                 *   Rscript -e 'install.packages("DTAtools", repos = "https://internal-rspm.example.com")'
+                 * ----------------------------------------------------------- */
+                sh 'Rscript -e \'stop("Replace this step with an install of DTAtools from your internal package repository.")\''
+            }
+        }
+
+        stage('Validate templates') {
+            steps {
+                sh 'Rscript -e \'DTAtools::validate_template(".", strict = TRUE)\''
+            }
+        }
+    }
+}

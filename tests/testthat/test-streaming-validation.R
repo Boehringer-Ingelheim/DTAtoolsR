@@ -1110,7 +1110,7 @@ test_that("check() scans a lazy table held in a DTADataSetTabular", {
   on.exit(unlink(path), add = TRUE)
 
   ds <- DTADataSetTabular(
-    name = "lazy_demo",
+    id = "lazy_demo",
     specs = specs,
     tables = list(demo = arrow::as_arrow_table(frame))
   )
@@ -1138,7 +1138,7 @@ test_that("last_validation_details is usable however the table was held", {
   on.exit(unlink(path), add = TRUE)
 
   materialised <- DTADataSetTabular(
-    name = "eager", specs = specs,
+    id = "eager", specs = specs,
     tables = list(demo = arrow::as_arrow_table(frame))
   )
   # `tab =` is what puts check() in single-table mode; the attribute is only
@@ -1147,7 +1147,7 @@ test_that("last_validation_details is usable however the table was held", {
   materialised <- check(materialised, tab = "demo", quiet = TRUE)
 
   lazy <- DTADataSetTabular(
-    name = "lazy", specs = specs,
+    id = "lazy", specs = specs,
     tables = list(demo = arrow::as_arrow_table(frame))
   )
   lazy@tables[["demo"]] <- arrow::open_delim_dataset(path, delim = ",")
@@ -1168,7 +1168,7 @@ test_that("a lazy table is accepted by the tables property contract", {
     DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE)
   ))
   ds <- DTADataSetTabular(
-    name = "lazy_ok",
+    id = "lazy_ok",
     specs = specs,
     tables = list(demo = arrow::as_arrow_table(data.frame(ID = "A001")))
   )
@@ -1868,7 +1868,7 @@ test_that("import errors from both axes are counted once each, cap or no cap", {
   # bypassed it and could report more import errors than `import_errors` had
   # rows. Nothing else in the suite populates BOTH sinks at once, which is
   # exactly the combination that broke.
-  specs <- vc_specs(
+  specs <- vc_specs_unchecked(
     list(
       DTAColumnSpec(id = "NUMCOL", type = "SAS Num", nullable = TRUE),
       DTAColumnSpec(id = "TEXTCOL", type = "SAS Char", length = 8, nullable = TRUE)
@@ -1909,7 +1909,7 @@ test_that("the import-typing axis is reported on its own alongside the merged fr
   # produce. A streamed table has no such moment, so check() took the merged
   # frame instead and put a wider axis in the same property: the same file
   # showed one set of import issues loaded eagerly and another streamed.
-  specs <- vc_specs(
+  specs <- vc_specs_unchecked(
     list(
       DTAColumnSpec(id = "NUMCOL", type = "SAS Num", nullable = TRUE),
       DTAColumnSpec(id = "TEXTCOL", type = "SAS Char", length = 8, nullable = TRUE)
@@ -1972,7 +1972,7 @@ test_that("a file with no typing failures reports an EMPTY typing frame, not non
 test_that("rule-time import errors alone leave the typing axis empty", {
   # The axis a materialising load records at import time is the TYPING axis, and
   # a Char column a rule happens to compare numerically produces none of it.
-  specs <- vc_specs(
+  specs <- vc_specs_unchecked(
     list(
       DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
       DTAColumnSpec(id = "TXT", type = "SAS Char", length = 8, nullable = TRUE)
@@ -2730,6 +2730,66 @@ test_that("on_missing_column = 'stop' reaches the same verdict without scanning"
   )
 })
 
+test_that("a repeated column name is refused from the header, before the scan", {
+  # A table carrying one name twice is refused rather than validated (see
+  # test-columnspec-checks.R for why: it is undecidable, not invalid). WHERE it
+  # is refused is this test's subject. The refusal used to come from the
+  # structural gate below the batch loop, so a 60 GB source was scanned in full
+  # -- uniqueness precompute, spill files and all -- to reach a verdict its
+  # header had already settled. The names are in hand before the first batch,
+  # so that is where the question is now answered.
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+    DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = FALSE)
+  ))
+  repeated <- data.frame(
+    ID = c("A001", "A002"),
+    VAL = c(50, 60),
+    VAL = c(999, -999),
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+  # Arrow schemas permit a repeated field name, and report it: this is a real
+  # holding the package can be handed, not a data.frame-only curiosity.
+  expect_identical(
+    dta_table_column_names(arrow::as_arrow_table(repeated)),
+    c("ID", "VAL", "VAL")
+  )
+
+  # The lazy path. A reader is consumable, so whether it still holds its rows
+  # after the refusal is a direct reading of whether the scan ran -- the same
+  # instrument the column-names test above uses, for the same reason.
+  #
+  # Built without a Scanner, which `vs_reader()` would use: Acero resolves a
+  # projection by field NAME and refuses a name that matches twice
+  # ("Invalid: Multiple matches for FieldRef.Name(VAL)"). That refusal is the
+  # reason this guard is not redundant -- it arrives from the C++ engine, names
+  # no remedy, and on the paths that build a scanner it would arrive only after
+  # the source had been opened. The guard answers first, in the package's own
+  # words.
+  reader <- arrow::as_record_batch_reader(arrow::as_arrow_table(repeated))
+  expect_error(
+    dta_validate_any_table(specs, reader, verbose = FALSE),
+    "duplicate column name"
+  )
+  expect_false(is.null(reader$read_next_batch()))
+
+  # The materialising path refuses too, and from the names rather than after
+  # every per-column check has run against a column set it could not see past.
+  expect_error(
+    dta_validate_any_table(specs, repeated, verbose = FALSE),
+    "duplicate column name"
+  )
+
+  # Repetition alone is what is refused: the same specs and values under
+  # distinct names still reach a verdict, by either holding.
+  sound <- data.frame(ID = c("A001", "A002"), VAL = c(50, 60), stringsAsFactors = FALSE)
+  expect_true(dta_validate_any_table(specs, sound, verbose = FALSE)$ok)
+  expect_true(
+    dta_validate_any_table(specs, vs_reader(sound, batch_rows = 1L), verbose = FALSE)$ok
+  )
+})
+
 test_that("check() forwards on_missing_column to the structural gate", {
   specs <- vc_specs(list(
     DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
@@ -2739,7 +2799,7 @@ test_that("check() forwards on_missing_column to the structural gate", {
 
   build <- function() {
     DTADataSetTabular(
-      name = "gate", specs = specs,
+      id = "gate", specs = specs,
       tables = list(demo = arrow::as_arrow_table(frame))
     )
   }
@@ -2776,7 +2836,7 @@ test_that("check() forwards fail_fast and use_threads without changing defaults"
 
   build <- function() {
     ds <- DTADataSetTabular(
-      name = "ff", specs = specs,
+      id = "ff", specs = specs,
       tables = list(demo = arrow::as_arrow_table(frame))
     )
     ds@tables[["demo"]] <- arrow::open_delim_dataset(path, delim = ",")

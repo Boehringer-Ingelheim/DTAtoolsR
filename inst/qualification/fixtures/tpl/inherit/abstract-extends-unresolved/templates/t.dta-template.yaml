@@ -1,0 +1,5 @@
+kind: dta_creation_template
+id: aeu1
+version: "1.0"
+abstract: true
+extends: nonexistent_parent@1.0

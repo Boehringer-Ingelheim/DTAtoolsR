@@ -4,14 +4,17 @@
 #' markers with values extracted from a [DTA] object. Placeholders use a
 #' single-brace, upper-case convention (for example `{DTA_TITLE}` or
 #' `{SUPPLIER_NAME}`) and may appear in the document body, headers, footers and
-#' table cells.
+#' table cells. A `{#DATASETS}` ... `{/DATASETS}` region repeats a span of the
+#' document body once per dataset in `dta`.
 #'
 #' The template is treated as an Open Packaging Conventions (OPC) archive: it is
 #' unzipped, the WordprocessingML text of each paragraph is substituted at the
 #' XML level (which transparently escapes any special characters such as `&`,
-#' `<` and `>`), and the parts are repackaged into a new `.docx`. Because
-#' substitution operates on the concatenated text of a whole paragraph, it is
-#' robust to Word splitting a single placeholder across multiple runs.
+#' `<` and `>`), and the parts are repackaged into a new `.docx`. Placeholders
+#' are substituted run by run, which preserves each run's formatting. Only when
+#' Word has split a placeholder across several runs is the paragraph's text
+#' joined and written into its first run (the other runs are emptied, so
+#' that paragraph's per-run formatting is lost).
 #'
 #' @details
 #' The following placeholders are populated automatically from the DTA metadata
@@ -20,24 +23,76 @@
 #'
 #' \describe{
 #'   \item{Agreement}{`{DTA_TITLE}`, `{DTA_VERSION}`, `{DTA_DATE}`, `{DTA_HEADER}`}
+#'   \item{Document and organisation}{`{DOCUMENT_NAME}` (default "Data Transfer
+#'     Agreement"), `{DOCUMENT_ABBREVIATION}` (default "DTA"),
+#'     `{ORGANISATION_NAME}` and `{ORGANISATION_UNIT}` (empty by default). Called
+#'     directly, [export_with_template()] uses these defaults; [write_dta()]
+#'     fills them from its `document_name`, `document_abbreviation`,
+#'     `organisation` and `organisation_unit` arguments.}
+#'   \item{Study}{`{STUDY_ID}`, `{PROTOCOL_ID}`}
 #'   \item{Supplier}{`{SUPPLIER_NAME}`, `{SUPPLIER_COUNTRY}`, `{SUPPLIER_ADDRESS}`,
 #'     `{SUPPLIER_EMAIL}`, `{SUPPLIER_PHONE}`, `{SUPPLIER_CONTACTS}`}
 #'   \item{Receiver}{`{RECEIVER_NAME}`, `{RECEIVER_COUNTRY}`, `{RECEIVER_ADDRESS}`,
 #'     `{RECEIVER_EMAIL}`, `{RECEIVER_PHONE}`, `{RECEIVER_CONTACTS}`}
 #'   \item{Transmission}{`{TRANSMISSION_TYPE}`, `{TRANSMISSION_FREQUENCY}`,
 #'     `{TRANSMISSION_NOTIFICATION}`, `{TRANSMISSION_FIRST_TRANSFER}`,
-#'     `{TRANSMISSION_LAST_TRANSFER}`, `{TEST_UPLOAD}`, `{BLINDED_TRANSFER}`}
-#'   \item{Data content}{`{DATASET_COUNT}`, `{DATASET_NAMES}`, `{DATASET_TYPES}`,
-#'     `{TOTAL_COLUMNS}`, `{TOTAL_RULES}`}
+#'     `{TRANSMISSION_LAST_TRANSFER}`, `{TEST_UPLOAD}`, `{BLINDED_TRANSFER}`,
+#'     `{TRANSMISSION_EXTENT}`, `{TRANSMISSION_SCOPE}`, `{TRANSMISSION_PACKAGING}`,
+#'     `{TRANSMISSION_SECURITY}`, `{TRANSMISSION_CHECKSUM}`,
+#'     `{TRANSMISSION_TEST_REQUIREMENTS}`, `{TRANSMISSION_BLINDING_REQUIREMENTS}`}
+#'   \item{Data content}{`{DATASET_COUNT}`, `{DATASET_IDS}`, `{DATASET_NAMES}`
+#'     (each dataset's name, or its id where no name is set),
+#'     `{DATASET_TYPES}`, `{TOTAL_COLUMNS}`, `{TOTAL_RULES}`}
 #'   \item{Process}{`{ERROR_HANDLING}`, `{AUTHORIZED_CORRECTIONS}`,
 #'     `{SIGNATORIES}`, `{PROCESS_INFORMATION}`, `{VERSION_HISTORY}`,
 #'     `{GENERATED_DATE}`}
+#'   \item{Block placeholders}{`{COLUMN_SPECS}`, `{VALIDATION_RULES}`,
+#'     `{FILE_SPECS}`, `{DATASETS}` (each also takes a `:DATASET` argument, e.g.
+#'     `{COLUMN_SPECS:ADSL}`, to render one dataset instead of all of them),
+#'     `{SUPPLIER_CONTACTS_TABLE}`, `{RECEIVER_CONTACTS_TABLE}`,
+#'     `{SIGNATURES_TABLE}`, `{VERSION_HISTORY_TABLE}`, `{STUDY_TABLE}`,
+#'     `{AGREEMENT_SECTIONS}`,
+#'     `{AUTHORIZED_CORRECTIONS_LIST}`. Unlike the placeholders above, a block
+#'     placeholder is replaced by rendered Word content -- a table, a heading, a
+#'     list -- so it must be the only text in its paragraph, and only in the
+#'     document body (not a header, footer or table cell). A `variables` entry
+#'     of the same name still wins and renders as plain text instead.}
+#'   \item{Repeating regions}{A body paragraph whose whole text is
+#'     `{#DATASETS}` opens a region, repeated once per dataset in `dta`, that
+#'     ends at the next body paragraph whose whole text is `{/DATASETS}`; both
+#'     markers must be alone in their paragraph, and a region does not nest.
+#'     Inside each repetition, seven placeholders resolve to that dataset's
+#'     values: `{DATASET_ID}`, `{DATASET_NAME}` (its id where no name is set),
+#'     `{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`, `{DATASET_FILE_COUNT}`,
+#'     `{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}` (the last two are
+#'     `0` for a non-tabular dataset). A bare dataset block
+#'     (`{COLUMN_SPECS}`, `{VALIDATION_RULES}`, `{FILE_SPECS}`, `{DATASETS}`)
+#'     alone in a paragraph of the region is bound to the repetition's dataset
+#'     (a bare `{COLUMN_SPECS}` or `{VALIDATION_RULES}` renders nothing for a
+#'     non-tabular dataset) and rendered without its generated heading; an
+#'     explicit `{COLUMN_SPECS:NAME}` is left as written. A
+#'     malformed marker -- unclosed, unopened, or not alone in its paragraph
+#'     -- is left in place and reported alongside unrendered blocks. A dataset
+#'     value that happens to spell a *block* placeholder renders as the text it
+#'     is, not as that block. The same is not yet true of an *inline*
+#'     placeholder: a value spelling one is substituted again by the pass that
+#'     follows region expansion, so a dataset described as
+#'     `"Title is {DTA_TITLE}"` comes out with the title resolved. That is a
+#'     known defect (DEV-016 in `inst/qualification/deviations.yaml`), not a
+#'     documented behaviour to rely on -- the two passes are separated by a
+#'     write and a re-read of the document, and only a token's spelling
+#'     survives that, which identifies a block paragraph but not an inline
+#'     placeholder inside a sentence.}
 #' }
 #'
-#' Additional or overriding values can be supplied through `variables`; names may
-#' be given with or without the surrounding braces (`"DTA_TITLE"` and
-#' `"{DTA_TITLE}"` are equivalent). User-supplied values take precedence over the
-#' automatically extracted ones and may introduce entirely new placeholders.
+#' Additional or overriding values can be supplied through `variables`; names
+#' may be given with or without the surrounding braces (`"DTA_TITLE"` and
+#' `"{DTA_TITLE}"` are equivalent). User-supplied values take precedence over
+#' the automatically extracted ones and may introduce entirely new placeholders.
+#' Study and agreement sections appear only where their placeholders occur;
+#' user-owned templates are never extended automatically. The new blocks
+#' render nothing when the corresponding metadata is empty. Agreement sections
+#' preserve their stored order and paragraph breaks as plain text.
 #'
 #' @param dta A [DTA] object.
 #' @param template Character. Path to the template `.docx` file.
@@ -105,12 +160,12 @@ export_with_template <- function(
   }
 
   dta_vars <- .extract_template_variables(dta)
-  user_vars <- .normalize_template_variables(variables, dta = dta)
+  user_vars <- .normalize_template_variables(variables)
   all_vars <- utils::modifyList(dta_vars, user_vars)
 
   tryCatch(
     {
-      .replace_docx_placeholders(template, all_vars, output)
+      .replace_docx_placeholders(template, all_vars, output, dta = dta, quiet = quiet)
       if (!isTRUE(quiet)) {
         cli::cli_alert_success("Document exported with template to {.file {output}}")
       }
@@ -151,6 +206,12 @@ export_with_template <- function(
     "{DTA_VERSION}" = "Agreement version",
     "{DTA_DATE}" = "Agreement date (ISO 8601)",
     "{DTA_HEADER}" = "Document header line",
+    "{DOCUMENT_NAME}" = "Name of this kind of document (default: Data Transfer Agreement)",
+    "{DOCUMENT_ABBREVIATION}" = "Abbreviation of the document name (default: DTA)",
+    "{ORGANISATION_NAME}" = "Name of the organisation issuing the document (empty if not set)",
+    "{ORGANISATION_UNIT}" = "Unit within the organisation (empty if not set)",
+    "{STUDY_ID}" = "Study identifier",
+    "{PROTOCOL_ID}" = "Protocol identifier",
     "{SUPPLIER_NAME}" = "Supplier organisation name",
     "{SUPPLIER_COUNTRY}" = "Supplier country",
     "{SUPPLIER_ADDRESS}" = "Supplier address",
@@ -168,10 +229,18 @@ export_with_template <- function(
     "{TRANSMISSION_NOTIFICATION}" = "How a transfer is notified",
     "{TRANSMISSION_FIRST_TRANSFER}" = "Date or phrase for the first transfer",
     "{TRANSMISSION_LAST_TRANSFER}" = "Date or phrase for the last transfer",
-    "{TEST_UPLOAD}" = "Whether a test upload is required (Yes/No)",
-    "{BLINDED_TRANSFER}" = "Whether the transfer is blinded (Yes/No)",
+    "{TEST_UPLOAD}" = "Whether a test upload is required (Yes/No; blank if unspecified)",
+    "{BLINDED_TRANSFER}" = "Whether the transfer is blinded (Yes/No; blank if unspecified)",
+    "{TRANSMISSION_EXTENT}" = "Extent of the data transferred",
+    "{TRANSMISSION_SCOPE}" = "Scope of the transfer",
+    "{TRANSMISSION_PACKAGING}" = "How the transferred files are packaged",
+    "{TRANSMISSION_SECURITY}" = "Security measures for the transfer",
+    "{TRANSMISSION_CHECKSUM}" = "Checksum or integrity-check procedure",
+    "{TRANSMISSION_TEST_REQUIREMENTS}" = "Requirements a test transfer must meet",
+    "{TRANSMISSION_BLINDING_REQUIREMENTS}" = "Blinding requirements for the transfer",
     "{DATASET_COUNT}" = "Number of datasets",
-    "{DATASET_NAMES}" = "Names of all datasets",
+    "{DATASET_IDS}" = "Identifiers of all datasets",
+    "{DATASET_NAMES}" = "Names of all datasets (the identifier where no name is set)",
     "{DATASET_TYPES}" = "Types of all datasets",
     "{TOTAL_COLUMNS}" = "Total column count across tabular datasets",
     "{TOTAL_RULES}" = "Total validation-rule count across tabular datasets",
@@ -192,16 +261,34 @@ export_with_template <- function(
 #' `DTA`, what each one would currently expand to -- rather than exporting a
 #' document to find out, or reading the list out of the documentation by hand.
 #'
+#' A placeholder is one of four kinds. An **inline** placeholder resolves to a
+#' string substituted into a run of text, and may sit mid-sentence. A **block**
+#' replaces a whole paragraph with rendered Word content -- a table, a
+#' heading, a list -- so it must be the only text in its paragraph, in the
+#' document body. A **region** marker (`{#DATASETS}` / `{/DATASETS}`) opens
+#' and closes a span of the document body that is repeated once per dataset;
+#' each marker, too, must be alone in its own body paragraph. A **dataset**
+#' placeholder (such as `{DATASET_NAME}`) resolves inside a region, once per
+#' repetition, to a value of the dataset that repetition belongs to. All four
+#' kinds share one token grammar and are told apart by the `kind` attribute of
+#' the returned vector, not by the vector's type.
+#'
 #' @param dta Optional [DTA] object. When supplied, the returned values are the
-#'   resolved text for that object. When `NULL` (the default) they are short
-#'   descriptions of what each placeholder means.
+#'   resolved text for that object's inline placeholders; a block, region or
+#'   dataset entry has no text value of its own outside of a repetition, so it
+#'   keeps its description either way. When `NULL` (the default) every entry
+#'   is a short description of what the placeholder means.
 #'
 #' @return A named character vector whose names are the brace-delimited
 #'   placeholder tokens (`"{DTA_TITLE}"` and so on), in documentation order.
 #'   The values are \describe{
 #'     \item{descriptions}{when `dta` is `NULL`.}
-#'     \item{the resolved text}{when `dta` is a [DTA].}
+#'     \item{the resolved text}{when `dta` is a [DTA], for inline placeholders;
+#'       a block, region or dataset entry keeps its description either way.}
 #'   }
+#'   The returned vector also carries a `kind` attribute: a character vector,
+#'   named like the return value, of `"inline"`, `"block"`, `"region"` or
+#'   `"dataset"`.
 #'
 #' @seealso [export_with_template()], [write_dta()]
 #' @export
@@ -209,35 +296,57 @@ export_with_template <- function(
 #' # What can a template refer to?
 #' head(dta_template_placeholders())
 #'
+#' # A block placeholder's description, and how to tell it from an inline one.
+#' dta_template_placeholders()[["{COLUMN_SPECS}"]]
+#' attr(dta_template_placeholders(), "kind")[["{COLUMN_SPECS}"]]
+#'
+#' # The placeholders usable inside a {#DATASETS} repeating region.
+#' dta_template_placeholders()[attr(dta_template_placeholders(), "kind") == "dataset"]
+#'
 #' # What would those become for a real DTA?
 #' dta <- read_dta_from_yaml(
 #'   system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 #' )
 #' dta_template_placeholders(dta)[c("{DTA_TITLE}", "{SUPPLIER_NAME}")]
 dta_template_placeholders <- function(dta = NULL) {
-  catalog <- .tv_placeholder_catalog()
+  inline <- .tv_placeholder_catalog()
+  block <- .tv_block_catalog()
+  region <- .tv_region_catalog()
+  dataset <- .tv_dataset_catalog()
+  kinds <- c(
+    rep("inline", length(inline)),
+    rep("block", length(block)),
+    rep("region", length(region)),
+    rep("dataset", length(dataset))
+  )
+
   if (is.null(dta)) {
-    return(catalog)
-  }
-  if (!inherits(dta, "DTAtools::DTA")) {
-    cli::cli_abort("{.arg dta} must be a DTA object or {.code NULL}.")
-  }
-  vars <- .extract_template_variables(dta)
-  vapply(
-    names(catalog),
-    function(k) {
+    out <- c(inline, block, region, dataset)
+  } else {
+    if (!inherits(dta, "DTAtools::DTA")) {
+      cli::cli_abort("{.arg dta} must be a DTA object or {.code NULL}.")
+    }
+    vars <- .extract_template_variables(dta)
+    resolved <- vapply(names(inline), function(k) {
       v <- vars[[k]]
       if (is.null(v) || length(v) == 0) "" else as.character(v)[[1]]
-    },
-    character(1)
-  )
+    }, character(1))
+    # A block, region marker or dataset placeholder has no text value of its
+    # own to report outside of a repetition: it expands to document content
+    # (block), delimits one (region), or resolves per repetition (dataset), so
+    # its description is the only thing there is to report either way.
+    out <- c(resolved, block, region, dataset)
+  }
+  attr(out, "kind") <- stats::setNames(kinds, names(out))
+  out
 }
 
 
 #' Extract template placeholder values from a DTA object
 #'
 #' Builds the named list of `{PLACEHOLDER}` values consumed by
-#' [export_with_template()]. All values are single-line character scalars.
+#' [export_with_template()]. All values are character scalars; stored line
+#' breaks are retained.
 #'
 #' @param dta A [DTA] object.
 #' @return A named list keyed by brace-delimited placeholder tokens.
@@ -279,11 +388,8 @@ dta_template_placeholders <- function(dta = NULL) {
   auth <- .format_authorized_for_corrections_lines(meta@authorized_for_corrections)
   auth_str <- if (length(auth) > 0) paste(auth, collapse = ", ") else ""
 
-  dataset_names <- if (length(datasets) > 0) {
-    paste(names(datasets), collapse = ", ")
-  } else {
-    ""
-  }
+  dataset_ids <- paste(names(datasets), collapse = ", ")
+  dataset_names <- paste(vapply(datasets, dta_dataset_label, character(1)), collapse = ", ")
   dataset_types <- if (length(datasets) > 0) {
     paste(vapply(datasets, function(ds) ds@type, character(1)), collapse = ", ")
   } else {
@@ -295,6 +401,12 @@ dta_template_placeholders <- function(dta = NULL) {
     "{DTA_VERSION}" = .tv_scalar(meta@version),
     "{DTA_DATE}" = .tv_scalar(meta@date),
     "{DTA_HEADER}" = .tv_scalar(meta@header),
+    "{DOCUMENT_NAME}" = .export_document_name(),
+    "{DOCUMENT_ABBREVIATION}" = .export_ctx$document_abbreviation %||% "DTA",
+    "{ORGANISATION_NAME}" = .export_ctx$organisation %||% "",
+    "{ORGANISATION_UNIT}" = .export_ctx$organisation_unit %||% "",
+    "{STUDY_ID}" = .tv_scalar(meta@study$id),
+    "{PROTOCOL_ID}" = .tv_scalar(meta@study$protocol_id),
     "{SUPPLIER_NAME}" = .tv_scalar(.tv_get(supplier, "affiliation", "name")),
     "{SUPPLIER_COUNTRY}" = .tv_scalar(.tv_get(supplier, "affiliation", "country")),
     "{SUPPLIER_ADDRESS}" = .tv_scalar(.tv_get(supplier, "affiliation", "address")),
@@ -312,9 +424,17 @@ dta_template_placeholders <- function(dta = NULL) {
     "{TRANSMISSION_NOTIFICATION}" = .tv_scalar(.tv_get(trans, "notification")),
     "{TRANSMISSION_FIRST_TRANSFER}" = .tv_scalar(.tv_get(trans, "date_first_transfer")),
     "{TRANSMISSION_LAST_TRANSFER}" = .tv_scalar(.tv_get(trans, "date_last_transfer")),
-    "{TEST_UPLOAD}" = if (isTRUE(.tv_get(trans, "test_upload"))) "Yes" else "No",
-    "{BLINDED_TRANSFER}" = if (isTRUE(.tv_get(trans, "blinded_transfer"))) "Yes" else "No",
+    "{TEST_UPLOAD}" = .tv_scalar(.tv_get(trans, "test_upload")),
+    "{BLINDED_TRANSFER}" = .tv_scalar(.tv_get(trans, "blinded_transfer")),
+    "{TRANSMISSION_EXTENT}" = .tv_scalar(.tv_get(trans, "extent")),
+    "{TRANSMISSION_SCOPE}" = .tv_scalar(.tv_get(trans, "scope")),
+    "{TRANSMISSION_PACKAGING}" = .tv_scalar(.tv_get(trans, "packaging")),
+    "{TRANSMISSION_SECURITY}" = .tv_scalar(.tv_get(trans, "security")),
+    "{TRANSMISSION_CHECKSUM}" = .tv_scalar(.tv_get(trans, "checksum")),
+    "{TRANSMISSION_TEST_REQUIREMENTS}" = .tv_scalar(.tv_get(trans, "test_requirements")),
+    "{TRANSMISSION_BLINDING_REQUIREMENTS}" = .tv_scalar(.tv_get(trans, "blinding_requirements")),
     "{DATASET_COUNT}" = as.character(length(datasets)),
+    "{DATASET_IDS}" = dataset_ids,
     "{DATASET_NAMES}" = dataset_names,
     "{DATASET_TYPES}" = dataset_types,
     "{TOTAL_COLUMNS}" = as.character(total_columns),
@@ -329,10 +449,11 @@ dta_template_placeholders <- function(dta = NULL) {
 }
 
 
-#' Coerce a metadata value to a single-line display string
+#' Coerce a metadata value to a scalar display string
 #'
 #' Dates render in ISO 8601 (`YYYY-MM-DD`) so a template filled on a German
 #' workstation and one filled on an English CI runner produce identical text.
+#' Only explicit logical TRUE/FALSE values render Yes/No; NA stays unspecified.
 #' @keywords internal
 .tv_scalar <- function(x, default = "") {
   if (is.null(x) || length(x) == 0) {
@@ -343,7 +464,7 @@ dta_template_placeholders <- function(dta = NULL) {
     return(if (nzchar(out)) out else default)
   }
   if (is.logical(x)) {
-    return(if (isTRUE(x)) "Yes" else "No")
+    return(if (isTRUE(x)) "Yes" else if (isFALSE(x)) "No" else default)
   }
   x <- as.character(x)
   x <- x[!is.na(x) & nzchar(x)]
@@ -382,25 +503,6 @@ dta_template_placeholders <- function(dta = NULL) {
     return(NULL)
   }
   first[[field]]
-}
-
-
-#' Join the names of all contacts of an organization list
-#' @keywords internal
-.tv_contact_names <- function(org) {
-  contacts <- .tv_get(org, "contacts")
-  if (is.null(contacts) || length(contacts) == 0) {
-    return("")
-  }
-  nms <- vapply(
-    contacts,
-    function(ct) {
-      if (is.list(ct) && !is.null(ct$name)) as.character(ct$name)[1] else ""
-    },
-    character(1)
-  )
-  nms <- nms[nzchar(nms)]
-  paste(nms, collapse = ", ")
 }
 
 
@@ -486,6 +588,16 @@ dta_template_placeholders <- function(dta = NULL) {
     if (!is.null(trans$date_last_transfer) && nzchar(as.character(trans$date_last_transfer))) {
       lines <- c(lines, paste0("  - Last transfer: ", as.character(trans$date_last_transfer)))
     }
+    extra_fields <- setdiff(
+      names(trans),
+      c("type", "frequency", "notification", "date_first_transfer", "date_last_transfer")
+    )
+    for (key in extra_fields) {
+      value <- .tv_scalar(trans[[key]])
+      if (nzchar(value)) {
+        lines <- c(lines, paste0("  - ", .title_case_field(key), ": ", value))
+      }
+    }
   }
   if (!is.null(meta@error_handling) && nzchar(as.character(meta@error_handling))) {
     lines <- c(lines, "- Error handling", paste0("  - ", as.character(meta@error_handling)))
@@ -525,7 +637,7 @@ dta_template_placeholders <- function(dta = NULL) {
 
 #' Normalize a user-supplied variable list to brace-delimited character values
 #' @keywords internal
-.normalize_template_variables <- function(variables, dta = NULL) {
+.normalize_template_variables <- function(variables) {
   if (is.null(variables) || length(variables) == 0) {
     return(list())
   }
@@ -538,7 +650,6 @@ dta_template_placeholders <- function(dta = NULL) {
   vals <- lapply(seq_along(variables), function(i) {
     .tv_template_value(
       variables[[i]],
-      dta = dta,
       markdown_cleanup = !.tv_needs_yaml_style(keys[[i]])
     )
   })
@@ -551,7 +662,7 @@ dta_template_placeholders <- function(dta = NULL) {
 #' Unlike [.tv_scalar()], this keeps caller-provided line breaks and tabs so a
 #' custom placeholder can intentionally render as a multi-line block.
 #' @keywords internal
-.tv_template_value <- function(x, default = "", markdown_cleanup = TRUE, dta = NULL) {
+.tv_template_value <- function(x, default = "", markdown_cleanup = TRUE) {
   if (is.null(x) || length(x) == 0) {
     return(default)
   }
@@ -560,7 +671,7 @@ dta_template_placeholders <- function(dta = NULL) {
     return(if (nzchar(out)) out else default)
   }
   if (is.logical(x)) {
-    return(if (isTRUE(x)) "Yes" else "No")
+    return(.tv_scalar(x, default = default))
   }
   vals <- as.character(x)
   vals <- vals[!is.na(vals)]
@@ -572,7 +683,7 @@ dta_template_placeholders <- function(dta = NULL) {
   if (isTRUE(markdown_cleanup)) {
     vals <- vapply(
       vals,
-      function(v) .tv_template_markdown_to_text(v, dta = dta),
+      function(v) .tv_template_markdown_to_text(v),
       character(1)
     )
   }
@@ -588,7 +699,7 @@ dta_template_placeholders <- function(dta = NULL) {
 #' Template placeholders are inserted as Word text runs, not a markdown parser.
 #' Strip common markdown markers so headings/bold/lists do not render literally.
 #' @keywords internal
-.tv_template_markdown_to_text <- function(text, dta = NULL) {
+.tv_template_markdown_to_text <- function(text) {
   if (!.tv_looks_markdown(text)) {
     return(text)
   }
@@ -597,7 +708,6 @@ dta_template_placeholders <- function(dta = NULL) {
     lines,
     function(ln) {
       x <- gsub("^\\s{0,3}#{1,6}\\s+", "", ln, perl = TRUE)
-      x <- .tv_reformat_dataset_bullet(x, dta = dta)
       x <- .tv_markdown_bullet_to_word_bullet(x)
       x <- gsub("\\*\\*([^*]+)\\*\\*", "\\1", x, perl = TRUE)
       x <- gsub("`([^`]+)`", "\\1", x, perl = TRUE)
@@ -655,295 +765,24 @@ dta_template_placeholders <- function(dta = NULL) {
 }
 
 
-#' Expand dense dataset/rule bullets into a readable multiline block
-#' @keywords internal
-.tv_reformat_dataset_bullet <- function(line, dta = NULL) {
-  body <- sub("^\\s*[-*+]\\s+", "", line, perl = TRUE)
-  m <- regexec("^\\*\\*([^*]+)\\*\\*(.*)$", body, perl = TRUE)
-  hits <- regmatches(body, m)[[1]]
-  if (length(hits) == 0) {
-    return(line)
-  }
-  if (length(hits) < 3) {
-    return(line)
-  }
-
-  name <- sub(":\\s*$", "", trimws(hits[[2]]))
-  tail <- trimws(hits[[3]])
-  meta <- ""
-  if (grepl("^\\[[^\\]]+\\]", tail, perl = TRUE)) {
-    meta <- regmatches(tail, regexec("^(\\[[^\\]]+\\])", tail, perl = TRUE))[[1]][[2]]
-    tail <- trimws(sub("^\\[[^\\]]+\\]", "", tail, perl = TRUE))
-  }
-  detail <- sub("^:\\s*", "", tail, perl = TRUE)
-  if (length(detail) == 0) {
-    return(line)
-  }
-
-  vals <- strsplit(detail, "\\|\\s*values\\s*:", perl = TRUE)[[1]]
-  if (length(vals) == 0) {
-    return(line)
-  }
-  desc <- trimws(vals[[1]])
-  values <- if (length(vals) > 1) trimws(paste(vals[-1], collapse = "| values: ")) else ""
-
-  header <- paste0("- ", name)
-  extra <- character(0)
-  if (nzchar(meta)) {
-    if (nzchar(desc)) {
-      extra <- c(extra, paste0("  - Description: ", desc))
-    }
-    meta_info <- .tv_parse_column_meta(meta)
-    if (nzchar(meta_info$type)) {
-      extra <- c(extra, paste0("  - Type: ", meta_info$type))
-    }
-    if (nzchar(meta_info$nullable)) {
-      extra <- c(extra, paste0("  - Nullable: ", meta_info$nullable))
-    }
-    if (nzchar(meta_info$length)) {
-      extra <- c(extra, paste0("  - Length: ", meta_info$length))
-    }
-    if (nzchar(values)) {
-      value_items <- trimws(unlist(strsplit(values, ",", fixed = TRUE)))
-      value_items <- value_items[nzchar(value_items)]
-      if (length(value_items) > 0) {
-        extra <- c(extra, "  - Values:")
-        extra <- c(extra, paste0("    - ", value_items))
-      } else {
-        extra <- c(extra, paste0("  - Values: ", values))
-      }
-    }
-    return(paste(c(header, extra), collapse = "\n"))
-  }
-
-  if (.tv_is_group_condition_summary(desc)) {
-    extra <- .tv_expand_group_condition_summary(desc, dta = dta, rule_id = name)
-  } else if (nzchar(desc)) {
-    extra <- c(extra, paste0("  - ", desc))
-  }
-
-  paste(c(header, extra), collapse = "\n")
-}
-
-
-#' Parse the bracket metadata of a column bullet into named fields
-#' @keywords internal
-.tv_parse_column_meta <- function(meta) {
-  raw <- gsub("^\\[|\\]$", "", trimws(meta))
-  parts <- trimws(unlist(strsplit(raw, ",", fixed = TRUE)))
-  parts <- parts[nzchar(parts)]
-
-  out <- list(type = "", nullable = "", length = "")
-  if (length(parts) == 0) {
-    return(out)
-  }
-
-  is_nullable <- grepl("^(nullable|not null)$", parts, ignore.case = TRUE)
-  is_length <- grepl("^length\\s+", parts, ignore.case = TRUE)
-  type_parts <- parts[!(is_nullable | is_length)]
-  if (length(type_parts) > 0) {
-    out$type <- paste(type_parts, collapse = ", ")
-  }
-
-  nullable_part <- parts[is_nullable]
-  if (length(nullable_part) > 0) {
-    tok <- tolower(nullable_part[[1]])
-    out$nullable <- if (identical(tok, "not null")) "no" else "yes"
-  }
-
-  length_part <- parts[is_length]
-  if (length(length_part) > 0) {
-    out$length <- trimws(sub("^length\\s+", "", length_part[[1]], ignore.case = TRUE))
-  }
-
-  out
-}
-
-
-#' Does a rule description look like group_condition summary output?
-#' @keywords internal
-.tv_is_group_condition_summary <- function(text) {
-  grepl("^group\\([^\\)]+\\):\\s*[0-9]+\\s*condition\\(s\\),\\s*[0-9]+\\s*constraint\\(s\\)", text)
-}
-
-
-#' Expand group_condition summary into a clearer premise-oriented outline
-#' @keywords internal
-.tv_expand_group_condition_summary <- function(text, dta = NULL, rule_id = "") {
-  m <- regexec(
-    "^group\\(([^\\)]+)\\):\\s*([0-9]+)\\s*condition\\(s\\),\\s*([0-9]+)\\s*constraint\\(s\\)\\s*[\u2014-]?\\s*(.*)$",
-    text,
-    perl = TRUE
-  )
-  hits <- regmatches(text, m)[[1]]
-  if (length(hits) == 0) {
-    return(paste0("  - ", text))
-  }
-
-  group_by <- trimws(hits[[2]])
-  n_cond <- trimws(hits[[3]])
-  n_constr <- trimws(hits[[4]])
-  note <- trimws(hits[[5]])
-
-  out <- c(
-    paste0("  - Grouped by: ", group_by),
-    "  - Conditions:",
-    "    - See detailed condition definitions below.",
-    "  - Constraints:",
-    "    - See detailed constraint definitions below.",
-    "  - Premise:",
-    paste0("    - Rows are grouped by ", group_by, "."),
-    "    - Condition checks are evaluated within each group.",
-    "    - The listed constraints must hold for the same grouped rows."
-  )
-  if (nzchar(note)) {
-    out <- c(out, paste0("  - Context: ", note))
-  }
-  detailed <- .tv_expand_group_condition_from_dta(dta, rule_id)
-  if (length(detailed) > 0) {
-    out <- c(out, detailed)
-  }
-  out
-}
-
-
-#' Build detailed group_condition rule breakdown from the DTA rule object
-#' @keywords internal
-.tv_expand_group_condition_from_dta <- function(dta, rule_id) {
-  if (is.null(dta) || !inherits(dta, "DTAtools::DTA") || !nzchar(rule_id)) {
-    return(character(0))
-  }
-  rule <- .tv_find_group_rule(dta, rule_id)
-  if (is.null(rule)) {
-    return(character(0))
-  }
-
-  out <- "  - Detailed rule definition:"
-
-  conds <- rule@conditions
-  out <- c(out, "    - Conditions:")
-  for (nm in names(conds)) {
-    out <- c(out, paste0("      - ", nm, ": ", .tv_condition_to_text(conds[[nm]])))
-  }
-
-  csts <- rule@constraints
-  out <- c(out, "    - Constraints:")
-  for (cst in csts) {
-    out <- c(out, paste0("      - ", .tv_constraint_to_text(cst)))
-  }
-
-  out
-}
-
-
-#' Find a group_condition rule object by id within a DTA
-#' @keywords internal
-.tv_find_group_rule <- function(dta, rule_id) {
-  for (ds in dta@datasets) {
-    if (!inherits(ds, "DTAtools::DTADataSetTabular")) {
-      next
-    }
-    rules <- ds@specs@rules
-    if (is.null(rules) || length(rules) == 0) {
-      next
-    }
-    for (r in rules) {
-      if (is.null(r)) {
-        next
-      }
-      rid <- tryCatch(as.character(r@id), error = function(e) "")
-      rtype <- tryCatch(as.character(r@type), error = function(e) "")
-      if (identical(rid, rule_id) && rtype %in% c("check_group_condition", "group_condition")) {
-        return(r)
-      }
-    }
-  }
-  NULL
-}
-
-
-#' Render one named condition map to plain text
-#' @keywords internal
-.tv_condition_to_text <- function(cond) {
-  if (is.null(cond) || !is.list(cond) || length(cond) == 0) {
-    return("no condition details")
-  }
-  col_parts <- vapply(
-    names(cond),
-    function(col) {
-      checks <- cond[[col]]
-      if (!is.list(checks) || length(checks) == 0) {
-        return(col)
-      }
-      check_parts <- vapply(
-        names(checks),
-        function(op) {
-          val <- checks[[op]]
-          val_txt <- if (length(val) > 1) {
-            paste(as.character(val), collapse = ", ")
-          } else {
-            as.character(val)[[1]]
-          }
-          paste(col, op, val_txt)
-        },
-        character(1)
-      )
-      paste(check_parts, collapse = " AND ")
-    },
-    character(1)
-  )
-  paste(col_parts, collapse = " AND ")
-}
-
-
-#' Render one group_condition constraint to plain text
-#' @keywords internal
-.tv_constraint_to_text <- function(cst) {
-  if (!is.list(cst) || is.null(cst$type)) {
-    return("unknown constraint")
-  }
-  ctype <- as.character(cst$type)
-  if (identical(ctype, "mutually_exclusive")) {
-    left <- cst$left %||% "?"
-    right <- cst$right %||% "?"
-    ls <- cst$left_scope %||% "any"
-    rs <- cst$right_scope %||% "any"
-    core <- paste0(
-      "mutually_exclusive: ", left, " (scope=", ls, ") and ",
-      right, " (scope=", rs, ") must not both hold"
-    )
-  } else if (identical(ctype, "requires")) {
-    ifn <- cst[["if"]] %||% "?"
-    thn <- cst[["then"]] %||% "?"
-    ifs <- cst$if_scope %||% "any"
-    ths <- cst$then_scope %||% "any"
-    core <- paste0(
-      "requires: if ", ifn, " (scope=", ifs, ") then ",
-      thn, " (scope=", ths, ")"
-    )
-  } else {
-    core <- paste0("constraint type ", ctype)
-  }
-  if (!is.null(cst$message) && nzchar(cst$message)) {
-    paste0(core, " \u2014 ", cst$message)
-  } else {
-    core
-  }
-}
-
-
 #' Replace placeholders in a DOCX template and write a new DOCX
 #'
 #' Unzips `template_path`, substitutes placeholders in the main document part and
-#' any header/footer parts, repackages the archive to `output_path`, and verifies
-#' the result opens as a valid DOCX.
+#' any header/footer parts, repackages the archive, verifies the result opens
+#' as a valid DOCX, and only then moves it to `output_path` (via
+#' [.dta_write_staged()]) -- any file already at `output_path` is left
+#' untouched until that last step succeeds.
 #'
 #' @param template_path Character. Path to the template `.docx`.
 #' @param variables Named list of brace-delimited placeholder values.
+#' @param dta A [DTA] object, passed through to [.tv_render_blocks()] so a block
+#'   placeholder left alone by the substitution above can be rendered.
 #' @param output_path Character. Path to the `.docx` to create.
+#' @param quiet Logical. Suppress the warning about block placeholders left
+#'   unchanged. Default `FALSE`.
 #' @return Invisibly returns `output_path`.
 #' @keywords internal
-.replace_docx_placeholders <- function(template_path, variables, output_path) {
+.replace_docx_placeholders <- function(template_path, variables, dta, output_path, quiet = FALSE) {
   # No requireNamespace() guards here: xml2, zip and officer are all hard
   # Imports, so they cannot be missing at this point.
   out_dir <- dirname(output_path)
@@ -983,11 +822,35 @@ dta_template_placeholders <- function(dta = NULL) {
     cli::cli_abort("Template does not contain a Word document part ({.file word/document.xml}).")
   }
 
+  # Pass 0 expands repeating regions and binds any bare dataset block inside
+  # them to its dataset BEFORE pass 1 stamps the template's own (non-region)
+  # block placeholders -- a region multiplies and deletes body paragraphs, so
+  # it must run first, and it stamps the blocks it binds with its own sentinel
+  # family so pass 1 can never re-stamp (or orphan) one of them.
+  #
+  # Pass 1 must act on the paragraphs that carried a block placeholder in the
+  # *template*, and after substitution those are no longer identifiable by text:
+  # a DTA whose title is the literal string "{COLUMN_SPECS}" would otherwise
+  # have its title paragraph replaced by a table.
+  nonce <- .tv_block_nonce()
+  region_blocks <- character(0)
+  blocks <- character(0)
+  if (file.exists(main)) {
+    regions <- .tv_expand_regions(main, dta, nonce, variables)
+    region_blocks <- regions$blocks
+    blocks <- .tv_mark_block_paragraphs(main, nonce, variables)
+  }
+
   unresolved <- character(0)
   for (part in parts) {
     unresolved <- c(unresolved, .replace_placeholders_in_xml(part, variables))
   }
   unresolved <- unique(unresolved)
+  # Pass 0 wrote the braces of every dataset value as stand-ins so neither
+  # pass above could read a value as a placeholder; both have run now.
+  if (file.exists(main)) {
+    .tv_restore_braces_in_xml(main)
+  }
   if (length(unresolved) > 0) {
     # Double braces so cli/glue renders the tokens literally instead of trying
     # to interpolate e.g. `{NOT_A_FIELD}` as an R expression.
@@ -999,41 +862,63 @@ dta_template_placeholders <- function(dta = NULL) {
     ))
   }
 
-  .zip_docx_dir(temp_dir, output_path)
-
-  valid <- tryCatch(
-    {
-      officer::read_docx(output_path)
-      TRUE
+  # Zipped, rendered and validated on a staging file beside output_path, and
+  # moved into place only once that staging file is a valid DOCX -- a failure
+  # at any of those three steps (a bad block placeholder, a render error, a
+  # corrupt archive) must never touch whatever was already at output_path.
+  .dta_write_staged(
+    output_path,
+    write = function(stage) {
+      .zip_docx_dir(temp_dir, stage)
+      .tv_render_blocks(
+        stage,
+        dta = dta,
+        blocks = c(region_blocks, blocks),
+        quiet = quiet,
+        bare = names(region_blocks)
+      )
+      invisible(NULL)
     },
-    error = function(e) FALSE
+    check = function(stage) {
+      valid <- tryCatch(
+        {
+          officer::read_docx(stage)
+          TRUE
+        },
+        error = function(e) FALSE
+      )
+      if (!isTRUE(valid)) {
+        cli::cli_abort("The generated document is not a valid DOCX: {.file {output_path}}")
+      }
+    }
   )
-  if (!isTRUE(valid)) {
-    cli::cli_abort("The generated document is not a valid DOCX: {.file {output_path}}")
-  }
 
   invisible(output_path)
 }
 
 
-#' Substitute placeholders within a single WordprocessingML XML part
+#' Substitute placeholders across a set of paragraph nodes
 #'
-#' Operates paragraph by paragraph. Within each paragraph the text of all runs is
-#' concatenated before substitution so that placeholders split across runs are
-#' still matched; the replacement text is written to the first run and the
-#' remaining runs of that paragraph are blanked. Setting text through `xml2`
-#' escapes XML special characters automatically.
+#' The paragraph-by-paragraph substitution loop shared by
+#' [.replace_placeholders_in_xml()] (given every paragraph of a whole document
+#' part) and [.tv_expand_regions()] (given only the paragraphs of one
+#' freshly-copied region repetition). Mutates `paras` in place -- xml2 nodes
+#' are external pointers into their owning document -- so the caller is
+#' responsible for writing the owning document back to disk; this function's
+#' return value is only the leftover report.
 #'
-#' @param xml_path Character. Path to the XML part to modify in place.
+#' Within each paragraph, placeholders that lie inside a single run are
+#' substituted run by run, leaving each run's formatting untouched. Only if a
+#' placeholder spans runs (see `.tv_spans_runs()`) is the text of all runs
+#' joined, substituted, and written to the first run, with the remaining runs
+#' of that paragraph blanked. Setting text through `xml2` escapes XML special
+#' characters automatically.
+#'
+#' @param paras An `xml_nodeset` of `<w:p>` paragraph nodes to substitute into.
 #' @param variables Named list of brace-delimited placeholder values.
-#' @return Character vector of unresolved placeholder tokens found in the part.
+#' @return Character vector of unique unresolved placeholder tokens found.
 #' @keywords internal
-.replace_placeholders_in_xml <- function(xml_path, variables) {
-  doc <- xml2::read_xml(xml_path)
-
-  # Namespace-agnostic XPath: match by local element name so we do not depend on
-  # the 'w' prefix being declared in a particular way.
-  paras <- xml2::xml_find_all(doc, ".//*[local-name()='p']")
+.tv_substitute_paragraphs <- function(paras, variables) {
   unresolved <- character(0)
 
   for (p in paras) {
@@ -1087,8 +972,29 @@ dta_template_placeholders <- function(dta = NULL) {
     }
   }
 
-  xml2::write_xml(doc, xml_path)
   unique(unresolved)
+}
+
+
+#' Substitute placeholders within a single WordprocessingML XML part
+#'
+#' Reads `xml_path`, delegates the actual substitution to
+#' [.tv_substitute_paragraphs()], then writes the result back.
+#'
+#' @param xml_path Character. Path to the XML part to modify in place.
+#' @param variables Named list of brace-delimited placeholder values.
+#' @return Character vector of unresolved placeholder tokens found in the part.
+#' @keywords internal
+.replace_placeholders_in_xml <- function(xml_path, variables) {
+  doc <- xml2::read_xml(xml_path)
+
+  # Namespace-agnostic XPath: match by local element name so we do not depend on
+  # the 'w' prefix being declared in a particular way.
+  paras <- xml2::xml_find_all(doc, ".//*[local-name()='p']")
+  unresolved <- .tv_substitute_paragraphs(paras, variables)
+
+  xml2::write_xml(doc, xml_path)
+  unresolved
 }
 
 
@@ -1100,8 +1006,27 @@ dta_template_placeholders <- function(dta = NULL) {
 #' `[A-Z][A-Z0-9_]*`, so a mixed-case token such as `{customField}` was left
 #' untouched *and* never reported, silently breaking the documented warning
 #' contract.
+#'
+#' The optional `:ARG` tail (e.g. `{COLUMN_SPECS:ADSL}`) lets a block
+#' placeholder name the one dataset it should render; inline placeholders never
+#' use it. The tail is `*` rather than `+` so that an empty argument --
+#' `{COLUMN_SPECS:}`, the shape a deleted dataset name leaves behind -- is still
+#' token-shaped. With `+` it matched nothing at all, so it was neither
+#' substituted, nor rendered, nor reported: the one outcome this grammar exists
+#' to prevent.
+#'
+#' The optional leading `#`/`/` makes a region marker (`{#DATASETS}` /
+#' `{/DATASETS}`) token-shaped too, for the same reason: a malformed one --
+#' unclosed, unopened, or not alone in its paragraph -- must be reported by the
+#' leftover scan rather than silently left out of the grammar altogether. The
+#' prefix is deliberately not restricted to the known marker names: any
+#' `{#word}` or `{/word}` a template contains is token-shaped, so one that is
+#' neither a marker nor a value -- a mistyped `{#DATASET}`, say -- is named by
+#' the unresolved-placeholder warning exactly as `{customField}` is, instead of
+#' surviving unreported into a signed document. Before regions existed such
+#' text was silently left alone.
 #' @keywords internal
-.tv_token_pattern <- function() "\\{[A-Za-z_][A-Za-z0-9_]*\\}"
+.tv_token_pattern <- function() "\\{[#/]?[A-Za-z_][A-Za-z0-9_]*(?::[^{}]*)?\\}"
 
 
 #' Is there anything in this text that could possibly be substituted?
@@ -1225,6 +1150,12 @@ dta_template_placeholders <- function(dta = NULL) {
 #' come first so that an exact variable name wins over the generic grammar, and
 #' so that keys which do not fit the grammar still match.
 #'
+#' A block placeholder (see [.tv_is_block_token()]) or a region marker (see
+#' [.tv_is_region_marker()]) is a third case: absent a `variables` entry it
+#' passes through unchanged like an unresolved token, but it is not counted as
+#' unresolved, because the block-rendering pass that runs after this one fills
+#' in a block, and reports a leftover region marker itself.
+#'
 #' @param text Character scalar to substitute into.
 #' @param variables Named list of brace-delimited placeholder values.
 #' @return A list with `text` (the substituted string) and `unresolved` (unique
@@ -1258,6 +1189,10 @@ dta_template_placeholders <- function(dta = NULL) {
       value <- variables[[token]]
       out <- c(out, if (length(value) == 0) "" else as.character(value)[[1]])
       replaced_keys <- c(replaced_keys, token)
+    } else if (.tv_is_block_token(token) || .tv_is_region_marker(token)) {
+      # Left for the block pass, which needs the paragraph intact. Not
+      # unresolved: a value for it exists, it is just not a string.
+      out <- c(out, token)
     } else {
       out <- c(out, token)
       unresolved <- c(unresolved, token)

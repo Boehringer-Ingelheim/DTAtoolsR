@@ -183,3 +183,87 @@ test_that("DTAColumnSpecStructureFactory validates backend prefixes", {
   )
   expect_false(inherits(err, "rlang_error"))
 })
+
+# ---- schema derivation for a column with no @structure ----------------------
+#
+# A DTAColumnSpec declared with only `values`/`pattern`/`nullable` -- no
+# `type`, `format` or `length` -- has `@structure = NULL`. Before this fix,
+# `as_json_schema_type(x@structure)` had no method for `NULL` and aborted;
+# `as_json_schema()` caught that in R/columnSpecChecks.R and silently skipped
+# the column's value checks entirely (see test-columnspec-checks.R for the
+# end-to-end behaviour that pinned).
+
+test_that("as_json_schema_type() on a typeless spec accepts every base type", {
+  spec <- DTAColumnSpec(id = "SEX", nullable = FALSE, values = c("M", "F"))
+  type <- as_json_schema_type(spec)
+
+  # Every type dta_base_json_type() can report, so a present value of ANY
+  # storage type never fails "type" -- only enum/pattern constrain it.
+  expect_setequal(type, c("string", "integer", "number", "boolean"))
+  expect_false("null" %in% type)
+})
+
+test_that("as_json_schema_type() on a typeless nullable spec also admits null", {
+  spec <- DTAColumnSpec(id = "SEX", nullable = TRUE, values = c("M", "F"))
+  type <- as_json_schema_type(spec)
+
+  expect_true("null" %in% type)
+  expect_true(all(c("string", "integer", "number", "boolean") %in% type))
+})
+
+test_that("as_json_schema_length() is NULL for a typeless spec", {
+  spec <- DTAColumnSpec(id = "SEX", nullable = FALSE, values = c("M", "F"))
+  expect_null(as_json_schema_length(spec))
+})
+
+test_that("as_json_schema() no longer errors for a typeless spec", {
+  spec <- DTAColumnSpec(id = "SEX", nullable = FALSE, values = c("M", "F"))
+  schema <- as_json_schema(spec)
+
+  expect_null(schema$maxLength)
+  expect_setequal(schema$type, c("string", "integer", "number", "boolean"))
+  expect_setequal(schema$enum, c("M", "F"))
+})
+
+test_that("a typeless spec's enum matches both character and numeric data", {
+  # `values: [1, 2]` with no declared type: the column might turn out to hold
+  # text ("1", "2") or numbers (1, 2), and the schema has to match either --
+  # coercing the declared values to one R type here would only ever satisfy
+  # one of the two (see the comment in R/DTAColumnSpec-class.R).
+  spec <- DTAColumnSpec(id = "CODE", nullable = FALSE, values = c(1, 2))
+  schema <- as_json_schema(spec)
+
+  expect_true(all(c("1", "2") %in% schema$enum))
+  expect_true(all(c(1, 2) %in% schema$enum))
+})
+
+test_that("get_arrow_type rejects bad input with a cli condition, not a bare stop()", {
+  # The three guards used stop(), so every other argument check in the package
+  # raised an rlang_error and these three a plain simpleError. Pin the class and
+  # the package-authored wording (never the base R text).
+  expect_error(get_arrow_type("AGE"), "must be a DTAColumnSpec", class = "rlang_error")
+
+  expect_error(
+    get_arrow_type(DTAColumnSpec(id = "FLAG", nullable = TRUE)),
+    "Structure is not set for FLAG",
+    class = "rlang_error"
+  )
+
+  no_type <- DTAColumnSpec(id = "AGE", type = "SAS Char")
+  no_type@structure@type <- NULL
+  expect_error(
+    get_arrow_type(no_type),
+    "Type is not set for AGE",
+    class = "rlang_error"
+  )
+})
+
+test_that("get_arrow_type does not interpolate braces in a column id", {
+  # The id is data. A brace in it must come out literally, not be evaluated.
+  expect_error(
+    get_arrow_type(DTAColumnSpec(id = "A{1+1}B", nullable = TRUE)),
+    "A{1+1}B",
+    fixed = TRUE,
+    class = "rlang_error"
+  )
+})

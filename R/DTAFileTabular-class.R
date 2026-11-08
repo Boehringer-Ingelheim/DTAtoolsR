@@ -22,11 +22,15 @@
 #'   expected.
 #' @param max_number_of_files Numeric or \code{NULL}; maximum number of files
 #'   expected.
-#' @param info Character or \code{NULL}; free-text description of the file.
-#' @param missing_values Character. String representing missing values in the
-#'   file. Default is \code{""}.
-#' @param sep Character. Field separator used in the TSV file.
-#'  Defaults to tab ("\\t").
+#' @param info Character, list or \code{NULL}; free-text description of the
+#'   file.
+#' @param missing_values Character. Values the file writes for a missing cell
+#'   (for instance \code{"."} in the SAS convention), honoured in addition to
+#'   the empty string and \code{"NA"}, which are always treated as missing.
+#'   The default \code{""} declares nothing and keeps the reader's own missing
+#'   set.
+#' @param sep Character. Single-character field separator. Defaults to tab
+#'   (\code{"\\t"}).
 #' @param has_header Logical; \code{TRUE} if the first row is a header. Default
 #'   is \code{TRUE}.
 #' @param quote Character or \code{NULL}; quoting character for fields. Default
@@ -59,9 +63,10 @@
 #'   The cost is disk and one pass, not memory. Conversion runs at an order of
 #'   20 MB/s -- 21 MB/s measured here on a 172 MiB, 1,000,000 x 20 latin1 CSV,
 #'   and 19 MB/s of decoded output when the source is gzip-compressed -- and the
-#'   copy is the size of the decoded text: roughly the size of the source for latin1
-#'   that is mostly ASCII, up to twice it for text that is wholly accented, and
-#'   the full decoded size for a \code{.gz} source. A very large non-UTF-8
+#'   copy is the size of the decoded text: roughly the size of the source for
+#'   latin1 that is mostly ASCII, up to twice it for text that is wholly
+#'   accented, and the full decoded size for a \code{.gz} source. A very large
+#'   non-UTF-8
 #'   delivery needs that much free space under \code{tempdir()}; declaring
 #'   \code{"UTF-8"} for a file that really is UTF-8 costs nothing at all. The
 #'   block the conversion works in is
@@ -206,8 +211,8 @@ DTAFileTabular <- S7::new_class(
 #' @param x A \code{DTAFileTabular} object containing file reading parameters.
 #' @param ... A single `file` argument: character string specifying the path
 #'   to the file to be read.
-#' @return A tibble containing the contents of the file if the filename
-#' matches; otherwise, returns \code{NULL}.
+#' @return An Arrow Table with the file's contents (the base method only
+#'   aborts: it is implemented by the concrete subclasses).
 #' @usage read_file_execution(x, ...)
 method(read_file_execution, DTAFileTabular) <- function(x, ...) {
   cli::cli_abort(
@@ -655,7 +660,7 @@ dta_last_newline <- function(bytes) {
 # converted.
 #
 # The two are separate because iconv's cost is not linear in the length of the
-# string it is given. Measured on the 161 MiB reference input, one 4 MiB string
+# string it is given. Measured on the 172 MiB reference input, one 4 MiB string
 # converts at 12 MB/s and the same bytes as 64 KiB pieces at 33 MB/s -- the
 # whole difference between this converter being slower than the line-based one
 # it replaced and being half again faster. The plateau is wide (4 KiB to
@@ -990,7 +995,7 @@ dta_stamp_dataset_transcode <- function(dataset, plan) {
 #' for an absent delivery, it answers by the delivered path (see
 #' `dta_missing_table_files()`), and two places reporting the same absence
 #' differently is how the two would drift apart.
-#' @param table A table holding of any kind.
+#' @param table A table of any kind.
 #' @return The same object, or a freshly opened `arrow::Dataset`.
 #' @keywords internal
 dta_refresh_transcoded_dataset <- function(table) {
@@ -1425,9 +1430,9 @@ dta_read_delim_normalized <- function(
 #' @title Missing-Value Markers for a Tabular Handler
 #' @description
 #' Maps a `DTAFileTabular` handler's declared `missing_values` onto the `na`
-#' argument the readers expect. An empty cell is always treated as missing
-#' regardless of what a handler declares; anything in `missing_values` adds to
-#' that rather than replacing it.
+#' argument the readers expect. Both readers default (when `na` is `NULL`) to
+#' Arrow's own `c("", "NA")`; anything a handler declares in `missing_values`
+#' is ADDED to that default set, never used in place of it.
 #' @param x A `DTAFileTabular` object (or subclass).
 #' @return A character vector to pass as `na`, or `NULL` when the handler
 #'   declares no missing-value markers -- `NULL` lets the reader keep Arrow's
@@ -1447,7 +1452,10 @@ dta_reader_na_values <- function(x) {
     return(NULL)
   }
 
-  unique(c("", declared))
+  # Declared tokens ADD to Arrow's default missing set; they never replace
+  # it, or a handler declaring "." as missing would turn literal "NA" text
+  # back into a value (REQ-FILE-004).
+  unique(c("", "NA", declared))
 }
 
 

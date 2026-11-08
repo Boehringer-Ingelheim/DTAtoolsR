@@ -1,0 +1,28 @@
+kind: dta_creation_template
+id: lint_instance
+version: "1.0"
+label: Inline rule on an undeclared column
+base:
+  metadata:
+    title: Inline Lint
+    version: "1.0"
+    date: "2026-01-01"
+    header: QA Org
+    receiver:
+      affiliation:
+        name: Our org
+      contacts: []
+    transmission:
+      type: Secure EDT server (SSH sFTP)
+      frequency: one-time
+      notification: email
+    error_handling: Errors are reported by email.
+    authorized_for_corrections: Data Manager
+datasets:
+  - id: inl
+    type: tabular
+    files: {filename: x.csv, type: csv}
+    columns:
+      - {id: C1, type: SAS Char, length: 3}
+    rules:
+      - {id: r1, type: col_unique, columns: [NOPE]}

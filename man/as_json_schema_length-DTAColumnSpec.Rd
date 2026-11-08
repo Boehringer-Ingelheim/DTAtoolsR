@@ -12,8 +12,10 @@ as_json_schema_length(x, ...)
 \item{...}{Not used by current methods; reserved for future extensions.}
 }
 \value{
-The column's declared maximum length, as a number, or \code{NA}
-when the specification declares none.
+The column's declared maximum length, as a number, or \code{NULL}
+when the specification declares none -- including a column with no
+\code{@structure} at all (no \code{type}, \code{format} or \code{length}),
+which has no length to read.
 }
 \description{
 Converts a DTAColumnSpec to a JSON Schema length.

@@ -1,0 +1,8 @@
+# A vocabulary at the library root: the folder of its kind is vocabulary/.
+kind: dta_vocabulary
+id: stray_terms
+version: "1.0"
+type: text
+terms:
+  - code: A
+    label: Alpha

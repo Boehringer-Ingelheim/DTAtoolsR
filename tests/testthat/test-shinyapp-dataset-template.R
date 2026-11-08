@@ -3,8 +3,6 @@
 # is necessary: the app's helper files are auto-sourced by Shiny at launch and
 # are not part of the package namespace).
 
-Sys.setenv(NOT_CRAN = "true")
-
 # A minimal but complete `dta_dataset_template` YAML, matching the shape
 # documented at the top of dataset_template.R. `version_line`/`date_line` are
 # parameterised so individual tests can swap in the unquoted-numeric /
@@ -30,8 +28,10 @@ write_dataset_template_fixture <- function(
       "    type: text",
       "    target: dataset.columns.GFNAM.values",
       "dataset:",
-      "  name: gf_data_specs_pattern",
+      "  id: gf_data_specs_pattern",
       "  type: tabular",
+      "  name: Genomic Findings data table",
+      "  description: Genomic Findings data, delivered as tab-separated files.",
       "  files: { filename: gf.tsv, type: tsv }",
       "  columns:",
       "    - { id: STUDYID, label: Study Identifier, type: SAS Char }",
@@ -47,8 +47,9 @@ write_dataset_template_fixture <- function(
 # apply_dataset_patch() operate on directly (never an S7 object).
 minimal_dataset_spec <- function() {
   list(
-    name = "ds1",
+    id = "ds1",
     type = "tabular",
+    name = "Dataset one",
     description = "original description",
     files = list(filename = "ds1.tsv", type = "tsv"),
     columns = list(
@@ -78,7 +79,42 @@ test_that("read_dataset_template() accepts a valid file", {
   expect_equal(res$value$description, "Genomic Findings data table")
   expect_equal(res$value$date, "2024-12-17")
   expect_length(res$value$options, 1)
-  expect_equal(res$value$dataset$name, "gf_data_specs_pattern")
+  expect_equal(res$value$dataset$id, "gf_data_specs_pattern")
+  expect_equal(res$value$dataset$name, "Genomic Findings data table")
+  expect_equal(
+    res$value$dataset$description,
+    "Genomic Findings data, delivered as tab-separated files."
+  )
+})
+
+test_that("read_dataset_template() rejects a dataset without an id, even one that has a name", {
+  dir <- withr::local_tempdir()
+  bodies <- list(
+    only_type = c("  type: tabular", "  description: A dataset nobody can address"),
+    # `name` is the label, so it can no more stand in for the identifier than
+    # nothing at all can.
+    only_name = c("  name: Some label", "  type: tabular")
+  )
+  for (case in names(bodies)) {
+    path <- file.path(dir, paste0(case, ".yaml"))
+    writeLines(
+      c(
+        "kind: dta_dataset_template",
+        "id: x",
+        'version: "1.0"',
+        "dataset:",
+        bodies[[case]],
+        "  files: { filename: gf.tsv, type: tsv }"
+      ),
+      path
+    )
+
+    res <- app_fn("read_dataset_template")(path)
+
+    expect_false(res$ok)
+    expect_null(res$value)
+    expect_equal(res$error, "Dataset template's 'dataset' section must contain an 'id'.")
+  }
 })
 
 test_that("read_dataset_template() rejects a wrong 'kind'", {
@@ -90,7 +126,7 @@ test_that("read_dataset_template() rejects a wrong 'kind'", {
       "id: x",
       'version: "1.0"',
       "dataset:",
-      "  name: ds1"
+      "  id: ds1"
     ),
     path
   )
@@ -112,7 +148,7 @@ test_that("read_dataset_template() rejects a missing 'id'", {
       "kind: dta_dataset_template",
       'version: "1.0"',
       "dataset:",
-      "  name: ds1"
+      "  id: ds1"
     ),
     path
   )
@@ -132,7 +168,7 @@ test_that("read_dataset_template() rejects a missing 'version'", {
       "kind: dta_dataset_template",
       "id: x",
       "dataset:",
-      "  name: ds1"
+      "  id: ds1"
     ),
     path
   )
@@ -173,8 +209,8 @@ test_that("read_dataset_template() rejects a 'datasets:' (plural) body, naming t
   # when converting one kind of template into the other) had def$dataset
   # silently return that array. is.list() on it was still TRUE, so the
   # 'dataset' section guard passed, and the error that actually surfaced was
-  # the unrelated-looking "'dataset' section must contain a 'name'" -- because
-  # the (nameless) datasets array has no $name of its own -- rather than
+  # the unrelated-looking "'dataset' section must contain an 'id'" -- because
+  # the (id-less) datasets array has no $id of its own -- rather than
   # anything naming the real problem. Fixed by reading def[["dataset"]], which
   # matches exactly, and reporting the absence with an explicit hint.
   dir <- withr::local_tempdir()
@@ -186,7 +222,7 @@ test_that("read_dataset_template() rejects a 'datasets:' (plural) body, naming t
       'version: "3.0"',
       "label: GF domain smrnaseq",
       "datasets:",
-      "  - name: gf_data_specs_pattern",
+      "  - id: gf_data_specs_pattern",
       "    type: tabular",
       "    files: { filename: gf.tsv, type: tsv }",
       "    columns:",
@@ -199,8 +235,8 @@ test_that("read_dataset_template() rejects a 'datasets:' (plural) body, naming t
   res <- fn(path)
 
   expect_false(res$ok)
-  # The exact, actionable diagnosis -- not the misleading "must contain a
-  # 'name'" a reader would see if def$dataset silently returned the datasets
+  # The exact, actionable diagnosis -- not the misleading "must contain an
+  # 'id'" a reader would see if def$dataset silently returned the datasets
   # array.
   expect_equal(
     res$error,
@@ -210,7 +246,7 @@ test_that("read_dataset_template() rejects a 'datasets:' (plural) body, naming t
       "dta_dataset_template needs the singular 'dataset:'."
     )
   )
-  expect_no_match(res$error, "must contain a 'name'", fixed = TRUE)
+  expect_no_match(res$error, "must contain an 'id'", fixed = TRUE)
 })
 
 test_that("build_dataset_from_template() rejects a hand-built def carrying 'datasets:' instead of 'dataset:'", {
@@ -221,7 +257,7 @@ test_that("build_dataset_from_template() rejects a hand-built def carrying 'data
   fn <- app_fn("build_dataset_from_template")
   def <- list(
     id = "gf_smrnaseq", version = "3.0",
-    datasets = list(list(name = "gf_data_specs_pattern", type = "tabular"))
+    datasets = list(list(id = "gf_data_specs_pattern", type = "tabular"))
   )
 
   res <- fn(def)
@@ -316,7 +352,8 @@ test_that("apply_dataset_template_path() sets a top-level scalar field", {
 
   expect_equal(out$description, "new description")
   # Nothing else in the spec is disturbed by a scalar-field set.
-  expect_equal(out$name, "ds1")
+  expect_equal(out$id, "ds1")
+  expect_equal(out$name, "Dataset one")
   expect_length(out$columns, 2)
 })
 
@@ -548,7 +585,7 @@ test_that("apply_dataset_patch() applies remove/add/modify/set in the documented
   # FINAL column list once add/remove/modify are all done.
   fn <- app_fn("apply_dataset_patch")
   ds <- list(
-    name = "ds1",
+    id = "ds1",
     type = "tabular",
     description = "original",
     columns = list(
@@ -626,7 +663,7 @@ test_that("build_dataset_from_template() falls back to the option default when n
       "    target: dataset.columns.GFNAM.values",
       "    default: Fallback Vendor",
       "dataset:",
-      "  name: ds1",
+      "  id: ds1",
       "  type: tabular",
       "  files: { filename: gf.tsv, type: tsv }",
       "  columns:",
@@ -644,7 +681,7 @@ test_that("build_dataset_from_template() falls back to the option default when n
   expect_equal(res$value$dataset$columns[[1]]$values, "Fallback Vendor")
 })
 
-test_that("build_dataset_from_template() renames the dataset when as_name is given", {
+test_that("build_dataset_from_template() sets the dataset's id when as_name is given", {
   dir <- withr::local_tempdir()
   path <- write_dataset_template_fixture(dir)
   def <- app_fn("read_dataset_template")(path)$value
@@ -653,7 +690,16 @@ test_that("build_dataset_from_template() renames the dataset when as_name is giv
   res <- fn(def, selections = list(vendor_name = "Acme Corp"), as_name = "gf_second_copy")
 
   expect_true(res$ok)
-  expect_equal(res$value$dataset$name, "gf_second_copy")
+  expect_equal(res$value$dataset$id, "gf_second_copy")
+  # Only the identifier changes: two datasets built from one template may share
+  # a label, so the template's name (and description) are left alone.
+  expect_equal(res$value$dataset$name, "Genomic Findings data table")
+  expect_equal(
+    res$value$dataset$description,
+    "Genomic Findings data, delivered as tab-separated files."
+  )
+  # The provenance records the id the dataset ended up with.
+  expect_equal(res$value$provenance$id, "gf_second_copy")
 })
 
 test_that("build_dataset_from_template() applies the patch on top of options", {
@@ -674,7 +720,7 @@ test_that("build_dataset_from_template() applies the patch on top of options", {
   expect_equal(res$value$provenance$deviations, res$value$deviations)
 })
 
-test_that("build_dataset_from_template() stamps the three provenance keys", {
+test_that("build_dataset_from_template() stamps the provenance keys", {
   dir <- withr::local_tempdir()
   path <- write_dataset_template_fixture(dir)
   def <- app_fn("read_dataset_template")(path)$value
@@ -694,7 +740,7 @@ test_that("build_dataset_from_template() stamps the three provenance keys", {
   expect_equal(res_labelled$value$dataset$template_source, "gf_smrnaseq (uploaded)")
 
   expect_equal(res_default$value$provenance, list(
-    name = "gf_data_specs_pattern",
+    id = "gf_data_specs_pattern",
     template = "gf_smrnaseq",
     version = "3.0",
     deviations = list()
@@ -724,7 +770,12 @@ test_that("build_dataset_from_template() output round-trips through dta_dataset_
   expect_equal(ds_obj@template_source, "gf_smrnaseq")
   expect_equal(ds_obj@template_version, "3.0")
   expect_equal(ds_obj@template_date, "2024-12-17")
-  expect_equal(ds_obj@name, "gf_data_specs_pattern")
+  expect_equal(ds_obj@id, "gf_data_specs_pattern")
+  expect_equal(ds_obj@name, "Genomic Findings data table")
+  expect_equal(
+    ds_obj@description,
+    "Genomic Findings data, delivered as tab-separated files."
+  )
 })
 
 test_that("build_dataset_from_template() with an empty patch leaves the dataset unchanged besides provenance", {
@@ -739,12 +790,17 @@ test_that("build_dataset_from_template() with an empty patch leaves the dataset 
   expect_length(res$value$deviations, 0)
   # Nothing besides the option effect and the provenance stamp touched the
   # dataset -- the column set, file, and other fields all survive untouched.
-  # (`description` here is the FIXTURE's own dataset-level field, which the
-  # fixture leaves unset -- the "Genomic Findings data table" text lives on
-  # the template's top-level `def$description`, a different field entirely.)
+  # (`name` and `description` here are the FIXTURE's own dataset-level fields;
+  # the "Genomic Findings data table" text on the template's top-level
+  # `def$description` is a different field entirely.)
   expect_equal(res$value$dataset$files, list(filename = "gf.tsv", type = "tsv"))
   expect_equal(res$value$dataset$columns[[1]]$id, "STUDYID")
-  expect_null(res$value$dataset$description)
+  expect_equal(res$value$dataset$id, "gf_data_specs_pattern")
+  expect_equal(res$value$dataset$name, "Genomic Findings data table")
+  expect_equal(
+    res$value$dataset$description,
+    "Genomic Findings data, delivered as tab-separated files."
+  )
   expect_equal(res$value$dataset$type, "tabular")
 })
 

@@ -1,0 +1,9 @@
+# REQ-TMPL-031: a structurally valid abstract creation template.
+kind: dta_creation_template
+id: layout_example
+version: "1.0"
+label: Layout qualification example
+abstract: true
+base:
+  metadata:
+    title: Layout qualification example

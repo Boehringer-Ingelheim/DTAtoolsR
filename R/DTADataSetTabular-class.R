@@ -4,19 +4,26 @@
 #' @importFrom cli cli_alert_info cli_abort
 #' @importFrom arrow arrow_table
 #' @importFrom tools md5sum
-#' @param name Character. Name of the container.
+#' @param id Character. Identifier of the dataset: its key in a DTA's
+#'   \code{datasets}, in every validation message and in \code{load_file()}.
 #' @param specs A DTAColumnSpecCollection object specifying the column specs.
 #' @param files A list of DTAFile objects specifying input file information.
+#'   Every handler must inherit \code{DTAFileTabular} (for example
+#'   \code{DTAFileCSV} or \code{DTAFileTSV}), because a tabular dataset parses
+#'   its files; a reader-less handler is rejected.
 #' @param tables A named list of tabular objects. A materialised entry
 #'   (data.frame or Arrow Table) is typed by `specs` and converted to an Arrow
 #'   Table before storage. A lazy entry (Arrow Dataset, `arrow_dplyr_query`, or
 #'   RecordBatchReader) is stored exactly as given -- it is typed and checked
 #'   for import issues later, at scan time, in `check()`.
-#' @param description Character or NA. Free-text description of the dataset.
-#' @param template_source Character or NA. Source of the template used to
+#' @param name Character or NULL. Human-readable name of the dataset, e.g.
+#'   \code{"Demographics"}; shown in place of the \code{id} where one is set.
+#' @param description Character or NULL. Long free-text description of the
+#'   dataset.
+#' @param template_source Character or NULL. Source of the template used to
 #'   generate the dataset specification.
-#' @param template_version Character or NA. Version of the template used.
-#' @param template_date Character or NA. Date of the template used.
+#' @param template_version Character or NULL. Version of the template used.
+#' @param template_date Character or NULL. Date of the template used.
 #' @details
 #' A table handed to this constructor is a table already in memory, which is
 #' the case [check()]'s retained-error cap is least suited to. `max_errors`
@@ -39,24 +46,27 @@
 #'
 #' # Create the DTADataSetTabular object
 #' data_obj <- DTADataSetTabular(
-#'   name = "example",
+#'   id = "example",
 #'   specs = create_example_DTAColumnSpecCollection(1),
-#'   tables = tables
+#'   tables = tables,
+#'   name = "Example visits"
 #' )
 #' @export
 DTADataSetTabular <- S7::new_class(
   "DTADataSetTabular",
   parent = DTADataSet,
   constructor = function(
-    name,
+    id,
     specs,
     tables = list(),
     files = list(),
+    name = NULL,
     description = NULL,
     template_source = NULL,
     template_version = NULL,
     template_date = NULL
   ) {
+    if (missing(id)) dta_abort_missing_dataset_id()
     if (inherits(files, "DTAtools::DTAFile")) {
       files <- list(files)
     }
@@ -139,9 +149,10 @@ DTADataSetTabular <- S7::new_class(
 
     new_object(
       .parent = DTADataSet(
-        name = name,
+        id = id,
         type = "tabular",
         files = files,
+        name = name,
         template_source = template_source,
         template_version = template_version,
         template_date = template_date,
@@ -320,10 +331,11 @@ method(specs, DTADataSetTabular) <- function(x) {
 #' @title Get table from DTADataSetTabular Object
 #' @description
 #' Extract a table from the tables in a DTADataSetTabular object.
-#' @param x An object of class DTADataSet.
+#' @param x An object of class DTADataSetTabular.
 #' @param id Character or numeric. Name or index of the table to retrieve.
 #' @param ... Not used by current methods; reserved for future extensions.
-#' @return An Arrow Table object.
+#' @return The table as stored: an Arrow Table, or, for a table loaded lazily,
+#'   an Arrow Dataset, \code{arrow_dplyr_query} or RecordBatchReader.
 #' @importFrom cli cli_abort
 #' @examples
 #' ds <- create_example_DTADataSetTabular(2)
@@ -344,8 +356,13 @@ method(get_table, DTADataSetTabular) <- function(x, id = 1) {
   }
 
   if (is.character(id)) {
+    # `!id %in% names(tables)` on a length-2 id is a length-2 `if` condition,
+    # which R rejects with a generic error naming none of this.
+    if (length(id) != 1 || is.na(id)) {
+      cli::cli_abort("Argument 'id' must be a single table name or a single index.")
+    }
     if (!id %in% names(tables)) {
-      cli::cli_abort("No table named {id} found in the container.")
+      cli::cli_abort("No table named {.val {id}} found in the container.")
     }
     return(tables[[id]])
   }
@@ -417,15 +434,16 @@ method(labels, DTADataSetTabular) <- function(object, ...) {
 #' @importFrom cli cli_alert_info cli_alert_success format_message cli_abort
 #' @importFrom tools md5sum
 #' @export
-#' @param DTADataSetTabular An object of class DTADataSet.
+#' @param DTADataSetTabular An object of class DTADataSetTabular.
 #' @param table Character. The name of the table within the DTADataSetTabular object to write.
 #' @param filename Character. The name of the file to write to.
 #' @param arrange_by Character vector. Columns to arrange the table by. NULL, Table won't be arranged. "all" (Default) -> Table will be arranged by all columns.
 #' @param arrange_desc Logical. Whether to arrange the table in descending order. Default is FALSE.
-#' @param sep Character. The field separator string. Default is ",".
+#' @param sep Character. The field separator string. Default is a tab
+#'   (\code{"\\t"}).
 #' @param na Character. The string to use for missing values in the data. Default is "".
-#' @param row.names Logical. Row names provided.
-#' @param quote Logical. Use of quotes
+#' @param row.names Logical. Write row names.
+#' @param quote Logical. Quote character and factor fields.
 #' @param overwrite Logical. Whether to overwrite the file if it exists. Default
 #'   is FALSE, so a call against an existing path aborts unless `overwrite =
 #'   TRUE` is passed explicitly.
@@ -440,9 +458,10 @@ method(labels, DTADataSetTabular) <- function(object, ...) {
 #' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
 #' @param ... Additional arguments passed to write.table.
 #' @return Invisibly, a list with \code{tables} (the data as written),
-#'   \code{table} (the table's name) and \code{md5sum} (the checksum, or
-#'   \code{NA} when \code{get_md5sum = FALSE}). Called mainly for the side
-#'   effect of writing the file.
+#'   \code{table} (the table's name), \code{md5sum} (the checksum as a
+#'   single string, or \code{NA_character_} when \code{get_md5sum = FALSE}),
+#'   and \code{n_rows} and \code{n_cols} (the dimensions of the table
+#'   written). Called mainly for the side effect of writing the file.
 #' @examples
 #' ds <- create_example_DTADataSetTabular(2)
 #' out_file <- tempfile(fileext = ".tsv")
@@ -532,12 +551,26 @@ write_table_to_file <- function(
     ))
   }
 
-  # Write the table to a file
+  # Both branches write to a temporary file and only put it in place once the
+  # whole table has been converted.
+  #
+  # write.table() truncates its destination and writes the header BEFORE it
+  # converts the data columns, so writing straight to `filename` meant that a
+  # conversion failing partway left a header-only file where a good export used
+  # to be. That is worse than leaving no file at all: a header-only file still
+  # reads as a table, with no rows, and a table with no rows breaks no
+  # constraint and so validates perfectly clean.
+  #
+  # The temporary file is created beside the destination rather than in the
+  # session's temporary directory, so the final step is a rename within one
+  # filesystem rather than a copy across two.
+  temp_file <- tempfile(tmpdir = dirname(filename), fileext = ".part")
+  on.exit(unlink(temp_file), add = TRUE)
+
   if (compression == "gzip") {
     if (!isTRUE(quiet)) {
       cli::cli_alert_info("Write table in gzip format to {filename}.")
     }
-    temp_file <- tempfile()
     write.table(
       table_data,
       file = temp_file,
@@ -554,13 +587,19 @@ write_table_to_file <- function(
     }
     write.table(
       table_data,
-      file = filename,
+      file = temp_file,
       na = na,
       row.names = row.names,
       sep = sep,
       quote = quote,
       ...
     )
+    if (!file.rename(temp_file, filename)) {
+      cli::cli_abort(c(
+        "Could not move the finished export into place at {.path {filename}}.",
+        i = "The previous contents of {.path {filename}}, if any, are unchanged."
+      ))
+    }
   }
 
   # Print a success message
@@ -568,22 +607,30 @@ write_table_to_file <- function(
     cli::cli_alert_success("File {filename} written successfully.")
   }
 
-  # Calculate md5sum
+  # Calculate md5sum. write_metadata() returns a list (checksum, rows, cols);
+  # only the checksum string is exposed as `md5sum`.
   if (get_md5sum) {
-    md5sum <- write_metadata(
+    meta <- write_metadata(
       filename,
       table_data,
       write_to_file = write_md5sum_to_file,
       quiet = quiet
     )
+    md5sum <- meta$md5sum
+    n_rows <- meta$n_rows
+    n_cols <- meta$n_cols
   } else {
-    md5sum <- NA
+    md5sum <- NA_character_
+    n_rows <- nrow(table_data)
+    n_cols <- ncol(table_data)
   }
 
   invisible(list(
     tables = table_data,
     table = table,
-    md5sum = md5sum
+    md5sum = md5sum,
+    n_rows = n_rows,
+    n_cols = n_cols
   ))
 }
 
@@ -650,20 +697,22 @@ create_example_DTADataSetTabular <- function(index = 1) {
   switch(index,
     `1` = {
       DTADataSetTabular(
-        name = "example_container_specs_without_data",
+        id = "example_container_specs_without_data",
         specs = create_example_DTAColumnSpecCollection(1),
       )
     },
     `2` = {
       DTADataSetTabular(
-        name = "demographics",
+        id = "demographics",
+        name = "Demographics",
         specs = create_example_DTAColumnSpecCollection(1),
         tables = list("tab1" = table1)
       )
     },
     `3` = {
       DTADataSetTabular(
-        name = "vitals",
+        id = "vitals",
+        name = "Vital signs",
         specs = create_example_DTAColumnSpecCollection(2),
         tables = list("tab2" = table2)
       )
@@ -678,7 +727,7 @@ create_example_DTADataSetTabular <- function(index = 1) {
 #' @export
 method(print, DTADataSetTabular) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTADataSetTabular}> : {.field {x@name}}")
+  cli_text("<{.emph DTADataSetTabular}> : {.field {x@id}}")
 
   print_info(x)
 
@@ -748,10 +797,10 @@ method(print_short_info, DTADataSetTabular) <- function(x, ...) {
 }
 
 
-#' @title loads file
+#' @title Load a file into a DTADataSetTabular
 #' @description
 #' Load the content of the file into dataset
-#' @param x An object of class DTADataSet
+#' @param x An object of class DTADataSetTabular
 #' @param ... Additional named arguments:
 #'   \describe{
 #'     \item{file}{file to be loaded}
@@ -766,11 +815,11 @@ method(print_short_info, DTADataSetTabular) <- function(x, ...) {
 #'     \item{stream}{whether to keep the file lazy rather than reading it into
 #'       memory. See \code{\link{load_file}}.}
 #'   }
-#' @return object of class DTADataSet with loaded data
+#' @return object of class DTADataSetTabular with loaded data
 #' @examples
 #' file_handler <- DTAFileCSV(filename = "clinical_data.csv")
 #' ds <- DTADataSetTabular(
-#'   name = "demo",
+#'   id = "demo",
 #'   specs = create_example_DTAColumnSpecCollection(1),
 #'   files = list(file_handler)
 #' )
@@ -954,12 +1003,21 @@ dta_unspecified_validation_row <- function(table_name, target_type = "table") {
 
 #' @title Validation Status for DTADataSetTabular
 #' @description Returns a compact status table for validated tables.
-#' @param x A \'DTADataSetTabular\' object.
+#' @param x A \'DTADataSetTabular\' or \'DTADataSetFile\' object.
 #' @param ... Additional arguments:
 #'   \describe{
 #'     \item{tables}{NULL (default), character table names, or numeric table indices.}
 #'   }
-#' @return A data.frame with validation status per table.
+#' @return A data.frame with one row per table (per file, for a
+#'   \code{DTADataSetFile}) and the columns \code{table}, \code{target_type}
+#'   (\code{"table"} or \code{"file"}), \code{status}, \code{ok},
+#'   \code{validated_at}, \code{run_id}, \code{validation_run},
+#'   \code{n_columnspec_errors}, \code{n_rule_errors} and
+#'   \code{n_import_errors}. \code{status} is \code{"validated"},
+#'   \code{"not_validated"} or, for a table checked against no column
+#'   specification, \code{"unspecified"}; \code{ok} is \code{NA} for the last
+#'   two. A dataset with no tables yields a zero-row data.frame with the same
+#'   columns.
 #' @usage validation_status(x, ...)
 #' @name validation_status
 #' @export
@@ -1028,7 +1086,7 @@ S7::method(validation_status, DTADataSetTabular) <- function(x, tables = NULL) {
 #' @description
 #' Returns detailed validation output for one table, either from in-memory
 #' store or from persisted artifact.
-#' @param x A \'DTADataSetTabular\' object.
+#' @param x A \'DTADataSetTabular\' or \'DTADataSetFile\' object.
 #' @param ... Additional arguments:
 #'   \describe{
 #'     \item{table}{Character or numeric table identifier.}
@@ -1124,7 +1182,8 @@ S7::method(clear_validation, DTADataSetTabular) <- function(
 #' @title Invalidate Validation Due to Spec Changes
 #' @description
 #' Marks validation as outdated for specified tables when specs are changed.
-#' This is a helper function called automatically when specs are updated.
+#' It is not called automatically: call it yourself after changing \code{@specs}
+#' so the next \code{check()} revalidates.
 #' @param x A \'DTADataSetTabular\' object.
 #' @param tables NULL (default) to invalidate all tables, or character/numeric
 #'   table identifiers.
@@ -1300,7 +1359,7 @@ S7::method(check, DTADataSetTabular) <- function(
   if (length(target_tables) == 0) {
     if (!isTRUE(quiet)) {
       cli::cli_alert_warning(
-        "Dataset {.field {x@name}} has no tables loaded; nothing was checked."
+        "Dataset {.field {x@id}} has no tables loaded; nothing was checked."
       )
     }
 
@@ -1341,7 +1400,7 @@ S7::method(check, DTADataSetTabular) <- function(
     if (length(x@specs@columns) == 0) {
       if (!isTRUE(quiet)) {
         cli::cli_alert_warning(
-          "Dataset {.field {x@name}} declares no columns in its specs; table {.field {table_name}} was not checked."
+          "Dataset {.field {x@id}} declares no columns in its specs; table {.field {table_name}} was not checked."
         )
       }
 
@@ -1629,6 +1688,9 @@ S7::method(check, DTADataSetTabular) <- function(
 
       if (n_invalid > 0) {
         cli::cli_alert_danger("{n_valid} of {n_total} {table_word} valid")
+        if (!isTRUE(dta_check_state$nested)) {
+          cli::cli_alert_info("Run {.fn explain_messages} on the checked object to see what failed and why.")
+        }
       } else if (n_valid < n_total) {
         # No table failed, but not every table was actually checked either --
         # e.g. a table validated against zero column specs, status

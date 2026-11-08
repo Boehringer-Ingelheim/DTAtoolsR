@@ -13,7 +13,10 @@
 
 \item{require_date}{Logical. When \code{TRUE} the field is typed \code{Date}
 and a phrase cannot be stored, so an unparseable string is coerced the way
-\code{as.Date()} would coerce it (to \code{NA}).}
+\code{as.Date()} would coerce it (to \code{NA}) - and, unlike the
+\code{FALSE} case where a phrase is legitimate free text, that \code{NA}
+is recorded as an import issue, since a Date-typed field silently losing
+its value is exactly the discard \code{@import_issues} exists to catch.}
 }
 \value{
 A list with \code{value} (the value to store) and \code{issues} (a

@@ -1,5 +1,3 @@
-Sys.setenv(NOT_CRAN = "true")
-
 # Coverage for R/validateTemplate.R -- the exported, package-namespace
 # validate_template(), which re-uses (never re-implements) the Shiny app's own
 # template engine (inst/shiny/dta_app/R/*.R) via a private, memoised
@@ -10,29 +8,84 @@ Sys.setenv(NOT_CRAN = "true")
 
 # ---- Fixture helpers --------------------------------------------------------
 
+# The path `filename` has inside the library ROOT `dir`: its kind folder
+# (templates/ for creation and dataset templates, parties/, vocabulary/),
+# created on demand. Every fixture below writes through this, so a test body
+# names a root and a file and the library layout is decided in one place.
+# A name matching no kind suffix lands directly in the root.
+lib_file <- function(dir, filename) {
+  sub <- if (grepl("[.]dta-(dataset-)?template[.]ya?ml$", filename)) {
+    "templates"
+  } else if (grepl("[.]dta-party[.]ya?ml$", filename)) {
+    "parties"
+  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
+    "vocabulary"
+  } else {
+    ""
+  }
+  target <- if (nzchar(sub)) file.path(dir, sub) else dir
+  dir.create(target, recursive = TRUE, showWarnings = FALSE)
+  file.path(target, filename)
+}
+
+# The lines of a minimal, fully valid creation template (see below).
+clean_template_lines <- function(id = "clean_tpl", version_line = "version: \"1.0\"") {
+  c(
+    "kind: dta_creation_template",
+    sprintf("id: %s", id),
+    version_line,
+    "base:",
+    "  metadata:",
+    "    title: Clean Template",
+    "datasets:",
+    "  - id: ds1",
+    "    type: tabular",
+    "    files: {filename: x.csv, type: csv}",
+    "    columns:",
+    "      - {id: COL1, type: SAS Char}"
+  )
+}
+
 # A minimal, fully valid, buildable creation template: zero issues expected
 # from ANY check. Parameterised by filename/id/version so the same shape can
 # be reused (with a different id, or a deliberately colliding one) across
-# several tests without duplicating the whole YAML body each time.
+# several tests without duplicating the whole YAML body each time. Lands in
+# the kind folder of the library root `dir`.
 write_clean_template <- function(dir, filename = "clean.dta-template.yaml",
                                  id = "clean_tpl", version_line = "version: \"1.0\"") {
-  writeLines(
-    c(
-      "kind: dta_creation_template",
-      sprintf("id: %s", id),
-      version_line,
-      "base:",
-      "  metadata:",
-      "    title: Clean Template",
-      "datasets:",
-      "  - name: ds1",
-      "    type: tabular",
-      "    files: {filename: x.csv, type: csv}",
-      "    columns:",
-      "      - {id: COL1, type: SAS Char}"
-    ),
-    file.path(dir, filename)
+  writeLines(clean_template_lines(id, version_line), lib_file(dir, filename))
+}
+
+# Write `lines` to `filename` in the arbitrary directory `at` (created on
+# demand) -- for the tests that put a file where it does NOT belong.
+write_lines_at <- function(at, filename, lines) {
+  dir.create(at, recursive = TRUE, showWarnings = FALSE)
+  writeLines(lines, file.path(at, filename))
+}
+
+# A clean creation template in an arbitrary directory, or below the
+# templates/ folder of library root `dir` (templates/<below>/<filename>).
+write_clean_at <- function(at, filename, id) {
+  write_lines_at(at, filename, clean_template_lines(id))
+}
+write_clean_below <- function(dir, below, filename, id) {
+  write_clean_at(file.path(dir, "templates", below), filename, id)
+}
+
+# A minimal party profile (kind dta_party_profile), valid on its own.
+party_lines <- function(id = "p_one") {
+  c(
+    "kind: dta_party_profile",
+    sprintf("id: %s", id),
+    "version: \"1.0\"",
+    "role: supplier",
+    "label: A Party",
+    "affiliation:",
+    "  name: Example Inc."
   )
+}
+write_party_file <- function(dir, id = "p_one", filename = paste0(id, ".dta-party.yaml")) {
+  writeLines(party_lines(id), lib_file(dir, filename))
 }
 
 # Every row of `result` for `code`, asserted non-empty and (when `severity` is
@@ -107,7 +160,7 @@ test_that("kind_unknown fires for a kind that is not one of the four known value
   dir <- withr::local_tempdir()
   writeLines(
     c("kind: not_a_real_kind", "id: foo", "version: \"1.0\""),
-    file.path(dir, "bad_kind.dta-template.yaml")
+    lib_file(dir, "bad_kind.dta-template.yaml")
   )
 
   result <- validate_template(dir)
@@ -123,7 +176,7 @@ test_that("id_missing fires when 'id' is absent", {
       "kind: dta_creation_template", "version: \"1.0\"",
       "base: {metadata: {}}", "datasets: []"
     ),
-    file.path(dir, "no_id.dta-template.yaml")
+    lib_file(dir, "no_id.dta-template.yaml")
   )
 
   result <- validate_template(dir)
@@ -137,7 +190,7 @@ test_that("version_missing fires when 'version' is absent", {
       "kind: dta_creation_template", "id: foo",
       "base: {metadata: {}}", "datasets: []"
     ),
-    file.path(dir, "no_version.dta-template.yaml")
+    lib_file(dir, "no_version.dta-template.yaml")
   )
 
   result <- validate_template(dir)
@@ -153,20 +206,20 @@ test_that("version_unquoted fires on an unquoted numeric version but not on a qu
       "kind: dta_creation_template", "id: unquoted_tpl", "version: 1.0",
       "base: {metadata: {}}", "datasets: []"
     ),
-    file.path(dir, "unquoted.dta-template.yaml")
+    lib_file(dir, "unquoted.dta-template.yaml")
   )
   writeLines(
     c(
       "kind: dta_creation_template", "id: quoted_tpl", "version: \"1.0\"",
       "base: {metadata: {}}", "datasets: []"
     ),
-    file.path(dir, "quoted.dta-template.yaml")
+    lib_file(dir, "quoted.dta-template.yaml")
   )
 
   result <- validate_template(dir)
 
   unquoted_rows <- expect_code_row(result, "version_unquoted", "error")
-  expect_equal(unquoted_rows$file, file.path(dir, "unquoted.dta-template.yaml"))
+  expect_equal(unquoted_rows$file, lib_file(dir, "unquoted.dta-template.yaml"))
   expect_false("quoted.dta-template.yaml" %in% basename(unquoted_rows$file))
 })
 
@@ -177,7 +230,7 @@ test_that("version_unparseable fires for a version that does not parse as numeri
       "kind: dta_creation_template", "id: foo", "version: \"not-a-version!!\"",
       "base: {metadata: {}}", "datasets: []"
     ),
-    file.path(dir, "bad_version.dta-template.yaml")
+    lib_file(dir, "bad_version.dta-template.yaml")
   )
 
   result <- validate_template(dir)
@@ -212,7 +265,7 @@ test_that("target_invalid fires for an option target that is not a real metadata
       "    type: text",
       "    target: metadata.not_a_real_field"
     ),
-    file.path(dir, "bad_target.dta-template.yaml")
+    lib_file(dir, "bad_target.dta-template.yaml")
   )
 
   result <- validate_template(dir)
@@ -234,7 +287,7 @@ test_that("target_machine_owned fires for a target naming a machine-owned metada
       "    type: text",
       "    target: metadata.template"
     ),
-    file.path(dir, "forged.dta-template.yaml")
+    lib_file(dir, "forged.dta-template.yaml")
   )
 
   result <- validate_template(dir)
@@ -265,7 +318,7 @@ test_that("target_machine_owned also fires when the forged target is hidden in a
       "        - path: metadata.import_issues",
       "          value: []"
     ),
-    file.path(dir, "forged_hidden.dta-template.yaml")
+    lib_file(dir, "forged_hidden.dta-template.yaml")
   )
 
   result <- validate_template(dir)
@@ -284,14 +337,12 @@ test_that("extends_unresolved fires when 'extends:' names a template not in this
       "abstract: true",
       "extends: nonexistent_parent",
       "base: {metadata: {}}",
-      # A non-empty (if bare) `datasets:` list: read_dta_creation_template()
-      # requires at least one entry regardless of `abstract:`, and this file
-      # is never actually built (abstract templates skip the instantiate
-      # dry-run), so the entry's own content never has to be valid.
+      # Abstract templates skip the instantiate dry-run, so this entry need
+      # not be buildable; resolution must still diagnose the missing parent.
       "datasets:",
-      "  - name: placeholder"
+      "  - id: placeholder"
     ),
-    file.path(dir, "child.dta-template.yaml")
+    lib_file(dir, "child.dta-template.yaml")
   )
 
   result <- validate_template(dir)
@@ -304,17 +355,17 @@ test_that("extends_cycle fires for a two-node extends cycle", {
     c(
       "kind: dta_creation_template", "id: cyc_a", "version: \"1.0\"",
       "abstract: true", "extends: cyc_b", "base: {metadata: {}}",
-      "datasets:", "  - name: placeholder"
+      "datasets:", "  - id: placeholder"
     ),
-    file.path(dir, "a.dta-template.yaml")
+    lib_file(dir, "a.dta-template.yaml")
   )
   writeLines(
     c(
       "kind: dta_creation_template", "id: cyc_b", "version: \"1.0\"",
       "abstract: true", "extends: cyc_a", "base: {metadata: {}}",
-      "datasets:", "  - name: placeholder"
+      "datasets:", "  - id: placeholder"
     ),
-    file.path(dir, "b.dta-template.yaml")
+    lib_file(dir, "b.dta-template.yaml")
   )
 
   result <- validate_template(dir)
@@ -335,7 +386,7 @@ test_that("dataset_template_unresolved fires for a datasets[].template ref not i
       "datasets:",
       "  - template: no_such_dataset_tpl@1.0"
     ),
-    file.path(dir, "uses_missing.dta-template.yaml")
+    lib_file(dir, "uses_missing.dta-template.yaml")
   )
 
   result <- validate_template(dir)
@@ -350,13 +401,13 @@ test_that("patch_incoherent fires when remove_columns names an absent column id"
       "id: ds_tpl",
       "version: \"1.0\"",
       "dataset:",
-      "  name: ds1",
+      "  id: ds1",
       "  type: tabular",
       "  files: {filename: x.csv, type: csv}",
       "  columns:",
       "    - {id: COL1, type: SAS Char}"
     ),
-    file.path(dir, "ds_tpl.dta-dataset-template.yaml")
+    lib_file(dir, "ds_tpl.dta-dataset-template.yaml")
   )
   writeLines(
     c(
@@ -370,7 +421,7 @@ test_that("patch_incoherent fires when remove_columns names an absent column id"
       "    patch:",
       "      remove_columns: [NOPE_NOT_A_COLUMN]"
     ),
-    file.path(dir, "uses_patch.dta-template.yaml")
+    lib_file(dir, "uses_patch.dta-template.yaml")
   )
 
   result <- validate_template(dir)
@@ -385,14 +436,14 @@ test_that("a coherent template:/patch: dataset entry does not fire patch_incoher
       "id: ds_tpl_ok",
       "version: \"1.0\"",
       "dataset:",
-      "  name: ds1",
+      "  id: ds1",
       "  type: tabular",
       "  files: {filename: x.csv, type: csv}",
       "  columns:",
       "    - {id: COL1, type: SAS Char}",
       "    - {id: COL2, type: SAS Char}"
     ),
-    file.path(dir, "ds_tpl_ok.dta-dataset-template.yaml")
+    lib_file(dir, "ds_tpl_ok.dta-dataset-template.yaml")
   )
   writeLines(
     c(
@@ -405,7 +456,7 @@ test_that("a coherent template:/patch: dataset entry does not fire patch_incoher
       "    patch:",
       "      remove_columns: [COL2]"
     ),
-    file.path(dir, "uses_patch_ok.dta-template.yaml")
+    lib_file(dir, "uses_patch_ok.dta-template.yaml")
   )
 
   result <- validate_template(dir)
@@ -433,7 +484,7 @@ test_that("dataset_missing fires, as an error, when a dta_dataset_template carri
       "id: slipped",
       "version: \"1.0\"",
       "datasets:",
-      "  - name: one",
+      "  - id: one",
       "    type: tabular",
       "    files:",
       "      filename: one.tsv",
@@ -441,7 +492,7 @@ test_that("dataset_missing fires, as an error, when a dta_dataset_template carri
       "      - id: C1",
       "        type: SAS Char"
     ),
-    file.path(dir, "slipped.dta-dataset-template.yaml")
+    lib_file(dir, "slipped.dta-dataset-template.yaml")
   )
 
   result <- validate_template(dir)
@@ -450,6 +501,184 @@ test_that("dataset_missing fires, as an error, when a dta_dataset_template carri
   # plural key was used instead" -- the exact, actionable diagnosis for the
   # mistake this test pins.
   expect_match(rows$message, "datasets:", fixed = TRUE)
+})
+
+# ---- dataset identity: id / name / description --------------------------
+
+write_dataset_tpl <- function(dir, identity_lines) {
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: ident",
+      "version: \"1.0\"",
+      "dataset:",
+      paste0("  ", identity_lines),
+      "  type: tabular",
+      "  files: {filename: one.tsv}",
+      "  columns:",
+      "    - {id: C1, type: SAS Char}"
+    ),
+    lib_file(dir, "ident.dta-dataset-template.yaml")
+  )
+}
+
+test_that("a dataset template with no id is a dataset_id_missing error, matching the engine's reader", {
+  dir <- withr::local_tempdir()
+  write_dataset_tpl(dir, "description: Only a long text")
+  expect_code_row(validate_template(dir), "dataset_id_missing", "error")
+  # The engine refuses the same file, so the error is not stricter than the app.
+  read <- app_env()$read_dataset_template(lib_file(dir, "ident.dta-dataset-template.yaml"))
+  expect_false(isTRUE(read$ok))
+})
+
+test_that("a dataset template with an id passes the identity check", {
+  dir <- withr::local_tempdir()
+  write_dataset_tpl(dir, c("id: ds1", "name: Dataset one", "description: Long text."))
+  result <- validate_template(dir)
+  expect_no_code_row(result, "dataset_id_missing")
+  expect_no_code_row(result, "dataset_field_invalid")
+})
+
+test_that("a dataset template in the pre-id shape is dataset_id_missing", {
+  # No backwards compatibility: `name:` is the label, never the identifier.
+  dir <- withr::local_tempdir()
+  write_dataset_tpl(dir, c("name: ds1", "description: Dataset one"))
+  expect_code_row(validate_template(dir), "dataset_id_missing", "error")
+})
+
+test_that("a non-scalar or missing id, name or description is dataset_field_invalid, naming the key as written", {
+  cases <- list(
+    list(lines = c("id: [a, b]"), key = "'id'"),
+    list(lines = c("id: ds1", "name: [a, b]"), key = "'name'"),
+    list(lines = c("id: ds1", "description: {x: 1}"), key = "'description'"),
+    list(lines = c("name: [a, b]"), key = "'name'"),
+    list(lines = c("id: .na"), key = "'id'")
+  )
+  for (case in cases) {
+    dir <- withr::local_tempdir()
+    write_dataset_tpl(dir, case$lines)
+    rows <- expect_code_row(validate_template(dir), "dataset_field_invalid", "error")
+    expect_match(rows$message, case$key, fixed = TRUE)
+  }
+})
+
+test_that("an empty or null dataset id is dataset_id_missing", {
+  for (line in c("id: \"\"", "id: ~")) {
+    dir <- withr::local_tempdir()
+    write_dataset_tpl(dir, line)
+    expect_code_row(validate_template(dir), "dataset_id_missing", "error")
+  }
+})
+
+test_that("an inline dataset with a list for its name is dataset_field_invalid", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: inline_tpl",
+      "version: \"1.0\"",
+      "abstract: true",
+      "base:",
+      "  metadata:",
+      "    title: Inline",
+      "datasets:",
+      "  - id: ds1",
+      "    name: [a, b]",
+      "    type: tabular",
+      "    files: {filename: x.csv, type: csv}",
+      "    columns:",
+      "      - {id: COL1, type: SAS Char}"
+    ),
+    lib_file(dir, "inline.dta-template.yaml")
+  )
+  rows <- expect_code_row(validate_template(dir), "dataset_field_invalid", "error")
+  expect_match(rows$message, "Inline dataset", fixed = TRUE)
+})
+
+test_that("an inline dataset with no id is a dataset_id_missing error, even in an abstract template", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: abs_tpl",
+      "version: \"1.0\"",
+      "abstract: true",
+      "base:",
+      "  metadata:",
+      "    title: Abstract",
+      "datasets:",
+      "  - type: tabular",
+      "    description: No identifier at all",
+      "    files: {filename: x.csv, type: csv}",
+      "    columns:",
+      "      - {id: COL1, type: SAS Char}"
+    ),
+    lib_file(dir, "abs.dta-template.yaml")
+  )
+  rows <- expect_code_row(validate_template(dir), "dataset_id_missing", "error")
+  expect_match(rows$message, "Inline dataset", fixed = TRUE)
+})
+
+test_that("a verb-form datasets: section checks its add:/modify: entries, not its verb keys", {
+  # The verb form is a MAPPING (add/modify/remove/order); walking it as a list
+  # of entries once reported dataset_id_missing for every verb key.
+  write_verb_child <- function(dir, added_id_line) {
+    writeLines(
+      c(
+        "kind: dta_creation_template",
+        "id: parent_tpl",
+        "version: \"1.0\"",
+        "base:",
+        "  metadata:",
+        "    title: Parent",
+        "datasets:",
+        "  - id: ds0",
+        "    type: tabular",
+        "    files: {filename: a.csv, type: csv}",
+        "    columns:",
+        "      - {id: COL1, type: SAS Char}",
+        "  - id: ds1",
+        "    type: tabular",
+        "    files: {filename: b.csv, type: csv}",
+        "    columns:",
+        "      - {id: COL1, type: SAS Char}"
+      ),
+      lib_file(dir, "parent.dta-template.yaml")
+    )
+    writeLines(
+      c(
+        "kind: dta_creation_template",
+        "id: child_tpl",
+        "version: \"1.0\"",
+        "extends: parent_tpl@1.0",
+        "datasets:",
+        "  remove: [ds0]",
+        "  add:",
+        added_id_line,
+        "      type: tabular",
+        "      files: {filename: c.csv, type: csv}",
+        "      columns:",
+        "        - {id: COL1, type: SAS Char}",
+        "  modify:",
+        "    - {id: ds1, description: Modified}",
+        "  order: [ds2, ds1]"
+      ),
+      lib_file(dir, "child.dta-template.yaml")
+    )
+  }
+
+  dir <- withr::local_tempdir()
+  write_verb_child(dir, "    - id: ds2")
+  result <- validate_template(dir)
+  expect_no_code_row(result, "dataset_id_missing")
+  expect_no_code_row(result, "dataset_field_invalid")
+
+  # The add: entries really are checked: one without an id is still reported,
+  # exactly once (not once per verb key).
+  dir2 <- withr::local_tempdir()
+  write_verb_child(dir2, "    - description: No identifier")
+  rows <- expect_code_row(validate_template(dir2), "dataset_id_missing", "error")
+  expect_equal(nrow(rows), 1L)
 })
 
 test_that("a well-formed dta_dataset_template with a proper 'dataset:' body validates clean", {
@@ -463,17 +692,183 @@ test_that("a well-formed dta_dataset_template with a proper 'dataset:' body vali
       "id: has_dataset_body",
       "version: \"1.0\"",
       "dataset:",
-      "  name: ds1",
+      "  id: ds1",
       "  type: tabular",
       "  files: {filename: x.csv, type: csv}",
       "  columns:",
       "    - {id: COL1, type: SAS Char}"
     ),
-    file.path(dir, "has_dataset_body.dta-dataset-template.yaml")
+    lib_file(dir, "has_dataset_body.dta-dataset-template.yaml")
   )
 
   result <- validate_template(dir)
   expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
+})
+
+# ---- column_spec_invalid -----------------------------------------------------
+
+write_column_tpl <- function(dir, col_line) {
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: colspec",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: ds1",
+      "  type: tabular",
+      "  files: {filename: x.csv, type: csv}",
+      "  columns:",
+      "    - {id: GOOD, type: SAS Char, length: 5, examples: [abc]}",
+      paste0("    - ", col_line)
+    ),
+    lib_file(dir, "colspec.dta-dataset-template.yaml")
+  )
+}
+
+test_that("column_spec_invalid fires, as an error naming the column, when DTAColumnSpec rejects a column", {
+  # An example that breaks the column's own pattern: rejected by the validator
+  # today, independent of any newer value-vs-type checks.
+  dir <- withr::local_tempdir()
+  write_column_tpl(dir, "{id: BADPAT, type: SAS Char, pattern: \"^[0-9]+$\", examples: [abc]}")
+  rows <- expect_code_row(validate_template(dir), "column_spec_invalid", "error")
+  expect_equal(nrow(rows), 1)
+  expect_match(rows$message, "BADPAT", fixed = TRUE)
+  expect_false(any(grepl("GOOD", rows$message, fixed = TRUE)))
+})
+
+test_that("column_spec_invalid fires for a dataset template column whose example is longer than its length", {
+  dir <- withr::local_tempdir()
+  write_column_tpl(dir, "{id: TOOLONG, type: SAS Char, length: 3, examples: [abcdef]}")
+  rows <- expect_code_row(validate_template(dir), "column_spec_invalid", "error")
+  expect_match(rows$message, "TOOLONG", fixed = TRUE)
+})
+
+test_that("a dataset template whose columns all fit validates with no column_spec_invalid row", {
+  dir <- withr::local_tempdir()
+  write_column_tpl(dir, "{id: FITS, type: SAS Char, length: 5, examples: [abc]}")
+  expect_no_code_row(validate_template(dir), "column_spec_invalid")
+})
+
+test_that("a column with a values_from binding is built without the binding key tripping column_spec_invalid", {
+  dir <- withr::local_tempdir()
+  write_column_tpl(dir, "{id: BOUND, type: SAS Char, values_from: {vocabulary: nowhere}}")
+  expect_no_code_row(validate_template(dir), "column_spec_invalid")
+})
+
+test_that("strict = TRUE aborts on a column_spec_invalid error", {
+  dir <- withr::local_tempdir()
+  write_column_tpl(dir, "{id: BADPAT, type: SAS Char, pattern: \"^[0-9]+$\", examples: [abc]}")
+  expect_error(validate_template(dir, strict = TRUE), "Template validation found")
+})
+
+# ---- linter codes (lint_dta) ------------------------------------------------
+
+write_rule_dataset_tpl <- function(dir, rule_lines) {
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: ruled",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: ds1",
+      "  type: tabular",
+      "  files: {filename: x.csv, type: csv}",
+      "  columns:",
+      "    - {id: COL1, type: SAS Char}",
+      "    - {id: BOUND, type: SAS Char, values_from: {vocabulary: nowhere}}",
+      "  rules:",
+      rule_lines
+    ),
+    lib_file(dir, "ruled.dta-dataset-template.yaml")
+  )
+}
+
+test_that("a dataset template rule on an undeclared column is a rule_column_undeclared error", {
+  dir <- withr::local_tempdir()
+  write_rule_dataset_tpl(dir, "    - {id: r1, type: col_unique, columns: [MISSING]}")
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "rule_column_undeclared", "error")
+  expect_equal(nrow(rows), 1)
+  expect_error(validate_template(dir, strict = TRUE), "Template validation found")
+})
+
+test_that("a dataset template with rules on declared columns, including a values_from column, is clean", {
+  dir <- withr::local_tempdir()
+  write_rule_dataset_tpl(dir, c(
+    "    - {id: r1, type: col_unique, columns: [COL1]}",
+    "    - {id: r2, type: col_unique, columns: [BOUND]}"
+  ))
+  # The deliberately unresolvable binding warns on its own; what matters is that
+  # it is neither a column_spec_invalid nor a rule finding.
+  result <- validate_template(dir)
+  expect_equal(result$code, "values_from_unresolved")
+})
+
+test_that("a creation template whose dataset repeats a rule id fails to instantiate", {
+  # The DTAColumnSpecCollection class invariant now rejects the duplicate id at
+  # construction, so the build itself fails: instantiate_failed is the expected
+  # code, and lint_dta() is never reached for it (no rule_id_duplicate row).
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: dup_rules",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Dup",
+      "datasets:",
+      "  - id: ds1",
+      "    type: tabular",
+      "    files: {filename: x.csv, type: csv}",
+      "    columns:",
+      "      - {id: COL1, type: SAS Char}",
+      "    rules:",
+      "      - {id: r1, type: col_unique, columns: [COL1]}",
+      "      - {id: r1, type: col_unique, columns: [COL1]}"
+    ),
+    lib_file(dir, "dup_rules.dta-template.yaml")
+  )
+  result <- validate_template(dir)
+  expect_code_row(result, "instantiate_failed", "error")
+  expect_no_code_row(result, "rule_id_duplicate")
+})
+
+test_that("a clean creation template, with and without rules, raises none of the linter codes", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  result <- validate_template(dir)
+  linter_codes <- c(
+    "rule_invalid", "rule_id_duplicate", "rule_column_undeclared",
+    "rule_range_non_numeric", "rule_condition_operator_invalid",
+    "rule_condition_numeric_on_text", "rule_condition_value_unfit",
+    "rule_condition_value_outside_values", "group_constraint_unknown_condition",
+    "rules_without_columns", "rule_not_checkable", "format_narrower_than_length"
+  )
+  expect_false(any(result$code %in% linter_codes))
+  expect_equal(nrow(result), 0)
+})
+
+test_that("an inline creation-template column the spec rejects still surfaces as instantiate_failed", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: inline_bad",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Inline bad",
+      "datasets:",
+      "  - id: ds1",
+      "    type: tabular",
+      "    files: {filename: x.csv, type: csv}",
+      "    columns:",
+      "      - {id: BADPAT, type: SAS Char, pattern: \"^[0-9]+$\", examples: [abc]}"
+    ),
+    lib_file(dir, "inline_bad.dta-template.yaml")
+  )
+  expect_code_row(validate_template(dir), "instantiate_failed", "error")
 })
 
 test_that("a dta_creation_template's own 'datasets:' key is correct and must not trip dataset_missing", {
@@ -505,7 +900,7 @@ test_that("party_slot_invalid fires for a slot target that is not metadata.suppl
       "  - id: supplier_choice",
       "    target: metadata.not_a_party_target"
     ),
-    file.path(dir, "bad_slot.dta-template.yaml")
+    lib_file(dir, "bad_slot.dta-template.yaml")
   )
 
   result <- validate_template(dir)
@@ -527,7 +922,7 @@ test_that("party_slot_invalid fires for a named profile id that does not exist",
       "    target: metadata.supplier",
       "    profiles: [not_a_real_profile]"
     ),
-    file.path(dir, "bad_slot_profile.dta-template.yaml")
+    lib_file(dir, "bad_slot_profile.dta-template.yaml")
   )
 
   result <- validate_template(dir)
@@ -547,7 +942,7 @@ test_that("instantiate_failed fires when a non-abstract template cannot actually
       "datasets:",
       "  - no_such_dataset_file.yaml"
     ),
-    file.path(dir, "broken_build.dta-template.yaml")
+    lib_file(dir, "broken_build.dta-template.yaml")
   )
 
   result <- validate_template(dir)
@@ -566,7 +961,7 @@ test_that("instantiate_failed does not fire for an abstract template that cannot
       "datasets:",
       "  - no_such_dataset_file.yaml"
     ),
-    file.path(dir, "broken_abstract.dta-template.yaml")
+    lib_file(dir, "broken_abstract.dta-template.yaml")
   )
 
   result <- validate_template(dir)
@@ -580,19 +975,19 @@ test_that("a malformed file yields one parse_failed error row, and other files a
   # A leading tab is invalid YAML indentation and reliably fails to parse.
   writeLines(
     c("kind: dta_creation_template", "\tid: bad"),
-    file.path(dir, "malformed.dta-template.yaml")
+    lib_file(dir, "malformed.dta-template.yaml")
   )
   write_clean_template(dir, filename = "clean.dta-template.yaml", id = "still_checked")
 
   result <- validate_template(dir)
 
-  malformed_rows <- result[result$file == file.path(dir, "malformed.dta-template.yaml"), , drop = FALSE]
+  malformed_rows <- result[result$file == lib_file(dir, "malformed.dta-template.yaml"), , drop = FALSE]
   expect_equal(nrow(malformed_rows), 1)
   expect_equal(malformed_rows$code, "parse_failed")
   expect_equal(malformed_rows$severity, "error")
 
   # The clean sibling file is unaffected: no rows of its own at all.
-  clean_rows <- result[result$file == file.path(dir, "clean.dta-template.yaml"), , drop = FALSE]
+  clean_rows <- result[result$file == lib_file(dir, "clean.dta-template.yaml"), , drop = FALSE]
   expect_equal(nrow(clean_rows), 0)
 })
 
@@ -605,7 +1000,7 @@ test_that("strict = TRUE aborts, summarising the error count, when any row is se
       "kind: dta_creation_template", "id: unquoted_tpl", "version: 1.0",
       "base: {metadata: {}}", "datasets: []"
     ),
-    file.path(dir, "unquoted.dta-template.yaml")
+    lib_file(dir, "unquoted.dta-template.yaml")
   )
 
   expect_error(
@@ -613,6 +1008,26 @@ test_that("strict = TRUE aborts, summarising the error count, when any row is se
     regexp = "Template validation found",
     class = "rlang_error"
   )
+})
+
+test_that("strict = TRUE never evaluates the offending file's path as a cli format string", {
+  # .dta_template_strict_check() sprintf()s preview$file (author-controlled --
+  # here, the template's own file name) straight into a cli_abort() bullet.
+  # Before the fix, a `{`/`}` in that path was glue-evaluated in the
+  # validating session instead of printed literally.
+  dir <- withr::local_tempdir()
+  payload_file <- "u{stop('evaluated')}.dta-template.yaml"
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: unquoted_tpl", "version: 1.0",
+      "base: {metadata: {}}", "datasets: []"
+    ),
+    lib_file(dir, payload_file)
+  )
+
+  err <- tryCatch(validate_template(dir, strict = TRUE), error = function(e) e)
+  expect_s3_class(err, "rlang_error")
+  expect_true(grepl(payload_file, conditionMessage(err), fixed = TRUE))
 })
 
 # ---- kinds filter -------------------------------------------------------------
@@ -623,10 +1038,10 @@ test_that("kinds restricts which files get their own report row but not cross-fi
     c(
       "kind: dta_dataset_template", "id: ds_tpl_k", "version: \"1.0\"",
       "dataset:",
-      "  name: ds1", "  type: tabular", "  files: {filename: x.csv, type: csv}",
+      "  id: ds1", "  type: tabular", "  files: {filename: x.csv, type: csv}",
       "  columns:", "    - {id: COL1, type: SAS Char}"
     ),
-    file.path(dir, "ds_tpl_k.dta-dataset-template.yaml")
+    lib_file(dir, "ds_tpl_k.dta-dataset-template.yaml")
   )
   writeLines(
     c(
@@ -634,7 +1049,7 @@ test_that("kinds restricts which files get their own report row but not cross-fi
       "base: {metadata: {}}",
       "datasets:", "  - template: ds_tpl_k@1.0"
     ),
-    file.path(dir, "uses_ds_tpl_k.dta-template.yaml")
+    lib_file(dir, "uses_ds_tpl_k.dta-template.yaml")
   )
 
   result <- validate_template(dir, kinds = "dta_creation_template")
@@ -664,7 +1079,7 @@ write_vocab_file <- function(dir, id = "visit", filename = NULL,
       "label: Visits",
       body
     ),
-    file.path(dir, filename)
+    lib_file(dir, filename)
   )
 }
 
@@ -687,7 +1102,22 @@ test_that("vocabulary_invalid fires, as an error, for a vocabulary that will not
       "type: categorical",
       "terms:", "  - code: SCR"
     ),
-    file.path(dir, "broken.dta-vocabulary.yaml")
+    lib_file(dir, "broken.dta-vocabulary.yaml")
+  )
+
+  result <- validate_template(dir)
+  expect_code_row(result, "vocabulary_invalid", "error")
+})
+
+test_that("vocabulary_invalid fires for a columns: entry with a bad field", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_vocabulary", "id: pairs", "version: \"1.0\"",
+      "columns:", "  - id: GFTEST", "    field: decode",
+      "terms:", "  - code: TRNSCPTN"
+    ),
+    lib_file(dir, "pairs.dta-vocabulary.yaml")
   )
 
   result <- validate_template(dir)
@@ -737,7 +1167,7 @@ test_that("kinds = 'dta_vocabulary' reports only vocabulary files", {
   # reported when `kinds` excludes it.
   writeLines(
     c("kind: dta_creation_template", "id: nover", "datasets: []"),
-    file.path(dir, "nover.dta-template.yaml")
+    lib_file(dir, "nover.dta-template.yaml")
   )
 
   result <- validate_template(dir, kinds = "dta_vocabulary")
@@ -756,13 +1186,13 @@ write_bound_dataset_tpl <- function(dir, col_lines, filename = "bound.dta-datase
       "id: bound_ds",
       "version: \"1.0\"",
       "dataset:",
-      "  name: ds1",
+      "  id: ds1",
       "  type: tabular",
       "  files: {filename: x.csv, type: csv}",
       "  columns:",
       col_lines
     ),
-    file.path(dir, filename)
+    lib_file(dir, filename)
   )
 }
 
@@ -920,7 +1350,11 @@ test_that("no_templates fires for an empty directory, naming the suffixes and th
   expect_match(rows$message, "dta-dataset-template.yaml", fixed = TRUE)
   expect_match(rows$message, "dta-party.yaml", fixed = TRUE)
   expect_match(rows$message, "dta-vocabulary.yaml", fixed = TRUE)
-  expect_match(rows$message, "non-recursively", fixed = TRUE)
+  expect_match(rows$message, "non-recursive", fixed = TRUE)
+  expect_match(rows$message, "in templates/", fixed = TRUE)
+  expect_match(rows$message, "in parties/", fixed = TRUE)
+  expect_match(rows$message, "in vocabulary/", fixed = TRUE)
+  expect_match(rows$message, "repository ROOT", fixed = TRUE)
 })
 
 test_that("strict = TRUE aborts on an empty directory instead of passing silently", {
@@ -937,7 +1371,7 @@ test_that("no_templates does not fire when path names a single file", {
   dir <- withr::local_tempdir()
   write_clean_template(dir)
 
-  result <- validate_template(file.path(dir, "clean.dta-template.yaml"))
+  result <- validate_template(lib_file(dir, "clean.dta-template.yaml"))
   expect_no_code_row(result, "no_templates")
 })
 
@@ -956,45 +1390,52 @@ test_that("no_templates does not fire when kinds filters out every file present"
 
 test_that("template_in_subdirectory fires, as a warning, for a template kept one level down", {
   dir <- withr::local_tempdir()
-  sub <- file.path(dir, "by-study")
-  dir.create(sub)
-  write_clean_template(sub, filename = "nested.dta-template.yaml", id = "nested_tpl")
+  write_clean_template(dir, filename = "top.dta-template.yaml", id = "top_tpl")
+  write_clean_below(dir, "by-study", filename = "nested.dta-template.yaml", id = "nested_tpl")
 
   result <- validate_template(dir)
   rows <- expect_code_row(result, "template_in_subdirectory", "warning")
   expect_match(rows$file, "nested.dta-template.yaml", fixed = TRUE)
+  expect_match(rows$message, "'templates/'", fixed = TRUE)
 })
 
 test_that("strict = TRUE stays silent when the only OTHER issue is a nested template", {
   # A directory holding ONLY a nested template also trips no_templates (its
-  # top-level scan is empty), so this needs a valid top-level template too --
-  # otherwise it would not be testing template_in_subdirectory "alone".
-  # template_in_subdirectory itself must not turn CI red on its own: keeping
-  # an archived or work-in-progress file below the root is a legitimate
-  # choice.
+  # kind-folder scan is empty), so this needs a valid template directly in
+  # templates/ too -- otherwise it would not be testing
+  # template_in_subdirectory "alone". template_in_subdirectory itself must not
+  # turn CI red on its own: keeping an archived or work-in-progress file below
+  # the kind folder is a legitimate choice.
   dir <- withr::local_tempdir()
   write_clean_template(dir, filename = "top.dta-template.yaml", id = "top_tpl")
-  sub <- file.path(dir, "by-study")
-  dir.create(sub)
-  write_clean_template(sub, filename = "nested.dta-template.yaml", id = "nested_tpl")
+  write_clean_below(dir, "by-study", filename = "nested.dta-template.yaml", id = "nested_tpl")
 
   expect_no_error(validate_template(dir, strict = TRUE))
+})
+
+test_that("a library holding ONLY a nested template reports it and no_templates", {
+  # template_in_subdirectory is a warning that does not count as a misplaced
+  # file, so it does not suppress no_templates: nothing is actually loaded.
+  dir <- withr::local_tempdir()
+  write_clean_below(dir, "archive", filename = "nested.dta-template.yaml", id = "nested_tpl")
+
+  result <- validate_template(dir)
+  expect_code_row(result, "template_in_subdirectory", "warning")
+  expect_code_row(result, "no_templates", "error")
 })
 
 test_that("a top-level template alongside a nested one is validated normally, the nested one is reported, and no_templates does not fire", {
   dir <- withr::local_tempdir()
   write_clean_template(dir, filename = "top.dta-template.yaml", id = "top_tpl")
-  sub <- file.path(dir, "archive")
-  dir.create(sub)
-  write_clean_template(sub, filename = "old.dta-template.yaml", id = "old_tpl")
+  write_clean_below(dir, "archive", filename = "old.dta-template.yaml", id = "old_tpl")
 
   result <- validate_template(dir)
 
   expect_code_row(result, "template_in_subdirectory", "warning")
   expect_no_code_row(result, "no_templates")
-  # The top-level file's own row set stays empty -- it is a fully valid
+  # The directly-placed file's own row set stays empty -- it is a fully valid
   # template, so anything else reported against it would be a false positive.
-  top_rows <- result[result$file == file.path(dir, "top.dta-template.yaml"), , drop = FALSE]
+  top_rows <- result[result$file == lib_file(dir, "top.dta-template.yaml"), , drop = FALSE]
   expect_equal(nrow(top_rows), 0)
 })
 
@@ -1004,25 +1445,20 @@ test_that("files under a dot-directory are not reported as nested templates", {
   # filename suffix.
   dir <- withr::local_tempdir()
   write_clean_template(dir, filename = "top.dta-template.yaml", id = "top_tpl")
-  dotdir <- file.path(dir, ".git", "refs")
-  dir.create(dotdir, recursive = TRUE)
-  write_clean_template(dotdir, filename = "phantom.dta-template.yaml", id = "phantom_tpl")
+  write_clean_below(dir, file.path(".git", "refs"), filename = "phantom.dta-template.yaml", id = "phantom_tpl")
+  # ... nor as misplaced, however the dot directory sits in the library.
+  write_clean_at(file.path(dir, ".git"), "phantom2.dta-template.yaml", "phantom_tpl2")
 
   result <- validate_template(dir)
   expect_no_code_row(result, "template_in_subdirectory")
+  expect_no_code_row(result, "template_misplaced")
   expect_false(any(grepl("phantom", result$file, fixed = TRUE)))
 })
 
-# ---- Regression guard: the bundled templates -------------------------------
+# ---- Regression guard: the bundled library ---------------------------------
 
-test_that("the bundled inst/extdata/templates directory validates with no error rows", {
-  # KNOWN CONFLICT (see the implementation report): the shipped
-  # biomarker_gf.dta-template.yaml has an unquoted `version: 1.0` at its top
-  # level, which the mandated version_unquoted check (severity "error")
-  # correctly flags. Fixing that file is outside this task's allowed file
-  # list, so this assertion is expected to fail until it is fixed -- kept as
-  # specified, per instruction, rather than weakened.
-  result <- validate_template(system.file("extdata", "templates", package = "DTAtools"))
+test_that("the bundled inst/extdata/library validates with no error rows", {
+  result <- validate_template(system.file("extdata", "library", package = "DTAtools"))
   errors <- result[result$severity == "error", , drop = FALSE]
   expect_equal(nrow(errors), 0, info = paste(utils::capture.output(print(errors)), collapse = "\n"))
 })
@@ -1055,7 +1491,7 @@ test_that(".dta_template_read_raw() does not signal on a file it cannot open", {
 
 test_that(".dta_template_read_raw() still reads a real template unchanged", {
   dir <- withr::local_tempdir()
-  path <- file.path(dir, "clean.dta-template.yaml")
+  path <- lib_file(dir, "clean.dta-template.yaml")
   write_clean_template(dir)
 
   res <- expect_no_warning(.dta_template_read_raw(path))
@@ -1088,4 +1524,495 @@ test_that(".dta_template_version_plain_is_exact() still tells quoted from unquot
   unquoted <- file.path(dir, "unquoted.yaml")
   writeLines(c("kind: dta_creation_template", "id: u", "version: 1.10"), unquoted)
   expect_false(.dta_template_version_plain_is_exact(unquoted))
+})
+
+
+# ---- Library layout ---------------------------------------------------------
+#
+# A library ROOT holds dta-app.yaml, templates/ (creation + dataset templates),
+# parties/, vocabulary/ and export-templates/. Nothing flat or mixed is read.
+
+test_that("a library root validates clean and strict stays silent", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  expect_equal(nrow(validate_template(dir)), 0)
+  expect_silent(validate_template(dir, strict = TRUE))
+})
+
+test_that("an empty or unrelated templates/ folder adds nothing to a valid library", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  writeLines("not a template", file.path(dir, "templates", "notes.txt"))
+  dir.create(file.path(dir, "parties"))
+  dir.create(file.path(dir, "vocabulary"))
+  expect_equal(nrow(validate_template(dir)), 0)
+})
+
+test_that("a kind folder given as the path is one library_subfolder_given error, whatever it holds", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  write_clean_template(dir, filename = "second.dta-template.yaml", id = "second_tpl")
+  write_vocab_file(dir)
+  write_party_file(dir)
+
+  for (sub in c("templates", "parties", "vocabulary")) {
+    result <- validate_template(file.path(dir, sub))
+    # One row for the folder, never one per file in it.
+    expect_equal(nrow(result), 1, info = sub)
+    expect_identical(result$code, "library_subfolder_given", info = sub)
+    expect_identical(result$severity, "error", info = sub)
+    expect_identical(result$file, file.path(dir, sub), info = sub)
+    expect_match(result$message, "not a library root", fixed = TRUE)
+    expect_match(result$message, "flat library", fixed = TRUE)
+    expect_match(result$message, "Reorganising an older repository", fixed = TRUE)
+    expect_match(result$message, "case-sensitive", fixed = TRUE)
+    expect_error(
+      validate_template(file.path(dir, sub), strict = TRUE),
+      class = "rlang_error", regexp = "library_subfolder_given"
+    )
+  }
+})
+
+test_that("library_subfolder_given replaces both the per-file rows and no_templates", {
+  # The folder holds files, none in a place the loader reads; the one row says
+  # why, so "No template files found" would only repeat it.
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  result <- validate_template(file.path(dir, "templates"))
+  expect_no_code_row(result, "no_templates")
+  expect_no_code_row(result, "template_misplaced")
+})
+
+test_that("a library root that happens to be called templates is not library_subfolder_given", {
+  # It holds kind folders, so it is a root: no sub-folder verdict.
+  dir <- file.path(withr::local_tempdir(), "templates")
+  dir.create(dir)
+  write_clean_template(dir)
+  write_party_file(dir)
+  result <- validate_template(dir)
+  expect_no_code_row(result, "library_subfolder_given")
+  expect_equal(nrow(result), 0)
+})
+
+test_that("a template file at the library root is template_misplaced, never scanned or checked for duplicate ids", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  root_file <- file.path(dir, "clean.dta-template.yaml")
+  for (id in c("root_only", "clean_tpl")) {
+    writeLines(clean_template_lines(id), root_file)
+    result <- validate_template(dir)
+    expect_equal(nrow(result), 1)
+    expect_identical(result$code, "template_misplaced")
+    expect_identical(result$severity, "error")
+    expect_identical(result$file, root_file)
+    expect_identical(result$id, id)
+    expect_match(result$message, "'templates/'", fixed = TRUE)
+    expect_error(
+      validate_template(dir, strict = TRUE),
+      class = "rlang_error", regexp = "template_misplaced"
+    )
+  }
+})
+
+test_that("every kind is template_misplaced in another kind's folder or at the root, naming the right folder", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  cases <- list(
+    list(file = "m_party.dta-party.yaml", kind = "dta_party_profile", right = "parties"),
+    list(file = "m_vocab.dta-vocabulary.yaml", kind = "dta_vocabulary", right = "vocabulary"),
+    list(file = "m_tpl.dta-template.yaml", kind = "dta_creation_template", right = "templates"),
+    list(file = "m_ds.dta-dataset-template.yaml", kind = "dta_dataset_template", right = "templates")
+  )
+  wrong_places <- list(
+    list(where = "templates", applies = c("m_party.dta-party.yaml", "m_vocab.dta-vocabulary.yaml")),
+    list(where = "parties", applies = c("m_tpl.dta-template.yaml", "m_ds.dta-dataset-template.yaml", "m_vocab.dta-vocabulary.yaml")),
+    list(where = "vocabulary", applies = c("m_party.dta-party.yaml", "m_tpl.dta-template.yaml")),
+    list(where = "", applies = vapply(cases, function(x) x$file, character(1)))
+  )
+  for (wp in wrong_places) {
+    for (case in cases) {
+      if (!case$file %in% wp$applies) next
+      at <- if (nzchar(wp$where)) file.path(dir, wp$where) else dir
+      dir.create(at, showWarnings = FALSE)
+      f <- file.path(at, case$file)
+      writeLines(c(sprintf("kind: %s", case$kind), "id: misplaced_one", "version: \"1.0\""), f)
+
+      result <- validate_template(dir)
+      label <- paste(case$file, "in", if (nzchar(wp$where)) wp$where else "root")
+      expect_equal(nrow(result), 1, info = label)
+      expect_identical(result$code, "template_misplaced", info = label)
+      expect_identical(result$severity, "error", info = label)
+      expect_identical(result$file, f, info = label)
+      expect_identical(result$kind, case$kind, info = label)
+      expect_match(result$message, sprintf("'%s/'", case$right), fixed = TRUE, info = label)
+      expect_match(result$message, "case-sensitive", fixed = TRUE, info = label)
+      file.remove(f)
+    }
+  }
+})
+
+test_that("a template under an unrelated folder is template_misplaced; unrelated yaml there is ignored", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  write_clean_at(file.path(dir, "chart", "templates"), "stray.dta-template.yaml", "stray_tpl")
+  writeLines("chart: value", file.path(dir, "chart", "templates", "foo.yaml"))
+
+  result <- validate_template(dir)
+  expect_equal(nrow(result), 1)
+  expect_identical(result$code, "template_misplaced")
+  expect_match(result$file, "stray.dta-template.yaml", fixed = TRUE)
+})
+
+test_that("a template nested below its own folder warns and says the scan is non-recursive", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  write_clean_below(dir, "sub", filename = "deep.dta-template.yaml", id = "deep_tpl")
+  result <- validate_template(dir)
+  expect_equal(nrow(result), 1)
+  expect_identical(result$code, "template_in_subdirectory")
+  expect_identical(result$severity, "warning")
+  expect_match(result$message, "non-recursive", fixed = TRUE)
+  expect_match(result$message, "directly into 'templates/'", fixed = TRUE)
+})
+
+test_that("template_in_subdirectory names the folder of the kind, for a party below parties/", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  write_lines_at(
+    file.path(dir, "parties", "archive"), "old.dta-party.yaml",
+    party_lines("old_party")
+  )
+  result <- validate_template(dir)
+  expect_equal(nrow(result), 1)
+  expect_identical(result$code, "template_in_subdirectory")
+  expect_match(result$message, "'parties/'", fixed = TRUE)
+})
+
+test_that("a party nested below the WRONG kind folder is template_misplaced, not a subdirectory warning", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  write_lines_at(
+    file.path(dir, "templates", "archive"), "old.dta-party.yaml",
+    party_lines("old_party")
+  )
+  result <- validate_template(dir)
+  expect_equal(nrow(result), 1)
+  expect_identical(result$code, "template_misplaced")
+  expect_match(result$message, "'parties/'", fixed = TRUE)
+})
+
+test_that("the placement rows ignore `kinds`", {
+  # Whether the loaders miss a file does not depend on which kinds the caller
+  # asked for report rows on.
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  write_vocab_file(dir)
+  write_clean_at(dir, "root_tpl.dta-template.yaml", "root_tpl")
+  write_clean_below(dir, "archive", filename = "old.dta-template.yaml", id = "old_tpl")
+
+  for (kinds in list("dta_vocabulary", "dta_party_profile", c("dta_vocabulary", "dta_dataset_template"))) {
+    result <- validate_template(dir, kinds = kinds)
+    expect_code_row(result, "template_misplaced", "error")
+    expect_code_row(result, "template_in_subdirectory", "warning")
+  }
+})
+
+test_that("a library holding only misplaced files reports them but not no_templates", {
+  dir <- withr::local_tempdir()
+  write_clean_at(dir, "root_tpl.dta-template.yaml", "root_tpl")
+
+  result <- validate_template(dir)
+  expect_code_row(result, "template_misplaced", "error")
+  expect_no_code_row(result, "no_templates")
+  expect_equal(nrow(result), 1)
+})
+
+test_that("an empty library root is only no_templates", {
+  dir <- withr::local_tempdir()
+  dir.create(file.path(dir, "templates"))
+  result <- validate_template(dir)
+  expect_equal(result$code, "no_templates")
+  expect_equal(result$severity, "error")
+})
+
+# ---- A single file is checked in isolation ---------------------------------
+
+test_that("a single file outside its kind folder validates with no placement row", {
+  dir <- withr::local_tempdir()
+  write_clean_at(dir, "solo.dta-template.yaml", "solo_tpl")
+  result <- validate_template(file.path(dir, "solo.dta-template.yaml"))
+  expect_equal(nrow(result), 0)
+  expect_no_code_row(result, "template_misplaced")
+  expect_no_code_row(result, "template_in_subdirectory")
+  expect_no_code_row(result, "no_templates")
+})
+
+test_that("a single file in the wrong kind folder is checked on its content only", {
+  dir <- withr::local_tempdir()
+  write_lines_at(file.path(dir, "templates"), "p.dta-party.yaml", party_lines("p_one"))
+  result <- validate_template(file.path(dir, "templates", "p.dta-party.yaml"))
+  expect_equal(nrow(result), 0)
+})
+
+test_that("a single file does no cross-file resolution, even when its parent sits next to it", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir) # clean_tpl@1.0 in templates/
+  write_lines_at(
+    file.path(dir, "templates"), "child.dta-template.yaml",
+    c(
+      "kind: dta_creation_template", "id: child_tpl", "version: \"1.0\"",
+      "abstract: true", "extends: clean_tpl@1.0", "base: {metadata: {}}",
+      "datasets:", "  - id: placeholder"
+    )
+  )
+
+  as_library <- validate_template(dir)
+  expect_no_code_row(as_library, "extends_unresolved")
+
+  alone <- validate_template(file.path(dir, "templates", "child.dta-template.yaml"))
+  expect_code_row(alone, "extends_unresolved", "warning")
+})
+
+# ---- export-templates/ -----------------------------------------------------
+
+test_that("export_template_invalid flags a non-docx file in export-templates/ and skips clutter", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  exp_dir <- file.path(dir, "export-templates")
+  dir.create(exp_dir)
+  writeLines("x", file.path(exp_dir, "good.docx"))
+  writeLines("x", file.path(exp_dir, "GOOD2.DOCX"))
+  writeLines("x", file.path(exp_dir, "README.md"))
+  writeLines("x", file.path(exp_dir, "readme.txt"))
+  writeLines("x", file.path(exp_dir, ".gitkeep"))
+  writeLines("x", file.path(exp_dir, "~$good.docx"))
+  writeLines("x", file.path(exp_dir, "~$old.doc"))
+  dir.create(file.path(exp_dir, "a-subfolder"))
+  expect_equal(nrow(validate_template(dir)), 0)
+
+  writeLines("x", file.path(exp_dir, "notes.txt"))
+  writeLines("x", file.path(exp_dir, "old.doc"))
+  # Only a file NAMED README is clutter; README_old.pdf is not a README.
+  writeLines("x", file.path(exp_dir, "README_old.pdf"))
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "export_template_invalid", "warning")
+  expect_setequal(basename(rows$file), c("notes.txt", "old.doc", "README_old.pdf"))
+  expect_true(all(rows$kind == "dta_export_template"))
+  expect_equal(nrow(result), 3)
+  # A warning: strict stays silent.
+  expect_no_error(validate_template(dir, strict = TRUE))
+})
+
+test_that("export_template_invalid is not raised for .docx below export-templates/ or whatever `kinds` says", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  exp_dir <- file.path(dir, "export-templates")
+  dir.create(file.path(exp_dir, "deep"), recursive = TRUE)
+  writeLines("x", file.path(exp_dir, "deep", "ignored.txt")) # non-recursive scan
+  expect_equal(nrow(validate_template(dir)), 0)
+
+  writeLines("x", file.path(exp_dir, "notes.txt"))
+  rows <- validate_template(dir, kinds = "dta_vocabulary")
+  expect_equal(rows$code, "export_template_invalid")
+})
+
+test_that("a stray non-docx file anywhere else is not an export_template_invalid row", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  writeLines("x", file.path(dir, "notes.txt"))
+  writeLines("x", file.path(dir, "templates", "notes.txt"))
+  expect_equal(nrow(validate_template(dir)), 0)
+})
+
+test_that("a single file never gets export-template rows", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  dir.create(file.path(dir, "export-templates"))
+  writeLines("x", file.path(dir, "export-templates", "notes.txt"))
+  result <- validate_template(file.path(dir, "templates", "clean.dta-template.yaml"))
+  expect_equal(nrow(result), 0)
+})
+
+# ---- The scaffold validates under the same layout --------------------------
+
+test_that("all four starter kinds resolve across files in their own folders", {
+  dir <- withr::local_tempdir()
+  suppressMessages(create_template_repo(dir, ci = FALSE))
+  expect_equal(nrow(validate_template(dir)), 0)
+  expect_no_error(validate_template(dir, strict = TRUE))
+})
+
+test_that("misplaced diagnostics tolerate malformed YAML and literal cli braces", {
+  dir <- file.path(withr::local_tempdir(), "repo-{stop('not evaluated')}")
+  suppressMessages(create_template_repo(dir, ci = FALSE))
+  writeLines("bad: [", file.path(dir, "broken.dta-template.yaml"))
+  result <- validate_template(dir)
+  expect_identical(result$code, "template_misplaced")
+  expect_true(is.na(result$id))
+  expect_error(
+    validate_template(dir, strict = TRUE),
+    class = "rlang_error", regexp = "template_misplaced"
+  )
+})
+
+# ---- prior_versions_invalid --------------------------------------------------
+
+test_that("prior_versions_invalid names each malformed entry and passes a good one", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir, version_line = "version: \"5.0\"")
+  path <- lib_file(dir, "clean.dta-template.yaml")
+  write(c(
+    "prior_versions:",
+    "  - { version: \"4.0\", date: 2024-03-01, changes: Fine. }",
+    "  - { version: \"6.0\", changes: Newer than the file. }",
+    "  - { version: \"3.0\", colour: red, changes: Extra key. }"
+  ), path, append = TRUE)
+
+  rows <- expect_code_row(validate_template(dir), "prior_versions_invalid", "error")
+  expect_equal(nrow(rows), 2)
+  expect_true(any(grepl("entry 2 (6.0) is not older than 5.0", rows$message, fixed = TRUE)))
+  expect_true(any(grepl("entry 3 (3.0) has unknown key(s): colour", rows$message, fixed = TRUE)))
+})
+
+test_that("a well-formed prior_versions block raises nothing", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir, version_line = "version: \"5.0\"")
+  write(
+    c("prior_versions:", "  - { version: \"4.0\", changes: Fine. }"),
+    lib_file(dir, "clean.dta-template.yaml"),
+    append = TRUE
+  )
+  expect_equal(nrow(validate_template(dir)), 0)
+})
+
+test_that("prior_versions must precede the template's oldest version in the directory, as in the picker", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir, filename = "v4.dta-template.yaml", version_line = "version: \"4.0\"")
+  write_clean_template(dir, filename = "v5.dta-template.yaml", version_line = "version: \"5.0\"")
+  write(
+    c("prior_versions:", "  - { version: \"4.5\", changes: Between the two. }"),
+    lib_file(dir, "v5.dta-template.yaml"),
+    append = TRUE
+  )
+  rows <- expect_code_row(validate_template(dir), "prior_versions_invalid", "error")
+  expect_match(rows$message, "entry 1 (4.5) is not older than 4.0", fixed = TRUE)
+})
+
+# ---- mixin_unresolved / mixin_invalid / mixin_conflict ----------------------
+
+write_mixin_file <- function(dir, id, body, abstract_line = "abstract: true") {
+  writeLines(
+    c(
+      "kind: dta_creation_template", sprintf("id: %s", id), "version: \"1.0\"",
+      abstract_line, "base: {}", body
+    ),
+    lib_file(dir, paste0(id, ".dta-template.yaml"))
+  )
+}
+
+write_mixin_user <- function(dir, id, mixins, abstract = FALSE) {
+  writeLines(
+    c(
+      "kind: dta_creation_template", sprintf("id: %s", id), "version: \"1.0\"",
+      if (abstract) "abstract: true",
+      sprintf("mixins: [%s]", mixins),
+      "base:", "  metadata:", "    title: T"
+    ),
+    lib_file(dir, paste0(id, ".dta-template.yaml"))
+  )
+}
+
+mixin_dataset_lines <- c(
+  "datasets:", "  - id: ds1", "    type: tabular",
+  "    files: {filename: x.csv, type: csv}", "    columns:", "      - {id: COL1, type: SAS Char}"
+)
+
+test_that("a template composed of valid disjoint mixins validates clean", {
+  dir <- withr::local_tempdir()
+  write_mixin_file(dir, "mx_a", mixin_dataset_lines)
+  write_mixin_file(dir, "mx_b", c("options:", "  - id: opt_b", "    target: metadata.title"))
+  write_mixin_user(dir, "composed", "mx_a, mx_b")
+
+  result <- validate_template(dir)
+
+  expect_equal(nrow(result), 0)
+})
+
+test_that("mixin_unresolved is a warning, and instantiate_failed only for a concrete template", {
+  dir <- withr::local_tempdir()
+  write_mixin_user(dir, "concrete_user", "no_such_mixin")
+  write_mixin_user(dir, "abstract_user", "no_such_mixin", abstract = TRUE)
+
+  result <- validate_template(dir)
+
+  rows <- expect_code_row(result, "mixin_unresolved", "warning")
+  expect_setequal(rows$id, c("concrete_user", "abstract_user"))
+  failed <- expect_code_row(result, "instantiate_failed", "error")
+  expect_identical(failed$id, "concrete_user")
+  expect_no_code_row(result, "extends_unresolved")
+  expect_no_code_row(result, "extends_cycle")
+})
+
+test_that("mixin_conflict is an error, and instantiate_failed only for a concrete template", {
+  dir <- withr::local_tempdir()
+  write_mixin_file(dir, "mx_a", c("options:", "  - id: same", "    target: metadata.title"))
+  write_mixin_file(dir, "mx_b", c("options:", "  - id: same", "    target: metadata.header"))
+  write_mixin_user(dir, "concrete_user", "mx_a, mx_b")
+  write_mixin_user(dir, "abstract_user", "mx_a, mx_b", abstract = TRUE)
+
+  result <- validate_template(dir)
+
+  rows <- expect_code_row(result, "mixin_conflict", "error")
+  expect_setequal(rows$id, c("concrete_user", "abstract_user"))
+  failed <- expect_code_row(result, "instantiate_failed", "error")
+  expect_identical(failed$id, "concrete_user")
+})
+
+test_that("mixin_invalid is an error when a listed mixin is not abstract", {
+  dir <- withr::local_tempdir()
+  write_mixin_file(dir, "mx_concrete", mixin_dataset_lines, abstract_line = "abstract: false")
+  write_mixin_user(dir, "concrete_user", "mx_concrete")
+  write_mixin_user(dir, "abstract_user", "mx_concrete", abstract = TRUE)
+
+  result <- validate_template(dir)
+
+  rows <- expect_code_row(result, "mixin_invalid", "error")
+  expect_setequal(rows$id, c("concrete_user", "abstract_user"))
+  failed <- expect_code_row(result, "instantiate_failed", "error")
+  expect_identical(failed$id, "concrete_user")
+})
+
+test_that("a malformed mixins: value in the validated file is mixin_invalid, abstract or not", {
+  # The reader rejects the shape inside dta_try(), which flattens the classed
+  # condition to a string -- so this is the only route by which an ABSTRACT
+  # template with a broken `mixins:` gets any diagnostic at all.
+  dir <- withr::local_tempdir()
+  write_mixin_file(dir, "mx_a", mixin_dataset_lines)
+  write_mixin_user(dir, "concrete_user", "mx_a, mx_a")
+  write_mixin_user(dir, "abstract_user", "mx_a, mx_a", abstract = TRUE)
+
+  result <- validate_template(dir)
+
+  rows <- expect_code_row(result, "mixin_invalid", "error")
+  expect_setequal(rows$id, c("concrete_user", "abstract_user"))
+  failed <- expect_code_row(result, "instantiate_failed", "error")
+  expect_identical(failed$id, "concrete_user")
+})
+
+test_that("an id that merely contains 'cycle detected' is still classified by condition class", {
+  dir <- withr::local_tempdir()
+  write_mixin_file(dir, "mx_a", c("options:", "  - id: same", "    target: metadata.title"))
+  write_mixin_file(dir, "mx_b", c("options:", "  - id: same", "    target: metadata.header"))
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: cycle detected", "version: \"1.0\"",
+      "abstract: true", "mixins: [mx_a, mx_b]", "base: {metadata: {}}"
+    ),
+    lib_file(dir, "odd.dta-template.yaml")
+  )
+
+  result <- validate_template(dir)
+
+  expect_code_row(result, "mixin_conflict", "error")
+  expect_no_code_row(result, "extends_cycle")
 })

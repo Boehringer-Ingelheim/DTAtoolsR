@@ -24,8 +24,13 @@
 # back to the "biomarker_gf" example, or someone will author a real
 # specification from a demo file by mistake.
 #
-# `%||%` is already bound in the app helper environment (see template_core.R
-# / 00_helpers.R) -- it is not redefined here.
+# A source's `root` is the configured / cloned / package directory as is -- a
+# library root holding templates/, parties/, vocabulary/ and export-templates/
+# folders (plus an optional dta-app.yaml); see template_index.R. `checkout` is
+# kept as a field and always equals `root`.
+#
+# `%||%` is already bound in the app helper environment (see utils_dta.R) --
+# it is not redefined here.
 # -----------------------------------------------------------------------------
 
 # ---- Config readers ---------------------------------------------------------
@@ -158,6 +163,14 @@ parse_template_sources <- function(spec) {
 
     if (scheme == "git") {
       ref <- if (has_hash && nzchar(ref)) ref else "HEAD"
+      # Both reach git as positional arguments, where a leading "-" is read
+      # as an option instead: `#--upload-pack=<cmd>` would have git fetch run
+      # <cmd>. No real repository URL, path or ref name starts with one.
+      if (startsWith(locator, "-") || startsWith(ref, "-")) {
+        cli::cli_abort(
+          "Template source {.val {entry}} has a locator or {.code #ref} starting with {.code -}, which git would read as an option."
+        )
+      }
     } else {
       if (has_hash) {
         cli::cli_warn(
@@ -182,7 +195,7 @@ parse_template_sources <- function(spec) {
 
 # ---- Cache -------------------------------------------------------------------
 
-# Directory that reads and removes a probe file, proving `dir` is genuinely
+# Writes and then removes a probe file in `dir`, proving `dir` is genuinely
 # writable. file.access() reports POSIX permission bits, which say nothing
 # about Windows ACLs or a Posit Connect content sandbox -- both can leave a
 # directory looking writable to file.access() while every actual write fails.
@@ -478,7 +491,7 @@ resolve_git_source <- function(src, refresh = FALSE) {
     if (!identical(src$ref, "HEAD")) {
       args <- c(args, "--branch", src$ref)
     }
-    args <- c(args, src$locator, root)
+    args <- c(args, "--", src$locator, root)
     run_result <- dta_template_git_run(args, token = token)
   } else {
     run_result <- dta_template_git_run(
@@ -524,13 +537,14 @@ resolve_git_source <- function(src, refresh = FALSE) {
 resolve_template_source <- function(src, refresh = FALSE) {
   base <- list(
     name = src$name, scheme = src$scheme, origin = src$locator, ref = src$ref,
-    root = NA_character_, ok = FALSE, stale = FALSE, stale_age = NA_real_,
+    root = NA_character_, checkout = NA_character_, ok = FALSE, stale = FALSE, stale_age = NA_real_,
     resolved_commit = NA_character_, error = NA_character_
   )
 
   if (src$scheme == "dir") {
     if (dir.exists(src$locator)) {
-      base$root <- normalizePath(src$locator, winslash = "/", mustWork = TRUE)
+      base$checkout <- normalizePath(src$locator, winslash = "/", mustWork = TRUE)
+      base$root <- base$checkout
       base$ok <- TRUE
     } else {
       base$error <- paste0("Template directory does not exist: ", src$locator)
@@ -548,14 +562,16 @@ resolve_template_source <- function(src, refresh = FALSE) {
       base$error <- paste0("Package ", src$locator, " has no dta-templates directory.")
       return(base)
     }
-    base$root <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+    base$checkout <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+    base$root <- base$checkout
     base$ok <- TRUE
     return(base)
   }
 
   # scheme == "git"
   git_result <- resolve_git_source(src, refresh = refresh)
-  base$root <- if (nzchar(git_result$root %||% "")) git_result$root else NA_character_
+  base$checkout <- if (nzchar(git_result$root %||% "")) git_result$root else NA_character_
+  base$root <- base$checkout
   base$ok <- isTRUE(git_result$ok)
   base$stale <- isTRUE(git_result$stale)
   base$stale_age <- git_result$stale_age %||% NA_real_

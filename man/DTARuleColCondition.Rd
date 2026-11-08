@@ -26,7 +26,7 @@ An object of class \code{DTARuleColCondition}.
 A rule for validating data tables with conditions
 }
 \examples{
-# Create a check_range rule
+# Create a col_condition rule
 DTAtools::DTARuleColCondition(
   id = "check_gfreasnd2",
   condition = list(

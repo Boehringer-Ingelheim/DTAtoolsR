@@ -1,0 +1,421 @@
+area: VAL
+title: Validation engine and result accessors
+
+# The verdict is the product. Everything else in the package exists to produce
+# it, report it or explain it, so this is the area where a defect could let a
+# non-conforming delivery be accepted with nothing visible to the user.
+
+requirements:
+  # ---- the three axes and the verdict ---------------------------------------
+
+  - id: REQ-VAL-001
+    text: >
+      check() shall report a table as valid (ok = TRUE) if and only if it has
+      zero column-specification errors, zero rule errors and zero import
+      errors.
+    risk: high
+    category: functional
+    covers: [check, validation_status]
+    source: README section "The Three Validation Axes"
+
+  - id: REQ-VAL-002
+    text: >
+      The three axes shall be reported independently, so that a table failing
+      one axis still reports the counts of the other two.
+    risk: high
+    category: functional
+    covers: [check, validation_status]
+    source: R/DTADataSetTabular-class.R
+    notes: >
+      A value the reader cannot parse is reported on the import axis only. A
+      rule reading that column treats it as it treats a missing value rather
+      than as a violation, so a single unparseable cell is never counted on two
+      axes. The delivery is still invalid: the import axis alone makes it so.
+
+  # ---- column specification checks ------------------------------------------
+
+  - id: REQ-VAL-003
+    text: >
+      A column declared in the specification but absent from the table shall be
+      reported with the keyword "required".
+    risk: high
+    category: functional
+    covers: [check, messages]
+    source: R/columnSpecChecks.R
+    notes: >
+      Pinned: the absence is reported once per ROW rather than once per table,
+      because the generated schema describes an array of rows and the validator
+      evaluates the requirement for each. At transfer scale a single missing
+      column therefore produces one error per row. Recorded as observed
+      behaviour, not endorsed as a good one.
+
+  - id: REQ-VAL-004
+    text: >
+      A column present in the table but not declared in the specification shall
+      be reported once for the table with the keyword "additionalProperties",
+      naming the column.
+    risk: medium
+    category: functional
+    covers: [check, messages]
+    source: R/columnSpecChecks.R
+
+  - id: REQ-VAL-005
+    text: >
+      A value whose JSON type does not match the declared type shall be
+      reported with the keyword "type", naming the row and the column. In a
+      column declared Int of a table typed in R, a number that is not whole, or
+      whose magnitude exceeds 2^31-1 (2147483647), has no integer type and
+      shall be reported the same way. A missing value in a column declared not
+      nullable shall be reported the same way.
+    risk: high
+    category: functional
+    covers: [check, messages]
+    source: R/columnSpecChecks.R
+    notes: >
+      The integer-range clause concerns a table typed in R, for instance a
+      double column handed to validate_table(). A value read from a file into
+      a declared Int column never reaches this check as an out-of-range number:
+      the reader stores the column as R integer and reports such a cell as an
+      import error with the cell stored as NA (REQ-TYPE-009).
+
+  - id: REQ-VAL-006
+    text: >
+      A string longer than the declared length shall be reported with the
+      keyword "maxLength", and the length shall be counted in characters rather
+      than in bytes.
+    risk: high
+    category: functional
+    covers: [check, messages]
+    source: R/columnSpecChecks.R
+    notes: >
+      The character-versus-byte distinction is load-bearing for any transfer
+      carrying non-ASCII text: counting bytes would reject legitimate values in
+      any language that needs them.
+
+  - id: REQ-VAL-007
+    text: >
+      A value outside a declared codelist of more than one permitted value
+      shall be reported with the keyword "enum".
+    risk: high
+    category: functional
+    covers: [check, messages]
+    source: R/columnSpecChecks.R
+
+  - id: REQ-VAL-008
+    text: >
+      A value differing from a declared codelist of exactly one permitted value
+      shall be reported with the keyword "const".
+    risk: high
+    category: functional
+    covers: [check, messages]
+    source: R/columnSpecChecks.R
+
+  - id: REQ-VAL-009
+    text: >
+      A value not matching a declared regular expression shall be reported with
+      the keyword "pattern", and the expression shall be interpreted as PCRE.
+      The expression applies to numeric values as well as to text, and is
+      matched against the number's plain decimal text: an integer as written,
+      a non-integer at up to 15 significant digits, and never in scientific
+      notation, so 1000000000 is matched as "1000000000" and not as "1e+09".
+    risk: high
+    category: functional
+    covers: [check, messages]
+    source: R/columnSpecChecks.R (dta_check_column_spec, dta_numeric_text)
+    notes: >
+      A number is matched as the number it was typed to, not as the characters
+      the file held: 007 in a declared Int column is the number 7 and is
+      matched as "7". A code whose leading zeros matter must be declared
+      SAS Char. Before the fix a pattern declared on a numeric column was never
+      evaluated at all, so a delivery could break it without any report.
+
+  - id: REQ-VAL-010
+    text: >
+      A missing value in a column declared nullable shall not be reported on
+      the column-specification axis.
+    risk: high
+    category: functional
+    covers: [check, messages]
+    source: R/columnSpecChecks.R
+
+  - id: REQ-VAL-011
+    text: >
+      One value may violate more than one declared constraint, and each
+      violation shall be reported separately.
+    risk: medium
+    category: functional
+    covers: [check, messages]
+    source: R/columnSpecChecks.R
+
+  - id: REQ-VAL-012
+    text: >
+      The column-specification error frame shall carry the columns row, column,
+      keyword, message, columnspec and data.
+    risk: medium
+    category: interface
+    covers: [validation_errors]
+    source: R/columnSpecChecks.R
+
+  - id: REQ-VAL-013
+    text: >
+      Every declared check shall report its own outcome as passed, failed,
+      not_applicable or not_checked, under the labels presence, extra, format,
+      length, values and pattern. The type check and the SAS format check
+      (keywords "type" and "format") are reported as separate rows under the
+      one label format, and the format row is not_applicable when no column
+      declares a format that constrains anything.
+    risk: medium
+    category: interface
+    covers: [validation_errors]
+    source: R/columnSpecChecks.R
+
+  # ---- check() and its arguments --------------------------------------------
+
+  - id: REQ-VAL-014
+    text: >
+      check() shall validate only the tables named by its tables or tab
+      arguments, and every loaded table when neither is given.
+    risk: medium
+    category: functional
+    covers: [check]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-VAL-015
+    text: >
+      A second check() of a table whose contents and specification are both
+      unchanged shall reuse the recorded verdict rather than revalidate, and
+      shall report that it did so as the status "skipped" in the summary of
+      that call.
+    risk: medium
+    category: performance
+    covers: [check]
+    source: R/DTADataSetTabular-class.R
+    notes: >
+      The per-call summary and the stored status answer different questions.
+      The summary says what THIS call did; validation_status() says what is on
+      record for the table, and stays "validated" across a skipped call.
+
+  - id: REQ-VAL-016
+    text: >
+      check(force = TRUE) shall revalidate even when nothing has changed, and a
+      change to either the table or the specification shall cause revalidation
+      without force.
+    risk: high
+    category: functional
+    covers: [check]
+    source: R/DTADataSetTabular-class.R
+    notes: >
+      The consequence of getting this wrong is a stale verdict presented as a
+      current one, which is worse than no verdict.
+
+  - id: REQ-VAL-017
+    text: >
+      check(persist = TRUE) shall write a validation artifact that
+      validation_errors(source = "artifact") reads back to the same verdict,
+      and reading an artifact that does not exist shall raise a condition
+      rather than return an empty result.
+    risk: high
+    category: integrity
+    covers: [check, validation_errors]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-VAL-018
+    text: >
+      max_errors shall cap how many error details are retained, and shall never
+      cap the reported error counts.
+    risk: high
+    category: functional
+    covers: [check, validation_status]
+    source: R/DTADataSetTabular-class.R
+    notes: >
+      A cap that also truncated the counts would understate how bad a delivery
+      is exactly when it is worst.
+
+  - id: REQ-VAL-019
+    text: >
+      use_threads shall change only how the work is scheduled: a validation run
+      with threads enabled and one with them disabled shall report identical
+      messages.
+    risk: high
+    category: functional
+    covers: [check]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-VAL-020
+    text: >
+      A specification declaring no columns shall be reported with the status
+      "unspecified" and an ok value of NA rather than as a clean pass.
+    risk: high
+    category: functional
+    covers: [check, validation_status]
+    source: R/DTADataSetTabular-class.R
+    notes: >
+      Reporting an unchecked table as valid would be the most dangerous
+      possible failure of this package, so the distinct status matters.
+
+  - id: REQ-VAL-021
+    text: >
+      clear_validation() shall discard the recorded verdict and return the
+      dataset to the not-validated state.
+    risk: low
+    category: functional
+    covers: [clear_validation, validation_status]
+    source: R/DTADataSetTabular-class.R
+
+  # ---- accessors -------------------------------------------------------------
+
+  - id: REQ-VAL-022
+    text: >
+      validation_status() shall return one row per table with the columns
+      table, target_type, status, ok, validated_at, run_id, validation_run,
+      n_columnspec_errors, n_rule_errors and n_import_errors.
+    risk: medium
+    category: interface
+    covers: [validation_status]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-VAL-023
+    text: >
+      messages() shall return one row per reported message with the columns id,
+      dataset, target, severity, source, rule_id, row, column, keyword and
+      message, where source is one of columnspec, rule or import.
+    risk: high
+    category: interface
+    covers: [messages]
+    source: R/validationReporting.R
+
+  - id: REQ-VAL-024
+    text: >
+      results() shall summarise every dataset in a DTA, reporting per target
+      the same counts as validation_status() together with the totals
+      n_targets, n_validated, n_valid, n_invalid, n_skipped and
+      n_not_validated.
+    risk: medium
+    category: interface
+    covers: [results]
+    source: R/validationReporting.R
+
+  - id: REQ-VAL-025
+    text: >
+      inspect() shall expand a message identifier into the detail behind it,
+      including the offending value and the surrounding row, and shall raise a
+      condition when given an identifier that does not exist.
+    risk: medium
+    category: interface
+    covers: [inspect]
+    source: R/validationReporting.R
+
+  - id: REQ-VAL-026
+    text: >
+      validation_errors() shall return the full validation detail, carrying its
+      result version and the attributes recording how many rows were scanned,
+      whether the scan was partial and whether it was structural only.
+    risk: medium
+    category: interface
+    covers: [validation_errors]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-VAL-027
+    text: >
+      validate_table() shall validate a table against a specification without a
+      dataset object, reporting the same verdict as check() does for the same
+      inputs.
+    risk: medium
+    category: functional
+    covers: [validate_table]
+    source: R/validationFunctions.R
+
+  - id: REQ-VAL-028
+    text: >
+      A table carrying the same column name more than once shall be refused
+      with an error naming the repeated name, rather than validated.
+    risk: high
+    category: functional
+    covers: [validate_table, check]
+    source: R/streamingValidation.R
+    notes: >
+      A refusal rather than a finding, because such a table is not invalid but
+      undecidable: a declared name must identify exactly one column, and
+      nothing in the package may choose which of two the constraints describe.
+      Reported on as a finding it would have to name a verdict for constraints
+      that were never evaluated against one of the columns.
+
+  - id: REQ-VAL-029
+    text: >
+      A column specification that declares values, a pattern or nullability
+      but no type, format or length shall still have every one of those
+      declared constraints checked, exactly as a typed column's are: an
+      out-of-codelist value, a value that does not match the pattern, and a
+      non-nullable column's missing value shall each be reported.
+    risk: high
+    category: functional
+    covers: [check, DTAColumnSpec]
+    source: R/DTAColumnSpec-class.R (as_json_schema, as_json_schema_type)
+    notes: >
+      Before the fix, as_json_schema() built no schema at all for such a
+      column, so dta_compile_columnspec_schemas() recorded schema = NULL for
+      it and dta_columnspec_errors() then skipped every one of its value
+      checks -- a column declared with a codelist but no type validated any
+      value at all, including ones outside that codelist.
+
+  - id: REQ-VAL-030
+    text: >
+      explain_messages() shall state, for each validation message, the
+      constraint that was violated and the offending value in plain text,
+      taking the allowed values from the column specification and the
+      offending value from the data, and shall return one row per explained
+      message.
+    risk: medium
+    category: interface
+    covers: [explain_messages]
+    source: R/validationReporting.R
+    notes: >
+      The wording is shared with the HTML report, so a codelist violation reads
+      "Must be one of: <values>." in both.
+
+  - id: REQ-VAL-031
+    text: >
+      A value in a column that declares a SAS format shall be reported with the
+      keyword "format" when it cannot be displayed in that format. For $w., a
+      string of more than w characters, counted in characters rather than
+      bytes. For w. and w.d, a number with more decimals than d, or whose
+      displayed width exceeds w, the width being its integer digits, a minus
+      sign if negative, and, when d is above zero, the decimal point with its d
+      digits; a number below one in magnitude whose width exceeds w by exactly
+      one, only for the leading zero, is displayed without that zero and fits.
+      A number with a fraction in a column that accepts integers only, in a
+      table typed in R, is reported as a type violation and not additionally as
+      a format violation; read from a file it is an import error (REQ-TYPE-009)
+      and is not reported as a format violation either.
+      For DATEw., TIMEw.d and DATETIMEw., a string that is not display text of
+      that format or is longer than w characters, ignoring spaces before and
+      after it: a date is a day from 01 to 31, an English three-letter month in
+      either case and an optional two- or four-digit year, with an optional
+      hyphen between day and month and between month and year; a time is hours
+      of one or more digits, a colon and minutes, with optional :second, and a
+      fraction of at most d digits only when d is above zero; a datetime is a
+      date, a colon and a time. The month names shall not depend on the system
+      language. The format BESTw. constrains nothing and shall never be
+      reported. A missing value shall not be reported as a format violation.
+      Where a $w. column also declares a length not exceeding w, an over-length
+      value shall be reported once, as maxLength, and not additionally as
+      format. The streaming and the in-memory engine shall report the same
+      violations.
+    risk: high
+    category: functional
+    covers: [check, messages, validation_errors]
+    source: R/columnSpecChecks.R (dta_check_column_spec, dta_sas_numeric_format_bad); R/DTAColumnSpec-class.R (as_json_schema)
+    notes: >
+      Before the fix a declared format was carried in the specification and
+      printed in the documentation but never checked: a twelve-character value
+      under $9., 1.2345 under 8.2 and a fraction under 10. all passed, and a
+      Date, Time or DateTime column with no pattern accepted any text. The
+      rendering of a number under w.d is the width SAS itself would reserve,
+      so 12345.67 fits 8.2 exactly and 123456.78 does not. Time and datetime
+      values are held as the display text the format produces; an ISO date
+      under DATE9. is therefore a violation. Hour, minute and second ranges
+      are not validated, only the shape; the day of the month is bounded to
+      01-31 but not checked against the month. SAS writes DATE11. as
+      15-AUG-2025 and right-aligns its text, hence the optional hyphens and the
+      ignored surrounding spaces. A TIME value is a duration, so 100:00:00 fits
+      TIME10.

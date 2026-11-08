@@ -1,0 +1,208 @@
+# Validation Plan — DTAtools
+
+This plan states what is qualified, how, and what counts as acceptable. It is
+the document the evidence bundle is measured against; the report produced by
+`run_qualification()` refers back to it.
+
+## 1. Purpose and approach
+
+DTAtools validates tabular data transfers against written Data Transfer
+Specifications. Where those transfers carry clinical or biomarker data, the
+question the tool answers — does this delivery conform to what was agreed —
+becomes a question about data integrity, and the tool itself has to be shown
+to work before its answer can be relied on.
+
+The software is bespoke and its behaviour is not exercised by any supplier's
+qualification, so it is handled as **GAMP 5 category 5**: it needs its own
+functional specification, its own testing against that specification, and
+documented evidence tying the two together.
+
+Testing is proportionate to risk, in the sense the FDA's *Computer Software
+Assurance* guidance uses. Features whose failure could let a non-conforming
+delivery be accepted — the validation axes, the rule engine, the reader, the
+integrity of exported data — are tested with scripted cases and recorded
+expected-versus-observed results. Features whose failure is visible and
+recoverable — document formatting, the interactive application's layout — are
+tested more lightly, and the report says which is which through each
+requirement's risk rating.
+
+Three stages are run:
+
+| Stage | Question it answers |
+| --- | --- |
+| Installation qualification (IQ) | Is the right software, with the right dependencies, correctly installed on this machine? |
+| Operational qualification (OQ) | Does each specified behaviour do what the specification says, against expected values written before the run? |
+| Performance qualification (PQ) | Does it do so end to end, on realistic data, at the volumes it will meet in use? |
+
+## 2. Scope
+
+**In scope.** Every symbol the package exports. The frozen list is
+`requirements/_api.yaml`, and the installation stage fails if the installed
+package's exports differ from it, so the scope cannot drift without being
+noticed.
+
+**Out of scope.** The correctness of R itself and of the package's
+dependencies; these are covered by their own releases and their versions are
+recorded in the environment section of every report. The infrastructure the
+package runs on. The content of any particular Data Transfer Specification: the
+tool is qualified to enforce a specification, not to judge whether a
+specification is the right one. The interactive application's visual
+appearance.
+
+## 3. Evidence and its properties
+
+Each run writes a bundle whose properties are the ones a regulated record needs.
+
+- **Attributable.** The report names who performed the run, on what host, with
+  which build of the package, and who is to review it.
+- **Contemporaneous.** `run.log` is written and flushed as events occur, not
+  assembled afterwards, so a run that dies half way still leaves usable
+  evidence of how far it got.
+- **Original and accurate.** Each step records the expected value, the observed
+  value, and the source file and line that produced it. Nothing in the report
+  is asserted that `results/results.json` does not also contain.
+- **Complete.** Test cases are discovered by parsing the suite before it runs,
+  so a case that never executed is reported as not executed rather than
+  omitted. Skips carry their reason.
+- **Enduring and available.** The bundle is plain text and self-contained. The
+  report is also rendered to HTML, Word and PDF where the tooling exists.
+- **Tamper-evident.** A hash manifest covers every file and is written last. The
+  report quotes the hash of `results.json`, taken before the report was
+  rendered, which ties the document to the data it describes.
+
+## 4. Two rules that make the evidence mean something
+
+**No expected value comes from the software.** Snapshot testing — recording
+what the software produced and asserting it produces that again — cannot
+detect a behaviour that was wrong when the snapshot was taken. Every expected
+value in this suite is written from the specification, and a meta-consistency
+check fails the run if a snapshot expectation appears anywhere in it.
+
+**Known defects are declared, not discovered.** `deviations.yaml` lists the
+defects already found and assessed. Each open entry is bound to a test that
+asserts the defect is still observable. A failure the run finds that is not in
+the register is therefore a new finding; and a registered defect that stops
+reproducing fails the run, because the register has stopped describing the
+software and a register that misstates the software is worse than none.
+
+## 4a. Evidence that these tests can fail
+
+A test suite that passes proves nothing until someone has shown it is capable
+of failing. Before this suite was released, five defects were deliberately
+introduced into the package one at a time, the suite was run against each, and
+the affected test cases were recorded. Every mutation was reverted immediately
+after its run.
+
+| Defect introduced | Where | Detected by |
+| --- | --- | --- |
+| A range rule's lower bound made exclusive | `R/evaluateRules.R`, the range operator | OQ-RULE-010 |
+| The permitted-value check made to report nothing | `R/columnSpecChecks.R`, the enum branch | OQ-VAL-006, 011, 012, 024, 028, 030, 031, 033 |
+| The recorded count of import errors forced to zero | `R/DTADataSetTabular-class.R`, the validation index entry | OQ-TYPE-019, OQ-VAL-014, 030, 035 |
+| Declared length measured in bytes rather than characters | `R/columnSpecChecks.R`, the length branch | OQ-VAL-005 |
+| Errors past the in-memory cap discarded instead of spilled | `R/streamingValidation.R`, the error sink | OQ-STREAM-006, 007 |
+
+Each mutation was caught, and each was caught by a test case whose subject is
+the behaviour that was broken rather than by an unrelated one.
+
+One negative result was recorded with them, and has since been closed. The same
+import-error count was also forced to zero in the separate branch that runs
+when a lazily held table's file cannot be read at all, and no test case failed.
+Two things were behind that. The mutation was equivalent: the branch takes its
+counts from `dta_file_validation_details()`, which records an absent file as a
+rule finding and writes an import count of zero already, so forcing it to zero
+changed nothing any test could observe. And no test case exercised the branch
+at all. REQ-ROBUST-017 now states what the branch must report, and OQ-ROBUST-017
+tests it. The control was re-run against that branch with a mutation that does
+change its behaviour -- the rule count, which is what carries the absence,
+forced to zero -- and OQ-ROBUST-017 failed, as it should.
+
+## 4b. Continuous execution and code coverage
+
+This suite runs in CI (`.github/workflows/qualification.yml`) in two tiers, so
+that a change cannot reach a release having broken a qualified behaviour unseen:
+
+- On a pull request into `dev`, the quick scale runs on Linux, and only when the
+  change touches `R/`, `inst/`, `tests/`, `DESCRIPTION` or `NAMESPACE`.
+- On a pull request into `master` (a release), the standard scale runs on Linux,
+  Windows and macOS. The same run happens every night on `dev`, on a pull
+  request labelled `full-ci`, and on manual dispatch.
+
+So every release is qualified on all three operating systems before it is
+merged, and `dev` is never more than a day from its last three-platform run. A
+run on the target system remains the qualification of record.
+
+Requirement coverage says that every requirement has a test; it does not say
+which code those tests execute. Line coverage of `R/` by the development suite is
+measured on the release tier above (`.github/workflows/test-coverage.yaml`) and
+published with the run, together with the list of lines no test executes. It is
+supporting evidence, not an acceptance criterion: it does not change this suite's
+verdict.
+
+The same workflow measures line coverage of `R/` by this suite alone, with the
+development tests excluded (`include_unit_tests = "never"`): those tests are not
+traced to requirements, so counting them would claim evidence this suite does
+not hold. The denominator is the package's product code. The suite's own runner
+(`R/qualification.R`, `R/qualification-report.R`) is excluded, because running
+it is what produces this evidence and its correct operation is established by the
+installation qualification and the OQ-CORE cases rather than by line coverage;
+so are the app launcher (`R/run_dta_app.R`) and the benchmarking helpers
+(`R/benchmarking.R`), which are not used to validate a delivery. The run fails
+below a recorded floor, which rises as coverage does. Like the figure above, it
+does not change this suite's verdict.
+
+## 5. Acceptance criteria
+
+The run is acceptable when all of the following hold, and the verdict line of
+the report states which of them did not.
+
+1. Every installation-qualification case passes.
+2. No operational or performance case fails or errors.
+3. Every meta-consistency check passes: every test is traced to a requirement
+   that exists, every requirement is exercised, every exported symbol is
+   claimed by a requirement, no snapshot expectations, and every declared test
+   case actually ran.
+4. Every open deviation still reproduces.
+5. Any requirement left unverified — because an optional dependency was absent,
+   or a scale tier was not selected — is listed, and the reviewer accepts each
+   one as immaterial to the intended use of this installation. A requirement
+   reported as verified with a deviation — its tests passed, but a registered
+   defect that is not closed affects it — is judged the same way, together
+   with that defect's impact statement and workaround.
+
+A verdict of `PASS WITH NOT-EXECUTED TESTS` requires the reviewer's judgement
+on point 5. A verdict marked `(PARTIAL)` cannot support a complete claim about
+the software: a filter or a stage selection was applied, and the run should be
+repeated in full before it is signed.
+
+## 6. Roles
+
+| Role | Responsibility |
+| --- | --- |
+| Performed by | Runs the qualification on the target system and files the bundle. Recorded automatically; may be overridden with the `tester` argument. |
+| Reviewed by | Checks the environment is the intended one, judges each unverified requirement and each deviation, and confirms the evidence supports the verdict. Must not be the person who performed the run. |
+| Approved by | Accepts the software for the intended use on this system. |
+
+## 7. When to re-qualify
+
+A qualification describes one build of the software on one system. Repeat it
+when any of these changes:
+
+- the package version;
+- the R minor version (4.5 to 4.6, say), or the major version of Arrow;
+- the operating system, or the deployment target the package is installed onto;
+- any dependency that fails its declared minimum after an environment change;
+- a defect is fixed that was reproduced by the previous run, since its register
+  entry and its test both change.
+
+A patch to an unrelated dependency does not require re-qualification, but the
+next run will record the new version and the difference will be visible.
+
+## 8. Deviation handling
+
+A failure that is not in the register is a new finding. It is recorded in
+section 8.2 of the report with the file and line that produced it, and it must
+be assessed before the software is used: either fixed, or added to the register
+with an impact statement and a workaround, and bound to a test.
+
+Registered deviations are reviewed at every run. An entry that no longer
+reproduces is closed, and its test is promoted to assert the correct behaviour.

@@ -4,7 +4,12 @@
 \alias{.end_section_orientation}
 \title{Close the current document section with the given page orientation.}
 \usage{
-.end_section_orientation(doc, orient = c("portrait", "landscape"))
+.end_section_orientation(
+  doc,
+  orient = c("portrait", "landscape"),
+  furniture_meta = NULL,
+  furniture = NULL
+)
 }
 \description{
 officer's \verb{body_end_section_*()} helpers terminate the content added \emph{before}

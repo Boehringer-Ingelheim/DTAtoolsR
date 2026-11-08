@@ -7,12 +7,27 @@
 # is only about the server wiring that joins it to the UI, driven through
 # shiny::testServer() exactly like test-shinyapp-server.R.
 
-Sys.setenv(NOT_CRAN = "true")
-
 skip_if_not_installed("shiny")
 skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
+
+# Path of `filename` inside library root `root`, routed by its kind suffix:
+# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
+# for everything else (creation and dataset templates, and the plain data
+# files that sit beside them, which resolve relative to the template).
+# Creates the folder, so a fixture can write straight to the returned path.
+lib_path <- function(root, filename) {
+  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
+    "parties"
+  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
+    "vocabulary"
+  } else {
+    "templates"
+  }
+  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
+  file.path(root, sub, filename)
+}
 
 app_server_dir <- function() .shiny_app_dir()
 
@@ -80,13 +95,13 @@ write_min_template <- function(root, id, version, label = id, filename = NULL,
       "    title: Test Title",
       "    version: \"1.0\"",
       "datasets:",
-      "  - name: mini_ds",
+      "  - id: mini_ds",
       "    type: file",
       "    files: { filename: mini.csv, type: csv }",
       "options: []",
       extra_lines
     ),
-    file.path(root, paste0(fname, ".dta-template.yaml"))
+    lib_path(root, paste0(fname, ".dta-template.yaml"))
   )
 }
 
@@ -102,7 +117,7 @@ write_party_profile <- function(root, id = "supplier_x", label = "Supplier X", r
       "  name: Party Affiliation Name",
       "  country: DE"
     ),
-    file.path(root, paste0(id, ".dta-party.yaml"))
+    lib_path(root, paste0(id, ".dta-party.yaml"))
   )
 }
 
@@ -122,22 +137,24 @@ write_template_with_party_slot <- function(root, id = "party_tpl") {
       "    target: metadata.supplier",
       "    label: Supplier",
       "datasets:",
-      "  - name: mini_ds",
+      "  - id: mini_ds",
       "    type: file",
       "    files: { filename: mini.csv, type: csv }",
       "options: []"
     ),
-    file.path(root, paste0(id, ".dta-template.yaml"))
+    lib_path(root, paste0(id, ".dta-template.yaml"))
   )
 }
 
-# Open the picker, force-read output$template_picker_ui (catches a render
-# crash, per the task's own warning about testServer never rendering an
-# output unless a test reads it), then move to the options step by directly
-# setting the id/version and clicking Next.
+# Open the picker and force-read all THREE of its outputs (a renderUI is
+# never evaluated unless a test reads it, so a crash in any of them would
+# otherwise pass silently), then move to the options step by setting the
+# id/version directly and pressing "Use this template".
 pick_template_step1 <- function(session, output, id, version) {
   session$setInputs(create_from_template = 1)
   html <- ui_text(output$template_picker_ui)
+  ui_text(output$template_picker_list)
+  ui_text(output$template_picker_detail)
   session$setInputs(template_select_name = id, template_select_version = version)
   session$setInputs(template_select_next = 1)
   invisible(html)
@@ -168,16 +185,23 @@ test_that("opening the picker with a dir: source lists the private templates and
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(create_from_template = 1)
-    html <- ui_text(output$template_picker_ui)
+    ui_text(output$template_picker_ui)
+    list_html <- ui_text(output$template_picker_list)
 
-    expect_match(html, "Private Template", fixed = TRUE)
-    expect_match(html, "myprivate", fixed = TRUE)
+    # With one library there is no filter to name it and no per-row badge, so
+    # the selected template's detail pane is where its source is named.
+    expect_match(
+      ui_text(output$template_picker_detail),
+      '<span class="badge tmpl-source">myprivate</span>',
+      fixed = TRUE
+    )
+    expect_match(list_html, "Private Template", fixed = TRUE)
     # Structural stand-in for "the packaged demo is not offered": with a
     # private source configured, dta_template_include_builtin() defaults to
     # FALSE (template_sources.R), so the builtin root is never scanned at
     # all -- exactly one entry should be rendered, not knowledge of the
     # packaged template's own label.
-    expect_equal(count_occurrences(html, "class=\"tmpl-entry"), 1)
+    expect_equal(count_occurrences(list_html, "class=\"tmpl-entry"), 1)
   })
 })
 
@@ -193,13 +217,376 @@ test_that("the version selector lists both versions of a two-version template, n
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(create_from_template = 1)
-    html <- ui_text(output$template_picker_ui)
+    ui_text(output$template_picker_ui)
+    session$setInputs(template_select_name = "multi_tpl")
+    # The version <select> belongs to the detail panel: it describes the
+    # SELECTED template, so it re-renders with the selection and not with
+    # the frame around it.
+    html <- ui_text(output$template_picker_detail)
 
     expect_match(html, "value=\"2.0\"", fixed = TRUE)
     expect_match(html, "value=\"1.0\"", fixed = TRUE)
     # Newest first: "2.0" must be rendered before "1.0" in the version
     # <select>.
     expect_true(regexpr("2.0", html, fixed = TRUE) < regexpr("1.0", html, fixed = TRUE))
+  })
+})
+
+# ---- Picker: search and source filter ---------------------------------------
+
+test_that("a version chosen on one template does not carry onto the next", {
+  # THE BUG THIS GUARDS: Shiny keeps the previous template's version input
+  # until the re-rendered control reports, so moving from a template whose
+  # only version is 1.0 to one whose newest is 2.0 used to open its 1.0.
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+  write_min_template(root, id = "old_tpl", version = "1.0", label = "Old Template")
+  write_min_template(root, id = "new_tpl", version = "1.0", label = "New Template", filename = "new_v1")
+  write_min_template(root, id = "new_tpl", version = "2.0", label = "New Template", filename = "new_v2")
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(create_from_template = 1)
+    ui_text(output$template_picker_ui)
+    session$setInputs(template_select_name = "old_tpl", template_select_version = "1.0")
+    expect_match(ui_text(output$template_picker_detail), "value=\"1.0\"[^>]*selected")
+
+    # The version input still says "1.0" -- nobody has touched it -- but it
+    # was chosen for old_tpl, so new_tpl opens at its newest.
+    session$setInputs(template_select_name = "new_tpl")
+    expect_match(ui_text(output$template_picker_detail), "value=\"2.0\"[^>]*selected")
+    expect_equal(template_picker_version(), "2.0")
+
+    # Choosing 1.0 FOR new_tpl is honoured.
+    session$setInputs(template_select_version = "1.0")
+    expect_equal(template_picker_version(), "1.0")
+  })
+})
+
+test_that("typing in the search box narrows the list and highlights the match", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  # Labels deliberately avoid the word "Template", so that exactly one row can
+  # carry the token below: the search matches at the START of a word, so the
+  # "late" inside "template" would not hit anyway -- and that is worth keeping
+  # true here rather than relying on it.
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("lib=dir:", root))
+  write_min_template(root, id = "early_tpl", version = "1.0", label = "Early Draft")
+  write_min_template(root, id = "late_tpl", version = "1.0", label = "Late Draft")
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(create_from_template = 1)
+    ui_text(output$template_picker_ui)
+    expect_equal(count_occurrences(ui_text(output$template_picker_list), "class=\"tmpl-entry"), 2)
+
+    session$setInputs(template_search = "late")
+    narrowed <- ui_text(output$template_picker_list)
+
+    expect_equal(count_occurrences(narrowed, "class=\"tmpl-entry"), 1)
+    expect_false(grepl("Early Draft", narrowed, fixed = TRUE))
+    # The matched token is marked in the label, so a hit on the id or the
+    # description is not left looking like an unexplained result.
+    expect_match(narrowed, "<mark>Late</mark>", fixed = TRUE)
+
+    # Clearing the box restores the full list rather than leaving the last
+    # filter in place.
+    session$setInputs(template_search = "")
+    expect_equal(count_occurrences(ui_text(output$template_picker_list), "class=\"tmpl-entry"), 2)
+  })
+})
+
+test_that("the source filter appears only with several sources, and restricts the list", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root_a <- withr::local_tempdir()
+  root_b <- withr::local_tempdir()
+  write_min_template(root_a, id = "one_tpl", version = "1.0", label = "One Template")
+  write_min_template(root_b, id = "two_tpl", version = "1.0", label = "Two Template")
+  withr::local_envvar(
+    DTATOOLS_TEMPLATE_SOURCES = paste0("one=dir:", root_a, ";two=dir:", root_b)
+  )
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(create_from_template = 1)
+    expect_match(ui_text(output$template_picker_ui), "id=\"template_select_source\"", fixed = TRUE)
+    expect_equal(count_occurrences(ui_text(output$template_picker_list), "class=\"tmpl-entry"), 2)
+
+    session$setInputs(template_select_source = "two")
+    filtered <- ui_text(output$template_picker_list)
+
+    expect_equal(count_occurrences(filtered, "class=\"tmpl-entry"), 1)
+    expect_match(filtered, "Two Template", fixed = TRUE)
+    expect_false(grepl("One Template", filtered, fixed = TRUE))
+  })
+})
+
+test_that("the library filter takes several libraries at once, and none means all", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root_a <- withr::local_tempdir()
+  root_b <- withr::local_tempdir()
+  root_c <- withr::local_tempdir()
+  write_min_template(root_a, id = "one_tpl", version = "1.0", label = "One Template")
+  write_min_template(root_b, id = "two_tpl", version = "1.0", label = "Two Template")
+  write_min_template(root_c, id = "three_tpl", version = "1.0", label = "Three Template")
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0(
+    "one=dir:", root_a, ";two=dir:", root_b, ";three=dir:", root_c
+  ))
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(create_from_template = 1)
+    frame <- ui_text(output$template_picker_ui)
+    expect_equal(count_occurrences(frame, 'name="template_select_source"'), 3)
+
+    session$setInputs(template_select_source = c("one", "three"))
+    both <- ui_text(output$template_picker_list)
+    expect_equal(count_occurrences(both, "class=\"tmpl-entry"), 2)
+    expect_match(both, "One Template", fixed = TRUE)
+    expect_match(both, "Three Template", fixed = TRUE)
+    expect_false(grepl("Two Template", both, fixed = TRUE))
+    expect_match(both, "2 of 3 templates", fixed = TRUE)
+
+    # Unchecking the last chip reports NULL, which restricts nothing.
+    session$setInputs(template_select_source = NULL)
+    expect_equal(count_occurrences(ui_text(output$template_picker_list), "class=\"tmpl-entry"), 3)
+  })
+})
+
+test_that("a source filter that no longer names a source is ignored, not applied", {
+  # THE BUG THIS GUARDS: the filter control exists only while two or more
+  # sources have templates, but Shiny keeps its last value after the control
+  # is gone -- so a refresh that emptied the chosen source used to leave
+  # every row filtered out behind "pick another source", with nothing left to
+  # pick from.
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root_a <- withr::local_tempdir()
+  root_b <- withr::local_tempdir()
+  write_min_template(root_a, id = "keep_tpl", version = "1.0", label = "Keep Template")
+  write_min_template(root_b, id = "gone_tpl", version = "1.0", label = "Gone Template")
+  withr::local_envvar(
+    DTATOOLS_TEMPLATE_SOURCES = paste0("one=dir:", root_a, ";two=dir:", root_b)
+  )
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(create_from_template = 1)
+    ui_text(output$template_picker_ui)
+    session$setInputs(template_select_source = "two")
+    expect_match(ui_text(output$template_picker_list), "Gone Template", fixed = TRUE)
+
+    unlink(lib_path(root_b, "gone_tpl_10.dta-template.yaml"))
+    session$setInputs(tmpl_refresh_templates = 1)
+
+    html <- ui_text(output$template_picker_list)
+    expect_equal(count_occurrences(html, "class=\"tmpl-entry"), 1)
+    expect_match(html, "Keep Template", fixed = TRUE)
+    expect_false(grepl("template_select_source", ui_text(output$template_picker_ui), fixed = TRUE))
+  })
+})
+
+test_that("with a single source the picker offers no source filter to choose from", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("solo=dir:", root))
+  write_min_template(root, id = "solo_tpl", version = "1.0", label = "Solo Template")
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(create_from_template = 1)
+
+    expect_false(grepl("template_select_source", ui_text(output$template_picker_ui), fixed = TRUE))
+  })
+})
+
+# ---- Picker: families -------------------------------------------------------
+
+# A base and one template that `extends:` it. write_min_template() appends
+# extra_lines at the end of the document; YAML mappings are unordered, so an
+# `extends:` written there is the same key it would be next to `label:`.
+write_family <- function(root) {
+  write_min_template(root, id = "base_tpl", version = "1.0", label = "Base Template")
+  write_min_template(root,
+    id = "child_tpl", version = "1.0", label = "Child Template",
+    extra_lines = "extends: base_tpl"
+  )
+}
+
+test_that("a deviation template is listed under its base, named as extending it", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+  write_family(root)
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(create_from_template = 1)
+    ui_text(output$template_picker_ui)
+    html <- ui_text(output$template_picker_list)
+
+    expect_equal(count_occurrences(html, "class=\"tmpl-entry"), 2)
+    # Exactly one row is a "top" row: the base. The child hangs off it and is
+    # revealed by expanding the family, which is what makes a library of 40
+    # standards with vendor variants each readable at all.
+    expect_equal(count_occurrences(html, "data-top"), 1)
+    expect_match(html, "extends Base Template", fixed = TRUE)
+    # The base advertises what expanding it will reveal. Asserted as a
+    # prefix so the count's own pluralisation is not pinned here.
+    expect_match(html, "1 variant", fixed = TRUE)
+  })
+})
+
+test_that("the detail panel names the base a selected deviation template resolves against", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+  write_family(root)
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(create_from_template = 1)
+    ui_text(output$template_picker_ui)
+    session$setInputs(template_select_name = "child_tpl")
+
+    # The lineage comes from load_template_definition(), i.e. the resolved
+    # chain the created document would actually be built from -- not from the
+    # `extends:` string as written.
+    expect_match(ui_text(output$template_picker_detail), "based on Base Template", fixed = TRUE)
+  })
+})
+
+# ---- Picker: "Back to templates" and an empty result ------------------------
+
+test_that("'Back to templates' reopens the picker with its selection intact and its search cleared", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+  write_min_template(root, id = "back_tpl", version = "1.0", label = "Back Template")
+  write_min_template(root, id = "other_tpl", version = "1.0", label = "Other Template")
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(create_from_template = 1)
+    ui_text(output$template_picker_ui)
+    session$setInputs(
+      template_search = "back", template_select_name = "back_tpl",
+      template_select_version = "1.0"
+    )
+    session$setInputs(template_select_next = 1)
+    expect_equal(rv$template_ref, "back_tpl@1.0")
+
+    # The browser reports the picker modal closed once "Use this template" has
+    # removed it. While it is closed the picker's outputs render NOTHING --
+    # that is what leaves the client no stale copy to re-insert, and no stale
+    # search box or checked radio to report as input, on the way back.
+    session$setInputs(template_picker_closed = 1)
+    expect_equal(ui_text(output$template_picker_ui), "")
+    expect_equal(ui_text(output$template_picker_list), "")
+    expect_equal(ui_text(output$template_picker_detail), "")
+
+    session$setInputs(template_options_back = 1)
+
+    # Going back does not discard the choice already made -- the author can
+    # press Cancel and still be where they were -- but the search is gone:
+    # the box is empty and the list is no longer narrowed by it.
+    expect_equal(rv$template_ref, "back_tpl@1.0")
+    frame <- ui_text(output$template_picker_ui)
+    expect_false(grepl("value=\"back\"", frame, fixed = TRUE))
+    html <- ui_text(output$template_picker_list)
+    expect_equal(count_occurrences(html, "class=\"tmpl-entry"), 2)
+    expect_false(grepl("<mark>", html, fixed = TRUE))
+    expect_match(html, "value=\"back_tpl\"[^>]*checked")
+  })
+})
+
+test_that("a re-opened picker shows an empty search box even if the close report never arrived", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+  write_min_template(root, id = "back_tpl", version = "1.0", label = "Back Template")
+  write_min_template(root, id = "other_tpl", version = "1.0", label = "Other Template")
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(create_from_template = 1)
+    ui_text(output$template_picker_ui)
+    session$setInputs(template_search = "back")
+    # A re-render while the picker stays open (Refresh templates) keeps what
+    # was typed -- only an open starts empty.
+    session$setInputs(tmpl_refresh_templates = 1)
+    expect_match(ui_text(output$template_picker_ui), "value=\"back\"", fixed = TRUE)
+    expect_equal(count_occurrences(ui_text(output$template_picker_list), "class=\"tmpl-entry"), 1)
+
+    # Neither a close report nor a cleared input arrives (input$template_search
+    # still says "back"); only a second open. The box AND the list start over.
+    session$setInputs(create_from_template = 2)
+    expect_false(grepl("value=\"back\"", ui_text(output$template_picker_ui), fixed = TRUE))
+    html <- ui_text(output$template_picker_list)
+    expect_equal(count_occurrences(html, "class=\"tmpl-entry"), 2)
+    expect_false(grepl("<mark>", html, fixed = TRUE))
+  })
+})
+
+test_that("Enter acts on the search text that arrives in the same message as the click", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+  write_min_template(root, id = "back_tpl", version = "1.0", label = "Back Template")
+  write_min_template(root, id = "other_tpl", version = "1.0", label = "Other Template")
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(create_from_template = 1)
+    ui_text(output$template_picker_ui)
+    # What the Enter key sends: the text, then the click, in one flush.
+    session$setInputs(template_search = "other", template_select_next = 1)
+    expect_equal(rv$template_ref, "other_tpl@1.0")
+  })
+})
+
+test_that("'Back to templates' lands on the template whose options were open, even for an implied selection", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+  write_min_template(root, id = "back_tpl", version = "1.0", label = "Back Template")
+  write_min_template(root, id = "other_tpl", version = "1.0", label = "Other Template")
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(create_from_template = 1)
+    ui_text(output$template_picker_ui)
+    # Search, no click: the only visible row is selected by implication.
+    session$setInputs(template_search = "other")
+    session$setInputs(template_select_next = 1)
+    expect_equal(rv$template_ref, "other_tpl@1.0")
+    session$setInputs(template_picker_closed = 1)
+
+    # With the search gone the first row of the full list is back_tpl; the
+    # author must still land on the template they chose.
+    session$setInputs(template_options_back = 1)
+    expect_match(ui_text(output$template_picker_list), "value=\"other_tpl\"[^>]*checked")
+  })
+})
+
+test_that("'Use this template' warns rather than proceeding when the search hides everything", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+  write_min_template(root, id = "hidden_tpl", version = "1.0", label = "Hidden Template")
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(create_from_template = 1)
+    ui_text(output$template_picker_ui)
+    session$setInputs(template_search = "zzz-nomatch")
+    expect_equal(count_occurrences(ui_text(output$template_picker_list), "class=\"tmpl-entry"), 0)
+
+    session$setInputs(template_select_next = 1)
+
+    # Nothing was selected, so nothing was carried into step 2 -- rather than
+    # the first entry of an unfiltered list the user cannot see.
+    expect_null(rv$template_ref)
   })
 })
 
@@ -235,7 +622,7 @@ test_that("a creation failure leaves the modal open instead of losing the user's
   app_fn("dta_template_index_invalidate")()
   root <- withr::local_tempdir()
   withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
-  # A template whose lone dataset entry cannot be built (no such legacy
+  # A template whose lone dataset entry cannot be built (no such
   # file) -- create_dta_from_template() must fail cleanly.
   writeLines(
     c(
@@ -251,7 +638,7 @@ test_that("a creation failure leaves the modal open instead of losing the user's
       "  - does-not-exist.yaml",
       "options: []"
     ),
-    file.path(root, "broken_tpl.dta-template.yaml")
+    lib_path(root, "broken_tpl.dta-template.yaml")
   )
 
   shiny::testServer(app_server_dir(), {
@@ -288,7 +675,7 @@ test_that("party slot selection reaches the created document's supplier block", 
   })
 })
 
-test_that("leaving a party slot on '(use template default)' does not touch its target", {
+test_that("leaving a party slot on the template's own party does not touch its target", {
   local_clean_template_env()
   app_fn("dta_template_index_invalidate")()
   root <- withr::local_tempdir()
@@ -299,7 +686,7 @@ test_that("leaving a party slot on '(use template default)' does not touch its t
   shiny::testServer(app_server_dir(), {
     pick_template_step1(session, output, "party_tpl", "1.0")
     # tmpl_party_supplier_choice deliberately left unset (its default choice
-    # value is "", the "(use template default)" sentinel).
+    # value is "", the template's-own-party row).
     session$setInputs(tmpl_party_supplier_choice = "")
     session$setInputs(tmpl_carry_source = "none")
     session$setInputs(template_create_confirm = 1)
@@ -362,7 +749,7 @@ test_that("carry-over 'From a file' reads the uploaded DTA's metadata", {
       "    affiliation:",
       "      name: File Supplier",
       "datasets:",
-      "  - name: anc_ds",
+      "  - id: anc_ds",
       "    type: file",
       "    files: { filename: a.csv, type: csv }"
     ),
@@ -417,7 +804,12 @@ test_that("a broken source with no cache shows the diagnostic and offers no temp
     expect_match(html, "badsource", fixed = TRUE)
     expect_match(html, "No templates are available", fixed = TRUE)
     # No fallback to the packaged demo: no template entry rendered at all.
-    expect_equal(count_occurrences(html, "class=\"tmpl-entry"), 0)
+    # With nothing to list, the frame does not even place the list output, so
+    # the count is taken over both -- "0 here and 0 there", either way.
+    expect_equal(
+      count_occurrences(paste0(html, ui_text(output$template_picker_list)), "class=\"tmpl-entry"),
+      0
+    )
   })
 })
 
@@ -432,14 +824,15 @@ test_that("'Refresh templates' picks up a template added to the source directory
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(create_from_template = 1)
-    html1 <- ui_text(output$template_picker_ui)
+    ui_text(output$template_picker_ui)
+    html1 <- ui_text(output$template_picker_list)
     expect_match(html1, "Early Template", fixed = TRUE)
     expect_equal(count_occurrences(html1, "class=\"tmpl-entry"), 1)
 
     write_min_template(root, id = "late_tpl", version = "1.0", label = "Late Template")
     session$setInputs(tmpl_refresh_templates = 1)
 
-    html2 <- ui_text(output$template_picker_ui)
+    html2 <- ui_text(output$template_picker_list)
     expect_match(html2, "Late Template", fixed = TRUE)
     expect_equal(count_occurrences(html2, "class=\"tmpl-entry"), 2)
   })
@@ -449,7 +842,7 @@ test_that("'Refresh templates' picks up a template added to the source directory
 
 test_that("with no private source configured, the picker opens and offers the packaged template(s)", {
   # Deliberately does NOT assert on any specific template's id/label/
-  # description -- inst/extdata/templates/*.dta-template.yaml is owned and
+  # description -- inst/extdata/library/templates/*.dta-template.yaml is owned and
   # concurrently edited elsewhere; this only pins the STRUCTURAL guarantee
   # that dta_template_include_builtin() defaults to TRUE with nothing private
   # configured (template_sources.R), so the packaged directory is scanned
@@ -459,11 +852,18 @@ test_that("with no private source configured, the picker opens and offers the pa
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(create_from_template = 1)
-    html <- ui_text(output$template_picker_ui)
+    ui_text(output$template_picker_ui)
+    list_html <- ui_text(output$template_picker_list)
 
-    expect_gte(count_occurrences(html, "class=\"tmpl-entry"), 1)
-    expect_match(html, "id=\"template_select_name\"", fixed = TRUE)
-    expect_match(html, "id=\"template_select_version\"", fixed = TRUE)
+    expect_gte(count_occurrences(list_html, "class=\"tmpl-entry"), 1)
+    # The radio group is the list output's own container -- Shiny's radio
+    # binding finds the inputs by the group id, so this pins the contract
+    # that makes clicking a row set input$template_select_name at all.
+    expect_match(list_html, "id=\"template_select_name\"", fixed = TRUE)
+    expect_match(
+      ui_text(output$template_picker_detail), "id=\"template_select_version\"",
+      fixed = TRUE
+    )
   })
 })
 
@@ -522,5 +922,90 @@ test_that("edit mode from a template-created document survives a reload", {
     session$setInputs(restore_session = 1)
 
     expect_true(editing())
+  })
+})
+
+# ---- Vocabulary slots: the live "n of m selected" counter -------------------
+
+# A vocabulary plus a template with one slot bound to it. The slot's `target`
+# only has to PARSE here (vocabulary_slot_target_parts(), vocabulary.R) -- this
+# test stops at the options step and never builds a document.
+write_vocab_slot_fixture <- function(root) {
+  writeLines(
+    c(
+      "kind: dta_vocabulary",
+      "id: visit",
+      'version: "1.0"',
+      "label: Visit identifiers",
+      "type: text",
+      "terms:",
+      "  - code: TERM_A",
+      "    label: First term",
+      "  - code: TERM_B",
+      "    label: Second term"
+    ),
+    lib_path(root, "visit.dta-vocabulary.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: vocab_tpl",
+      'version: "1.0"',
+      "label: Vocabulary Template",
+      "base:",
+      "  metadata:",
+      "    title: T",
+      '    version: "1.0"',
+      "vocabulary_slots:",
+      "  - id: visit_choice",
+      "    label: Visits",
+      "    target: datasets.mini_ds.columns.VISIT.values",
+      "    vocabulary: visit@1.0",
+      "    default: [TERM_A, TERM_B]",
+      "datasets:",
+      "  - id: mini_ds",
+      "    type: file",
+      "    files: { filename: mini.csv, type: csv }",
+      "options: []"
+    ),
+    lib_path(root, "vocab_tpl.dta-template.yaml")
+  )
+}
+
+test_that("the vocabulary counter follows the control, and an emptied control means no terms", {
+  # The counter is a server-side renderText registered per slot on every open
+  # of the options modal, which is the only reason a test can see it at all --
+  # the All/None/Default links that drive it are client-side.
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+  write_vocab_slot_fixture(root)
+
+  shiny::testServer(app_server_dir(), {
+    pick_template_step1(session, output, "vocab_tpl", "1.0")
+
+    # In a browser the control binds already holding the slot's `default:`
+    # and reports it at once; testServer has no browser, so the report is
+    # made by hand.
+    session$setInputs(tmpl_vocab_visit_choice = c("TERM_A", "TERM_B"))
+    expect_equal(output$tmpl_vocab_visit_choice_count, "2 of 2 selected")
+
+    session$setInputs(tmpl_vocab_visit_choice = "TERM_A")
+    expect_equal(output$tmpl_vocab_visit_choice_count, "1 of 2 selected")
+    expect_identical(collect_vocab_selections(), list(visit_choice = "TERM_A"))
+
+    # A term the vocabulary does not offer (typed into an `open` slot) is
+    # counted apart from the offered ones rather than silently dropped.
+    session$setInputs(tmpl_vocab_visit_choice = c("TERM_A", "OWN"))
+    expect_equal(output$tmpl_vocab_visit_choice_count, "1 of 2 selected, 1 custom")
+
+    # THE POINT OF "None": an emptied control is "0 of 2", and is collected
+    # as an explicit empty selection -- which vocabulary_slot_values() reads
+    # as "no terms" -- not omitted, which would have put the default back
+    # behind the author's back.
+    session$setInputs(tmpl_vocab_visit_choice = character(0))
+    expect_equal(output$tmpl_vocab_visit_choice_count, "0 of 2 selected")
+    expect_identical(collect_vocab_selections(), list(visit_choice = character(0)))
   })
 })

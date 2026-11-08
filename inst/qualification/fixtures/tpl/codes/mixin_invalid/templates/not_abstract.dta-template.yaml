@@ -1,0 +1,9 @@
+kind: dta_creation_template
+id: mi_concrete
+version: "1.0"
+base: {}
+datasets:
+  - id: obs
+    type: tabular
+    columns:
+      - id: A

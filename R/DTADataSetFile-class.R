@@ -5,20 +5,28 @@
 #' @importFrom cli cli_abort
 #' @include validationReporting.R
 #' @include DTAFileAny-class.R
-#' @param name Character. Name of the container.
+#' @param id Character. Identifier of the dataset: its key in a DTA's
+#'   \code{datasets}, in every validation message and in \code{load_file()}.
 #' @param paths Character vector of file paths to validate.
 #' @param files A list of DTAFile objects specifying input file information.
-#' @param description Character or NULL. Optional description.
-#' @param template_source Character or NA. Source of the template used to
+#'   Any handler that is not a \code{DTAFileAny} is rebuilt as one, keeping its
+#'   filename, pattern, file-count limits and info.
+#'   When \code{files} is empty, one \code{DTAFileAny} handler is built per
+#'   entry of \code{paths}.
+#' @param name Character or NULL. Human-readable name of the dataset, e.g.
+#'   \code{"Delivery reports"}; shown in place of the \code{id} where one is set.
+#' @param description Character or NULL. Long free-text description of the
+#'   dataset.
+#' @param template_source Character or NULL. Source of the template used to
 #'   generate the dataset specification.
-#' @param template_version Character or NA. Version of the template used.
-#' @param template_date Character or NA. Date of the template used.
+#' @param template_version Character or NULL. Version of the template used.
+#' @param template_date Character or NULL. Date of the template used.
 #' @return An object of class DTADataSetFile.
 #' @examples
 #' path <- tempfile(fileext = ".pdf")
 #' writeLines("a delivered report", path)
 #'
-#' ds <- DTADataSetFile(name = "delivery", paths = path)
+#' ds <- DTADataSetFile(id = "delivery", paths = path, name = "Delivery reports")
 #' validation_status(check(ds, quiet = TRUE))
 #'
 #' unlink(path)
@@ -27,14 +35,16 @@ DTADataSetFile <- S7::new_class(
   "DTADataSetFile",
   parent = DTADataSet,
   constructor = function(
-    name,
+    id,
     paths = character(),
     files = list(),
+    name = NULL,
     description = NULL,
     template_source = NULL,
     template_version = NULL,
     template_date = NULL
   ) {
+    if (missing(id)) dta_abort_missing_dataset_id()
     if (inherits(files, "DTAtools::DTAFile")) {
       files <- list(files)
     }
@@ -76,9 +86,10 @@ DTADataSetFile <- S7::new_class(
 
     new_object(
       .parent = DTADataSet(
-        name = name,
+        id = id,
         type = "file",
         files = files,
+        name = name,
         template_source = template_source,
         template_version = template_version,
         template_date = template_date,
@@ -178,12 +189,18 @@ dta_file_id_to_names <- function(all_names, tables = NULL) {
 # declared handler is never dropped just because nothing arrived for it --
 # doing the latter used to make a 1-of-3 delivery report as a clean PASS.
 #
-# For every handler with no delivered path satisfying it (tested with
+# For every declared NAME with no delivered path matching IT (tested with
 # matches_filename(), never by treating the declared name as a path to stat),
-# every name it declares contributes one entry with path = NA_character_ --
-# the marker for "declared but not delivered". `filename` is a VECTOR, so this
-# flattens with unlist()/lapply(), never vapply(..., character(1)), which
-# would crash on a handler that declares more than one name.
+# that one name contributes an entry with path = NA_character_ -- the marker
+# for "declared but not delivered". matches_filename() yields one logical PER
+# declared name/pattern (see the comment above dta_matches_filename_base in
+# R/DTAFile-class.R), so the per-name verdicts across every delivered path are
+# OR-ed together (Reduce(`|`, ...), NA treated as FALSE) rather than collapsed
+# with any() first -- collapsing first only asks "did SOMETHING about this
+# handler match", so a handler declaring two names had the one delivered name
+# hide the other, still-missing one from the report. `filename` is a VECTOR,
+# so this flattens with unlist()/lapply(), never vapply(..., character(1)),
+# which would crash on a handler that declares more than one name.
 #
 # Names are deduplicated; where a declared name collides with a delivered
 # key, the delivered entry wins (setdiff() drops it from the missing side).
@@ -193,13 +210,19 @@ dta_file_dataset_targets <- function(x) {
   delivered <- stats::setNames(paths, dta_file_target_keys(paths))
 
   declared_names <- unlist(lapply(x@files, function(handler) {
-    satisfied <- length(paths) > 0 && any(vapply(
-      paths,
-      function(p) any(matches_filename(handler, basename(p))),
-      logical(1)
-    ))
+    names_i <- handler@filename
 
-    if (satisfied) character(0) else handler@filename
+    if (length(paths) == 0) {
+      return(names_i)
+    }
+
+    matched <- Reduce(`|`, lapply(paths, function(p) {
+      m <- matches_filename(handler, basename(p))
+      m[is.na(m)] <- FALSE
+      m
+    }))
+
+    names_i[!matched]
   }))
 
   missing_names <- setdiff(declared_names, names(delivered))
@@ -427,7 +450,7 @@ dta_resolve_file_handler_index <- function(handler_index, files_list) {
 #' @return The updated \code{DTADataSetFile} object.
 #' @examples
 #' handler <- DTAFileAny(filename = "clinical_data.csv")
-#' ds <- DTADataSetFile(name = "delivery", files = list(handler))
+#' ds <- DTADataSetFile(id = "delivery", files = list(handler))
 #'
 #' file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
 #' ds <- load_file(ds, file = file, handler_index = 1)
@@ -520,7 +543,7 @@ method(load_file, DTADataSetFile) <- function(
 #' @examples
 #' path <- tempfile(fileext = ".txt")
 #' writeLines("content", path)
-#' ds <- check(DTADataSetFile(name = "delivery", paths = path), quiet = TRUE)
+#' ds <- check(DTADataSetFile(id = "delivery", paths = path), quiet = TRUE)
 #' nrow(validation_status(clear_validation(ds)))
 #' @usage clear_validation(x, ...)
 #' @rdname clear_validation
@@ -826,7 +849,7 @@ S7::method(validation_errors, DTADataSetFile) <- function(
 #' @export
 S7::method(results, DTADataSetFile) <- function(x, tables = NULL) {
   status_df <- validation_status(x, tables = tables)
-  dataset_name <- if (!is.null(x@name) && nzchar(x@name)) x@name else NA_character_
+  dataset_name <- if (!is.null(x@id) && nzchar(x@id)) x@id else NA_character_
   dta_results_from_status(status_df, dataset_name = dataset_name)
 }
 
@@ -871,7 +894,7 @@ S7::method(messages, DTADataSetFile) <- function(
 
     do.call(rbind, lapply(rule_errors, function(err) {
       data.frame(
-        dataset = x@name,
+        dataset = x@id,
         target = table_name,
         severity = "error",
         source = "rule",

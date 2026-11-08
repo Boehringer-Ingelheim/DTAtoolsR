@@ -1,0 +1,9 @@
+kind: dta_creation_template
+id: tiv1
+version: "1.0"
+abstract: true
+options:
+  - id: bad
+    label: Bad option
+    type: text
+    target: metadata.no_such_field

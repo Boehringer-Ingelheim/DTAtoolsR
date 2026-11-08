@@ -5,7 +5,22 @@
 # helper-shinyapp.R (see that file for why the app's helper files must be
 # sourced into a private environment for testing).
 
-Sys.setenv(NOT_CRAN = "true")
+# Path of `filename` inside library root `root`, routed by its kind suffix:
+# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
+# for everything else (creation and dataset templates, and the plain data
+# files that sit beside them, which resolve relative to the template).
+# Creates the folder, so a fixture can write straight to the returned path.
+lib_path <- function(root, filename) {
+  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
+    "parties"
+  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
+    "vocabulary"
+  } else {
+    "templates"
+  }
+  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
+  file.path(root, sub, filename)
+}
 
 # Local copy of the isolation helper defined in test-shinyapp-template-
 # sources.R / test-shinyapp-template-create.R -- deliberately duplicated
@@ -70,7 +85,7 @@ index_over <- function(root) {
 # dataset-template machinery this file has nothing to do with.
 write_demo_ct <- function(root, version, header, error_handling, supplier_name,
                           title = "Ancestor Title") {
-  path <- file.path(root, paste0("demo_ct_", gsub("[.]", "_", version, fixed = FALSE), ".dta-template.yaml"))
+  path <- lib_path(root, paste0("demo_ct_", gsub("[.]", "_", version, fixed = FALSE), ".dta-template.yaml"))
   writeLines(
     c(
       "kind: dta_creation_template",
@@ -87,7 +102,7 @@ write_demo_ct <- function(root, version, header, error_handling, supplier_name,
       "      affiliation:",
       sprintf('        name: "%s"', supplier_name),
       "datasets:",
-      "  - name: mini_ds",
+      "  - id: mini_ds",
       "    type: file",
       "    files: { filename: mini.csv, type: csv }",
       "options: []"
@@ -137,7 +152,7 @@ build_demo_current <- function(idx, lineage = "grandparent_ct@1.0") {
   loaded <- load_fn("demo_ct@1.0", index = idx)
   testthat::expect_true(loaded$ok)
 
-  prov <- prov_fn(loaded$value$def, loaded$value, selections = list())
+  prov <- prov_fn(loaded$value$def, loaded$value)
   built <- create_fn(loaded$value$def, loaded$value$path, selections = list(), index = idx, provenance = prov)
   testthat::expect_true(built$ok)
 
@@ -200,7 +215,7 @@ test_that("dta_dataset_leaves() keys columns by id and is stable across a column
     "  title: DS Test",
     '  version: "1.0"',
     "datasets:",
-    "  - name: ds1",
+    "  - id: ds1",
     "    type: tabular",
     "    files: { filename: a.csv, type: csv }",
     "    columns:",
@@ -213,7 +228,7 @@ test_that("dta_dataset_leaves() keys columns by id and is stable across a column
     "  title: DS Test",
     '  version: "1.0"',
     "datasets:",
-    "  - name: ds1",
+    "  - id: ds1",
     "    type: tabular",
     "    files: { filename: a.csv, type: csv }",
     "    columns:",
@@ -248,7 +263,7 @@ test_that("dta_diff() reports added/removed/changed and omits unchanged keys", {
     "  header: Header A",
     "  error_handling: Old Handling",
     "datasets:",
-    "  - name: ds1",
+    "  - id: ds1",
     "    type: file",
     "    files: { filename: a.csv, type: csv }",
     sep = "\n"
@@ -260,7 +275,7 @@ test_that("dta_diff() reports added/removed/changed and omits unchanged keys", {
     "  header: Header Changed",
     "  authorized_for_corrections: New Person",
     "datasets:",
-    "  - name: ds1",
+    "  - id: ds1",
     "    type: file",
     "    files: { filename: a.csv, type: csv }",
     sep = "\n"
@@ -348,24 +363,108 @@ test_that("rebase_plan() gives a clear error for a document with no template pro
   expect_match(flat_message(plan$error), "template provenance", ignore.case = TRUE)
 })
 
-test_that("rebase_plan() names the missing field for a partial provenance record", {
-  root <- withr::local_tempdir()
-  setup_demo_family(root)
-  idx <- index_over(root)
+test_that("rebase_option_answer() inverts single-path, value-keyed and boolean options", {
+  answer <- app_fn("rebase_option_answer")
+  md <- list(
+    header = "Mine", blank = character(0),
+    transmission = list(blinded = TRUE, blinded_description = "Kept blind")
+  )
 
+  expect_identical(answer(list(id = "h", target = "metadata.header"), md), "Mine")
+  # Nothing to read back: the option falls back to its default.
+  expect_null(answer(list(id = "b", target = "metadata.blank"), md))
+  expect_null(answer(list(id = "m", target = "metadata.missing"), md))
+
+  toggle <- list(
+    id = "blind", type = "boolean",
+    effects = list(
+      "TRUE" = list(
+        list(path = "metadata.transmission.blinded", value = TRUE),
+        list(path = "metadata.transmission.blinded_description", value = "Kept blind")
+      ),
+      "FALSE" = list(
+        list(path = "metadata.transmission.blinded", value = FALSE),
+        list(path = "metadata.transmission.blinded_description", value = "")
+      )
+    )
+  )
+  expect_identical(answer(toggle, md), TRUE)
+  md$transmission <- list(blinded = FALSE, blinded_description = "")
+  expect_identical(answer(toggle, md), FALSE)
+  # A document matching neither key cannot be told apart: default.
+  md$transmission <- list(blinded = TRUE, blinded_description = "Edited")
+  expect_null(answer(toggle, md))
+})
+
+test_that("rebase_derive_selections() reads options a variant choice contributes", {
+  derive <- app_fn("rebase_derive_selections")
+  def <- list(
+    id = "v", version = "1.0", options = list(),
+    variants = list(id = "platform", label = "Platform", choices = list(
+      list(value = "a", label = "A", datasets = list("a.yaml"), options = list(
+        list(id = "hdr", type = "text", target = "metadata.header")
+      )),
+      list(value = "b", label = "B", datasets = list("b.yaml"))
+    ))
+  )
   dta <- app_fixture_dta()
   md <- DTAtools::metadata(dta)
-  # id/version alone: DTAMetaData's own validator requires BOTH whenever
-  # @template is non-empty, so this is the only "partial" record that can
-  # exist as a legitimate object -- `selections` is not validated there and
-  # is the field this test actually exercises being reported as missing.
-  S7::prop(md, "template") <- list(id = "demo_ct", version = "1.0")
+  S7::prop(md, "header") <- "Variant header"
   dta@metadata <- md
+  prov <- list(id = "v", version = "1.0", variant = list(id = "platform", value = "a"))
 
-  plan <- app_fn("rebase_plan")(dta, "1.1", index = idx)
+  sel <- derive(dta, prov, list(def))
+  expect_identical(sel$hdr, "Variant header")
+  expect_identical(sel$platform, "a")
 
-  expect_false(plan$ok)
-  expect_match(flat_message(plan$error), "selections", ignore.case = TRUE)
+  # A document still carrying recorded selections replays exactly those.
+  expect_identical(derive(dta, c(prov, list(selections = list(hdr = "old"))), list(def)), list(hdr = "old"))
+})
+
+test_that("rebase_plan() re-derives option answers from the document, so they survive a rebase", {
+  root <- withr::local_tempdir()
+  # An option writing `header`, whose default moves between the versions.
+  for (v in c("1.0", "1.1")) {
+    writeLines(c(
+      "kind: dta_creation_template",
+      "id: opt_ct",
+      sprintf('version: "%s"', v),
+      "base:",
+      "  metadata:",
+      '    title: "T"',
+      '    version: "1.0"',
+      "datasets:",
+      "  - id: mini_ds",
+      "    type: file",
+      "    files: { filename: mini.csv, type: csv }",
+      "options:",
+      "  - id: hdr",
+      "    type: text",
+      "    target: metadata.header",
+      sprintf('    default: "Default %s"', v)
+    ), lib_path(root, paste0("opt_ct_", sub(".", "_", v, fixed = TRUE), ".dta-template.yaml")))
+  }
+  idx <- index_over(root)
+
+  loaded <- app_fn("load_template_definition")("opt_ct@1.0", index = idx)
+  expect_true(loaded$ok)
+  prov <- app_fn("template_provenance")(loaded$value$def, loaded$value)
+  built <- app_fn("create_dta_from_template")(
+    loaded$value$def, loaded$value$path,
+    selections = list(hdr = "Chosen header"), index = idx, provenance = prov
+  )
+  expect_true(built$ok)
+  expect_false("selections" %in% names(DTAtools::metadata(built$value)@template))
+
+  plan <- app_fn("rebase_plan")(built$value, "1.1", index = idx)
+  expect_true(plan$ok)
+  # The author's answer is neither overwritten by 1.1's default nor a conflict.
+  expect_false("header" %in% plan$conflicts$key)
+  expect_false("header" %in% plan$changes$key[plan$changes$resolution == "take_template"])
+
+  applied <- app_fn("rebase_apply")(built$value, plan, resolutions = list())
+  expect_true(applied$ok)
+  expect_identical(DTAtools::metadata(applied$value)@header, "Chosen header")
 })
 
 # ---- rebase_plan(): missing-ancestor degradation -----------------------------
@@ -550,7 +649,7 @@ test_that("dta_template_provenance() returns NULL when absent and the record whe
 # packaged biomarker_gf template does via `version: "${version}"`, and it is the
 # shape that produces a `version_history.1.version` leaf on any rebase.
 write_vh_ct <- function(root, version, header) {
-  path <- file.path(root, sprintf("vh_ct_%s.dta-template.yaml", gsub("[.]", "_", version)))
+  path <- lib_path(root, sprintf("vh_ct_%s.dta-template.yaml", gsub("[.]", "_", version)))
   writeLines(
     c(
       "kind: dta_creation_template",
@@ -567,7 +666,7 @@ write_vh_ct <- function(root, version, header) {
       '        date: "2026-01-01"',
       '        changes: "Initial template-generated version"',
       "datasets:",
-      "  - name: mini_ds",
+      "  - id: mini_ds",
       "    type: file",
       "    files: { filename: mini.csv, type: csv }",
       "options: []"
@@ -583,7 +682,7 @@ write_vh_ct <- function(root, version, header) {
 build_vh_current <- function(idx) {
   loaded <- app_fn("load_template_definition")("vh_ct@1.0", index = idx)
   testthat::expect_true(loaded$ok)
-  prov <- app_fn("template_provenance")(loaded$value$def, loaded$value, selections = list())
+  prov <- app_fn("template_provenance")(loaded$value$def, loaded$value)
   built <- app_fn("create_dta_from_template")(
     loaded$value$def, loaded$value$path,
     selections = list(), index = idx, provenance = prov
@@ -655,4 +754,52 @@ test_that("rebase_apply() leaves the existing version history intact and appends
   expect_equal(after[[1]], before[[1]])
   # No stub entry named "1" -- the corruption pinned above did not occur.
   expect_null(names(after))
+})
+
+test_that("rebase keeps the document's own mixins, as it keeps its lineage", {
+  root <- withr::local_tempdir()
+  setup_demo_family(root)
+  idx <- index_over(root)
+
+  current <- build_demo_current(idx)
+  md <- DTAtools::metadata(current)
+  tpl <- S7::prop(md, "template")
+  # The target templates (1.0 and 1.1) have no mixins at all, so anything the
+  # document keeps can only have come from the document.
+  tpl$mixins <- c("doc_mixin_a@1.0", "doc_mixin_b@2.0")
+  S7::prop(md, "template") <- tpl
+  current@metadata <- md
+
+  plan <- app_fn("rebase_plan")(current, "1.1", index = idx)
+  expect_true(plan$ok)
+  expect_identical(
+    plan$target_provenance$mixins,
+    c("doc_mixin_a@1.0", "doc_mixin_b@2.0")
+  )
+
+  applied <- app_fn("rebase_apply")(
+    current, plan,
+    resolutions = list("supplier.affiliation.name" = "target")
+  )
+  expect_true(applied$ok)
+  rebased <- DTAtools::metadata(applied$value)@template
+  expect_identical(rebased$version, "1.1")
+  expect_identical(rebased$mixins, c("doc_mixin_a@1.0", "doc_mixin_b@2.0"))
+  expect_identical(rebased$lineage, "grandparent_ct@1.0")
+})
+
+test_that("a document without mixins rebases to one without a mixins key", {
+  root <- withr::local_tempdir()
+  setup_demo_family(root)
+  idx <- index_over(root)
+
+  current <- build_demo_current(idx)
+  plan <- app_fn("rebase_plan")(current, "1.1", index = idx)
+  expect_true(plan$ok)
+  applied <- app_fn("rebase_apply")(
+    current, plan,
+    resolutions = list("supplier.affiliation.name" = "target")
+  )
+  expect_true(applied$ok)
+  expect_false("mixins" %in% names(DTAtools::metadata(applied$value)@template))
 })

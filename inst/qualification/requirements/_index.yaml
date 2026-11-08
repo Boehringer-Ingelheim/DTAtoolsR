@@ -1,0 +1,62 @@
+# The functional areas the qualification suite covers.
+#
+# `min_tests` is a floor, not a target: it exists so that an area cannot be
+# quietly emptied by a refactor and still report full coverage. The meta checks
+# fail when an area falls below its floor.
+#
+# `package_version` is the version this suite was written against. A run
+# against a different version fails meta check M12, because requirements
+# written for one version of the software say nothing certain about another.
+
+suite_revision: 1
+package_version: 0.26.0
+
+areas:
+  - area: CORE
+    title: The qualification runner itself
+    min_tests: 11
+  - area: ENV
+    title: Installed system and environment
+    min_tests: 23
+  - area: SPEC
+    title: Specifications, YAML and factories
+    min_tests: 32
+  - area: TYPE
+    title: Declared types and typing at read
+    min_tests: 31
+  - area: VAL
+    title: Validation engine and result accessors
+    min_tests: 39
+  - area: RULE
+    title: Cross-column and grouped rules
+    min_tests: 40
+  - area: FILE
+    title: File handlers and readers
+    min_tests: 42
+  - area: STREAM
+    title: Streaming validation and engine parity
+    min_tests: 31
+  - area: META
+    title: Transfer metadata
+    min_tests: 22
+  - area: TMPL
+    title: Templates, inheritance and controlled vocabulary
+    min_tests: 102
+  - area: EXPORT
+    title: Document and data export
+    min_tests: 54
+  - area: REPORT
+    title: The standalone HTML validation report
+    min_tests: 17
+  - area: APP
+    title: The interactive application
+    min_tests: 37
+  - area: ROBUST
+    title: Error handling, integrity and isolation
+    min_tests: 17
+  - area: PERF
+    title: End-to-end workflows and behaviour at scale
+    min_tests: 25
+
+# Each area work package raises its own floor to the count it delivers, so that
+# the floor tracks what was actually built rather than what was hoped for.

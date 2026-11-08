@@ -16,10 +16,11 @@ Invisibly returns \code{pdf_file}.
 }
 \description{
 Tries every backend reported by \code{\link[=.pdf_backends_available]{.pdf_backends_available()}} in priority order
-and returns as soon as one yields a genuine PDF. Produces a real PDF or
-aborts: a DOCX is never renamed to \code{.pdf}, and no file is ever written to a
-path other than the requested \code{pdf_file}. Any partial output is removed
-before the abort so the caller is not left with a misnamed or truncated
-document.
+and returns as soon as one yields a genuine PDF. Each attempt is written to
+its own staging file beside \code{pdf_file} (via \code{\link[=.dta_write_staged]{.dta_write_staged()}}); the
+destination is only ever touched by the final rename, once
+\code{\link[=.is_pdf_file]{.is_pdf_file()}} has accepted the staged output. A file already at
+\code{pdf_file} -- valid or not -- is therefore left completely alone by every
+failed attempt; only a successful conversion replaces it.
 }
 \keyword{internal}

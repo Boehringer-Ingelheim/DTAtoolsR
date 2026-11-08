@@ -1,6 +1,7 @@
 #' @title DTAColumnSpecCollection Class
 #' @description
-#' This class represents a collection of DTAColumnSpec objects with optional template.
+#' This class represents a collection of DTAColumnSpec objects with optional
+#' rules.
 #' @import S7
 #' @importFrom cli cli_abort
 #' @importFrom stringr str_flatten_comma
@@ -93,6 +94,20 @@ DTAColumnSpecCollection <- S7::new_class(
       return("All elements in 'rules' must be of class 'DTARule'")
     }
 
+    # Rules must fit the columns they name: one check function shared with
+    # lint_dta(), so an inconsistent specification can never exist as an
+    # object. Only errors block; warnings are lint_dta()'s to report.
+    if (length(self@rules) > 0) {
+      findings <- dta_specs_findings(self@columns, self@rules)
+      errs <- findings[findings$severity == "error", , drop = FALSE]
+      if (nrow(errs) > 0) {
+        return(paste0(
+          "The specification is inconsistent:\n",
+          paste0("  (", errs$code, ") ", errs$message, collapse = "\n")
+        ))
+      }
+    }
+
     NULL
   }
 )
@@ -102,11 +117,13 @@ DTAColumnSpecCollection <- S7::new_class(
 #'
 #' @description
 #' Provides a preview of the column IDs contained within a \code{DTAColumnSpecCollection} object.
-#' If the collection contains more than 5 columns, it returns the IDs of the first four columns,
-#' an ellipsis, and the last column's ID. If there are 5 or fewer columns, it returns all column IDs.
+#' If the collection contains more than `n` columns, it returns the IDs of the first `n - 1`
+#' columns, an ellipsis, and the last column's ID. If there are `n` or fewer columns, it returns
+#' all column IDs. A collection with no columns is reported as `"not set"`.
 #'
 #' @param x A \code{DTAColumnSpecCollection} object.
-#' @param ... Not used by current methods; reserved for future extensions.
+#' @param ... Further arguments to the method: `n`, the most IDs to show
+#'   (a single whole number of at least 2; default 8).
 #'
 #' @return A character string representing a preview of the column IDs.
 #'
@@ -117,21 +134,19 @@ DTAColumnSpecCollection <- S7::new_class(
 #' @export
 column_preview <- new_generic("column_preview", "x")
 method(column_preview, DTAColumnSpecCollection) <- function(x, n = 8) {
-  if (length(x@columns) > n) {
-    col_preview <- str_flatten_comma(
-      c(
-        unlist(map(x@columns[1:(n - 1)], function(y) y@id)),
-        "...",
-        x@columns[[length(x@columns)]]@id
-      )
-    )
-  } else if (length(x@columns) <= n) {
-    col_preview <- str_flatten_comma(map(x@columns, function(y) y@id))
-  } else {
-    col_preview <- "not set"
+  # Below 2 the abbreviation `x@columns[1:(n - 1)]` indexes with 1:0 and
+  # shows the first column anyway.
+  if (length(n) != 1 || !is.numeric(n) || is.na(n) || n < 2 || n != trunc(n)) {
+    cli::cli_abort("{.arg n} must be a single whole number of at least 2.")
   }
-
-  col_preview
+  ids <- vapply(x@columns, function(y) y@id, character(1), USE.NAMES = FALSE)
+  if (length(ids) == 0) {
+    return("not set")
+  }
+  if (length(ids) > n) {
+    ids <- c(ids[seq_len(n - 1)], "...", ids[[length(ids)]])
+  }
+  str_flatten_comma(ids)
 }
 
 
@@ -140,7 +155,9 @@ method(column_preview, DTAColumnSpecCollection) <- function(x, n = 8) {
 #' @description
 #' Provides a preview of the rules contained within a \code{DTAColumnSpecCollection} object.
 #' If the collection contains more than 5 rules, it returns the IDs of the first four rules,
-#' an ellipsis, and the rules ID. If there are 5 or fewer rules, it returns all rules.
+#' an ellipsis, and the last rule's ID. If there are 5 or fewer rules, it
+#' returns all rules' IDs. If the collection has no rules (\code{rules} is
+#' \code{NULL}), it returns \code{"not set"}.
 #'
 #' @importFrom stringr str_flatten_comma
 #'
@@ -224,7 +241,9 @@ method(names, DTAColumnSpecCollection) <- function(x) {
 #' @param x An object of class DTAColumnSpecCollection.
 #' @param ... Additional named arguments:
 #'   \describe{
-#'     \item{id}{Character. The ID of the column to retrieve.}
+#'     \item{id}{The column to retrieve: its ID (a single string) or its
+#'       position (a single whole number). An ID or position that does not
+#'       exist is an error of class `dta_colspec_not_found`.}
 #'   }
 #' @return A DTAColumnSpec object corresponding to the specified ID.
 #' @examples
@@ -240,7 +259,41 @@ colspec <- new_generic("colspec", "x")
 
 #' @export
 method(colspec, DTAColumnSpecCollection) <- function(x, id) {
-  return(x@columns[[id]])
+  columns <- x@columns
+  # `[[` leaked a raw base subscript error for a position past the end,
+  # silently truncated a fractional one, and returned NULL for an unknown
+  # name -- which the caller then dereferenced with `@` far from the cause.
+  if (is.character(id)) {
+    if (length(id) != 1 || is.na(id) || !id %in% names(columns)) {
+      cli::cli_abort(
+        c(
+          "No column {.val {id}} in the specification.",
+          i = "Columns: {.val {names(columns)}}."
+        ),
+        class = "dta_colspec_not_found"
+      )
+    }
+    return(columns[[id]])
+  }
+  if (is.numeric(id)) {
+    if (length(id) != 1 || is.na(id) || id != trunc(id)) {
+      cli::cli_abort(
+        "Argument {.arg id} must be a single, non-missing whole number or a column name.",
+        class = "dta_colspec_not_found"
+      )
+    }
+    if (id < 1 || id > length(columns)) {
+      cli::cli_abort(
+        "Column position {id} is out of bounds: the specification has {length(columns)} column{?s}.",
+        class = "dta_colspec_not_found"
+      )
+    }
+    return(columns[[id]])
+  }
+  cli::cli_abort(
+    "Argument {.arg id} must be a column name or a position.",
+    class = "dta_colspec_not_found"
+  )
 }
 
 
@@ -302,6 +355,9 @@ import_specs_from_yaml <- function(file) {
   if (is.null(yaml$columns)) {
     cli::cli_abort("YAML file must contain a 'columns' section.")
   }
+
+  # Every problem at once, before any constructor stops at the first.
+  dta_lint_enforce(lint_dta(list(columns = yaml$columns, rules = yaml$rules)))
 
   columns <- yaml$columns
 
@@ -406,6 +462,13 @@ dta_warn_numeric_values_on_text_column <- function(spec) {
     return(invisible(NULL))
   }
 
+  # A column with no declared type has no text type to warn about: its schema
+  # admits every base type, "string" included, so the test below would fire
+  # for any numeric `values` on it.
+  if (is.null(spec@structure)) {
+    return(invisible(NULL))
+  }
+
   types <- tryCatch(as_json_schema_type(spec), error = function(e) NULL)
   if (!"string" %in% types) {
     return(invisible(NULL))
@@ -446,46 +509,74 @@ dta_warn_numeric_values_on_text_column <- function(spec) {
 #   )
 # }
 
-# #' @title Create DTAColumnSpecCollection from JSON File
-# #' @description
-# #' Parses a JSON file to extract column specifications and create a DTAColumnSpecCollection object.
-# #' @importFrom jsonlite fromJSON
-# #' @importFrom cli cli_abort
-# #' @export
-# #' @param file Character. Path to the JSON file containing specifications.
-# #' @examples
-# #' \dontrun{
-# #'   import_specs_from_json(file)
-# #' }
-# #'
-# #' @return A DTAColumnSpecCollection object.
-# import_specs_from_json <- function(file) {
-#   json <- jsonlite::fromJSON(file, simplifyVector = FALSE)
-#   columns <- json$columns
-#   rules <- json$rules
-#   if (!is.list(columns)) {
-#     cli_abort("`columns` must be a list.")
-#   }
-#   if (!is.null && !is.list(rules)) {
-#     cli_abort("`rules` must be a list or null.")
-#   }
-#   specs_from_list(columns, rules)
-#   # TODO check this function, was heavily modified
-# }
+#' @title Create DTAColumnSpecCollection from JSON File
+#' @description
+#' Reads a JSON file written by \code{\link{write_columns_to_json}} and creates
+#' the DTAColumnSpecCollection it describes, including its rules. The reader
+#' of the YAML counterpart is \code{\link{import_specs_from_yaml}}.
+#' @importFrom jsonlite fromJSON
+#' @export
+#' @param file Character. Path to the JSON file containing specifications.
+#' @examples
+#' specs <- create_example_DTAColumnSpecCollection()
+#' json_file <- tempfile(fileext = ".json")
+#' write_columns_to_json(specs, json_file)
+#' back <- import_specs_from_json(json_file)
+#' names(back@columns)
+#' unlink(json_file)
+#'
+#' @return A DTAColumnSpecCollection object.
+import_specs_from_json <- function(file) {
+  json <- jsonlite::fromJSON(file, simplifyVector = FALSE)
+  if (is.null(json$columns)) {
+    cli::cli_abort("JSON file must contain a 'columns' section.")
+  }
+  specs_from_list(json$columns, json$rules)
+}
 
 #' @title Create DTAColumnSpecCollection from DTA Word Document
 #' @description
-#' Parses a DTA Word document to extract column specifications and create a DTAColumnSpecCollection object.
+#' Parses a table in a Word document into a DTAColumnSpecCollection. The table
+#' layout is the one [export_specs_table()] writes, so a specification exported
+#' to Word, reviewed there, and read back arrives at the same columns.
+#'
+#' A column's permitted values and pattern travel in its Description cell, on
+#' lines of their own: `#@values: "A"; "B"` and `#@pattern: ^[A-Z]{3}$`.
 #' @importFrom docxtractr docx_extract_all_tbls
 #' @importFrom purrr map set_names
 #' @importFrom dplyr mutate filter
 #' @export
 #' @examples
-#' # No runnable example yet.
-#' # Word import examples are intentionally skipped until the API is reworked.
+#' specs <- DTAColumnSpecCollection(columns = list(
+#'   ARM = DTAColumnSpec(
+#'     id = "ARM", label = "Arm", type = "SAS Char", length = 8,
+#'     nullable = FALSE, values = c("Placebo", "Active")
+#'   ),
+#'   VISIT = DTAColumnSpec(
+#'     id = "VISIT", label = "Visit", type = "SAS Char", length = 20,
+#'     nullable = TRUE, pattern = "^(Screening|Baseline|Week [0-9]+)$"
+#'   )
+#' ))
+#' docx <- tempfile(fileext = ".docx")
+#' export_specs_table(specs, file = docx, quiet = TRUE)
+#' back <- columns_specs_from_word(docx)
+#' back@columns$ARM@values
+#' back@columns$VISIT@pattern
+#' unlink(docx)
 #' @param file Character. Path to the Word document.
 #' @param table_position Integer. Index of the table to extract.
-#' @param colnames Vector. Vector containing column names of the table. Essential column names are: id Variable Name), label (Variable Label), type (Type), nullable (Nullable), description (Description)
+#' @param colnames Character vector naming the table's columns, in order. When
+#'   left at its default and the table's header row is the one
+#'   [export_specs_table()] writes (in either of its two layouts), columns are
+#'   matched by their header instead, so the six-column layout without a
+#'   Length column is read correctly too. Recognised names: `id`, `label`,
+#'   `type`, `length`, `format`, `nullable`, `description`; `id` is required.
+#'
+#'   A description cell may carry markers on their own lines:
+#'   \code{#@values: a;b;c} gives the permitted values (separated by
+#'   \code{value_sep}) and \code{#@pattern: <regex>} gives a pattern. Both
+#'   markers, and everything after them, are removed from the stored
+#'   description.
 #' @param value_sep Character. Separator dividing the values. Default: ";"
 #' @return A DTAColumnSpecCollection object.
 columns_specs_from_word <- function(
@@ -503,74 +594,144 @@ columns_specs_from_word <- function(
   value_sep = ";"
 ) {
   doc <- docxtractr::read_docx(file)
-  columns <- docxtractr::docx_extract_all_tbls(doc, preserve = TRUE)[[
-    table_position
-  ]]
+  # A soft line break (Shift+Enter in Word, and what flextable writes for a
+  # newline in a cell) is a <w:br/>, which docxtractr drops without a trace, so
+  # "#@pattern: ^A$" followed by a second line would read as one run-on line.
+  # Write each one as a text node holding a newline before extracting.
+  if (inherits(doc$docx, "xml_document")) {
+    for (br in xml2::xml_find_all(doc$docx, "//*[local-name()='tbl']//*[local-name()='br']")) {
+      xml2::xml_add_sibling(br, "w:t", intToUtf8(10L), .where = "after")
+      xml2::xml_remove(br)
+    }
+  }
+  tables <- docxtractr::docx_extract_all_tbls(doc, preserve = TRUE)
+  if (
+    length(table_position) != 1 || !is.numeric(table_position) ||
+      is.na(table_position) || table_position != round(table_position) ||
+      table_position < 1 || table_position > length(tables)
+  ) {
+    cli::cli_abort(
+      c(
+        "{.arg table_position} must be the index of a table in the document.",
+        x = "The document holds {length(tables)} table{?s}."
+      ),
+      class = "dta_word_import_error"
+    )
+  }
+  columns <- as.data.frame(tables[[table_position]], stringsAsFactors = FALSE)
+
+  # The header row export_specs_table() writes, in either of its layouts.
+  header_map <- c(
+    "variable name" = "id",
+    "variable label" = "label",
+    "type" = "type",
+    "length" = "length",
+    "format" = "format",
+    "nullable" = "nullable",
+    "description" = "description"
+  )
+  header <- tolower(trimws(gsub("[^A-Za-z]+", " ", names(columns))))
+  if (missing(colnames) && length(header) > 0 && all(header %in% names(header_map))) {
+    colnames <- unname(header_map[header])
+  }
+  if (length(colnames) != ncol(columns)) {
+    cli::cli_abort(
+      c(
+        "{.arg colnames} names {length(colnames)} column{?s}, but table {table_position} has {ncol(columns)}.",
+        i = "Pass one name per table column, in order."
+      ),
+      class = "dta_word_import_error"
+    )
+  }
+  if (!"id" %in% colnames) {
+    cli::cli_abort("{.arg colnames} must include {.val id}.", class = "dta_word_import_error")
+  }
   colnames(columns) <- colnames
 
-  columns <- columns %>%
-    dplyr::mutate(
-      nullable = grepl("Yes|yes", nullable),
-      values = purrr::map(description, function(desc) {
-        if (grepl("#@values:", desc)) {
-          # extract and clean values line
-          value_line <- sub(".*#@values:", "", desc)
-          value_line <- sub("\n.*", "", value_line)
-          values <- unlist(strsplit(value_line, value_sep))
-          values <- trimws(values)
-          values <- gsub("^\"|^\'|\"$|\'$", "", values)
-          return(values)
-        }
-        NULL
-      }),
-      pattern = purrr::map_chr(description, function(desc) {
-        if (grepl("#@pattern:", desc)) {
-          # extract and clean pattern line
-          pattern <- sub(".*#@pattern:\\s*([^\\n]+).*", "\\1", desc)
-          pattern <- trimws(pattern)
-          pattern <- gsub("^\"|^\'|\"$|\'$", "", pattern)
-          return(pattern)
-        } else {
-          NA
-        }
-      }),
-      clean_description = trimws(gsub(
-        "#@values:.*|#@pattern:.*",
-        "",
-        description
-      ))
-    ) %>%
-    # remove whitespaces in id - not allowed
-    dplyr::mutate(id = gsub("\\s+", "", id)) %>%
-    # remove empty ids - empty rows
-    dplyr::filter(!is.na(id)) %>%
-    dplyr::filter(id != "")
+  # docxtractr hands back an empty cell as either "" or NA.
+  blank <- function(x) is.na(x) | !nzchar(trimws(x))
+  cell <- function(row, name) {
+    if (!name %in% names(row)) {
+      return(NULL)
+    }
+    value <- as.character(row[[name]])
+    if (length(value) != 1 || blank(value)) NULL else trimws(value)
+  }
+  unquote <- function(x) gsub("^[\"']|[\"']$", "", trimws(x))
 
-  column_list <- purrr::map(1:nrow(columns), function(i) {
-    row <- columns[i, ]
-    if (is.na(row$pattern)) {
-      pattern <- NULL
-    } else {
-      pattern <- row$pattern
+  # The rest of the line after a tag. Cut at a real line break: the earlier
+  # character class `[^\\n]` excluded a backslash and the LETTER n, which cut a
+  # pattern such as ^(Screening|Baseline)$ down to ^(Scree.
+  tag_line <- function(desc, tag) {
+    if (is.null(desc) || !grepl(tag, desc, fixed = TRUE)) {
+      return(NULL)
     }
-    if (all(is.na(row$values[[1]]))) {
-      values <- NULL
-    } else {
-      values <- row$values[[1]]
+    rest <- substring(desc, regexpr(tag, desc, fixed = TRUE) + nchar(tag))
+    line <- trimws(sub("[\r\n].*$", "", rest))
+    if (nzchar(line)) line else NULL
+  }
+  backend_of <- function(x) {
+    if (is.null(x)) {
+      return(NULL)
     }
+    first <- strsplit(x, "[[:space:]]+")[[1]][1]
+    if (first %in% `__DTAtools_supported_backends__`) first else NULL
+  }
+
+  ids <- gsub("[[:space:]]+", "", as.character(columns$id))
+  keep <- which(!blank(ids))
+  column_list <- lapply(keep, function(i) {
+    row <- as.list(columns[i, , drop = FALSE])
+    description <- cell(row, "description")
+
+    values_line <- tag_line(description, "#@values:")
+    values <- if (is.null(values_line)) {
+      NULL
+    } else {
+      unquote(strsplit(values_line, value_sep, fixed = TRUE)[[1]])
+    }
+    pattern_line <- tag_line(description, "#@pattern:")
+    pattern <- if (is.null(pattern_line)) NULL else unquote(pattern_line)
+    if (!is.null(description)) {
+      # Drop each tag line together with the line break before it.
+      description <- trimws(gsub("[\r\n]*#@(values|pattern):[^\r\n]*", "", description))
+      if (!nzchar(description)) description <- NULL
+    }
+
+    # export_specs_table() writes a format without its backend prefix ("$10.",
+    # not "SAS $10."), because the structure stores it that way; the type cell
+    # carries the prefix. Restore it from the type, so the table that function
+    # writes can be read back.
+    type <- cell(row, "type")
+    format <- cell(row, "format")
+    if (!is.null(format) && is.null(backend_of(format)) && !is.null(backend_of(type))) {
+      format <- paste(backend_of(type), format)
+    }
+
+    length_cell <- cell(row, "length")
+    length_value <- if (is.null(length_cell)) NULL else suppressWarnings(as.numeric(length_cell))
+    if (!is.null(length_value) && is.na(length_value)) {
+      cli::cli_abort(
+        "The Length cell of column {.field {ids[[i]]}} is not a number: {.val {length_cell}}.",
+        class = "dta_word_import_error"
+      )
+    }
+    nullable_cell <- cell(row, "nullable")
+
     DTAColumnSpec(
-      id = row$id,
-      label = row$label,
-      type = row$type,
-      format = row$format,
-      length = as.numeric(row$length),
-      nullable = row$nullable,
+      id = ids[[i]],
+      label = cell(row, "label"),
+      type = type,
+      format = format,
+      length = length_value,
+      # "Yes", "y", "TRUE", and a qualified "Yes (if consented)" all mean yes.
+      nullable = if (is.null(nullable_cell)) NULL else grepl("^(yes|y|true)([^a-z]|$)", tolower(nullable_cell)),
       values = values,
       pattern = pattern,
-      description = row$clean_description
+      description = description
     )
-  }) %>%
-    set_names(columns$id)
+  })
+  names(column_list) <- ids[keep]
 
   DTAColumnSpecCollection(columns = column_list)
 }
@@ -709,7 +870,8 @@ write_columns_to_yaml <- function(
 #' @param columns An object of class DTAColumnSpecCollection.
 #' @param file Character. Path to the JSON file to write the specifications to.
 #' @param pretty Logical. Whether to pretty-print the JSON. Default is TRUE.
-#' @return NULL. The function writes the DTAColumnSpecCollection to a JSON file.
+#' @return NULL. The function writes the DTAColumnSpecCollection to a JSON file;
+#'   read it back with \code{\link{import_specs_from_json}}.
 #' @examples
 #' columns <- create_example_DTAColumnSpecCollection()
 #' out_file <- tempfile(fileext = ".json")
@@ -720,8 +882,17 @@ write_columns_to_json <- function(
   file,
   pretty = TRUE
 ) {
+  # jsonlite writes an unset (NULL) property as `{}`, which reads back as an
+  # empty list that the typed properties reject. Omit unset properties, as the
+  # YAML output does; as.list() itself is left alone.
+  drop_unset <- function(x) {
+    if (!is.list(x)) {
+      return(x)
+    }
+    lapply(x[!vapply(x, is.null, logical(1))], drop_unset)
+  }
   jsonlite::write_json(
-    as.list(columns),
+    drop_unset(as.list(columns)),
     path = file,
     pretty = pretty,
     auto_unbox = TRUE

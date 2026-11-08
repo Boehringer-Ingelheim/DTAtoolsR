@@ -4,11 +4,13 @@
 \alias{.report_import_expected_text}
 \title{"Should Be" Text for an Import (Type-Coercion) Error}
 \usage{
-.report_import_expected_text(row1)
+.report_import_expected_text(row1, html = TRUE)
 }
 \arguments{
 \item{row1}{A one-row data.frame: the first row of one message's
 \code{inspect()} output.}
+
+\item{html}{If \code{FALSE}, return plain text instead of HTML-escaped text.}
 }
 \value{
 A length-1 character string, HTML-escaped.

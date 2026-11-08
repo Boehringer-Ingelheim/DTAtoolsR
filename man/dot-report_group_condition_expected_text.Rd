@@ -4,10 +4,12 @@
 \alias{.report_group_condition_expected_text}
 \title{"Should Be" Text for a Group Condition Violation}
 \usage{
-.report_group_condition_expected_text(rule_def)
+.report_group_condition_expected_text(rule_def, html = TRUE)
 }
 \arguments{
 \item{rule_def}{A \code{DTARuleGroupCondition} object, or \code{NULL}.}
+
+\item{html}{If \code{FALSE}, return plain text instead of HTML-escaped text.}
 }
 \value{
 A length-1 character string, HTML-escaped where it embeds data.

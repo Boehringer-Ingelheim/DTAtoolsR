@@ -119,19 +119,13 @@ test_that("export_column_value_table writes DOCX and returns value table", {
     )
   )
 
-  # A bare expect_error() accepts any error, including a typo in the test.
-  # Assert the error's kind, not its text: export_column_value_table() has no
-  # input validation at all, so this is a raw base R error whose message is
-  # translated (German on this machine) and cannot be matched portably.
-  #
-  # KNOWN DEFECT, pinned: unlike export_specs_table(), which aborts with
-  # "must be a DTAColumnSpecCollection", this leaks an internal error. Once a
-  # cli_abort() is added this SHOULD fail -- switch to
-  # expect_error(..., class = "rlang_error").
-  err <- expect_error(
-    export_column_value_table(list(), file = tempfile(fileext = ".docx"), id = "VISIT")
+  # Like export_specs_table(), a non-collection argument aborts with the
+  # package's own cli error naming the expected class.
+  expect_error(
+    export_column_value_table(list(), file = tempfile(fileext = ".docx"), id = "VISIT"),
+    regexp = "must be a DTAColumnSpecCollection",
+    class = "rlang_error"
   )
-  expect_false(inherits(err, "rlang_error"))
 
   out <- tempfile(fileext = ".docx")
   on.exit(unlink(out, force = TRUE), add = TRUE)
@@ -211,4 +205,45 @@ test_that("write_metadata does not create a sidecar when write_to_file = FALSE",
 
   expect_equal(res$n_rows, 3L)
   expect_false(file.exists(metadata_file))
+})
+
+test_that("write_table_to_file() returns md5sum as a bare checksum plus n_rows and n_cols", {
+  ds <- create_example_DTADataSetTabular(2)
+  out <- tempfile(fileext = ".csv")
+  on.exit(unlink(c(out, paste0(out, ".md5")), force = TRUE), add = TRUE)
+
+  res <- write_table_to_file(
+    ds,
+    table = "tab1", filename = out, sep = ",", arrange_by = NULL, quiet = TRUE
+  )
+
+  expect_type(res$md5sum, "character")
+  expect_length(res$md5sum, 1L)
+  expect_identical(res$md5sum, unname(tools::md5sum(out)))
+
+  written <- utils::read.csv(out, colClasses = "character")
+  expect_identical(res$n_rows, nrow(written))
+  expect_identical(res$n_cols, ncol(written))
+
+  # the documented idiom runs in this branch
+  expect_true(!is.na(res$md5sum))
+})
+
+test_that("write_table_to_file() with get_md5sum = FALSE returns NA_character_ and still the dimensions", {
+  ds <- create_example_DTADataSetTabular(2)
+  out <- tempfile(fileext = ".csv")
+  on.exit(unlink(c(out, paste0(out, ".md5")), force = TRUE), add = TRUE)
+
+  res <- write_table_to_file(
+    ds,
+    table = "tab1", filename = out, sep = ",", arrange_by = NULL,
+    get_md5sum = FALSE, quiet = TRUE
+  )
+
+  expect_identical(res$md5sum, NA_character_)
+  expect_false(isTRUE(!is.na(res$md5sum)))
+  written <- utils::read.csv(out, colClasses = "character")
+  expect_identical(res$n_rows, nrow(written))
+  expect_identical(res$n_cols, ncol(written))
+  expect_false(file.exists(paste0(out, ".md5")))
 })

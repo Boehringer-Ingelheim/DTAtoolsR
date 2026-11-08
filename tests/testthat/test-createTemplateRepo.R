@@ -1,12 +1,10 @@
-Sys.setenv(NOT_CRAN = "true")
-
 # Coverage for R/createTemplateRepo.R -- the exported, package-namespace
 # create_template_repo(), which is the WRITE side of the feature
 # validate_template() (R/validateTemplate.R) is the read side of: it scaffolds
 # a directory that already passes validate_template(path, strict = TRUE)
 # unmodified. See that file's header comment for the split between the
 # skeleton it copies (inst/extdata/template-repo-skeleton/) and the packaged
-# examples (inst/extdata/templates/) used elsewhere.
+# library (inst/extdata/library/) used elsewhere.
 
 # ---- Fixture helpers --------------------------------------------------------
 
@@ -30,12 +28,26 @@ md5_snapshot <- function(dir) {
 # project's house rule that a file-producing function is verified by reading
 # the file back.
 template_kinds <- function(dir) {
-  files <- list.files(dir, pattern = "[.]dta-.*[.]ya?ml$", full.names = FALSE)
+  # One folder per kind: templates/ (two kinds), parties/, vocabulary/.
+  files <- list.files(
+    file.path(dir, c("templates", "parties", "vocabulary")),
+    pattern = "[.]dta-.*[.]ya?ml$", full.names = TRUE
+  )
   stats::setNames(
-    vapply(files, function(f) yaml::read_yaml(file.path(dir, f))$kind, character(1)),
-    files
+    vapply(files, function(f) yaml::read_yaml(f)$kind, character(1)),
+    basename(files)
   )
 }
+
+# The files of a default (examples = TRUE) scaffold, apart from CI.
+scaffold_example_files <- c(
+  "README.md", ".gitignore", "dta-app.yaml",
+  "templates/starter.dta-template.yaml",
+  "templates/starter_dataset.dta-dataset-template.yaml",
+  "parties/starter_supplier.dta-party.yaml",
+  "vocabulary/starter_terms.dta-vocabulary.yaml",
+  "export-templates/README.md"
+)
 
 # ---- The round trip -- the anchor test --------------------------------------
 
@@ -72,7 +84,7 @@ test_that("the starter dataset template's STATUS column is bound via values_from
   dir <- withr::local_tempdir()
   create_template_repo(dir)
 
-  ds_files <- list.files(dir, pattern = "[.]dta-dataset-template[.]ya?ml$", full.names = TRUE)
+  ds_files <- list.files(file.path(dir, "templates"), pattern = "[.]dta-dataset-template[.]ya?ml$", full.names = TRUE)
   expect_length(ds_files, 1)
   ds_def <- yaml::read_yaml(ds_files[[1]])
 
@@ -85,11 +97,11 @@ test_that("the starter creation template imports the starter dataset template by
   dir <- withr::local_tempdir()
   create_template_repo(dir)
 
-  tpl_files <- list.files(dir, pattern = "[.]dta-template[.]ya?ml$", full.names = TRUE)
+  tpl_files <- list.files(file.path(dir, "templates"), pattern = "[.]dta-template[.]ya?ml$", full.names = TRUE)
   expect_length(tpl_files, 1)
   tpl_def <- yaml::read_yaml(tpl_files[[1]])
 
-  ds_files <- list.files(dir, pattern = "[.]dta-dataset-template[.]ya?ml$", full.names = TRUE)
+  ds_files <- list.files(file.path(dir, "templates"), pattern = "[.]dta-dataset-template[.]ya?ml$", full.names = TRUE)
   ds_id <- yaml::read_yaml(ds_files[[1]])$id
 
   refs <- vapply(tpl_def$datasets, function(entry) as.character(entry$template %||% ""), character(1))
@@ -106,6 +118,64 @@ test_that("ci = TRUE writes .github/workflows/validate-templates.yml, naming val
   expect_true(file.exists(workflow))
   content <- paste(readLines(workflow), collapse = "\n")
   expect_match(content, "validate_template", fixed = TRUE)
+})
+
+test_that("the GitHub workflow installs remotes, which its placeholder install examples call", {
+  # setup-r-dependencies hands `packages` straight to pak::lockfile_create(),
+  # so every entry must be a resolvable package reference: the earlier
+  # `packages: none` named a CRAN package that does not exist and failed the
+  # job before validation ever ran.
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, examples = FALSE)
+
+  workflow <- yaml::read_yaml(file.path(dir, ".github", "workflows", "validate-templates.yml"))
+  steps <- workflow$jobs[["validate-templates"]]$steps
+  uses <- vapply(steps, function(s) s$uses %||% "", character(1))
+  deps <- steps[[grep("setup-r-dependencies", uses, fixed = TRUE)]]$with$packages
+  expect_identical(deps, "any::remotes")
+
+  runs <- vapply(steps, function(s) s$run %||% "", character(1))
+  expect_true(any(grepl("validate_template(\".\", strict = TRUE)", runs, fixed = TRUE)))
+})
+
+test_that("the Bitbucket and Jenkins assets install remotes, and Jenkins uses a writable user library", {
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, examples = FALSE, ci = c("bitbucket", "jenkins"))
+
+  pipeline <- yaml::read_yaml(file.path(dir, "bitbucket-pipelines.yml"))
+  script <- unlist(pipeline$definitions$steps[[1]]$step$script)
+  expect_true(any(grepl("install.packages(\"remotes\")", script, fixed = TRUE)))
+
+  jenkinsfile <- paste(readLines(file.path(dir, "Jenkinsfile")), collapse = "\n")
+  expect_match(jenkinsfile, "install.packages(\"remotes\")", fixed = TRUE)
+  # R_LIBS, not R_LIBS_USER: rocker's Renviron.site fills R_LIBS with the
+  # unwritable site library unless it is already set, and R_LIBS is searched
+  # first.
+  expect_match(jenkinsfile, "R_LIBS = '/tmp/R-library'", fixed = TRUE)
+  expect_match(jenkinsfile, "mkdir -p \"$R_LIBS\"", fixed = TRUE)
+})
+
+test_that("examples = FALSE does not suggest a validate_template() call that must fail", {
+  # Whitespace (including cli's wrapping and non-breaking spaces) is squeezed
+  # out so the assertions do not depend on where cli breaks the line.
+  scaffold_message <- function(...) {
+    msgs <- character()
+    withCallingHandlers(
+      create_template_repo(withr::local_tempdir(), ...),
+      message = function(m) {
+        msgs <<- c(msgs, conditionMessage(m))
+        invokeRestart("muffleMessage")
+      }
+    )
+    gsub("[[:space:] ]+", "", paste(msgs, collapse = ""))
+  }
+
+  # Positive control: the default scaffold does suggest the strict call.
+  expect_match(scaffold_message(), "strict=TRUE", fixed = TRUE)
+
+  bare <- scaffold_message(examples = FALSE)
+  expect_match(bare, "no_templates", fixed = TRUE)
+  expect_no_match(bare, "strict=TRUE", fixed = TRUE)
 })
 
 test_that("ci = FALSE creates no .github directory at all", {
@@ -141,9 +211,9 @@ test_that("ci = c(\"github\", \"bitbucket\", \"jenkins\") writes all three CI fi
 
 test_that("a repository with all three CI files still validates clean", {
   # bitbucket-pipelines.yml and Jenkinsfile land in the repository ROOT --
-  # exactly where validate_template()'s flat scan, and its recursive
-  # template_in_subdirectory check, are both looking. Pins that neither file
-  # is mistaken for a template, and neither trips the subdirectory warning.
+  # exactly where validate_template()'s placement check (which looks for
+  # template files outside their kind folder) is looking. Pins that neither
+  # file is mistaken for a template, and neither trips a placement row.
   dir <- withr::local_tempdir()
   create_template_repo(dir, ci = c("github", "bitbucket", "jenkins"))
 
@@ -207,7 +277,7 @@ test_that("examples = FALSE writes no template files, and validate_template() re
   dir <- withr::local_tempdir()
   create_template_repo(dir, examples = FALSE)
 
-  expect_length(list.files(dir, pattern = "[.]dta-.*[.]ya?ml$"), 0)
+  expect_setequal(list_all_files(dir), c(".gitignore", "README.md", ".github/workflows/validate-templates.yml"))
 
   result <- validate_template(dir)
   rows <- result[result$code == "no_templates", , drop = FALSE]
@@ -294,4 +364,152 @@ test_that("the bundled template-repo-skeleton directory is itself clean", {
 
   result <- validate_template(dir)
   expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
+})
+
+
+test_that("the scaffold puts README.md and dta-app.yaml at the root and one kind per folder", {
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, ci = FALSE)
+  expect_setequal(list_all_files(dir), scaffold_example_files)
+  # No template file sits in the root, and no folder holds another kind's file.
+  expect_length(list.files(dir, pattern = "[.]dta-.*[.]ya?ml$"), 0)
+  expect_setequal(
+    list.files(file.path(dir, "templates")),
+    c("starter.dta-template.yaml", "starter_dataset.dta-dataset-template.yaml")
+  )
+  expect_identical(list.files(file.path(dir, "parties")), "starter_supplier.dta-party.yaml")
+  expect_identical(list.files(file.path(dir, "vocabulary")), "starter_terms.dta-vocabulary.yaml")
+  expect_identical(list.files(file.path(dir, "export-templates")), "README.md")
+})
+
+test_that("examples = TRUE and each ci provider write exactly the documented file set", {
+  ci_files <- list(
+    github = ".github/workflows/validate-templates.yml",
+    bitbucket = "bitbucket-pipelines.yml",
+    jenkins = "Jenkinsfile"
+  )
+  for (provider in names(ci_files)) {
+    dir <- withr::local_tempdir()
+    create_template_repo(dir, ci = provider)
+    expect_setequal(list_all_files(dir), c(scaffold_example_files, ci_files[[provider]]))
+  }
+
+  none <- withr::local_tempdir()
+  create_template_repo(none, ci = FALSE)
+  expect_setequal(list_all_files(none), scaffold_example_files)
+
+  all3 <- withr::local_tempdir()
+  create_template_repo(all3, ci = names(ci_files))
+  expect_setequal(list_all_files(all3), c(scaffold_example_files, unlist(ci_files)))
+})
+
+test_that("examples = FALSE writes only README.md, .gitignore and the CI file(s), no kind folders", {
+  bare <- withr::local_tempdir()
+  create_template_repo(bare, ci = FALSE, examples = FALSE)
+  expect_setequal(list_all_files(bare), c("README.md", ".gitignore"))
+  expect_false(any(dir.exists(file.path(bare, c("templates", "parties", "vocabulary", "export-templates")))))
+
+  with_ci <- withr::local_tempdir()
+  create_template_repo(with_ci, ci = c("github", "jenkins"), examples = FALSE)
+  expect_setequal(
+    list_all_files(with_ci),
+    c("README.md", ".gitignore", ".github/workflows/validate-templates.yml", "Jenkinsfile")
+  )
+})
+
+test_that("dta-app.yaml is scaffolded in the root with the examples, is not a template, and parses with no problems", {
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, ci = FALSE)
+  cfg <- file.path(dir, "dta-app.yaml")
+  expect_true(file.exists(cfg))
+  expect_false(file.exists(file.path(dir, "templates", "dta-app.yaml")))
+  parsed <- DTAtools:::.dta_template_engine_get("parse_dta_app_config")(cfg)
+  expect_equal(nrow(parsed$problems), 0)
+
+  bare <- withr::local_tempdir()
+  create_template_repo(bare, ci = FALSE, examples = FALSE)
+  expect_false(file.exists(file.path(bare, "dta-app.yaml")))
+})
+
+test_that("a scaffold file moved into the wrong folder is template_misplaced, pointing at the right one", {
+  moves <- list(
+    list(from = "parties/starter_supplier.dta-party.yaml", to = "templates", right = "parties"),
+    list(from = "vocabulary/starter_terms.dta-vocabulary.yaml", to = "parties", right = "vocabulary"),
+    list(from = "templates/starter.dta-template.yaml", to = "vocabulary", right = "templates"),
+    list(from = "templates/starter_dataset.dta-dataset-template.yaml", to = ".", right = "templates")
+  )
+  for (mv in moves) {
+    dir <- withr::local_tempdir()
+    create_template_repo(dir, ci = FALSE)
+    dest <- if (mv$to == ".") file.path(dir, basename(mv$from)) else file.path(dir, mv$to, basename(mv$from))
+    expect_true(file.rename(file.path(dir, mv$from), dest))
+
+    result <- validate_template(dir)
+    rows <- result[result$code == "template_misplaced", , drop = FALSE]
+    expect_equal(nrow(rows), 1, info = mv$from)
+    expect_identical(rows$severity, "error", info = mv$from)
+    expect_identical(rows$file, dest, info = mv$from)
+    expect_match(rows$message, sprintf("'%s/'", mv$right), fixed = TRUE, info = mv$from)
+    expect_error(validate_template(dir, strict = TRUE), class = "rlang_error", regexp = "template_misplaced")
+  }
+})
+
+test_that("a scaffold dta-app.yaml moved into templates/ is app_config_misplaced", {
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, ci = FALSE)
+  file.rename(file.path(dir, "dta-app.yaml"), file.path(dir, "templates", "dta-app.yaml"))
+  result <- validate_template(dir)
+  expect_identical(result$code, "app_config_misplaced")
+})
+
+test_that("pointing validate_template() at a scaffold's kind folder is library_subfolder_given", {
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, ci = FALSE)
+  for (sub in c("templates", "parties", "vocabulary")) {
+    result <- validate_template(file.path(dir, sub))
+    expect_identical(result$code, "library_subfolder_given", info = sub)
+  }
+})
+
+test_that("a non-docx file dropped into the scaffold's export-templates/ is export_template_invalid, a warning", {
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, ci = FALSE)
+  writeLines("x", file.path(dir, "export-templates", "notes.txt"))
+  result <- validate_template(dir, strict = TRUE)
+  expect_identical(result$code, "export_template_invalid")
+  expect_identical(result$severity, "warning")
+})
+
+test_that("the scaffold README is byte-identical to the complete skeleton README", {
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, ci = FALSE)
+  skeleton <- system.file("extdata", "template-repo-skeleton", "README.md", package = "DTAtools")
+  readme <- file.path(dir, "README.md")
+  expect_identical(unname(tools::md5sum(readme)), unname(tools::md5sum(skeleton)))
+  headings <- grep("^## ", readLines(readme, warn = FALSE), value = TRUE)
+  expect_true(all(c(
+    "## Folder layout", "## Connecting the DTAtools app",
+    "## Validating", "## Troubleshooting"
+  ) %in% headings))
+})
+
+test_that("every folder the scaffold writes is one the engine reads", {
+  # The scaffold copies a directory tree; the engine owns the folder names.
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, ci = FALSE)
+  engine <- function(f) DTAtools:::.dta_template_engine_get(f)
+  folders <- list.dirs(dir, recursive = FALSE, full.names = FALSE)
+  expect_setequal(folders, c(engine("dta_template_kind_subdirs")(), engine("dta_export_templates_subdir")()))
+  for (kind in engine("dta_template_all_kinds")()) {
+    expect_true(dir.exists(engine("dta_template_kind_dir")(dir, kind)), info = kind)
+  }
+})
+
+test_that("a templates/ collision aborts before writing any scaffold file", {
+  dir <- withr::local_tempdir()
+  dir.create(file.path(dir, "templates"))
+  writeLines("existing template", file.path(dir, "templates", "starter.dta-template.yaml"))
+  before <- md5_snapshot(dir)
+  expect_error(create_template_repo(dir), "starter.dta-template.yaml", fixed = TRUE)
+  expect_identical(md5_snapshot(dir), before)
 })

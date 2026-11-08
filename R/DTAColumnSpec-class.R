@@ -41,27 +41,31 @@ dta_normalise_spec_values <- function(values) {
   unname(flattened)
 }
 
-#' @title DTA Column Format Class
+#' @title DTA Column Specification Class
 #' @description
-#' Class for column format.
-#'
-#' This class defines the format of a column in a DTA dataset.
+#' Specification of one column of a DTA dataset: its id, label, type and
+#' format, whether it may be missing, and the values or pattern it must
+#' satisfy.
 #' @import S7
 #' @export
 #'
 #' @param id Character. The id of the column.
-#' @param label Character or NA. The label of the column.
-#' @param type Character or NA. The type of the column.
-#' @param format Character or NA. The format of the column.
-#' @param length Numeric or NA. The max character length.
-#' @param nullable Logical or NA. Whether the column can be null.
-#' @param pattern Character or NA. The pattern of the column.
+#' @param label Character or NULL. The label of the column.
+#' @param type Character or NULL. The type of the column.
+#' @param format Character or NULL. The format of the column.
+#' @param length Numeric or NULL. The max character length.
+#' @param nullable Logical or NULL. Whether the column can be null.
+#' @param pattern Character or NULL. The pattern of the column.
 #' @param values Character or numeric vector, or NULL. The permitted values of
 #'   the column. A list is accepted and flattened to a vector.
 #' @param examples Character or numeric vector, or NULL. Example value(s) for
 #'   the column. A list is accepted and flattened to a vector.
-#' @param description Character or NA. The description of the column.
-#' @param colclass Character or NA. The R/SAS storage class of the column.
+#' @param description Character or NULL. The description of the column.
+#' @param colclass Character or NULL. The semantic category of the column; one
+#'   of \code{"patient_info"}, \code{"measurement_patient"},
+#'   \code{"measurement"}, \code{"visit_related"}, \code{"date_related"},
+#'   \code{"study_info"}, \code{"wide_format"}, \code{"long_format"} or
+#'   \code{"wide_and_long_format"}.
 #' @return An object of class DTAColumnSpec.
 #' @examples
 #' col_format <- DTAColumnSpec(
@@ -149,9 +153,30 @@ DTAColumnSpec <- S7::new_class(
       if (!is.null(self@values)) {
         cli_abort("{self@id}: 'values' cannot be set if pattern is provided.")
       }
+
+      # The data is matched with PCRE (dta_check_column_spec()), so the pattern
+      # must compile as PCRE: an invalid one would otherwise abort the whole
+      # check() much later, on the first column that reaches it.
+      if (!is.na(self@pattern)) {
+        compiles <- tryCatch(
+          {
+            suppressWarnings(grepl(self@pattern, "", perl = TRUE))
+            TRUE
+          },
+          error = function(e) FALSE
+        )
+        if (!compiles) {
+          cli_abort(
+            "{self@id}: 'pattern' '{self@pattern}' is not a valid regular expression.",
+            class = "dta_spec_invalid_pattern"
+          )
+        }
+      }
+
       if (!is.null(self@examples)) {
         for (ex in self@examples) {
-          if (!grepl(ex, pattern = self@pattern)) {
+          ex_text <- if (is.numeric(ex)) dta_numeric_text(ex) else as.character(ex)
+          if (!is.na(ex_text) && !grepl(self@pattern, ex_text, perl = TRUE)) {
             cli_abort(
               "{self@id}: example '{ex}' must conform to the pattern '{self@pattern}' provided."
             )
@@ -178,6 +203,17 @@ DTAColumnSpec <- S7::new_class(
         )
       }
     }
+
+    # Declared values and examples must themselves fit the column's type,
+    # length and format, or the spec contradicts itself. Last, so the cheaper
+    # structural checks above report first.
+    problems <- dta_spec_value_problems(self)
+    if (length(problems) > 0) {
+      cli_abort(
+        c("{self@id}: declared values/examples do not fit the column.", .cli_escape(problems)),
+        class = "dta_spec_value_mismatch"
+      )
+    }
   }
 )
 
@@ -195,14 +231,14 @@ DTAColumnSpec <- S7::new_class(
 #' @export
 get_arrow_type <- function(x) {
   if (!inherits(x, "DTAtools::DTAColumnSpec")) {
-    stop("Input must be a DTAColumnSpec object.")
+    cli::cli_abort("Input must be a DTAColumnSpec object.")
   }
   if (is.null(x@structure)) {
-    stop(glue::glue("Structure is not set for {x@id}."))
+    cli::cli_abort("Structure is not set for {x@id}.")
   }
   type <- x@structure@type
   if (is.null(type)) {
-    stop(glue::glue("Type is not set for {x@id}."))
+    cli::cli_abort("Type is not set for {x@id}.")
   }
   switch(type,
     "Char" = "utf8",
@@ -405,6 +441,14 @@ method(as.list, DTAColumnSpec) <- function(x, ...) {
 #' called on the underlying structure it reports the type alone. The base
 #' \code{\link{DTAColumnSpecStructure}} method aborts, because a structure that
 #' names no backend cannot say how it should be validated.
+#'
+#' A column declared with no \code{type}, \code{format} or \code{length} has no
+#' \code{@structure} at all, so there is no backend to dispatch on. Such a
+#' column is still checked on \code{values}/\code{pattern}/\code{nullable} (see
+#' \code{\link{as_json_schema}()}), so "type" itself must never be the reason a
+#' present value fails: every JSON base type \code{\link{dta_base_json_type}()}
+#' can produce is returned, which is a no-op constraint for "type" while
+#' leaving missingness governed by the same nullable rule as a typed column.
 #' @return A character vector naming the JSON Schema type of the column, with
 #'   \code{"null"} appended when the column is nullable.
 #' @examples
@@ -426,7 +470,19 @@ if (!exists("as_json_schema_type", mode = "function", inherits = FALSE)) {
 }
 #' @export
 method(as_json_schema_type, DTAColumnSpec) <- function(x) {
-  type <- as_json_schema_type(x@structure)
+  type <- if (is.null(x@structure)) {
+    # Every base type dta_base_json_type() (R/columnSpecChecks.R) can return
+    # for a value, derived from that function rather than duplicated here so
+    # the two cannot drift apart. "type" is then unconstrained: whichever base
+    # type a present value has, it is in this set.
+    unique(vapply(
+      list(character(1), integer(1), double(1), logical(1)),
+      dta_base_json_type,
+      character(1)
+    ))
+  } else {
+    as_json_schema_type(x@structure)
+  }
 
   if (!is.null(x@nullable) && x@nullable) {
     type <- c(type, "null")
@@ -442,8 +498,10 @@ method(as_json_schema_type, DTAColumnSpec) <- function(x) {
 #' @title as_json_schema_length
 #' @description
 #' Converts a DTAColumnSpec to a JSON Schema length.
-#' @return The column's declared maximum length, as a number, or \code{NA}
-#'   when the specification declares none.
+#' @return The column's declared maximum length, as a number, or \code{NULL}
+#'   when the specification declares none -- including a column with no
+#'   \code{@structure} at all (no \code{type}, \code{format} or \code{length}),
+#'   which has no length to read.
 #' @usage as_json_schema_length(x, ...)
 #' @export
 if (!exists("as_json_schema_length", mode = "function", inherits = FALSE)) {
@@ -451,6 +509,9 @@ if (!exists("as_json_schema_length", mode = "function", inherits = FALSE)) {
 }
 #' @export
 method(as_json_schema_length, DTAColumnSpec) <- function(x) {
+  if (is.null(x@structure)) {
+    return(NULL)
+  }
   x@structure@length
 }
 
@@ -463,7 +524,10 @@ method(as_json_schema_length, DTAColumnSpec) <- function(x) {
 #' @title JSON Schema for a Column Specification
 #' @description
 #' Renders a column specification as JSON Schema: the type, and the length,
-#' pattern and permitted-value constraints the specification declares. The
+#' pattern, permitted-value and format constraints the specification declares.
+#' A SAS \code{format} is emitted as a \code{format} keyword and checked against
+#' the data, except \code{BESTw.} (adaptive width, so it constrains nothing) and
+#' a \code{$w.} that the declared \code{length} already covers. The
 #' single-column methods return the schema fragment as a list; the
 #' \code{\link{DTAColumnSpecCollection}} method assembles those fragments into
 #' a whole schema and serialises it.
@@ -511,21 +575,34 @@ method(as_json_schema, DTAColumnSpec) <- function(x) {
     }
 
     schema_types <- schema$type
-    base_type <- schema_types[schema_types != "null"][1]
+    non_null_types <- unique(schema_types[schema_types != "null"])
 
-    values <- switch(base_type,
-      "integer" = as.integer(values_flat),
-      "number" = as.numeric(values_flat),
-      "boolean" = as.logical(values_flat),
-      "string" = {
-        if (is.list(values_raw)) {
-          unlist(lapply(values_raw, as.character), recursive = TRUE, use.names = FALSE)
-        } else {
-          as.character(values_flat)
-        }
-      },
+    values <- if (length(non_null_types) > 1) {
+      # No declared type (see as_json_schema_type()): the column's actual
+      # runtime storage is unknown, so the declared values are kept in their
+      # YAML representation rather than coerced to any one of them. `%in%`
+      # (dta_check_column_spec()'s enum check) compares by coercing both sides
+      # to a common type at match time, so an un-coerced numeric `1` still
+      # matches a character column holding "1", and a character "1" still
+      # matches a numeric column holding 1 -- coercing here to a single type
+      # would only ever satisfy one of the two.
       values_flat
-    )
+    } else {
+      base_type <- non_null_types[1]
+      switch(base_type,
+        "integer" = as.integer(values_flat),
+        "number" = as.numeric(values_flat),
+        "boolean" = as.logical(values_flat),
+        "string" = {
+          if (is.list(values_raw)) {
+            unlist(lapply(values_raw, as.character), recursive = TRUE, use.names = FALSE)
+          } else {
+            as.character(values_flat)
+          }
+        },
+        values_flat
+      )
+    }
 
     if (!is.null(x@nullable)) {
       if (x@nullable) {
@@ -553,6 +630,8 @@ method(as_json_schema, DTAColumnSpec) <- function(x) {
   if (!is.null(x@pattern) && !is.na(x@pattern)) {
     schema$pattern <- x@pattern
   }
+
+  schema$format <- dta_columnspec_emitted_format(x)
 
   return(schema)
 }

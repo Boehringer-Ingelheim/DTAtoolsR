@@ -1,0 +1,10 @@
+kind: dta_dataset_template
+id: vie_ds_include
+version: "1.0"
+dataset:
+  id: ds1
+  columns:
+    - id: COL1
+      values_from:
+        vocabulary: vie_voc@1.0
+        include: [A, B]

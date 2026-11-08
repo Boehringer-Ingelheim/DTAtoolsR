@@ -1,0 +1,391 @@
+area: SPEC
+title: Specifications, their construction and their accessors
+
+# A Data Transfer Specification is the agreement. Everything the package
+# decides about a delivery follows from how that agreement was read, so a
+# specification misread is a delivery checked against rules nobody agreed to --
+# and the check would look entirely successful while doing it.
+
+requirements:
+  # ---- reading a specification ------------------------------------------------
+
+  - id: REQ-SPEC-001
+    text: >
+      read_dta_from_yaml() shall build a transfer object from a YAML
+      specification, carrying its datasets, their column specifications, their
+      rules, their file handlers and the transfer metadata.
+    risk: high
+    category: functional
+    covers: [read_dta_from_yaml, DTA]
+    source: R/DTA-class.R
+
+  - id: REQ-SPEC-002
+    text: >
+      read_dataset_from_yaml() shall build a single dataset from a YAML
+      specification that describes one.
+    risk: high
+    category: functional
+    covers: [read_dataset_from_yaml, DTADataSet]
+    source: R/DTADataSet-class.R
+
+  - id: REQ-SPEC-003
+    text: >
+      import_specs_from_yaml() shall build a column specification collection
+      from a YAML file describing columns and rules.
+    risk: high
+    category: functional
+    covers: [import_specs_from_yaml, DTAColumnSpecCollection]
+    source: R/DTAColumnSpecCollection-class.R
+
+  - id: REQ-SPEC-004
+    text: >
+      The list-based constructors dta_from_list(), dta_dataset_from_list(),
+      dta_file_handlers_from_list() and specs_from_list() shall build the same
+      objects from an already-parsed specification as the YAML readers build
+      from the file.
+    risk: high
+    category: functional
+    covers: [dta_from_list, dta_dataset_from_list, dta_file_handlers_from_list, specs_from_list]
+    source: R/DTADataSet-class.R
+    notes: >
+      The YAML readers parse and then delegate to these, so a difference
+      between the two paths would mean the file and its parsed form describe
+      different agreements.
+
+  - id: REQ-SPEC-005
+    text: >
+      A specification that cannot be read shall raise a condition naming what
+      is wrong with it, rather than yielding a partial object.
+    risk: high
+    category: functional
+    covers: [read_dta_from_yaml, import_specs_from_yaml]
+    source: R/DTA-class.R
+    notes: >
+      A partially-read specification is the dangerous outcome: the checks it
+      does describe would run and report success, and the ones it lost would
+      never be missed.
+
+  - id: REQ-SPEC-006
+    text: >
+      A value written in a specification shall keep the text it was written
+      with, so that a code such as 007 is not silently read as the number 7.
+    risk: high
+    category: integrity
+    covers: [import_specs_from_yaml, DTAColumnSpec]
+    source: README section "YAML Column Format"
+
+  # ---- constructing a specification directly -----------------------------------
+
+  - id: REQ-SPEC-007
+    text: >
+      DTAColumnSpec() shall carry a column's identifier, declared type, length,
+      nullability, permitted values, pattern, label and description.
+    risk: high
+    category: interface
+    covers: [DTAColumnSpec]
+    source: R/DTAColumnSpec-class.R
+
+  - id: REQ-SPEC-008
+    text: >
+      DTAColumnSpecCollection() shall carry a set of column specifications
+      keyed by identifier, together with the rules that apply across them.
+    risk: high
+    category: interface
+    covers: [DTAColumnSpecCollection]
+    source: R/DTAColumnSpecCollection-class.R
+
+  - id: REQ-SPEC-009
+    text: >
+      DTAColumnSpecStructure() and DTAColumnSpecStructureSAS() shall carry a
+      column's declared type, format and length, and DTAColumnSpecStructureSAS
+      shall infer the type from a SAS format when none is given.
+    risk: medium
+    category: interface
+    covers: [DTAColumnSpecStructure, DTAColumnSpecStructureSAS, DTAColumnSpecStructureFactory]
+    source: R/DTAColumnSpecStructureSAS-class.R
+
+  - id: REQ-SPEC-010
+    text: >
+      The dataset classes DTADataSetTabular and DTADataSetFile shall each carry
+      their id, their optional name and description, their file handlers and
+      their validation state, and
+      DTADataSetFactory() shall build the one its type names.
+    risk: high
+    category: interface
+    covers: [DTADataSet, DTADataSetTabular, DTADataSetFile, DTADataSetFactory]
+    source: R/DTADataSet-class.R
+
+  - id: REQ-SPEC-011
+    text: >
+      The file handler classes DTAFileCSV, DTAFileTSV, DTAFileDelim and
+      DTAFileAny shall each carry the properties their format needs, and
+      DTAFileFactory() shall build the one its type names.
+    risk: high
+    category: interface
+    covers: [DTAFile, DTAFileTabular, DTAFileCSV, DTAFileTSV, DTAFileDelim, DTAFileAny, DTAFileFactory]
+    source: R/DTAFile-class.R
+
+  - id: REQ-SPEC-012
+    text: >
+      DTAMetaData() shall carry the transfer's descriptive and contractual
+      metadata, and DTARule shall be the common class of every rule type.
+    risk: medium
+    category: interface
+    covers: [DTAMetaData, DTARule]
+    source: R/DTAMetaData-class.R
+
+  - id: REQ-SPEC-013
+    text: >
+      Each factory shall reject a type it does not recognise, naming what it
+      accepts.
+    risk: medium
+    category: interface
+    covers: [DTADataSetFactory, DTAFileFactory, DTAColumnSpecStructureFactory]
+    source: R/DTADataSet-class.R
+
+  # ---- writing a specification back --------------------------------------------
+
+  - id: REQ-SPEC-014
+    text: >
+      A column specification collection written to YAML and read back shall
+      describe the same columns, with the same types, lengths, nullability,
+      permitted values and patterns.
+    risk: high
+    category: integrity
+    covers: [write_columns_to_yaml, import_specs_from_yaml]
+    source: R/DTAColumnSpecCollection-class.R
+
+  - id: REQ-SPEC-015
+    text: >
+      A column specification collection written to JSON shall parse as JSON,
+      and import_specs_from_json() shall read it back as the same columns and
+      rules.
+    risk: medium
+    category: integrity
+    covers: [write_columns_to_json, import_specs_from_json]
+    source: R/DTAColumnSpecCollection-class.R
+
+  # ---- the JSON schema view ------------------------------------------------------
+
+  - id: REQ-SPEC-016
+    text: >
+      as_json_schema() shall render a column specification as a JSON Schema
+      fragment, with as_json_schema_type() and as_json_schema_length()
+      contributing the declared type and length.
+    risk: medium
+    category: interface
+    covers: [as_json_schema, as_json_schema_type, as_json_schema_length]
+    source: R/DTAColumnSpec-class.R
+
+  - id: REQ-SPEC-017
+    text: >
+      A nullable column shall admit the null type in its schema, and a
+      non-nullable column shall not.
+    risk: high
+    category: functional
+    covers: [as_json_schema_type]
+    source: R/DTAColumnSpec-class.R
+
+  # ---- accessors ------------------------------------------------------------------
+
+  - id: REQ-SPEC-018
+    text: >
+      datasets(), files(), specs(), tables(), rules() and metadata() shall each
+      return the corresponding part of a transfer object.
+    risk: medium
+    category: interface
+    covers: [datasets, files, specs, tables, rules, metadata]
+    source: R/DTA-class.R
+
+  - id: REQ-SPEC-019
+    text: >
+      columns(), labels(), names() and colspec() shall report a specification's
+      column identifiers, their labels, and the specification of a column
+      named or positioned, and colspec() shall raise a condition for an
+      identifier or position the specification does not contain.
+    risk: medium
+    category: interface
+    covers: [columns, labels, names, colspec]
+    source: R/DTA-class.R
+
+  - id: REQ-SPEC-020
+    text: >
+      get_table() shall return a loaded table by name or by position, and shall
+      raise a condition for a name or position that does not exist.
+    risk: medium
+    category: interface
+    covers: [get_table]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-SPEC-021
+    text: >
+      column_preview() shall summarise a specification's columns without
+      loading any data.
+    risk: low
+    category: interface
+    covers: [column_preview]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-SPEC-022
+    text: >
+      print(), print_info() and print_short_info() shall describe an object
+      without altering it.
+    risk: low
+    category: interface
+    covers: [print, print_info, print_short_info]
+    source: R/DTA-class.R
+
+  # ---- the shipped examples --------------------------------------------------------
+
+  - id: REQ-SPEC-023
+    text: >
+      Every create_example_ constructor shipped with the package shall build a
+      valid object of the class it names.
+    risk: medium
+    category: documentation
+    covers:
+      - create_example_DTA
+      - create_example_DTAColumnSpec
+      - create_example_DTAColumnSpecCollection
+      - create_example_DTADataSetTabular
+      - create_example_DTAFileCSV
+      - create_example_DTAFileTSV
+      - create_example_DTAMetaData
+      - create_example_DTARuleColCondition
+      - create_example_DTARuleColRange
+      - create_example_DTARuleColUnique
+    source: R/DTA-class.R
+    notes: >
+      These are what a new user meets first, in every help page's examples. One
+      that does not build makes the documentation wrong in the place a reader
+      is most likely to trust it.
+
+  - id: REQ-SPEC-024
+    text: >
+      DTA() shall refuse a non-empty @datasets whose names are not all
+      distinct, non-empty and non-NA, or whose name for an entry differs from
+      that dataset's @id, with a condition naming the offending names, rather
+      than construct an object in which one dataset is unreachable by name or
+      reported under two different names.
+    risk: high
+    category: integrity
+    covers: [DTA]
+    source: R/DTA-class.R
+    notes: >
+      check() and every accessor that follows read and write @datasets[[name]].
+      A duplicated name is not a cosmetic problem: the second dataset sharing
+      it is never reachable by name, so it is validated only insofar as the
+      first entry stands in for it, and the caller sees one verdict where two
+      were meant.
+
+  - id: REQ-SPEC-025
+    text: >
+      dta_dataset_from_list(), and with it read_dta_from_yaml() and
+      read_dataset_from_yaml(), shall refuse a dataset entry that has no id,
+      and shall read an entry that has an id with its id, name and description
+      unchanged.
+    risk: high
+    category: integrity
+    covers: [dta_dataset_from_list, read_dta_from_yaml, read_dataset_from_yaml]
+    source: R/DTADataSet-class.R
+    notes: >
+      The id is the dataset's identifier; the name is only its label. An entry
+      that omits the id must not be keyed by its label, because every
+      load_file() and every report would then address a dataset that is not
+      there. Specifications written before datasets had an id are refused,
+      not rewritten.
+
+  - id: REQ-SPEC-026
+    text: >
+      Constructing a DTAColumnSpec shall be refused, with a condition of class
+      dta_spec_value_mismatch, when a declared value or example does not fit
+      the column's own declared type, length or SAS format: a string longer
+      than the length or the $w. width, a text that is not a whole number
+      under Int (or is outside plus or minus 2^31-1), a text that is not a
+      number under Num, a number that cannot be displayed in w.d, or a date,
+      time or datetime that is not display text of its format. It shall also
+      be refused, with a condition of class dta_spec_invalid_pattern, when the
+      declared pattern is not a valid regular expression. A specification read
+      from YAML shall be refused for the same cause, reported as a
+      dta_lint_error that carries a column_spec_invalid finding naming the
+      column.
+    risk: high
+    category: integrity
+    covers: [DTAColumnSpec, import_specs_from_yaml]
+    source: R/DTAColumnSpec-class.R (validator); R/columnSpecChecks.R (dta_spec_value_problems)
+    notes: >
+      A specification that contradicts itself would fail every correct
+      delivery, or, for a pattern that does not compile, abort check() on the
+      first column that reached it. Refusing it at construction puts the fault
+      at the line that wrote it. Specifications written before this check that
+      carry such values no longer load. Declared values are brought to the
+      column's stored type before they are tested, so "abc" under Int is
+      reported as not an integer rather than silently becoming a missing value.
+
+  - id: REQ-SPEC-027
+    text: >
+      A DTAColumnSpecCollection shall be refused, at construction and again
+      whenever its columns or rules are assigned, when a rule contradicts the
+      columns beside it: two rules sharing an id, a rule naming a column the
+      collection does not declare (when it declares at least one), a
+      col_range on a declared column whose type is not Num or Int, or an
+      equals/in operand that is not in the column's declared values list. The
+      refusal shall name every such error, each by its lint_dta() code, and a
+      refused assignment shall leave the collection as it was. A collection
+      whose only finding is a warning, such as rules with no declared column,
+      shall be accepted.
+    risk: high
+    category: integrity
+    covers: [DTAColumnSpecCollection]
+    source: R/DTAColumnSpecCollection-class.R (validator); R/lintDTA.R (dta_specs_findings)
+    notes: >
+      Enforced in the class itself so that YAML, JSON and Word import,
+      template instantiation, the application's editors and programmatic code
+      meet the same check. A rule that can never match, or names a column that
+      is not there, would otherwise make every delivery pass or fail for a
+      reason the specification does not state.
+
+  - id: REQ-SPEC-028
+    text: >
+      lint_dta() shall report every problem of a specification in one pass as
+      a data frame with columns dataset, object, id, severity, code and
+      message, sorted, with zero rows when the specification is clean. For a
+      list holding columns and rules it shall report, one row each and under
+      these codes at severity error: rule_id_duplicate,
+      rule_column_undeclared, rule_range_non_numeric,
+      rule_condition_operator_invalid, rule_condition_numeric_on_text,
+      rule_condition_value_unfit, rule_condition_value_outside_values,
+      group_constraint_unknown_condition, column_spec_invalid, rule_invalid,
+      column_id_duplicate, and for a document dataset_id_missing,
+      dataset_id_duplicate and metadata_invalid. It shall report
+      rules_without_columns and format_narrower_than_length at severity
+      warning, and version_unquoted at warning for an unquoted numeric
+      metadata.version in a file. The bundled clinical specification shall
+      lint with zero rows. An equals/in operand outside a values list is an
+      error; a not_equals/not_in operand outside it shall not be an error.
+    risk: high
+    category: functional
+    covers: [lint_dta]
+    source: R/lintDTA.R
+    notes: >
+      A column or rule that cannot be built is reported rather than thrown, so
+      one broken entry does not hide the others; a broken column still counts
+      as declared, so the rules naming it are not additionally reported as
+      dangling.
+
+  - id: REQ-SPEC-029
+    text: >
+      lint_dta(strict = TRUE) shall raise a condition of class dta_lint_error
+      carrying the findings as its findings element when any finding has
+      severity error, and shall not raise when the only findings are
+      warnings. read_dta_from_yaml() and import_specs_from_yaml() shall check
+      the parsed document first and, when it has errors, raise a condition of
+      class dta_lint_error that names every error, instead of stopping at the
+      first constructor error.
+    risk: high
+    category: integrity
+    covers: [lint_dta, read_dta_from_yaml, import_specs_from_yaml]
+    source: R/lintDTA.R (dta_lint_enforce); R/DTA-class.R; R/DTAColumnSpecCollection-class.R
+    notes: >
+      Specifications written before the cross-object check that carry
+      dangling rules no longer load; lint_dta() on the file lists what to fix.

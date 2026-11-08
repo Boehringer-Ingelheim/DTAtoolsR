@@ -1,0 +1,4 @@
+kind: dta_creation_template
+id: v2
+version: 1.10
+abstract: true

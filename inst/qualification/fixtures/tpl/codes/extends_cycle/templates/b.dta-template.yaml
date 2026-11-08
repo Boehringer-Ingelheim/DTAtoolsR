@@ -1,0 +1,4 @@
+kind: dta_creation_template
+id: cyc_b
+version: "1.0"
+extends: cyc_a@1.0

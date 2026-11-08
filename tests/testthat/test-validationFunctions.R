@@ -1,3 +1,8 @@
+# This file tests how the engine copes with rules that contradict their columns
+# (stale, restored or legacy specs). The class refuses to build them, so the
+# constructor is shadowed by the rule-unchecked variant for the whole file.
+DTAColumnSpecCollection <- unchecked_collection
+
 test_that("validate_table and validate_table_detailed pass for valid input", {
   specs <- DTAColumnSpecCollection(
     columns = list(
@@ -50,6 +55,53 @@ test_that("validate_table returns column spec errors and aborts on rule errors",
     validate_table(specs = specs_rules, table = duplicated_table, verbose = FALSE),
     "Rule violations"
   )
+})
+
+test_that("validate_table never evaluates a rule id as a cli format string (abort path)", {
+  # rule_messages is data-derived (it embeds the rule id) and used to be handed
+  # to cli_abort() as bullet content unescaped, so a `{`/`}` in the id was
+  # glue-evaluated in the validating session instead of printed.
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 12, nullable = FALSE)
+    ),
+    rules = list(DTARuleColUnique(id = "u{stop('evaluated')}", columns = "ID"))
+  )
+  duplicated_table <- data.frame(ID = c("A001", "A001"), stringsAsFactors = FALSE)
+
+  err <- tryCatch(
+    validate_table(specs = specs, table = duplicated_table, verbose = FALSE),
+    error = function(e) e
+  )
+  expect_s3_class(err, "rlang_error")
+  expect_true(grepl("u{stop('evaluated')}", conditionMessage(err), fixed = TRUE))
+  expect_true(grepl("^Rule violations:", conditionMessage(err)))
+})
+
+test_that("validate_table never evaluates a rule id as a cli format string (warn path)", {
+  # Same payload, but with a column spec error present too, so the rule
+  # messages travel through the cli_warn() bullets instead of cli_abort().
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 3, nullable = FALSE)
+    ),
+    rules = list(DTARuleColUnique(id = "u{stop('evaluated')}", columns = "ID"))
+  )
+  duplicated_table <- data.frame(ID = c("TOOLONG", "TOOLONG"), stringsAsFactors = FALSE)
+
+  warning_message <- tryCatch(
+    {
+      withCallingHandlers(
+        validate_table(specs = specs, table = duplicated_table, verbose = FALSE),
+        warning = function(w) {
+          stop(conditionMessage(w))
+        }
+      )
+      NA_character_
+    },
+    error = function(e) conditionMessage(e)
+  )
+  expect_true(grepl("u{stop('evaluated')}", warning_message, fixed = TRUE))
 })
 
 test_that("Column spec errors pin the offending row, column and keyword", {

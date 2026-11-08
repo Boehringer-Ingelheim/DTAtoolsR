@@ -5,17 +5,22 @@
 #'
 #' Methods are available for `DTA`, `DTADataSet`, and `DTADataSetTabular`.
 #' @param x A `DTA`, `DTADataSet`, or `DTADataSetTabular` object.
-#' @param ... Additional method arguments.
+#' @param ... Method arguments. The `DTADataSet` and `DTADataSetTabular`
+#'   methods take `tables` (names or indices of the tables to report on;
+#'   `NULL` for all). The `DTA` method takes `datasets` (`NULL`, dataset
+#'   names, or indices).
 #' @return
-#' A data.frame summarizing validation state.
-#'
-#' For `DTADataSetTabular`, columns are:
-#' `target`, `status`, `validated_at`, `run_id`, `validation_run`,
-#' `n_columnspec_errors`, `n_rule_errors`, `n_import_errors`.
-#'
-#' For `DTA`, the summary is aggregated per dataset and includes:
-#' `dataset`, `n_targets`, `n_validated`, `n_valid`, `n_invalid`,
+#' A data.frame with one row per validation target (table), with columns:
+#' `dataset`, `target`, `target_type`, `status`, `validated_at`, `run_id`,
+#' `validation_run`, `n_columnspec_errors`, `n_rule_errors`,
+#' `n_import_errors`, `n_targets`, `n_validated`, `n_valid`, `n_invalid`,
 #' `n_skipped`, `n_not_validated`.
+#'
+#' The `n_targets` ... `n_not_validated` columns are counts over all
+#' targets of the dataset and repeat on every row of that dataset; they are
+#' not aggregated across datasets. For a `DTA`, the per-dataset results are
+#' row-bound. A dataset that is not a `DTADataSet` contributes a single row
+#' with status `"not_validated"` and `NA` in the other columns.
 #' @examples
 #' dta <- create_example_DTA()
 #' dta <- check(dta, quiet = TRUE)
@@ -91,7 +96,7 @@ dta_results_from_status <- function(status_df, dataset_name = NA_character_) {
 #' @export
 S7::method(results, DTADataSetTabular) <- function(x, tables = NULL) {
   status_df <- validation_status(x, tables = tables)
-  dataset_name <- if (!is.null(x@name) && nzchar(x@name)) x@name else NA_character_
+  dataset_name <- if (!is.null(x@id) && nzchar(x@id)) x@id else NA_character_
   dta_results_from_status(status_df, dataset_name = dataset_name)
 }
 
@@ -107,7 +112,7 @@ S7::method(results, DTADataSet) <- function(x, tables = NULL) {
   }
 
   status_df <- validation_status(x, tables = tables)
-  dataset_name <- if (!is.null(x@name) && nzchar(x@name)) x@name else NA_character_
+  dataset_name <- if (!is.null(x@id) && nzchar(x@id)) x@id else NA_character_
   dta_results_from_status(status_df, dataset_name = dataset_name)
 }
 
@@ -171,15 +176,24 @@ S7::method(results, DTA) <- function(x, datasets = NULL) {
 #' @title Retrieve Check Messages
 #' @description
 #' Returns one row per validation message to support debugging workflows.
-#' The output combines column spec and rule failures into a single flat table.
+#' The output combines column spec, rule and import failures into a single
+#' flat table.
 #'
 #' Methods are available for `DTA`, `DTADataSet`, and `DTADataSetTabular`.
 #' @param x A `DTA`, `DTADataSet`, or `DTADataSetTabular` object.
-#' @param ... Additional method arguments.
+#' @param ... Method arguments:
+#'   * `tables` (`DTADataSet` and `DTADataSetTabular` methods): names or
+#'     indices of the tables to report on; `NULL` for all.
+#'   * `datasets` (`DTA` method): `NULL`, dataset names, or indices.
+#'   * `source`: where validation details are read from, one of `"auto"`
+#'     (the default), `"memory"` or `"artifact"`.
+#'   * `as_tibble`: logical, default `TRUE`. Return a tibble when the
+#'     `tibble` package is installed.
 #' @return
 #' A data.frame (or tibble when `as_tibble = TRUE` and package `tibble`
 #' is installed) with columns:
-#' `dataset`, `target`, `severity`, `source`, `rule_id`,
+#' `id` (sequential integer), `dataset`, `target`, `severity`, `source`
+#' (`"columnspec"`, `"rule"` or `"import"`), `rule_id`,
 #' `row`, `column`, `keyword`, `message`.
 #' @examples
 #' ds <- create_example_DTADataSetTabular(2)
@@ -287,12 +301,17 @@ dta_import_error_messages <- function(import_errors) {
     return(character(0))
   }
 
+  reason <- as.character(import_errors$reason)
+  detail <- ifelse(
+    reason == "not_whole", "not a whole number",
+    ifelse(reason == "out_of_range", "outside the 32-bit integer range", reason)
+  )
   sprintf(
     "value '%s' in column '%s' cannot be represented as declared type '%s' (%s); imported as NA",
     as.character(import_errors$raw),
     as.character(import_errors$column),
     as.character(import_errors$declared_type),
-    as.character(import_errors$reason)
+    detail
   )
 }
 
@@ -362,13 +381,15 @@ dta_collect_messages_for_dataset <- function(x, tables = NULL, source = c("auto"
 
   out <- lapply(target_tables, function(table_name) {
     entry <- x@validation_index[[table_name]]
-    if (is.null(entry)) {
+    # "unspecified" (a spec with no columns) records no artifact and no store
+    # entry, so there is nothing to collect; validation_errors() would abort.
+    if (is.null(entry) || identical(entry$status, "unspecified")) {
       return(dta_empty_messages())
     }
 
     details <- validation_errors(x, table = table_name, source = source)
 
-    dataset_name <- if (!is.null(x@name) && nzchar(x@name)) x@name else NA_character_
+    dataset_name <- if (!is.null(x@id) && nzchar(x@id)) x@id else NA_character_
 
     schema_df <- dta_columnspec_messages_to_df(dataset_name, table_name, details)
     rule_df <- dta_rule_messages_to_df(dataset_name, table_name, details)
@@ -516,7 +537,11 @@ S7::method(messages, DTA) <- function(
 #'   }
 #' @return A tibble/data.frame with one or more rows per requested id.
 #'   Detail fields are appended as flat columns prefixed with
-#'   \code{schema_}, \code{context_}, and \code{failing_}.
+#'   \code{columnspec_}, \code{context_}, \code{failing_}, \code{import_}
+#'   and \code{group_violation_}. Summary fields of the validation result are
+#'   added as \code{details_*} columns, and the class of the rule behind a
+#'   rule message as \code{rule_definition_class}.
+#' @seealso \code{\link{explain_messages}} for the same findings in plain language.
 #' @usage inspect(x, ...)
 #' @examples
 #' ds <- check(create_example_DTADataSetTabular(2), quiet = TRUE)
@@ -527,6 +552,258 @@ S7::method(messages, DTA) <- function(
 #' @name inspect
 #' @export
 inspect <- S7::new_generic("inspect", "x")
+
+# Set while check(<DTA>) runs its datasets, so they do not each repeat the
+# explain_messages() hint that the DTA summary prints once.
+dta_check_state <- new.env(parent = emptyenv())
+
+#' @keywords internal
+#' @title Find the Rule Definition Behind a Rule Message
+#' @param x A `DTA` (the rule is looked up in `x@datasets[[dataset_name]]`) or a
+#'   `DTADataSet` (used as is).
+#' @param dataset_name Dataset name as reported by `messages()`.
+#' @param rule_id The rule's `id`.
+#' @return The rule object, or `NULL` when it cannot be resolved.
+dta_find_rule_def <- function(x, dataset_name, rule_id) {
+  tryCatch(
+    {
+      ds <- if (inherits(x, "DTAtools::DTA")) x@datasets[[dataset_name]] else x
+      if (!is.null(ds) && !is.null(ds@specs) && !is.null(ds@specs@rules)) {
+        for (r in ds@specs@rules) {
+          if (!is.null(r@id) && identical(r@id, rule_id)) {
+            return(r)
+          }
+        }
+      }
+      NULL
+    },
+    error = function(e) NULL
+  )
+}
+
+#' @title Explain Validation Messages in Plain Language
+#' @description
+#' Prints, for every validation message, what was checked, what the value
+#' should have been and what it actually was, in the same words the HTML report
+#' from \code{\link{write_validation_report}} uses. Where \code{\link{messages}}
+#' gives the validator's generic wording ("must be equal to one of the allowed
+#' values") and \code{\link{inspect}} a wide technical table, this names the
+#' allowed values and shows the offending one.
+#' @param x A checked \code{DTA} or \code{DTADataSet} (anything
+#'   \code{messages()} and \code{inspect()} accept).
+#' @param id Optional integer message id(s) as shown by \code{messages()}.
+#'   Default: all messages.
+#' @param n Maximum number of messages to print. Use \code{Inf} for all.
+#' @return Invisibly, a data.frame with one row per explained message and the
+#'   columns \code{id}, \code{dataset}, \code{target}, \code{source},
+#'   \code{row}, \code{column}, \code{problem}, \code{should_be} and
+#'   \code{actual}.
+#' @seealso \code{\link{messages}}, \code{\link{inspect}},
+#'   \code{\link{write_validation_report}}
+#' @examples
+#' ds <- check(create_example_DTADataSetTabular(2), quiet = TRUE)
+#' explain_messages(ds, n = 3)
+#' @export
+explain_messages <- function(x, id = NULL, n = 20) {
+  if (!is.numeric(n) || length(n) != 1 || is.na(n) || n < 1) {
+    cli::cli_abort("'n' must be a single number >= 1 (use Inf for all messages).")
+  }
+
+  msgs <- messages(x, as_tibble = FALSE)
+  if (!is.null(id)) {
+    msgs <- dta_get_message_rows_by_id(msgs, id)
+  }
+  out <- dta_explain_empty()
+  if (nrow(msgs) == 0) {
+    cli::cli_alert_success("No validation messages.")
+    return(invisible(out))
+  }
+
+  n_more <- max(nrow(msgs) - n, 0)
+  msgs <- msgs[seq_len(min(nrow(msgs), n)), , drop = FALSE]
+
+  # One batched call, as the report does: inspect() re-collects every message
+  # on each invocation. Failure falls back to the plain messages() row.
+  inspected <- tryCatch(
+    inspect(x, id = msgs$id, as_tibble = FALSE),
+    error = function(e) NULL
+  )
+  by_id <- if (!is.null(inspected) && nrow(inspected) > 0) {
+    split(seq_len(nrow(inspected)), inspected$id)
+  }
+
+  rows <- lapply(seq_len(nrow(msgs)), function(i) {
+    msg_row <- msgs[i, , drop = FALSE]
+    idx <- by_id[[as.character(msg_row$id)]]
+    detail <- if (is.null(idx)) msg_row else inspected[idx, , drop = FALSE]
+    rule_def <- NULL
+    if (identical(as.character(msg_row$source), "rule") && !is.na(msg_row$rule_id)) {
+      rule_def <- dta_find_rule_def(x, as.character(msg_row$dataset), as.character(msg_row$rule_id))
+    }
+    dta_explain_one(msg_row, detail, rule_def)
+  })
+
+  if (n_more > 0) {
+    cli::cli_alert_info("... and {n_more} more message{?s}; use {.code n = Inf} to show all.")
+  }
+
+  invisible(do.call(rbind, rows))
+}
+
+#' @keywords internal
+dta_explain_empty <- function() {
+  data.frame(
+    id = integer(0), dataset = character(0), target = character(0),
+    source = character(0), row = numeric(0), column = character(0),
+    problem = character(0), should_be = character(0), actual = character(0),
+    stringsAsFactors = FALSE
+  )
+}
+
+#' @keywords internal
+#' @title Offending Rows as Printed Lines
+#' @param detail `inspect()` rows of one message.
+#' @param prefix_pattern Regex selecting the columns to show (`^failing_`,
+#'   `^context_` or `^group_violation_`).
+#' @param max_rows Maximum number of rows to print.
+#' @return Character vector of printed lines, or `NULL` when nothing was captured.
+dta_explain_rows_lines <- function(detail, prefix_pattern, max_rows = 5) {
+  cols <- grep(prefix_pattern, names(detail), value = TRUE)
+  if (length(cols) == 0) {
+    return(NULL)
+  }
+  sub <- unique(detail[, cols, drop = FALSE])
+  names(sub) <- sub(prefix_pattern, "", names(sub))
+  names(sub)[names(sub) == ".row"] <- "Row"
+  sub <- sub[rowSums(!is.na(sub)) > 0, , drop = FALSE]
+  if (nrow(sub) == 0) {
+    return(NULL)
+  }
+  if ("Row" %in% names(sub)) {
+    sub <- sub[, c("Row", setdiff(names(sub), "Row")), drop = FALSE]
+  }
+  shown <- utils::head(sub, max_rows)
+  lines <- utils::capture.output(print(shown, row.names = FALSE))
+  if (nrow(sub) > nrow(shown)) {
+    lines <- c(lines, paste0("... ", nrow(sub) - nrow(shown), " more row(s)"))
+  }
+  lines
+}
+
+#' @keywords internal
+#' @title Print and Return the Explanation of One Message
+#' @description
+#' Mirrors the type branching of `.report_inspect_panel_html()`, with
+#' `html = FALSE`. Message text is only ever interpolated through local
+#' variables: cli parses `{}` in the format string it is handed, so pasting a
+#' data or spec value into it would evaluate that value as code.
+#' @param msg_row One row of `messages()`.
+#' @param detail `inspect()` rows for the same id (or `msg_row` as fallback).
+#' @param rule_def Rule object or `NULL`.
+#' @return A one-row data.frame as described in `explain_messages()`.
+dta_explain_one <- function(msg_row, detail, rule_def) {
+  row1 <- detail[1, , drop = FALSE]
+  type <- if ("type" %in% names(row1) && !is.na(row1[["type"]])) {
+    as.character(row1[["type"]])
+  } else {
+    as.character(msg_row$source)
+  }
+  label <- switch(type,
+    rule = "Rule failure",
+    columnspec = "Column spec violation",
+    import = "Import error",
+    "Message"
+  )
+  if (identical(type, "rule") && !is.na(msg_row$rule_id)) {
+    label <- paste0(label, " (", msg_row$rule_id, ")")
+  }
+
+  row_no <- suppressWarnings(as.numeric(msg_row$row))
+  col_nm <- as.character(msg_row$column)
+  where <- c(
+    if (!is.na(row_no)) paste0("Row ", format(row_no, scientific = FALSE)),
+    if (!is.na(col_nm)) paste0("column ", col_nm)
+  )
+  problem <- as.character(msg_row$message)
+  problem_line <- if (length(where) > 0) {
+    paste0(paste(where, collapse = ", "), ": ", problem)
+  } else {
+    problem
+  }
+
+  info <- character(0)
+  table_lines <- NULL
+  if (identical(type, "columnspec")) {
+    # inspect() carries no columnspec_* detail for an undeclared column; the
+    # messages() row still knows the keyword, and the sentences key off it.
+    if (!"columnspec_keyword" %in% names(row1) || is.na(row1[["columnspec_keyword"]])) {
+      row1[["columnspec_keyword"]] <- as.character(msg_row$keyword)
+    }
+    should_be <- .report_columnspec_expected_text(row1, html = FALSE)
+    actual <- .report_columnspec_actual_text(row1, html = FALSE)
+  } else if (identical(type, "import")) {
+    should_be <- .report_import_expected_text(row1, html = FALSE)
+    actual <- .report_import_actual_text(row1, html = FALSE)
+  } else if (identical(type, "rule")) {
+    desc <- tryCatch(rule_def@description, error = function(e) NULL)
+    if (!is.null(desc) && length(desc) == 1 && !is.na(desc) && nzchar(desc)) {
+      info <- paste0("What this rule checks: ", desc)
+    }
+    if (inherits(rule_def, "DTAtools::DTARuleGroupCondition")) {
+      should_be <- .report_group_condition_expected_text(rule_def, html = FALSE)
+      info <- c(info, vapply(
+        rule_def@constraints,
+        function(cn) .report_group_constraint_desc(cn, html = FALSE),
+        character(1)
+      ))
+      table_lines <- c(
+        dta_explain_rows_lines(detail, "^group_violation_"),
+        dta_explain_rows_lines(detail, "^failing_")
+      )
+    } else {
+      should_be <- .report_rule_expected_text(rule_def, html = FALSE)
+      pattern <- if (any(grepl("^failing_", names(detail)))) "^failing_" else "^context_"
+      table_lines <- dta_explain_rows_lines(detail, pattern)
+    }
+    actual <- if (is.null(table_lines)) {
+      "No offending rows were captured."
+    } else {
+      paste(table_lines, collapse = "\n")
+    }
+  } else {
+    should_be <- problem
+    actual <- "(see technical detail via inspect())"
+  }
+
+  header <- paste0(
+    "#", msg_row$id, " | ", msg_row$dataset, " / ", msg_row$target, " | ", label
+  )
+  cli::cli_rule(left = "{header}")
+  cli::cli_text("{problem_line}")
+  for (line in info) {
+    cli::cli_alert_info("{line}")
+  }
+  cli::cli_alert_success("Should be: {should_be}")
+  if (is.null(table_lines)) {
+    cli::cli_alert_danger("Actual: {actual}")
+  } else {
+    cli::cli_alert_danger("Actual:")
+    cli::cli_verbatim(table_lines)
+  }
+
+  data.frame(
+    id = as.integer(msg_row$id),
+    dataset = as.character(msg_row$dataset),
+    target = as.character(msg_row$target),
+    source = as.character(msg_row$source),
+    row = row_no,
+    column = col_nm,
+    problem = problem,
+    should_be = should_be,
+    actual = actual,
+    stringsAsFactors = FALSE
+  )
+}
 
 #' @keywords internal
 dta_validate_inspect_ids <- function(id) {
@@ -917,12 +1194,116 @@ dta_filter_import_matches <- function(import_errors, msg_row) {
   hits
 }
 
+#' @title Table Frame for Inspection, Bounded and Column-Limited
+#' @description
+#' `dta_inspect_tabular_message()` used to call
+#' `as.data.frame(x@tables[[table_name]])` unconditionally, which for a
+#' streamed table materialises the whole delivery -- everything `check()` was
+#' streaming specifically to avoid -- just to show one row of context. This
+#' collects only what a preview actually needs: a column subset and,
+#' when supplied, the first `max_row` rows.
+#'
+#' A table already in memory is untouched: `as.data.frame()`, exactly as
+#' before. A `RecordBatchReader` cannot be safely re-read -- it is one-shot,
+#' and the scan `check()` ran may already have consumed it -- so this returns
+#' `NULL` rather than reading (and thereby destroying) whatever is left of it.
+#' Any other lazy source (`Dataset`, `arrow_dplyr_query`) is scanned fresh,
+#' which is safe to repeat, through the same ordered record-batch reader the
+#' validation scan numbers its rows from.
+#' @param tbl A table representation, as held in `x@tables[[table_name]]`.
+#' @param columns Character, or `NULL` for every column.
+#' @param max_row Numeric, or `NULL`/non-finite for no row bound. When finite
+#'   and positive, only the first `max_row` rows are read, so row `k` of the
+#'   returned frame stays row `k` of the underlying table.
+#' @return A data.frame, or `NULL` when `tbl` cannot be safely re-read.
+#' @keywords internal
+dta_inspect_table_frame <- function(tbl, columns = NULL, max_row = NULL) {
+  if (!dta_table_is_lazy(tbl)) {
+    return(as.data.frame(tbl))
+  }
+
+  if (inherits(tbl, "RecordBatchReader")) {
+    return(NULL)
+  }
+
+  query <- tbl
+  if (!is.null(columns) && length(columns) > 0) {
+    # dta_build_inspect_row_context() falls back to the first six columns when
+    # none of the ones it wants exist; select those here so a lazy table gets
+    # the same fallback rather than an empty frame.
+    available <- names(tbl)
+    if (!any(columns %in% available)) {
+      columns <- available[seq_len(min(6, length(available)))]
+    }
+    query <- dplyr::select(query, dplyr::any_of(columns))
+  }
+  # Read through the same ordered Scanner -> RecordBatchReader the validation
+  # engine numbers its rows from (dta_validate_table_stream()), so row `k`
+  # here is the row `k` a message reports. `head()` on a Dataset promises no
+  # order across batches, so it was a different reader that merely agreed
+  # on small inputs. The bounded case stops at the first `max_row` rows.
+  reader <- arrow::Scanner$create(query)$ToRecordBatchReader()
+  if (is.null(max_row) || !is.finite(max_row) || max_row <= 0) {
+    return(as.data.frame(as.data.frame(reader$read_table())))
+  }
+
+  batches <- list()
+  n <- 0
+  while (n < max_row) {
+    batch <- reader$read_next_batch()
+    if (is.null(batch)) {
+      break
+    }
+    batches[[length(batches) + 1L]] <- as.data.frame(batch)
+    n <- n + nrow(batches[[length(batches)]])
+  }
+  if (length(batches) == 0) {
+    # Nothing to read: the empty table still carries the columns.
+    return(as.data.frame(as.data.frame(reader$read_table())))
+  }
+  out <- as.data.frame(do.call(rbind, batches))
+  out <- out[seq_len(min(nrow(out), max_row)), , drop = FALSE]
+  rownames(out) <- NULL
+  out
+}
+
+#' @title Columns a Rule's Inspection Needs
+#' @description
+#' The columns `dta_inspect_tabular_message()` must load to recompute a rule's
+#' failing rows and build its preview: the rule's own target column(s) (a
+#' group condition's `group_by` and condition columns for that rule type),
+#' plus `SUBJECT_ID`/`VISIT`, which the preview always tries to show for
+#' context. Requesting only these keeps a lazily-held table from being pulled
+#' into memory in full just to inspect one message.
+#' @param rule_def A rule object, or `NULL` when the rule could not be
+#'   resolved.
+#' @return Character. Deduplicated column names.
+#' @keywords internal
+dta_inspect_rule_needed_columns <- function(rule_def) {
+  rule_cols <- if (is.null(rule_def)) {
+    character(0)
+  } else if (inherits(rule_def, "DTAtools::DTARuleGroupCondition")) {
+    cond_cols <- unique(unlist(lapply(rule_def@conditions, names), use.names = FALSE))
+    c(rule_def@group_by %||% character(0), cond_cols)
+  } else if (inherits(rule_def, "DTAtools::DTARuleColRange")) {
+    rule_def@columns
+  } else if (inherits(rule_def, "DTAtools::DTARuleColUnique")) {
+    dta_unique_columns(rule_def)
+  } else if (inherits(rule_def, "DTAtools::DTARuleColCondition")) {
+    c(names(rule_def@condition), names(rule_def@then))
+  } else {
+    character(0)
+  }
+
+  unique(c(rule_cols, "SUBJECT_ID", "VISIT"))
+}
+
 #' @keywords internal
 dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory", "artifact")) {
   source <- match.arg(source)
   table_name <- as.character(msg_row$target)
   details <- validation_errors(x, table = table_name, source = source)
-  table_df <- as.data.frame(x@tables[[table_name]])
+  raw_table <- x@tables[[table_name]]
 
   out <- list(
     id = as.integer(msg_row$id),
@@ -934,13 +1315,32 @@ dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory",
     message = as.character(msg_row$message)
   )
 
+  # Both branches below build a row context for exactly one row (msg_row$row),
+  # so only that row -- and only the columns dta_build_inspect_row_context()
+  # can use -- is ever requested from a lazily-held table. Without a row to
+  # show, there is nothing worth reading: dta_build_inspect_row_context()
+  # would return NULL anyway, so the read is skipped rather than materialising
+  # (or scanning) the table for no reason.
+  msg_row_no <- suppressWarnings(as.numeric(msg_row$row))
+  has_row <- length(msg_row_no) == 1 && !is.na(msg_row_no) && msg_row_no >= 1
+
   if (identical(as.character(msg_row$source), "columnspec")) {
     columnspec_full <- details$columnspec_errors$full_error
     schema_match <- dta_filter_columnspec_matches(columnspec_full, msg_row)
 
+    row_cols <- unique(c("SUBJECT_ID", "VISIT", as.character(msg_row$column)))
+    row_cols <- row_cols[!is.na(row_cols) & nzchar(row_cols)]
+    table_df <- if (has_row) dta_inspect_table_frame(raw_table, columns = row_cols, max_row = msg_row_no) else NULL
+
     out$type <- "columnspec"
     out$why <- "Column values violate JSON schema constraints (type/value/length/required)."
-    out$row_context <- dta_build_inspect_row_context(table_df, msg_row)
+    if (has_row && is.null(table_df)) {
+      out$why <- paste(
+        out$why,
+        "Row context is unavailable: the table is a one-shot stream already consumed by validation."
+      )
+    }
+    out$row_context <- if (is.null(table_df)) NULL else dta_build_inspect_row_context(table_df, msg_row)
     out$columnspec_matches <- utils::head(schema_match, 20)
     return(out)
   }
@@ -948,12 +1348,22 @@ dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory",
   # Without an explicit branch an import message would fall through to the rule
   # branch below, look up rule_id = NA, and return a nonsense record.
   if (identical(as.character(msg_row$source), "import")) {
+    row_cols <- unique(c("SUBJECT_ID", "VISIT", as.character(msg_row$column)))
+    row_cols <- row_cols[!is.na(row_cols) & nzchar(row_cols)]
+    table_df <- if (has_row) dta_inspect_table_frame(raw_table, columns = row_cols, max_row = msg_row_no) else NULL
+
     out$type <- "import"
     out$why <- paste(
       "A value could not be represented in the column's declared type,",
       "so the typed column holds NA and the raw value was kept."
     )
-    out$row_context <- dta_build_inspect_row_context(table_df, msg_row)
+    if (has_row && is.null(table_df)) {
+      out$why <- paste(
+        out$why,
+        "Row context is unavailable: the table is a one-shot stream already consumed by validation."
+      )
+    }
+    out$row_context <- if (is.null(table_df)) NULL else dta_build_inspect_row_context(table_df, msg_row)
     out$import_matches <- utils::head(
       dta_filter_import_matches(details$import_errors, msg_row),
       20
@@ -968,12 +1378,41 @@ dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory",
   }
   rule_idx <- which(vapply(rules_list, function(r) identical(r@id, rule_id), logical(1)))
   rule_def <- if (length(rule_idx) > 0) rules_list[[rule_idx[[1]]]] else NULL
+
+  is_group_condition <- !is.null(rule_def) && inherits(rule_def, "DTAtools::DTARuleGroupCondition")
+
+  # Failing rows are recomputed from the table, not read off `details`, so
+  # there is no row bound to apply here (unlike the columnspec/import
+  # branches above): the whole table -- narrowed to the columns this rule
+  # actually reads -- has to be scanned regardless.
+  table_df <- if (!is.null(rule_def)) {
+    dta_inspect_table_frame(raw_table, columns = dta_inspect_rule_needed_columns(rule_def))
+  } else {
+    NULL
+  }
+
+  if (!is.null(rule_def) && is.null(table_df)) {
+    out$type <- "rule"
+    out$why <- paste(
+      if (is_group_condition) {
+        "A group-level constraint was violated: within one or more groups of rows, conditions that must be mutually exclusive co-occur, or a required follow-on condition is absent."
+      } else {
+        "Rule logic found rows that violate IF/THEN, range, or uniqueness constraints."
+      },
+      "Failing rows are unavailable: the table is a one-shot stream already consumed by validation."
+    )
+    out$rule_id <- rule_id
+    out$rule_definition <- rule_def
+    out$failing_row_count <- NA_integer_
+    out$failing_rows_preview <- NULL
+    out$group_violation_details <- NULL
+    return(out)
+  }
+
   failing_rows <- if (!is.null(rule_def)) dta_rule_failure_row_indices(rule_def, table_df) else integer(0)
 
   row_preview <- NULL
   group_violation_details <- NULL
-
-  is_group_condition <- !is.null(rule_def) && inherits(rule_def, "DTAtools::DTARuleGroupCondition")
 
   if (length(failing_rows) > 0) {
     # Group condition rules show ALL failing rows and include all involved columns.
@@ -1068,6 +1507,33 @@ S7::method(inspect, DTADataSet) <- function(
   cli::cli_abort("inspect() is currently implemented for DTADataSetTabular and DTADataSetFile subclasses.")
 }
 
+# Inspect record for one metadata import message: an "import" record whose
+# import_matches carry the matching import_issues row (same field and reason),
+# in the shape the report renders for per-table import errors.
+#' @keywords internal
+dta_inspect_metadata_message <- function(metadata, msg_row) {
+  errors <- metadata_import_errors(metadata)
+  hit <- which(errors$column %in% as.character(msg_row$column) &
+    errors$reason %in% as.character(msg_row$keyword))
+  matches <- errors[utils::head(hit, 1), , drop = FALSE]
+  rownames(matches) <- NULL
+  list(
+    id = as.integer(msg_row$id),
+    dataset = NA_character_,
+    target = "metadata",
+    source = "import",
+    severity = as.character(msg_row$severity),
+    type = "import",
+    headline = sprintf("[metadata] %s", msg_row$message),
+    why = paste(
+      "A metadata value could not be fully interpreted, so the value",
+      "recorded differs from what was written."
+    ),
+    message = as.character(msg_row$message),
+    import_matches = matches
+  )
+}
+
 #' @export
 S7::method(inspect, DTA) <- function(
   x,
@@ -1081,6 +1547,9 @@ S7::method(inspect, DTA) <- function(
 
   records <- lapply(seq_len(nrow(msg_rows)), function(i) {
     msg_row <- msg_rows[i, , drop = FALSE]
+    if (is.na(msg_row$dataset) && identical(as.character(msg_row$target), "metadata")) {
+      return(dta_inspect_metadata_message(x@metadata, msg_row))
+    }
     dataset_name <- as.character(msg_row$dataset)
     ds <- x@datasets[[dataset_name]]
     if (is.null(ds) || !inherits(ds, "DTAtools::DTADataSet")) {

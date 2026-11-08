@@ -1,0 +1,9 @@
+kind: dta_dataset_template
+id: vv1
+version: "1.0"
+dataset:
+  id: ds1
+  columns:
+    - id: COL1
+      values: [A, B]
+      values_from: vv_voc@1.0

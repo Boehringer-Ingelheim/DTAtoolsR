@@ -109,6 +109,69 @@
 
 
 #' @keywords internal
+#' @title Add the Metadata Axis to the Overview Rows
+#' @description
+#' `results()` carries one row per dataset target and none for metadata: the
+#' metadata verdict is computed by `check()` and kept on the object, never in
+#' the frame `results()` returns. The overview is the first thing a reviewer
+#' reads and for many it is the only thing, so a transfer that is invalid ONLY
+#' because of a metadata import error must not headline as "everything passed"
+#' while the fault sits in a message row further down the same page.
+#'
+#' One row is added for the metadata axis when, and only when, it has something
+#' to report. A clean transfer's overview stays a statement about its targets,
+#' which is what the per-target table below the cards is for.
+#' @param x The object being reported on.
+#' @param results_df The frame returned by `results(x)`.
+#' @return `results_df`, with one metadata row appended where warranted.
+.report_with_metadata_row <- function(x, results_df) {
+  if (!inherits(x, "DTAtools::DTA")) {
+    return(results_df)
+  }
+  md <- tryCatch(metadata(x), error = function(e) NULL)
+  if (is.null(md)) {
+    return(results_df)
+  }
+  errors <- tryCatch(metadata_import_errors(md), error = function(e) NULL)
+  n_errors <- if (is.data.frame(errors)) nrow(errors) else 0L
+  if (n_errors == 0) {
+    return(results_df)
+  }
+
+  # Built from the frame itself, so the row keeps every column results() has
+  # and the right type for each, whatever that set becomes.
+  row <- if (is.data.frame(results_df) && ncol(results_df) > 0) {
+    out <- results_df[NA_integer_, , drop = FALSE]
+    rownames(out) <- NULL
+    out
+  } else {
+    data.frame(
+      dataset = NA_character_, target = NA_character_, target_type = NA_character_,
+      status = NA_character_, n_columnspec_errors = NA_integer_,
+      n_rule_errors = NA_integer_, n_import_errors = NA_integer_,
+      stringsAsFactors = FALSE
+    )
+  }
+  # Blank rather than NA: this cell renders straight into the table, and the
+  # metadata axis belongs to the transfer rather than to any one dataset.
+  row$dataset <- ""
+  row$target <- "metadata"
+  if ("target_type" %in% names(row)) {
+    row$target_type <- "metadata"
+  }
+  row$status <- "failed"
+  row$n_columnspec_errors <- 0L
+  row$n_rule_errors <- 0L
+  row$n_import_errors <- as.integer(n_errors)
+
+  if (!is.data.frame(results_df) || nrow(results_df) == 0) {
+    return(row)
+  }
+  rbind(results_df, row)
+}
+
+
+#' @keywords internal
 #' @title Build Validation Summary HTML Section
 #' @description
 #' Renders the top-level summary section with pass/fail/pending counts and
@@ -194,6 +257,94 @@
   )
 }
 
+
+#' @keywords internal
+#' @title What a Validation Report Was Run Over
+#' @description
+#' One row per input a checked DTA's verdict rests on, so a filed report can be
+#' tied back to the data it describes: for a tabular dataset, every loaded
+#' table -- with the delivered file(s) a streamed Arrow dataset scans and the
+#' content-hash stamp an in-memory table carries -- and for a file dataset,
+#' every delivered path. Sizes and modification times are read from the file
+#' system; nothing is hashed here, because a delivery can be tens of gigabytes
+#' and the report must not re-read it.
+#' @param x A DTA object.
+#' @return A data frame with columns `Dataset`, `Table`, `Kind`, `Source file`,
+#'   `Size (bytes)`, `Modified (UTC)` and `Content hash`; zero rows when no
+#'   dataset has data attached.
+.report_inputs_df <- function(x) {
+  input_row <- function(dataset, table, kind, path = NA_character_, hash = NA_character_) {
+    size <- NA_character_
+    modified <- NA_character_
+    if (!is.na(path)) {
+      info <- suppressWarnings(file.info(path))
+      if (!is.na(info$size)) {
+        size <- format(info$size, scientific = FALSE, big.mark = "")
+        modified <- format(info$mtime, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+      } else {
+        size <- "file not found"
+      }
+    }
+    data.frame(
+      Dataset = dataset, Table = table, Kind = kind, `Source file` = path,
+      `Size (bytes)` = size, `Modified (UTC)` = modified, `Content hash` = hash,
+      check.names = FALSE, stringsAsFactors = FALSE
+    )
+  }
+
+  rows <- list()
+  for (ds in x@datasets) {
+    id <- ds@id
+    if (inherits(ds, "DTAtools::DTADataSetFile")) {
+      for (path in ds@file_paths) {
+        rows[[length(rows) + 1L]] <- input_row(id, NA_character_, "file", path)
+      }
+      next
+    }
+    tables <- tryCatch(ds@tables, error = function(e) list())
+    table_names <- names(tables) %||% rep("", length(tables))
+    for (k in seq_along(tables)) {
+      tbl <- tables[[k]]
+      # Every input is listed, named or not.
+      nm <- if (nzchar(table_names[[k]])) table_names[[k]] else paste0("table ", k)
+      if (inherits(tbl, "Dataset")) {
+        files <- dta_dataset_source_files(tbl)
+        if (length(files) == 0) files <- NA_character_
+        for (path in files) {
+          rows[[length(rows) + 1L]] <- input_row(id, nm, "streamed", path)
+        }
+      } else {
+        rows[[length(rows) + 1L]] <- input_row(
+          id, nm, "in memory",
+          hash = dta_table_hash_stamp(tbl) %||% NA_character_
+        )
+      }
+    }
+  }
+
+  if (length(rows) == 0) {
+    return(input_row("", "", "")[0, , drop = FALSE])
+  }
+  do.call(rbind, rows)
+}
+
+#' @keywords internal
+#' @title Build the Inputs Section of a Validation Report
+#' @param x A DTA object.
+#' @return A character string of HTML.
+.report_inputs_html <- function(x) {
+  df <- .report_inputs_df(x)
+  body <- if (nrow(df) == 0) {
+    '<p class="report-inputs-empty">No data was attached to any dataset of this transfer.</p>'
+  } else {
+    .report_kv_table_html(df)
+  }
+  paste0(
+    '<section class="report-inputs">\n  <h2>Inputs</h2>\n  ',
+    body,
+    "\n</section>"
+  )
+}
 
 #' @keywords internal
 #' @title Build Messages Table HTML Section
@@ -455,8 +606,9 @@
 #' @description
 #' Returns `default` when `x` is `NULL`, not length 1, or `NA`; otherwise
 #' returns `x` coerced to character (or `default` if that coercion is blank).
-#' Used throughout this file instead of `%||%`, which this package does not
-#' import (base R only gained it in 4.4.0, and `DESCRIPTION` allows R >= 4.1).
+#' Used throughout this file instead of `%||%` because it also covers the
+#' length-1, `NA` and blank-string checks that `%||%` (which only tests for
+#' `NULL`) does not.
 #' @param x A scalar value, or `NULL`.
 #' @param default Character scalar to fall back to.
 #' @return A length-1 character string.
@@ -478,14 +630,16 @@
 #' `dta_condition_operators()` (`R/evaluateRules.R`) is covered.
 #' @param op Character scalar operator name.
 #' @param value The operator's right-hand side.
+#' @param html If `FALSE`, return plain text: no escaping, operators as `!=`, `>` etc.
 #' @return A length-1 character string, HTML-escaped where it embeds data.
-.report_condition_operator_text <- function(op, value) {
+.report_condition_operator_text <- function(op, value, html = TRUE) {
+  esc <- .report_escaper(html)
   op <- as.character(op)[1]
 
   if (identical(op, "range")) {
     v <- as.character(unlist(value))
-    lo <- if (length(v) >= 1) .report_html_escape(v[[1]]) else ""
-    hi <- if (length(v) >= 2) .report_html_escape(v[[2]]) else ""
+    lo <- if (length(v) >= 1) esc(v[[1]]) else ""
+    hi <- if (length(v) >= 2) esc(v[[2]]) else ""
     return(paste0("between ", lo, " and ", hi))
   }
 
@@ -493,24 +647,32 @@
     return(if (isTRUE(value)) "is empty" else "is not empty")
   }
 
-  val_text <- .report_html_escape(paste(as.character(unlist(value)), collapse = ", "))
+  val_text <- esc(paste(as.character(unlist(value)), collapse = ", "))
 
   switch(op,
     equals = ,
     equal = paste0("= ", val_text),
     not_equals = ,
-    not_equal = paste0("&#8800; ", val_text),
+    not_equal = paste0(if (html) "&#8800; " else "!= ", val_text),
     `in` = paste0("in {", val_text, "}"),
     not_in = paste0("not in {", val_text, "}"),
-    greater = paste0("&gt; ", val_text),
-    less = paste0("&lt; ", val_text),
+    greater = paste0(if (html) "&gt; " else "> ", val_text),
+    less = paste0(if (html) "&lt; " else "< ", val_text),
     greater_equal = ,
-    min = paste0("&gt;= ", val_text),
+    min = paste0(if (html) "&gt;= " else ">= ", val_text),
     less_equal = ,
-    max = paste0("&lt;= ", val_text),
+    max = paste0(if (html) "&lt;= " else "<= ", val_text),
     pattern = paste0("matches pattern ", val_text),
-    paste0(.report_html_escape(op), " ", val_text)
+    paste0(esc(op), " ", val_text)
   )
+}
+
+#' @keywords internal
+#' @title Escape Function for HTML or Plain Output
+#' @param html If `TRUE`, HTML-escape; otherwise return `as.character`.
+#' @return A function.
+.report_escaper <- function(html) {
+  if (isTRUE(html)) .report_html_escape else as.character
 }
 
 #' @keywords internal
@@ -525,8 +687,10 @@
 #' first. Used for `DTARuleColCondition`'s `condition`/`then` and each named
 #' entry of `DTARuleGroupCondition@conditions`.
 #' @param cond A named list, or `NULL`/empty/not list-shaped.
+#' @param html If `FALSE`, return plain text.
 #' @return A length-1 character string (possibly `""`), HTML-escaped.
-.report_condition_to_text <- function(cond) {
+.report_condition_to_text <- function(cond, html = TRUE) {
+  esc <- .report_escaper(html)
   if (is.null(cond) || length(cond) == 0 || is.null(names(cond))) {
     return("")
   }
@@ -535,11 +699,11 @@
     spec <- cond[[col]]
     if (is.list(spec) && length(spec) > 0 && !is.null(names(spec))) {
       op_texts <- vapply(names(spec), function(op) {
-        paste0(.report_html_escape(col), " ", .report_condition_operator_text(op, spec[[op]]))
+        paste0(esc(col), " ", .report_condition_operator_text(op, spec[[op]], html = html))
       }, character(1))
       paste(op_texts, collapse = " and ")
     } else {
-      .report_html_escape(col)
+      esc(col)
     }
   }, character(1))
 
@@ -560,8 +724,10 @@
 #' of surfacing the validator's generic message.
 #' @param row1 A one-row data.frame: the first row of one message's
 #'   `inspect()` output.
+#' @param html If `FALSE`, return plain text instead of HTML-escaped text.
 #' @return A length-1 character string, HTML-escaped.
-.report_columnspec_expected_text <- function(row1) {
+.report_columnspec_expected_text <- function(row1, html = TRUE) {
+  esc <- .report_escaper(html)
   fallback <- function() {
     msg <- if ("columnspec_message" %in% names(row1) && !is.na(row1[["columnspec_message"]])) {
       row1[["columnspec_message"]]
@@ -570,7 +736,7 @@
     } else {
       "(unknown constraint)"
     }
-    .report_html_escape(msg)
+    esc(msg)
   }
 
   kw <- if ("columnspec_keyword" %in% names(row1)) row1[["columnspec_keyword"]] else NA
@@ -585,7 +751,7 @@
   # (dta_columnspec_error_rows() call sites in R/columnSpecChecks.R). Escape
   # first, then re-join for prose so the multi-value keywords each get their
   # own readable separator.
-  spec_text <- if (!is.na(spec)) .report_html_escape(as.character(spec)) else ""
+  spec_text <- if (!is.na(spec)) esc(as.character(spec)) else ""
   spec_text_prose <- gsub("; ", ", ", spec_text, fixed = TRUE)
 
   switch(kw,
@@ -596,6 +762,7 @@
     enum = paste0("Must be one of: ", spec_text_prose, "."),
     const = paste0("Must be exactly: ", spec_text, "."),
     pattern = paste0("Must match the pattern: ", spec_text),
+    format = paste0("Must fit the SAS format: ", spec_text, "."),
     fallback()
   )
 }
@@ -604,8 +771,9 @@
 #' @title The Actual Offending Value for a Column Spec Violation
 #' @param row1 A one-row data.frame: the first row of one message's
 #'   `inspect()` output.
+#' @param html If `FALSE`, return plain text instead of HTML-escaped text.
 #' @return A length-1 character string, HTML-escaped.
-.report_columnspec_actual_text <- function(row1) {
+.report_columnspec_actual_text <- function(row1, html = TRUE) {
   kw <- if ("columnspec_keyword" %in% names(row1)) as.character(row1[["columnspec_keyword"]]) else NA_character_
   data_val <- if ("columnspec_data" %in% names(row1)) row1[["columnspec_data"]] else NA
 
@@ -618,19 +786,20 @@
     }
     return("(missing / not present)")
   }
-  .report_html_escape(as.character(data_val))
+  .report_escaper(html)(as.character(data_val))
 }
 
 #' @keywords internal
 #' @title "Should Be" Text for an Import (Type-Coercion) Error
 #' @param row1 A one-row data.frame: the first row of one message's
 #'   `inspect()` output.
+#' @param html If `FALSE`, return plain text instead of HTML-escaped text.
 #' @return A length-1 character string, HTML-escaped.
-.report_import_expected_text <- function(row1) {
+.report_import_expected_text <- function(row1, html = TRUE) {
   declared <- if ("import_declared_type" %in% names(row1)) row1[["import_declared_type"]] else NA
   declared_text <- .report_or_default(declared, "")
   if (nzchar(declared_text)) {
-    paste0("A value representable as the declared type: ", .report_html_escape(declared_text), ".")
+    paste0("A value representable as the declared type: ", .report_escaper(html)(declared_text), ".")
   } else {
     "A value representable in the column's declared type."
   }
@@ -640,11 +809,12 @@
 #' @title The Raw Offending Value for an Import (Type-Coercion) Error
 #' @param row1 A one-row data.frame: the first row of one message's
 #'   `inspect()` output.
+#' @param html If `FALSE`, return plain text instead of HTML-escaped text.
 #' @return A length-1 character string, HTML-escaped.
-.report_import_actual_text <- function(row1) {
+.report_import_actual_text <- function(row1, html = TRUE) {
   raw <- if ("import_raw" %in% names(row1)) row1[["import_raw"]] else NA
   raw_text <- .report_or_default(raw, "")
-  if (nzchar(raw_text)) .report_html_escape(raw_text) else "(empty)"
+  if (nzchar(raw_text)) .report_escaper(html)(raw_text) else "(empty)"
 }
 
 #' @keywords internal
@@ -657,25 +827,27 @@
 #' `.report_group_condition_expected_text()` -- its constraint is a
 #' group-level relationship, not a single per-row bound.
 #' @param rule_def An S7 rule object, or `NULL` when it could not be resolved.
+#' @param html If `FALSE`, return plain text instead of HTML-escaped text.
 #' @return A length-1 character string, HTML-escaped where it embeds data.
-.report_rule_expected_text <- function(rule_def) {
+.report_rule_expected_text <- function(rule_def, html = TRUE) {
+  esc <- .report_escaper(html)
   if (is.null(rule_def)) {
     return("(rule definition not available; see technical detail below)")
   }
 
   if (inherits(rule_def, "DTAtools::DTARuleColRange")) {
-    cols <- .report_html_escape(paste(rule_def@columns, collapse = ", "))
+    cols <- esc(paste(rule_def@columns, collapse = ", "))
     has_min <- length(rule_def@min) == 1 && !is.na(rule_def@min)
     has_max <- length(rule_def@max) == 1 && !is.na(rule_def@max)
     bound <- if (has_min && has_max) {
       paste0(
-        "between ", .report_html_escape(rule_def@min), " and ",
-        .report_html_escape(rule_def@max), " (inclusive)"
+        "between ", esc(rule_def@min), " and ",
+        esc(rule_def@max), " (inclusive)"
       )
     } else if (has_min) {
-      paste0("at least ", .report_html_escape(rule_def@min))
+      paste0("at least ", esc(rule_def@min))
     } else if (has_max) {
-      paste0("at most ", .report_html_escape(rule_def@max))
+      paste0("at most ", esc(rule_def@max))
     } else {
       "within the configured range"
     }
@@ -683,13 +855,13 @@
   }
 
   if (inherits(rule_def, "DTAtools::DTARuleColUnique")) {
-    cols <- .report_html_escape(paste(rule_def@columns, collapse = ", "))
+    cols <- esc(paste(rule_def@columns, collapse = ", "))
     return(paste0("Values in ", cols, " must be unique across all rows."))
   }
 
   if (inherits(rule_def, "DTAtools::DTARuleColCondition")) {
-    cond_text <- .report_condition_to_text(rule_def@condition)
-    then_text <- .report_condition_to_text(rule_def@then)
+    cond_text <- .report_condition_to_text(rule_def@condition, html = html)
+    then_text <- .report_condition_to_text(rule_def@then, html = html)
     if (nzchar(cond_text) && nzchar(then_text)) {
       return(paste0("IF ", cond_text, " THEN ", then_text, " must hold."))
     }
@@ -708,12 +880,13 @@
 #' `.report_rule_explain_html()`) rather than trying to compress the whole
 #' constraint into one line.
 #' @param rule_def A `DTARuleGroupCondition` object, or `NULL`.
+#' @param html If `FALSE`, return plain text instead of HTML-escaped text.
 #' @return A length-1 character string, HTML-escaped where it embeds data.
-.report_group_condition_expected_text <- function(rule_def) {
+.report_group_condition_expected_text <- function(rule_def, html = TRUE) {
   if (is.null(rule_def)) {
     return("A group-level constraint (see technical detail below) must hold.")
   }
-  group_by <- .report_html_escape(paste(rule_def@group_by, collapse = ", "))
+  group_by <- .report_escaper(html)(paste(rule_def@group_by, collapse = ", "))
   paste0(
     "Within each group of rows sharing the same ", group_by,
     ", the constraint(s) described above (\"What this rule checks\") must hold."
@@ -738,36 +911,46 @@
   cid <- .report_or_default(constraint$id, "(constraint)")
   ctype <- .report_or_default(constraint$type, "")
 
+  paste0(
+    "<dt>Constraint ", .report_html_escape(cid), " (", .report_html_escape(ctype), ")</dt><dd>",
+    .report_group_constraint_desc(constraint), "</dd>"
+  )
+}
+
+#' @keywords internal
+#' @title Sentence Describing One Group Condition Constraint
+#' @param constraint One element of `DTARuleGroupCondition@constraints`.
+#' @param html If `FALSE`, return plain text instead of HTML-escaped text.
+#' @return A length-1 character string.
+.report_group_constraint_desc <- function(constraint, html = TRUE) {
+  esc <- .report_escaper(html)
+  ctype <- .report_or_default(constraint$type, "")
+
   # DTARuleGroupCondition-class.R's normalize_scope() defaults EVERY scope
   # field (left_scope/right_scope/if_scope/then_scope) to "any" when unset --
   # not "all" -- so every fallback below matches that, not a guess.
-  desc <- if (identical(ctype, "mutually_exclusive")) {
-    left <- .report_html_escape(.report_or_default(constraint$left, ""))
-    right <- .report_html_escape(.report_or_default(constraint$right, ""))
-    left_scope <- .report_html_escape(.report_or_default(constraint$left_scope, "any"))
-    right_scope <- .report_html_escape(.report_or_default(constraint$right_scope, "any"))
+  if (identical(ctype, "mutually_exclusive")) {
+    left <- esc(.report_or_default(constraint$left, ""))
+    right <- esc(.report_or_default(constraint$right, ""))
+    left_scope <- esc(.report_or_default(constraint$left_scope, "any"))
+    right_scope <- esc(.report_or_default(constraint$right_scope, "any"))
     paste0(
       "\"", left, "\" (", left_scope, " row(s)) and \"", right, "\" (", right_scope,
       " row(s)) must never both hold within the same group."
     )
   } else if (identical(ctype, "requires")) {
-    if_name <- .report_html_escape(.report_or_default(constraint[["if"]], ""))
-    then_name <- .report_html_escape(.report_or_default(constraint[["then"]], ""))
-    if_scope <- .report_html_escape(.report_or_default(constraint$if_scope, "any"))
-    then_scope <- .report_html_escape(.report_or_default(constraint$then_scope, "any"))
+    if_name <- esc(.report_or_default(constraint[["if"]], ""))
+    then_name <- esc(.report_or_default(constraint[["then"]], ""))
+    if_scope <- esc(.report_or_default(constraint$if_scope, "any"))
+    then_scope <- esc(.report_or_default(constraint$then_scope, "any"))
     paste0(
       "When \"", if_name, "\" holds for ", if_scope,
       " row(s) in the group, \"", then_name, "\" must hold for ",
       then_scope, " row(s) in the group."
     )
   } else {
-    paste0("Constraint type: ", .report_html_escape(ctype), ".")
+    paste0("Constraint type: ", esc(ctype), ".")
   }
-
-  paste0(
-    "<dt>Constraint ", .report_html_escape(cid), " (", .report_html_escape(ctype), ")</dt><dd>",
-    desc, "</dd>"
-  )
 }
 
 #' @keywords internal
@@ -980,7 +1163,8 @@
 #'   legitimately return more than one row per id (a rule's failing-row
 #'   preview, or multiple group_condition violations); every row is used
 #'   where it matters (the "actual" tables), while metadata that's constant
-#'   across rows (`id`, `type`, `message`, `headline`) is read from the first.
+#'   across rows (`id`, `type`, `message`) is read from the first. The panel
+#'   headline is not a column: it is built from `message`.
 #' @param rule_def Optional S7 rule object to describe; `NULL` for
 #'   columnspec/import messages, or when the rule definition could not be
 #'   resolved.
@@ -1042,7 +1226,11 @@
     } else {
       ""
     }
-    actual <- "(see technical detail below)"
+    actual <- if (identical(type, "unknown")) {
+      "Detail could not be generated for this message; only the validation message itself is available."
+    } else {
+      "(see technical detail below)"
+    }
   }
 
   # Technical detail: the first row's raw columns, key/value.

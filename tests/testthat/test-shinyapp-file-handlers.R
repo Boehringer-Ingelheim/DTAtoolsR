@@ -303,6 +303,41 @@ test_that("a handler change is visible in the handlers signature", {
   ))
 })
 
+# ---- Export file name -------------------------------------------------------
+
+test_that("the YAML export file name keeps the dots in the version", {
+  fn <- app_fn("dta_yaml_export_filename")
+  date <- as.Date("2026-11-04")
+
+  # The bundled spec is titled "Clinical Data Specification", version "0.1".
+  expect_identical(
+    fn(app_fixture_dta(), date),
+    "Clinical_Data_Specification_v0.1_2026-11-04.yaml"
+  )
+
+  # A multi-part version keeps every part, so "1.0" can never collide with "10".
+  lines <- readLines(app_fixture_path("clinical_dta.yaml"), warn = FALSE)
+  lines <- sub('version: "0.1"', 'version: "1.2.10"', lines, fixed = TRUE)
+  dta <- app_fn("dta_read_yaml_text")(paste(lines, collapse = "\n"))$value
+  expect_identical(
+    fn(dta, date),
+    "Clinical_Data_Specification_v1.2.10_2026-11-04.yaml"
+  )
+})
+
+test_that("the YAML export file name omits the version segment without one", {
+  fn <- app_fn("dta_yaml_export_filename")
+  dta <- app_fixture_dta()
+  md <- DTAtools::metadata(dta)
+  S7::prop(md, "version") <- NULL
+  S7::prop(dta, "metadata") <- md
+  expect_null(S7::prop(DTAtools::metadata(dta), "version"))
+  expect_identical(
+    fn(dta, as.Date("2026-11-04")),
+    "Clinical_Data_Specification_2026-11-04.yaml"
+  )
+})
+
 # ---- Round trips ------------------------------------------------------------
 
 test_that("a dataset edited to two handlers survives a YAML round trip", {
@@ -598,7 +633,7 @@ test_that("dta_handler_type() returns 'any' for a DTAFileAny", {
 
 test_that("handler_expected() returns the filename/pattern only, never the extensions", {
   # handler_expected() must read back verbatim in the exported specification
-  # (format_datasets_detail(), utils_export.R), so the allowed-endings
+  # (.build_file_specs_table(), R/documentBuilders.R), so the allowed-endings
   # restriction moved to its own helper, handler_endings(), instead of being
   # glued onto this string.
   fn <- app_fn("handler_expected")
@@ -637,7 +672,7 @@ test_that("dta_set_handler() rejects a parsing type when dataset_type is file", 
   # The mirror of the test above, and the programmatic half of the rule the
   # form enforces by rendering its type control read-only.
   fn <- app_fn("dta_set_handler")
-  ds <- DTAtools::DTADataSetFile(name = "reports")
+  ds <- DTAtools::DTADataSetFile(id = "reports")
   dta_obj <- DTAtools::DTA(datasets = list(reports = ds))
 
   for (ty in c("csv", "tsv")) {
@@ -664,7 +699,7 @@ test_that("a type='any' handler with extensions survives a YAML round trip", {
     pattern = TRUE,
     extensions = c("pdf", "zip")
   )
-  ds <- DTAtools::DTADataSetFile(name = "reports", files = list(h))
+  ds <- DTAtools::DTADataSetFile(id = "reports", files = list(h))
   dta_obj <- DTAtools::DTA(datasets = list(reports = ds))
 
   txt <- to_yaml(dta_obj)
@@ -687,7 +722,7 @@ test_that("dta_handler_fields() returns extensions as a comma-separated string",
   fn <- app_fn("dta_handler_fields")
 
   h <- DTAtools::DTAFileAny(filename = "report.pdf", extensions = c("pdf", "zip"))
-  ds <- DTAtools::DTADataSetFile(name = "rpts", files = list(h))
+  ds <- DTAtools::DTADataSetFile(id = "rpts", files = list(h))
   dta_obj <- DTAtools::DTA(datasets = list(rpts = ds))
 
   fields <- fn(dta_obj, "rpts", 1)
@@ -789,7 +824,7 @@ test_that("a handler with every field set survives YAML -> app -> YAML", {
     "  title: Reader settings",
     "  version: \"0.1\"",
     "datasets:",
-    "  - name: raw",
+    "  - id: raw",
     "    type: tabular",
     "    files:",
     "      filename: site_.*[.]tsv$",
@@ -871,7 +906,7 @@ test_that("a DTAFileAny reports no reader settings at all", {
   fields_fn <- app_fn("dta_handler_fields")
 
   h <- DTAtools::DTAFileAny(filename = "report.pdf")
-  ds <- DTAtools::DTADataSetFile(name = "rpts", files = list(h))
+  ds <- DTAtools::DTADataSetFile(id = "rpts", files = list(h))
   dta_obj <- DTAtools::DTA(datasets = list(rpts = ds))
 
   expect_length(fields_fn(dta_obj, "rpts", 1)$reader_settings, 0)
@@ -934,7 +969,7 @@ test_that("reader settings a type cannot take are dropped, not forwarded", {
   set_fn <- app_fn("dta_set_handler")
   handlers_fn <- app_fn("dta_handlers")
 
-  ds <- DTAtools::DTADataSetFile(name = "reports")
+  ds <- DTAtools::DTADataSetFile(id = "reports")
   dta_obj <- DTAtools::DTA(datasets = list(reports = ds))
 
   res <- set_fn(dta_obj, "reports",

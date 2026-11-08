@@ -1,6 +1,8 @@
 # -----------------------------------------------------------------------------
 # Utilities: thin, safe wrappers around the DTAtools API.
-# The app mutates the DTA object ONLY through these helpers.
+# The app mutates the DTA object mainly through these helpers (a few spots in
+# app.R, e.g. restoring the version history after a rebuild, set properties
+# directly).
 #
 # `%||%` and `dta_try()` below are the two primitives every other engine file
 # (template_core.R, template_create.R, template_inherit.R, template_index.R,
@@ -37,8 +39,150 @@
 dta_try <- function(expr) {
   tryCatch(
     list(ok = TRUE, value = force(expr), error = NULL),
-    error = function(e) list(ok = FALSE, value = NULL, error = conditionMessage(e))
+    error = function(e) {
+      out <- list(ok = FALSE, value = NULL, error = conditionMessage(e))
+      # A `dta_lint_error` carries EVERY finding as a data.frame; keep it so the
+      # UI can list them one per line instead of one wrapped paragraph.
+      if (is.data.frame(e$findings) && nrow(e$findings) > 0) out$findings <- e$findings
+      out
+    }
   )
+}
+
+# ---- Spec check (linter) ---------------------------------------------------
+
+dta_empty_findings <- function() {
+  data.frame(
+    dataset = character(0), object = character(0), id = character(0),
+    severity = character(0), code = character(0), message = character(0),
+    stringsAsFactors = FALSE
+  )
+}
+
+# Findings of DTAtools::lint_dta() for a DTA object (or YAML path / list). Never
+# throws, and never reports a crashed linter as a clean document: a failure
+# becomes one `lint_failed` error finding, so the Spec check panel shows it.
+dta_lint <- function(x) {
+  if (is.null(x)) {
+    return(dta_empty_findings())
+  }
+  out <- tryCatch(suppressWarnings(DTAtools::lint_dta(x)), error = function(e) e)
+  if (inherits(out, "error")) {
+    return(data.frame(
+      dataset = NA_character_, object = NA_character_, id = NA_character_,
+      severity = "error", code = "lint_failed",
+      message = conditionMessage(out), stringsAsFactors = FALSE
+    ))
+  }
+  if (!is.data.frame(out) || nrow(out) == 0) dta_empty_findings() else out
+}
+
+# One display line per finding: "[dataset / object id] message".
+dta_finding_lines <- function(f) {
+  if (!is.data.frame(f) || nrow(f) == 0) {
+    return(character(0))
+  }
+  where <- vapply(seq_len(nrow(f)), function(i) {
+    parts <- c(f$dataset[[i]], f$id[[i]])
+    paste(parts[!is.na(parts) & nzchar(parts)], collapse = " / ")
+  }, character(1))
+  ifelse(nzchar(where), paste0(where, ": ", f$message), f$message)
+}
+
+# The same findings as a <ul>, errors first. NULL when there are none.
+dta_findings_ui <- function(f) {
+  if (!is.data.frame(f) || nrow(f) == 0) {
+    return(NULL)
+  }
+  f <- f[order(f$severity != "error"), , drop = FALSE]
+  tags$ul(
+    class = "spec-findings",
+    lapply(seq_len(nrow(f)), function(i) {
+      tags$li(
+        class = paste0("spec-finding ", f$severity[[i]]),
+        tags$strong(paste0(f$severity[[i]], " ", f$code[[i]], ": ")),
+        dta_finding_lines(f[i, , drop = FALSE])
+      )
+    })
+  )
+}
+
+# The dialog shown when a file could not be loaded: every finding, and the
+# file's text in an editable box. The text box id carries `lf$nonce`, new on
+# every open, so a re-shown dialog never inherits the cached value of an
+# earlier one (the modal output cache trap).
+dta_load_failure_modal <- function(lf) {
+  modalDialog(
+    title = paste("Could not load", lf$name %||% "the file"),
+    tags$p(lf$error %||% "The file is not a valid specification."),
+    dta_findings_ui(lf$findings),
+    textAreaInput(paste0("load_failure_text_", lf$nonce), "Edit the YAML and load it again",
+      value = lf$text, rows = 16, width = "100%"
+    ),
+    footer = tagList(
+      modalButton("Cancel"),
+      actionButton("load_corrected_yaml", "Load corrected YAML", class = "btn btn-primary")
+    ),
+    size = "l", easyClose = FALSE
+  )
+}
+
+# ---- Rules <-> columns (list form) -------------------------------------------
+
+# Every column a rule (as dta_rule_to_list() returns it) refers to.
+dta_rule_list_columns <- function(l) {
+  cols <- switch(l$type %||% "",
+    col_range = ,
+    col_unique = as.character(unlist(l$columns)),
+    col_condition = c(names(l$condition), names(l$then)),
+    group_condition = c(
+      as.character(unlist(l$group_by)),
+      unlist(lapply(l$conditions, names), use.names = FALSE)
+    ),
+    character(0)
+  )
+  unique(as.character(cols))
+}
+
+# Rules of a dataset that use column `id`: ids, in rule order.
+dta_rules_using_column <- function(dta, dataset, id) {
+  ds <- dta_get_dataset(dta, dataset)
+  rules <- tryCatch(ds@specs@rules, error = function(e) NULL) %||% list()
+  hit <- vapply(rules, function(r) {
+    l <- dta_rule_to_list(r)
+    !is.null(l) && id %in% dta_rule_list_columns(l)
+  }, logical(1))
+  vapply(rules[hit], function(r) as.character(r@id), character(1))
+}
+
+# A rule list with column `old` renamed to `new` wherever the rule refers to it.
+dta_rule_list_rename <- function(l, old, new) {
+  sw <- function(x) {
+    x[x %in% old] <- new
+    x
+  }
+  rn <- function(x) {
+    if (!is.null(names(x))) names(x) <- sw(names(x))
+    x
+  }
+  # Exact [[ throughout: `$` would let `condition` partial-match `conditions`.
+  if (!is.null(l[["columns"]])) l[["columns"]] <- sw(as.character(unlist(l[["columns"]])))
+  if (!is.null(l[["group_by"]])) l[["group_by"]] <- sw(as.character(unlist(l[["group_by"]])))
+  if (!is.null(l[["condition"]])) l[["condition"]] <- rn(l[["condition"]])
+  if (!is.null(l[["then"]])) l[["then"]] <- rn(l[["then"]])
+  if (!is.null(l[["conditions"]])) l[["conditions"]] <- lapply(l[["conditions"]], rn)
+  l
+}
+
+# Ids of the columns a range rule may target: numeric ones only.
+dta_numeric_column_ids <- function(dta, dataset) {
+  ds <- dta_get_dataset(dta, dataset)
+  cols <- tryCatch(ds@specs@columns, error = function(e) NULL) %||% list()
+  keep <- vapply(cols, function(c) {
+    ty <- tryCatch(as.character(c@structure@type)[1], error = function(e) "")
+    isTRUE(ty %in% c("Num", "Int"))
+  }, logical(1))
+  names(cols)[keep]
 }
 
 # ---- Loading -------------------------------------------------------------
@@ -175,6 +319,25 @@ dta_get_dataset <- function(dta, name) {
   tryCatch(DTAtools::datasets(dta, name), error = function(e) NULL)
 }
 
+# What a person reads for a dataset: its name, else its id. Mirrors the
+# package's internal dta_dataset_label(), which the app cannot reach.
+dta_dataset_label <- function(ds) {
+  nm <- tryCatch(ds@name, error = function(e) NULL)
+  if (is.null(nm) || !length(nm) || is.na(nm[1]) || !nzchar(nm[1])) {
+    return(tryCatch(ds@id, error = function(e) ""))
+  }
+  nm[1]
+}
+
+# A form value -> NULL when blank (unset), else the trimmed string.
+dta_blank_to_null <- function(x) {
+  if (is.null(x) || length(x) == 0) {
+    return(NULL)
+  }
+  v <- trimws(as.character(x)[1])
+  if (is.na(v) || !nzchar(v)) NULL else v
+}
+
 # File handlers (DTAFile objects) of a dataset.
 dta_handlers <- function(ds) {
   h <- tryCatch(ds@files, error = function(e) list())
@@ -197,10 +360,11 @@ handler_is_pattern <- function(h) {
 
 # The declared filename or pattern ONLY -- never glue anything else onto this.
 # It is read back verbatim in the exported specification document
-# (format_datasets_detail(), utils_export.R), so a suffix here would make a
-# declared filename unrecoverable from the export. Callers that also want the
-# allowed-endings restriction use handler_endings() below and surface it as
-# its own, clearly-labelled field.
+# (.build_file_specs_table(), R/documentBuilders.R, which feeds both the
+# built-in layout and the {FILE_SPECS}/{DATASETS} template blocks), so a suffix
+# here would make a declared filename unrecoverable from the export. Callers
+# that also want the allowed-endings restriction use handler_endings() below
+# and surface it as its own, clearly-labelled field.
 handler_expected <- function(h) {
   fn <- tryCatch(h@filename, error = function(e) NA_character_)
   paste(fn, collapse = ", ")
@@ -463,6 +627,84 @@ dta_set_metadata_field <- function(dta, field, value) {
   })
 }
 
+# ---- Study identity and ordered agreement sections ------------------------
+
+dta_set_study_field <- function(dta, field, value) {
+  dta_try({
+    md <- DTAtools::metadata(dta)
+    if (is.null(value) ||
+      (is.character(value) && length(value) == 1L && !is.na(value) && !nzchar(trimws(value)))) {
+      value <- NULL
+    }
+    md@study <- list_set_path(md@study, field, value)
+    dta@metadata <- md
+    dta
+  })
+}
+
+# Replacing a section keeps its position, including an explicit ID change.
+# The S7 property validates the complete candidate before it replaces metadata.
+dta_save_agreement_section <- function(dta, id, title, text, previous_id = NULL) {
+  dta_try({
+    md <- DTAtools::metadata(dta)
+    sections <- md@sections
+    if (!is.character(id) || length(id) != 1L || is.na(id) ||
+      !grepl("^[A-Za-z][A-Za-z0-9_]*$", id)) {
+      cli::cli_abort("A section ID must start with a letter and contain only letters, digits or underscores.")
+    }
+    if (!is.null(previous_id) && !(previous_id %in% names(sections))) {
+      cli::cli_abort("The section being edited no longer exists.")
+    }
+    if (id %in% names(sections) && !identical(id, previous_id)) {
+      cli::cli_abort("A section with ID {.val {id}} already exists.")
+    }
+    section <- list(title = title, text = text)
+    if (is.null(previous_id)) {
+      sections <- list_set_path(sections, id, section)
+    } else {
+      sections <- list_set_path(sections, previous_id, section)
+      names(sections)[match(previous_id, names(sections))] <- id
+    }
+    md@sections <- sections
+    dta@metadata <- md
+    dta
+  })
+}
+
+dta_remove_agreement_section <- function(dta, id) {
+  dta_try({
+    md <- DTAtools::metadata(dta)
+    if (length(id) != 1L || is.na(id) || !(id %in% names(md@sections))) {
+      cli::cli_abort("The section to remove no longer exists.")
+    }
+    md@sections <- list_set_path(md@sections, id, NULL)
+    dta@metadata <- md
+    dta
+  })
+}
+
+dta_move_agreement_section <- function(dta, id, direction) {
+  dta_try({
+    md <- DTAtools::metadata(dta)
+    sections <- md@sections
+    if (length(id) != 1L || is.na(id) || !(id %in% names(sections))) {
+      cli::cli_abort("The section to move no longer exists.")
+    }
+    if (length(direction) != 1L || is.na(direction) || !(direction %in% c("up", "down"))) {
+      cli::cli_abort("Choose either up or down when moving a section.")
+    }
+    from <- match(id, names(sections))
+    to <- from + if (identical(direction, "up")) -1L else 1L
+    if (to >= 1L && to <= length(sections)) {
+      order <- seq_along(sections)
+      order[c(from, to)] <- c(to, from)
+      md@sections <- sections[order]
+      dta@metadata <- md
+    }
+    dta
+  })
+}
+
 # ---- People / contacts ---------------------------------------------------
 # Contacts live under metadata receiver/supplier as `$contacts` (a list of
 # person lists). Roles are free text; multiple roles are comma-joined so the
@@ -476,6 +718,33 @@ dta_contacts <- function(dta, side) {
   side_list <- tryCatch(S7::prop(md, side), error = function(e) NULL)
   cs <- side_list$contacts %||% list()
   if (is.null(cs)) list() else cs
+}
+
+# "Authorized for corrections" is a list of names, not links to contacts: a
+# renamed or removed contact's stored string stays selected and simply lands
+# under "Entered manually" in the picker.
+dta_authorized_values <- function(dta) {
+  md <- tryCatch(DTAtools::metadata(dta), error = function(e) NULL)
+  v <- if (is.null(md)) NULL else tryCatch(S7::prop(md, "authorized_for_corrections"), error = function(e) NULL)
+  v <- trimws(as.character(unlist(v)))
+  unique(v[!is.na(v) & nzchar(v)])
+}
+
+dta_authorized_choices <- function(dta) {
+  names_of <- function(side) {
+    n <- vapply(dta_contacts(dta, side), function(cx) as.character(cx$name %||% "")[1], character(1))
+    n <- trimws(n)
+    n[!is.na(n) & nzchar(n)]
+  }
+  receiver <- unique(names_of("receiver"))
+  supplier <- setdiff(unique(names_of("supplier")), receiver)
+  manual <- setdiff(dta_authorized_values(dta), c(receiver, supplier))
+  groups <- list(Receiver = receiver, Supplier = supplier, "Entered manually" = manual)
+  groups <- groups[lengths(groups) > 0L]
+  if (length(groups) == 0L) {
+    return(list())
+  }
+  lapply(groups, function(x) stats::setNames(x, x))
 }
 
 dta_add_contact <- function(dta, side, name, roles = "", email = "",
@@ -511,6 +780,29 @@ dta_remove_contact <- function(dta, side, index) {
     side_list$contacts <- contacts
     S7::prop(md, side) <- side_list
     dta@metadata <- md
+    dta
+  })
+}
+
+# Swap a contact with its neighbour; a move past either end is a no-op.
+dta_move_contact <- function(dta, side, index, direction) {
+  dta_try({
+    if (length(side) != 1L || is.na(side) || !(side %in% c("receiver", "supplier"))) {
+      cli::cli_abort("Choose either receiver or supplier when moving a contact.")
+    }
+    if (length(direction) != 1L || is.na(direction) || !(direction %in% c("up", "down"))) {
+      cli::cli_abort("Choose either up or down when moving a contact.")
+    }
+    md <- DTAtools::metadata(dta)
+    side_list <- tryCatch(S7::prop(md, side), error = function(e) NULL) %||% list()
+    contacts <- side_list$contacts %||% list()
+    to <- index + if (identical(direction, "up")) -1L else 1L
+    if (index >= 1 && index <= length(contacts) && to >= 1 && to <= length(contacts)) {
+      contacts[c(index, to)] <- contacts[c(to, index)]
+      side_list$contacts <- contacts
+      S7::prop(md, side) <- side_list
+      dta@metadata <- md
+    }
     dta
   })
 }
@@ -634,7 +926,7 @@ dta_status_map <- function(dta) {
   }
 
   for (nm in names_ds) {
-    # No bound data -> nodata, independent of results() (Contract C5).
+    # No bound data -> nodata, independent of results().
     if (dta_dataset_content_count(dta_get_dataset(dta, nm)) == 0) {
       out[[nm]] <- "nodata"
       next
@@ -960,22 +1252,25 @@ dta_inspect <- function(dta, dataset, id) {
 
 # ---- Export --------------------------------------------------------------
 
-dta_export <- function(dta, file, format, signature_list = NULL) {
+dta_export <- function(dta, file, format, signature_list = NULL, doc_args = list()) {
   format <- tolower(format %||% "")
   # PDF gets a dedicated, robust path (see dta_export_pdf); other formats go
   # straight to the package writer.
   if (identical(format, "pdf")) {
-    return(dta_try(dta_export_pdf(dta, file, signature_list)))
+    return(dta_try(dta_export_pdf(dta, file, signature_list, doc_args)))
   }
-  dta_try(DTAtools::write_dta(
-    dta,
-    file = file,
-    format = format,
-    overwrite = TRUE,
-    include_signatures = !is.null(signature_list),
-    signature_list = signature_list,
-    quiet = TRUE
-  ))
+  dta_try(do.call(DTAtools::write_dta, c(
+    list(
+      dta,
+      file = file,
+      format = format,
+      overwrite = TRUE,
+      include_signatures = !is.null(signature_list),
+      signature_list = signature_list,
+      quiet = TRUE
+    ),
+    doc_args
+  )))
 }
 
 # Does `file` exist and begin with the %PDF- magic bytes? Used to VERIFY a
@@ -1103,12 +1398,17 @@ dta_markdown_to_pdf <- function(lines, file) {
   ascii <- function(x) x
   opened <- FALSE
   if (isTRUE(cairo_ok)) {
+    # A cairo that reports itself available can still fail to load (macOS
+    # without XQuartz: "failed to load cairo DLL"). R signals that as a
+    # warning, not an error, and then opens no device, so the warning has to
+    # count as a failure or the PDF is never written.
     opened <- tryCatch(
       {
         grDevices::cairo_pdf(file, width = 8.27, height = 11.69, onefile = TRUE, pointsize = 10)
         TRUE
       },
-      error = function(e) FALSE
+      error = function(e) FALSE,
+      warning = function(w) FALSE
     )
   }
   if (!isTRUE(opened)) {
@@ -1401,16 +1701,22 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
 # build the DOCX first (always works via officer), then
 # convert with the best engine available and VERIFY a real PDF resulted. When no
 # external converter exists we still produce a valid PDF from the Markdown export
-# via R's own device -- so the export ALWAYS yields an openable PDF.
-dta_export_pdf <- function(dta, file, signature_list = NULL) {
+# via R's own device. When even the Markdown export fails, the export FAILS: it
+# used to fall back to a title-only page saying the layout "could not be
+# generated", which opened as a valid PDF and so read as a successful export of
+# an agreement whose content was missing.
+dta_export_pdf <- function(dta, file, signature_list = NULL, doc_args = list()) {
   docx <- tempfile(fileext = ".docx")
   on.exit(unlink(docx), add = TRUE)
-  DTAtools::write_dta(
-    dta,
-    file = docx, format = "docx", overwrite = TRUE,
-    include_signatures = !is.null(signature_list),
-    signature_list = signature_list, quiet = TRUE
-  )
+  do.call(DTAtools::write_dta, c(
+    list(
+      dta,
+      file = docx, format = "docx", overwrite = TRUE,
+      include_signatures = !is.null(signature_list),
+      signature_list = signature_list, quiet = TRUE
+    ),
+    doc_args
+  ))
 
   # 1) LibreOffice / soffice (best fidelity to the DOCX layout).
   soffice <- dta_find_soffice()
@@ -1423,40 +1729,50 @@ dta_export_pdf <- function(dta, file, signature_list = NULL) {
   }
 
   # 3) Self-contained fallback: render the Markdown export to a real PDF with
-  #    R's built-in device (no external tools). Guarantees a working download.
+  #    R's built-in device (no external tools).
   md <- tempfile(fileext = ".md")
   on.exit(unlink(md), add = TRUE)
-  ok_md <- tryCatch(
+  md_error <- tryCatch(
     {
-      DTAtools::write_dta(
-        dta,
-        file = md, format = "md", overwrite = TRUE,
-        include_signatures = !is.null(signature_list),
-        signature_list = signature_list, quiet = TRUE
-      )
-      TRUE
+      do.call(DTAtools::write_dta, c(
+        list(
+          dta,
+          file = md, format = "md", overwrite = TRUE,
+          include_signatures = !is.null(signature_list),
+          signature_list = signature_list, quiet = TRUE
+        ),
+        doc_args
+      ))
+      NULL
     },
-    error = function(e) FALSE
+    error = function(e) conditionMessage(e)
   )
-  lines <- if (isTRUE(ok_md)) {
+  lines <- if (is.null(md_error)) {
     tryCatch(readLines(md, warn = FALSE), error = function(e) character(0))
   } else {
     character(0)
   }
   if (length(lines) == 0) {
-    ttl <- tryCatch(as.character(S7::prop(DTAtools::metadata(dta), "title"))[1],
-      error = function(e) NULL
-    )
-    lines <- c(
-      "# Data Transfer Agreement",
-      if (!is.null(ttl) && nzchar(ttl)) paste0("**Title:** ", ttl) else NULL,
-      paste0("**Generated:** ", format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
-      "",
-      "(The full document layout could not be generated on this system.)"
-    )
+    # Nothing is written to `file`: a page that only says the content is
+    # missing must not be handed out as the agreement.
+    unlink(file)
+    stop(paste0(
+      "Could not produce a PDF on this system: no LibreOffice or PDF-capable ",
+      "pandoc engine was found, and the document text for the built-in PDF ",
+      "renderer could not be generated",
+      if (!is.null(md_error)) paste0(" (", md_error, ")") else "",
+      "."
+    ))
   }
-  dta_markdown_to_pdf(lines, file)
-  if (!dta_is_pdf(file)) {
+  rendered <- tryCatch(
+    {
+      dta_markdown_to_pdf(lines, file)
+      TRUE
+    },
+    error = function(e) FALSE
+  )
+  if (!isTRUE(rendered) || !dta_is_pdf(file)) {
+    unlink(file)
     stop(paste0(
       "Could not produce a PDF on this system (no LibreOffice, LaTeX or ",
       "PDF-capable pandoc engine, and the built-in PDF device failed)."
@@ -1472,7 +1788,8 @@ dta_export_pdf <- function(dta, file, signature_list = NULL) {
 # Distinct from DTAtools::write_validation_report(), which the Validation
 # messages dock offers as "Report": that one lists the individual validation
 # messages, this one certifies the overall per-dataset outcome.
-dta_build_validation_report <- function(dta, status = NULL) {
+dta_build_validation_report <- function(dta, status = NULL, document_name = NULL,
+                                        organisation = NULL, organisation_unit = NULL) {
   esc <- function(x) htmltools::htmlEscape(as.character(x %||% ""))
   ts <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
 
@@ -1513,8 +1830,9 @@ dta_build_validation_report <- function(dta, status = NULL) {
     # so the invariant is enforced rather than merely true.
     s <- dta_lookup(st, nm, "pending")
     cls <- if (identical(s, "pass")) "ok" else if (identical(s, "fail")) "bad" else "muted"
+    label <- tryCatch(dta_get_dataset(dta, nm)@name, error = function(e) NULL) %||% ""
     paste0(
-      "<tr><td>", esc(nm), "</td><td class='", cls, "'>",
+      "<tr><td>", esc(nm), "</td><td>", esc(label), "</td><td class='", cls, "'>",
       esc(status_label(s)), "</td></tr>"
     )
   }, character(1)), collapse = "")
@@ -1588,6 +1906,10 @@ dta_build_validation_report <- function(dta, status = NULL) {
   } else {
     ""
   }
+  # The document name is the main heading; the DTA's title sits beneath it.
+  doc_name <- paste(document_name %||% "Data Transfer Agreement", collapse = " / ")
+  org_line <- paste(Filter(nzchar, trimws(c(organisation, organisation_unit))), collapse = " · ")
+  org_html <- if (nzchar(org_line)) paste0("<div class='subtitle'>", esc(org_line), "</div>") else ""
 
   css <- paste0(
     "body{font-family:Segoe UI,Arial,sans-serif;color:#222;margin:32px}",
@@ -1610,11 +1932,12 @@ dta_build_validation_report <- function(dta, status = NULL) {
   paste0(
     "<!doctype html><html lang='en'><head><meta charset='utf-8'>",
     "<title>DTA Validation Summary</title><style>", css, "</style></head><body>",
-    "<h1>DTA Validation Summary</h1>", subtitle,
+    "<h1>", esc(doc_name), "</h1>",
+    "<div class='subtitle'>Validation Summary</div>", subtitle, org_html,
     "<div class='meta'>Generated ", esc(ts), "</div>",
     "<div class='banner ", banner_cls, "'>", banner_txt, "</div>",
     "<div class='summary'>", esc(summary_line), "</div>", caveat,
-    "<h2>Datasets</h2><table><thead><tr><th>Dataset</th><th>Status</th></tr>",
+    "<h2>Datasets</h2><table><thead><tr><th>Dataset</th><th>Name</th><th>Status</th></tr>",
     "</thead><tbody>", ds_rows, "</tbody></table>", detail_html,
     "</body></html>"
   )
@@ -2046,17 +2369,6 @@ dta_rule_to_list <- function(rule) {
     return(NULL)
   }
   ty <- raw$type %||% ""
-  ty <- switch(ty,
-    check_col_condition = ,
-    col_condition = "col_condition",
-    check_range = ,
-    col_range = "col_range",
-    check_unique = ,
-    col_unique = "col_unique",
-    check_group_condition = ,
-    group_condition = "group_condition",
-    ty
-  )
   out <- list(id = raw$id, type = ty)
   if (!is.null(raw$description) && length(raw$description) && nzchar(raw$description)) {
     out$description <- raw$description
@@ -2097,8 +2409,10 @@ dta_dataset_to_list <- function(ds) {
     return(list())
   }
   out <- list()
-  out$name <- tryCatch(ds@name, error = function(e) NULL)
+  out$id <- tryCatch(ds@id, error = function(e) NULL)
   out$type <- tryCatch(ds@type, error = function(e) NULL) %||% "tabular"
+  label <- tryCatch(ds@name, error = function(e) NULL)
+  if (!is.null(label) && length(label) && nzchar(label)) out$name <- label
   desc <- tryCatch(ds@description, error = function(e) NULL)
   if (!is.null(desc) && length(desc) && nzchar(desc)) out$description <- desc
   ts <- tryCatch(ds@template_source, error = function(e) NULL)
@@ -2142,6 +2456,22 @@ dta_to_list <- function(dta) {
   out
 }
 
+# File name of the "Export DTA YAML" download: <title>_v<version>_<date>.yaml.
+# Dots in the version are kept ("1.2.0" -> "v1.2.0", so "1.0" and "10" stay
+# distinct); other separators fold to "_" and the segment is left out when
+# there is no version.
+dta_yaml_export_filename <- function(dta, date = Sys.Date()) {
+  md <- tryCatch(DTAtools::metadata(dta), error = function(e) NULL)
+  field <- function(name) {
+    x <- tryCatch(as.character(S7::prop(md, name))[1], error = function(e) NULL)
+    if (is.null(x) || is.na(x)) "" else x
+  }
+  ttl <- field("title")
+  base <- if (nzchar(ttl)) gsub("[^A-Za-z0-9]+", "_", ttl) else "DTA"
+  ver <- gsub("^[_.]+|[_.]+$", "", gsub("[^A-Za-z0-9.]+", "_", field("version")))
+  paste0(base, if (nzchar(ver)) paste0("_v", ver), "_", date, ".yaml")
+}
+
 # Serialize a whole DTA to a YAML string. Returns dta_try() (value = character).
 dta_to_yaml_text <- function(dta) {
   dta_try({
@@ -2169,8 +2499,8 @@ dta_dataset_to_yaml_text <- function(dta, dataset) {
 }
 
 # ---- Dataset metadata editing --------------------------------------------
-# The DTADataSet-level properties -- name, description and the three template_*
-# fields -- as opposed to the DOCUMENT-level DTAMetaData handled by
+# The DTADataSet-level properties -- id, name, description and the three
+# template_* fields -- as opposed to the DOCUMENT-level DTAMetaData handled by
 # dta_set_metadata_field() above. Both are called "metadata"; they are different
 # objects, and only these belong to a single dataset.
 #
@@ -2202,6 +2532,7 @@ dta_dataset_meta_fields <- function(dta, dataset) {
     as.character(v)[1]
   }
   list(
+    id = g("id"),
     name = g("name"),
     type = g("type"),
     description = g("description"),
@@ -2217,22 +2548,22 @@ dta_dataset_meta_fields <- function(dta, dataset) {
 # A blank optional field UNSETS the property (NULL) rather than storing "",
 # matching dta_set_metadata_field()'s rule for the document-level fields: an
 # empty field means "not set at all", and .dta_compact() then omits it from the
-# serialized YAML entirely. `name` is not optional -- the DTADataSet validator
+# serialized YAML entirely. `id` is not optional -- the DTADataSet validator
 # rejects an empty one -- so it is required here.
 #
-# RENAMING RE-KEYS THE DATASET LIST IN PLACE. `dta@datasets` is a named list and
-# datasets(dta, name) looks up by name, so the entry has to move; but every
+# CHANGING THE ID RE-KEYS THE DATASET LIST IN PLACE. `dta@datasets` is keyed by
+# id and datasets(dta, id) looks up by it, so the entry has to move; but every
 # upload slot, example picker and nav button in the app is keyed by the
-# dataset's POSITION and resolves its name only at click time. The obvious
+# dataset's POSITION and resolves its id only at click time. The obvious
 # `datasets[[old]] <- NULL; datasets[[new]] <- ds` moves the dataset to the end
 # of the list, after which those controls silently address the wrong dataset.
 # The replace-in-place below is what keeps them correct.
-dta_set_dataset_meta <- function(dta, dataset, name, description = NULL,
+dta_set_dataset_meta <- function(dta, dataset, id, name = NULL, description = NULL,
                                  template_source = NULL, template_version = NULL,
                                  template_date = NULL) {
   dta_try({
-    nm <- trimws(as.character(name %||% "")[1])
-    if (is.na(nm) || !nzchar(nm)) stop("A dataset name is required.")
+    nm <- trimws(as.character(id %||% "")[1])
+    if (is.na(nm) || !nzchar(nm)) stop("A dataset ID is required.")
 
     # Resolved by position rather than through datasets(dta, dataset): the
     # position is needed anyway for the in-place replacement below, and this
@@ -2246,22 +2577,15 @@ dta_set_dataset_meta <- function(dta, dataset, name, description = NULL,
     # Without this the named-list assignment below would overwrite the other
     # dataset outright, destroying it with no error and no warning.
     if (nm %in% all_names[-pos]) {
-      stop(sprintf("A dataset named '%s' already exists.", nm))
+      stop(sprintf("A dataset with ID '%s' already exists.", nm))
     }
 
-    blank_to_null <- function(x) {
-      if (is.null(x) || length(x) == 0) {
-        return(NULL)
-      }
-      v <- trimws(as.character(x)[1])
-      if (is.na(v) || !nzchar(v)) NULL else v
-    }
-
-    ds@name <- nm
-    ds@description <- blank_to_null(description)
-    ds@template_source <- blank_to_null(template_source)
-    ds@template_version <- blank_to_null(template_version)
-    ds@template_date <- blank_to_null(template_date)
+    ds@id <- nm
+    ds@name <- dta_blank_to_null(name)
+    ds@description <- dta_blank_to_null(description)
+    ds@template_source <- dta_blank_to_null(template_source)
+    ds@template_version <- dta_blank_to_null(template_version)
+    ds@template_date <- dta_blank_to_null(template_date)
 
     dsets <- dta@datasets
     dsets[[pos]] <- ds
@@ -2280,7 +2604,7 @@ dta_set_dataset_meta <- function(dta, dataset, name, description = NULL,
 # Create a new, empty dataset of the given `type` and append it to `dta`.
 #
 # `type` is a CREATION-TIME choice only, never revisited afterwards -- see the
-# comment above dta_set_dataset_meta() (~L1629-1637) for why the property
+# comment above dta_set_dataset_meta() for why the property
 # itself cannot be trusted once a dataset exists: assigning `ds@type` passes
 # its validator without changing the S7 class, so nothing downstream would
 # dispatch correctly on the new value. That is exactly why no helper in this
@@ -2288,7 +2612,8 @@ dta_set_dataset_meta <- function(dta, dataset, name, description = NULL,
 # a different type is to add a new dataset and remove the old one.
 #
 # APPENDED AT THE END, never inserted anywhere else. Every nav button, upload
-# slot and example picker in the app (app.R:774-799 and nearby) is keyed by
+# slot and example picker in the app (see the dataset nav and upload observers
+# in app.R) is keyed by
 # the dataset's POSITION in `dta@datasets`, resolving the name only at click
 # time -- so inserting ahead of an existing entry would silently repoint those
 # controls at the wrong dataset. Appending is the one mutation that cannot do
@@ -2296,14 +2621,14 @@ dta_set_dataset_meta <- function(dta, dataset, name, description = NULL,
 # reasoning as the in-place re-key in dta_set_dataset_meta() above; there it
 # holds ONE index steady across a rename, here it holds every OTHER index
 # steady across the list's growth.
-dta_add_dataset <- function(dta, name, type = "tabular", description = NULL) {
+dta_add_dataset <- function(dta, id, type = "tabular", name = NULL, description = NULL) {
   dta_try({
-    nm <- trimws(as.character(name %||% "")[1])
-    if (is.na(nm) || !nzchar(nm)) stop("A dataset name is required.")
+    nm <- trimws(as.character(id %||% "")[1])
+    if (is.na(nm) || !nzchar(nm)) stop("A dataset ID is required.")
 
     all_names <- names(dta@datasets) %||% character(0)
     if (nm %in% all_names) {
-      stop(sprintf("A dataset named '%s' already exists.", nm))
+      stop(sprintf("A dataset with ID '%s' already exists.", nm))
     }
 
     type <- tolower(trimws(as.character(type %||% "")[1]))
@@ -2314,23 +2639,18 @@ dta_add_dataset <- function(dta, name, type = "tabular", description = NULL) {
       ))
     }
 
-    blank_to_null <- function(x) {
-      if (is.null(x) || length(x) == 0) {
-        return(NULL)
-      }
-      v <- trimws(as.character(x)[1])
-      if (is.na(v) || !nzchar(v)) NULL else v
-    }
-    desc <- blank_to_null(description)
+    label <- dta_blank_to_null(name)
+    desc <- dta_blank_to_null(description)
 
     ds <- if (identical(type, "tabular")) {
       DTAtools::DTADataSetTabular(
-        name = nm,
+        id = nm,
         specs = DTAtools::DTAColumnSpecCollection(columns = list()),
+        name = label,
         description = desc
       )
     } else {
-      DTAtools::DTADataSetFile(name = nm, description = desc)
+      DTAtools::DTADataSetFile(id = nm, name = label, description = desc)
     }
 
     dsets <- dta@datasets
@@ -2427,26 +2747,54 @@ dta_column_fields <- function(dta, dataset, id) {
     nullable = isTRUE(l$nullable),
     values = if (!is.null(l$values)) paste(unlist(l$values), collapse = "\n") else "",
     pattern = l$pattern %||% "",
+    examples = if (!is.null(l$examples)) paste(unlist(l$examples), collapse = "\n") else "",
     description = l$description %||% ""
   )
 }
 
 # Add or update a column (rename when old_id differs). Returns dta_try().
+#
+# RENAME GUARD mirrors dta_set_dataset_meta()'s rename guard: renaming onto an
+# id another column already holds would otherwise fall straight through to
+# `cols[[id]] <- spec` and silently destroy that column. Adding a column
+# under an already-existing id with old_id = NULL is a different, intended
+# operation -- an in-place update of that column -- and is left alone.
+#
+# CARRYOVER: the editor form exposes only a subset of DTAColumnSpec's
+# properties. `examples` and `colclass` have no field in the UI, so rebuilding
+# the spec from form values alone would silently drop them on every save.
+# They are looked up on the column being edited (by old_id when renaming,
+# else by id) and passed through unchanged.
 dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
                            type = NULL, format = NULL, length = NULL,
                            nullable = NULL, values = NULL, pattern = NULL,
-                           description = NULL, old_id = NULL) {
+                           description = NULL, old_id = NULL, examples = NULL) {
   dta_try({
     id <- trimws(as.character(id)[1] %||% "")
     if (!nzchar(id)) stop("A column id is required.")
     if (grepl("\\s", id)) stop("Column id cannot contain whitespace.")
+
+    ds <- DTAtools::datasets(dta, dataset)
+    specs <- ds@specs
+    cols <- specs@columns %||% list()
+
+    renaming <- !is.null(old_id) && nzchar(old_id) && !identical(old_id, id)
+    if (renaming && id %in% names(cols)) {
+      stop(sprintf("A column named '%s' already exists.", id))
+    }
+    existing <- cols[[if (renaming) old_id else id]]
+
     bk <- backend %||% "SAS"
     type_arg <- if (!is.null(type) && nzchar(type)) paste(bk, type) else NULL
     format_arg <- if (!is.null(format) && nzchar(format)) paste(bk, format) else NULL
     len_arg <- NULL
-    if (!is.null(length) && length(length) && nzchar(as.character(length))) {
-      len_arg <- suppressWarnings(as.integer(length))
-      if (is.na(len_arg)) len_arg <- NULL
+    len_txt <- trimws(as.character(length)[1])
+    if (!is.null(length) && length(length) && !is.na(len_txt) && nzchar(len_txt)) {
+      # A length that is not a whole number is refused, never silently dropped:
+      # the column would save without the width the author asked for.
+      len_arg <- if (grepl("^[0-9]+$", len_txt)) suppressWarnings(as.integer(len_txt)) else NA_integer_
+      if (is.na(len_arg)) stop("Length must be a whole number.")
+      if (len_arg < 1L) stop("Length must be a whole number of at least 1.")
     }
     vals <- NULL
     if (!is.null(values) && length(values) > 0) {
@@ -2457,17 +2805,49 @@ dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
     patt <- if (!is.null(pattern) && nzchar(pattern)) pattern else NULL
     lbl <- if (!is.null(label) && nzchar(label)) label else NULL
     desc <- if (!is.null(description) && nzchar(description)) description else NULL
+    # `examples`: NULL keeps the column's own (callers without the field);
+    # a character vector replaces them, and an empty one clears them.
+    ex <- if (is.null(examples)) {
+      if (!is.null(existing)) existing@examples else NULL
+    } else {
+      e <- trimws(as.character(examples))
+      if (any(nzchar(e))) e[nzchar(e)] else NULL
+    }
     spec <- DTAtools::DTAColumnSpec(
       id = id, label = lbl, type = type_arg, format = format_arg,
       length = len_arg, nullable = nullable, pattern = patt, values = vals,
-      description = desc
+      description = desc,
+      examples = ex,
+      colclass = if (!is.null(existing)) existing@colclass else NULL
     )
-    ds <- DTAtools::datasets(dta, dataset)
-    specs <- ds@specs
-    cols <- specs@columns %||% list()
-    if (!is.null(old_id) && nzchar(old_id) && !identical(old_id, id)) cols[[old_id]] <- NULL
-    cols[[id]] <- spec
-    specs@columns <- cols
+    if (renaming) {
+      # A rename carries the column's name into the dataset's rules in the same
+      # save. The new column is added next to the old one first, so every
+      # intermediate object still satisfies the rules-vs-columns invariant:
+      # old+new columns with the old rules, then old+new with the renamed
+      # rules, then the old column removed.
+      rl <- specs@rules %||% list()
+      new_rules <- lapply(rl, function(r) {
+        l <- dta_rule_to_list(r)
+        if (is.null(l) || !(old_id %in% dta_rule_list_columns(l))) {
+          return(r)
+        }
+        do.call(dta_build_rule, dta_rule_list_rename(l, old_id, id))
+      })
+      pos <- match(old_id, names(cols))
+      both <- c(cols, stats::setNames(list(spec), id))
+      specs@columns <- both
+      if (length(new_rules) > 0) specs@rules <- new_rules
+      final <- both[names(both) != old_id]
+      if (!is.na(pos)) {
+        ord <- append(setdiff(names(final), id), id, after = pos - 1L)
+        final <- final[ord]
+      }
+      specs@columns <- final
+    } else {
+      cols[[id]] <- spec
+      specs@columns <- cols
+    }
     ds@specs <- specs
     dta@datasets[[dataset]] <- ds
     dta
@@ -2476,6 +2856,15 @@ dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
 
 dta_remove_column <- function(dta, dataset, id) {
   dta_try({
+    # A column a rule still uses stays: removing it would leave the rule
+    # pointing at nothing, which the spec invariant rejects anyway.
+    used <- dta_rules_using_column(dta, dataset, id)
+    if (length(used) > 0) {
+      stop(sprintf(
+        "Column %s is used by rule(s) %s -- remove or edit them first",
+        id, paste(used, collapse = ", ")
+      ))
+    }
     ds <- DTAtools::datasets(dta, dataset)
     specs <- ds@specs
     cols <- specs@columns %||% list()
@@ -2584,17 +2973,7 @@ dta_build_rule <- function(id, type, description = NULL, condition = NULL,
   if (!nzchar(id)) stop("A rule id is required.")
   if (grepl("\\s", id)) stop("Rule id cannot contain whitespace.")
   desc <- if (!is.null(description) && nzchar(description)) description else NULL
-  ty <- switch(type,
-    col_condition = ,
-    check_col_condition = "col_condition",
-    col_range = ,
-    check_range = "col_range",
-    col_unique = ,
-    check_unique = "col_unique",
-    group_condition = ,
-    check_group_condition = "group_condition",
-    type
-  )
+  ty <- type
   if (identical(ty, "col_condition")) {
     DTAtools::DTARuleColCondition(
       id = id, description = desc,
@@ -3073,7 +3452,7 @@ dta_set_transmission_field <- function(dta, field, value) {
     md <- DTAtools::metadata(dta)
     tr <- tryCatch(S7::prop(md, "transmission"), error = function(e) NULL) %||% list()
     drop <- is.null(value) ||
-      (is.character(value) && (length(value) == 0 || !any(nzchar(value))))
+      (is.character(value) && (length(value) == 0 || !any(nzchar(trimws(value)))))
     if (drop) tr[[field]] <- NULL else tr[[field]] <- value
     S7::prop(md, "transmission") <- tr
     dta@metadata <- md
@@ -3140,8 +3519,9 @@ dta_update_contact <- function(dta, side, index, fields) {
 # ---- Raw-YAML apply reconciliation (handler / spec diff + data transfer) --
 # When the editable Raw YAML is applied, the app must NOT blindly discard bound
 # uploads. These helpers let the server compare the OLD and NEW dataset shapes
-# so it can: keep uploads whose file handlers are unchanged, clear a dataset's
-# uploads when its handlers changed, drop deleted datasets, and clear only the
+# so it can: keep uploads whose file handlers are unchanged, re-key uploads of
+# a dataset whose handlers changed (dta_match_handlers(); only files whose
+# handler vanished are unloaded), drop deleted datasets, and clear only the
 # affected dataset's validation when its columns/rules changed.
 
 # A stable string signature of a dataset's file handlers (for equality tests).
@@ -3183,6 +3563,7 @@ dta_transfer_bound_data <- function(dta, dataset, old_ds, keep_validation = TRUE
     if (isTRUE(keep_validation)) {
       new_ds@validation_index <- tryCatch(old_ds@validation_index, error = function(e) list()) %||% list()
       new_ds@validation_store <- tryCatch(old_ds@validation_store, error = function(e) list()) %||% list()
+      attr(new_ds, "last_validation_summary") <- attr(old_ds, "last_validation_summary")
     } else {
       new_ds@validation_index <- list()
       new_ds@validation_store <- list()
@@ -3204,7 +3585,13 @@ dta_transfer_bound_data <- function(dta, dataset, old_ds, keep_validation = TRUE
 # rebuild real arrow tables on restore.
 
 # Returns list(dta = <tables/validation stripped>, tables, vindex, vstore).
-dta_dump_session <- function(dta) {
+#
+# `table_ref`, when given, is called as table_ref(dataset, table_name, table)
+# and its return value is stored in place of the collected data.frame -- the
+# app passes one that writes each table to an Arrow IPC file ONCE and returns
+# the path (see dta_table_store()), so an autosave after a validation run or a
+# spec edit no longer re-collects and re-serialises every bound table.
+dta_dump_session <- function(dta, table_ref = NULL) {
   tables <- list()
   vindex <- list()
   vstore <- list()
@@ -3214,7 +3601,13 @@ dta_dump_session <- function(dta) {
     if (is.null(ds)) next
     tb <- tryCatch(ds@tables, error = function(e) NULL)
     if (length(tb) > 0) {
-      tables[[nm]] <- lapply(tb, function(t) tryCatch(as.data.frame(t), error = function(e) NULL))
+      tables[[nm]] <- lapply(stats::setNames(names(tb), names(tb)), function(tn) {
+        t <- tb[[tn]]
+        tryCatch(
+          if (is.function(table_ref)) table_ref(nm, tn, t) else as.data.frame(t),
+          error = function(e) NULL
+        )
+      })
       vindex[[nm]] <- tryCatch(ds@validation_index, error = function(e) list()) %||% list()
       vstore[[nm]] <- tryCatch(ds@validation_store, error = function(e) list()) %||% list()
       # Clear in an order the S7 validator tolerates: index/store (<= tables)
@@ -3230,7 +3623,11 @@ dta_dump_session <- function(dta) {
 
 # Rebuild a live DTA from dta_dump_session() output: re-materialize each saved
 # data.frame as an arrow table and restore its validation index/store.
-dta_restore_session <- function(dump) {
+#
+# `table_dir` is the only directory a table path in the dump may point into:
+# the dump comes out of a file on disk, and a copied or planted one must not
+# be able to read an arbitrary Arrow file the server can reach.
+dta_restore_session <- function(dump, table_dir = NULL) {
   if (is.null(dump)) {
     return(NULL)
   }
@@ -3245,7 +3642,21 @@ dta_restore_session <- function(dump) {
       if (is.null(df)) {
         return(NULL)
       }
-      tryCatch(arrow::as_arrow_table(df), error = function(e) NULL)
+      tryCatch(
+        # A path written by dta_table_store(); a data.frame from an older
+        # session file or a dump taken without a table_ref.
+        if (is.character(df)) {
+          if (is.null(table_dir) || !.dta_path_under(df, table_dir)) {
+            return(NULL)
+          }
+          # mmap = FALSE: the table must not pin the file, which the store
+          # deletes as soon as the table is replaced.
+          arrow::read_ipc_file(df, as_data_frame = FALSE, mmap = FALSE)
+        } else {
+          arrow::as_arrow_table(df)
+        },
+        error = function(e) NULL
+      )
     })
     arrow_tbls <- arrow_tbls[!vapply(arrow_tbls, is.null, logical(1))]
     ds@tables <- arrow_tbls
@@ -3264,6 +3675,122 @@ dta_restore_session <- function(dump) {
     dta@datasets[[nm]] <- ds
   }
   dta
+}
+
+# The name the autosave slot is filed under. The browser's localStorage id is
+# a bearer secret that any other content served from the same origin can read
+# -- and on Posit Connect every published app, report and page shares one
+# origin -- so whenever the platform authenticates the viewer the key is bound
+# to that user too: a stolen id used while signed in as someone else names a
+# different file, and restore_session re-checks the user stored inside it.
+# Without authentication (session$user NULL) the id alone is all there is.
+dta_session_key <- function(client_id, user = NULL) {
+  if (is.null(user) || length(user) != 1L || is.na(user) || !nzchar(user)) {
+    return(client_id)
+  }
+  rlang::hash(c(user, client_id))
+}
+
+# Per-session writer for dta_dump_session(table_ref = ). Each bound table is
+# written to `dir` ONCE, as an Arrow IPC file, and that file is re-used for as
+# long as the same table object stays bound -- identical() on the R6 object is
+# a reference comparison -- so an autosave that changed no data writes no data.
+# A table that was replaced or unbound has its file deleted by the dump that
+# no longer sees it.
+#
+# Superseded files are only queued by dump() and deleted by commit(), which
+# the caller runs once the autosave that stops referring to them is safely on
+# disk -- until then the previous autosave still points at them.
+dta_table_store <- function(dir) {
+  seen <- new.env(parent = emptyenv()) # "dataset\001table" -> list(obj, path)
+  used <- character(0)
+  stale <- character(0)
+  ref <- function(ds, tn, t) {
+    key <- paste(ds, tn, sep = "\001")
+    used <<- c(used, key)
+    hit <- seen[[key]]
+    if (!is.null(hit) && identical(hit$obj, t) && file.exists(hit$path)) {
+      return(hit$path)
+    }
+    dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+    path <- tempfile("table-", tmpdir = dir, fileext = ".arrow")
+    tryCatch(arrow::write_ipc_file(t, path), error = function(e) {
+      unlink(path)
+      stop(e)
+    })
+    if (!is.null(hit)) stale <<- c(stale, hit$path)
+    seen[[key]] <- list(obj = t, path = path)
+    path
+  }
+  list(
+    dump = function(dta) {
+      used <<- character(0)
+      out <- dta_dump_session(dta, table_ref = ref)
+      for (k in setdiff(ls(seen, all.names = TRUE), used)) {
+        stale <<- c(stale, seen[[k]]$path)
+        rm(list = k, envir = seen)
+      }
+      out
+    },
+    commit = function() {
+      unlink(stale)
+      stale <<- character(0)
+      # The sweep ages files by mtime; the table files are written once, so
+      # the directory is touched with every saved autosave to keep it as
+      # fresh as the .rds that refers to it.
+      if (dir.exists(dir)) Sys.setFileTime(dir, Sys.time())
+      invisible(NULL)
+    },
+    # After a restore: the files the dump points at back the tables just
+    # rebuilt from them, so the next autosave need not write them again.
+    adopt = function(dta, dump) {
+      for (nm in names(dump$tables)) {
+        for (tn in names(dump$tables[[nm]])) {
+          p <- dump$tables[[nm]][[tn]]
+          t <- tryCatch(dta@datasets[[nm]]@tables[[tn]], error = function(e) NULL)
+          if (is.character(p) && !is.null(t)) {
+            seen[[paste(nm, tn, sep = "\001")]] <- list(obj = t, path = p)
+          }
+        }
+      }
+      invisible(NULL)
+    },
+    clear = function() {
+      rm(list = ls(seen, all.names = TRUE), envir = seen)
+      unlink(dir, recursive = TRUE, force = TRUE)
+    }
+  )
+}
+
+# ---- Retention of session files ---------------------------------------------
+# Everything this app writes that carries a user's data -- the autosave slot
+# and its table files, the staged copy of every upload, every export -- lives
+# in tempdir() so that 'Restore previous session' can outlive a reload. None of
+# it may outlive that purpose: dta_sweep_session_files() deletes whatever is
+# older than the retention window, except paths a live session still owns.
+# Each session registers what it owns here, keyed by session$token.
+.dta_live_session_paths <- new.env(parent = emptyenv())
+
+# Retention window in seconds, from DTATOOLS_SESSION_TTL_HOURS (default 24).
+dta_session_ttl_seconds <- function() {
+  h <- suppressWarnings(as.numeric(Sys.getenv("DTATOOLS_SESSION_TTL_HOURS", "")))
+  if (length(h) != 1L || is.na(h) || h <= 0) h <- 24
+  h * 3600
+}
+
+dta_sweep_session_files <- function(dir = tempdir(), ttl = dta_session_ttl_seconds(),
+                                    keep = unlist(as.list(.dta_live_session_paths), use.names = FALSE),
+                                    now = Sys.time()) {
+  paths <- list.files(dir,
+    pattern = "^(dtatools_app_session_|dta_upload_|dta-export-)",
+    full.names = TRUE, all.files = TRUE
+  )
+  norm <- function(p) normalizePath(p, winslash = "/", mustWork = FALSE)
+  paths <- paths[!norm(paths) %in% norm(keep %||% character(0))]
+  age <- as.numeric(difftime(now, file.mtime(paths), units = "secs"))
+  old <- paths[!is.na(age) & age > ttl]
+  unlink(old, recursive = TRUE, force = TRUE)
+  invisible(old)
 }
 
 # Format the date/time suffix of an export file name as "%Y-%m-%d_%H-%M".

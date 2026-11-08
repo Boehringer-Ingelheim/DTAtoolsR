@@ -7,6 +7,14 @@
 #' dataset/target/source/rule/column/keyword/message, differing only by row)
 #' are capped at `max_repeats` in the default view with a "show more" toggle
 #' in the resulting HTML.
+#'
+#' So that a filed report can be tied back to what it describes, its header
+#' records the generation time with its UTC offset, the DTAtools and R
+#' versions, and the specification's version (`metadata(x)@version`), and an
+#' Inputs section lists every table and file the verdict rests on: the source
+#' file(s) of a streamed dataset or a file dataset with their size and
+#' modification time, and the content-hash stamp of a table held in memory.
+#' Nothing is re-read to produce it.
 #' @import S7
 #' @importFrom cli cli_abort cli_alert_success
 #' @importFrom glue glue
@@ -22,8 +30,15 @@
 #' @param quiet Logical. If `TRUE`, suppresses the success message. Default
 #'   `FALSE`.
 #' @param title Optional character scalar used as the report's page title
-#'   and heading. Defaults to the DTA's metadata title (`metadata(x)@title`)
-#'   when available, else `"Validation Report"`.
+#'   and, beneath the document name, its subtitle. Defaults to the DTA's
+#'   metadata title (`metadata(x)@title`) when available, else
+#'   `"Validation Report"`.
+#' @param document_name Optional character: what this kind of document is
+#'   called, shown as the report's main heading above `title`. A vector is
+#'   joined with `" / "`. `NULL` (the default) uses "Data Transfer Agreement".
+#' @param organisation,organisation_unit Optional single strings naming the
+#'   organisation (and unit within it) issuing the report; shown in the header
+#'   block when given. `NULL` or empty (the default) shows nothing.
 #' @return Invisibly returns `file`.
 #' @export
 #' @examples
@@ -32,12 +47,15 @@
 #' out <- tempfile(fileext = ".html")
 #' write_validation_report(dta, out)
 write_validation_report <- function(
-  x, file, max_repeats = 5, overwrite = FALSE, quiet = FALSE, title = NULL
+  x, file, max_repeats = 5, overwrite = FALSE, quiet = FALSE, title = NULL,
+  document_name = NULL, organisation = NULL, organisation_unit = NULL
 ) {
   # Validate input
   if (!inherits(x, "DTAtools::DTA")) {
     cli::cli_abort("'x' must be a DTA object.")
   }
+
+  .set_export_ctx(document_name, organisation, organisation_unit)
 
   # Check file overwrite
   if (file.exists(file) && !overwrite) {
@@ -73,6 +91,11 @@ write_validation_report <- function(
 
   # Get results and messages
   res <- DTAtools::results(x)
+  # The metadata axis counts toward this transfer's verdict (check() folds
+  # metadata import errors into its overall ok), so the overview has to show
+  # it too. Without this the summary cards and the verdict disagree, and the
+  # cards are what a reader sees first.
+  res <- .report_with_metadata_row(x, res)
   msgs <- DTAtools::messages(x, as_tibble = FALSE)
 
   # Fetch inspect() detail for every message with ONE call, not one call per
@@ -87,7 +110,20 @@ write_validation_report <- function(
   if (nrow(msgs) > 0) {
     inspect_all <- tryCatch(
       DTAtools::inspect(x, id = msgs$id, as_tibble = FALSE),
-      error = function(e) NULL
+      error = function(e) {
+        # Isolation: retry once per dataset group (the NA group, i.e. metadata,
+        # on its own) so one failing group loses only its own detail. Not per
+        # message id, which would bring back the O(n^2) re-collection.
+        groups <- split(msgs$id, ifelse(is.na(msgs$dataset), "\001metadata", as.character(msgs$dataset)))
+        parts <- lapply(groups, function(ids) {
+          tryCatch(
+            DTAtools::inspect(x, id = ids, as_tibble = FALSE),
+            error = function(e2) NULL
+          )
+        })
+        parts <- Filter(function(p) is.data.frame(p) && nrow(p) > 0, parts)
+        if (length(parts) == 0) NULL else dta_rbind_fill(unname(parts))
+      }
     )
     if (!is.null(inspect_all) && nrow(inspect_all) > 0 && "id" %in% names(inspect_all)) {
       inspect_index <- list(df = inspect_all, by_id = split(seq_len(nrow(inspect_all)), inspect_all$id))
@@ -118,22 +154,7 @@ write_validation_report <- function(
     # Look up rule definition if this is a rule message
     rule_def <- NULL
     if (source_type == "rule" && !is.na(msg_row$rule_id)) {
-      rule_id <- as.character(msg_row$rule_id)
-      tryCatch(
-        {
-          ds <- x@datasets[[dataset_name]]
-          if (!is.null(ds) && !is.null(ds@specs) && !is.null(ds@specs@rules)) {
-            rules_list <- ds@specs@rules
-            for (r in rules_list) {
-              if (!is.null(r@id) && identical(r@id, rule_id)) {
-                rule_def <- r
-                break
-              }
-            }
-          }
-        },
-        error = function(e) NULL
-      )
+      rule_def <- dta_find_rule_def(x, dataset_name, as.character(msg_row$rule_id))
     }
 
     # Build inspect panel
@@ -171,9 +192,28 @@ write_validation_report <- function(
   # Build HTML document
   summary_html <- .report_summary_html(res)
   messages_html <- .report_messages_table_html(msgs, max_repeats = max_repeats)
-  timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+  # The offset makes the moment unambiguous to a reader in another timezone.
+  timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S %z")
   pkg_version <- as.character(utils::packageVersion("DTAtools"))
+  r_version <- as.character(getRversion())
   escaped_title <- .report_html_escape(title)
+  # The document name is the main heading; the title sits beneath it.
+  escaped_name <- .report_html_escape(.export_document_name())
+  org_line <- .export_org_line()
+  org_html <- if (nzchar(org_line)) {
+    paste0('<div class="report-meta report-org">', .report_html_escape(org_line), "</div>")
+  } else {
+    ""
+  }
+  # The specification version the verdict was reached against -- the report is
+  # a statement about this version of the agreement, not about the agreement.
+  spec_version <- tryCatch(DTAtools::metadata(x)@version, error = function(e) NULL)
+  spec_version <- if (is.character(spec_version) && length(spec_version) == 1 && !is.na(spec_version) && nzchar(spec_version)) {
+    .report_html_escape(spec_version)
+  } else {
+    "not set"
+  }
+  inputs_html <- .report_inputs_html(x)
 
   html_doc <- glue::glue(
     '<!DOCTYPE html>
@@ -187,10 +227,14 @@ write_validation_report <- function(
 </head>
 <body>
 <header class="report-header">
-  <h1>{escaped_title}</h1>
-  <div class="report-meta">Generated {timestamp} &middot; DTAtools {pkg_version}</div>
+  <h1>{escaped_name}</h1>
+  <div class="report-subtitle">{escaped_title}</div>
+  {org_html}
+  <div class="report-meta">Generated {timestamp} &middot; DTAtools {pkg_version} &middot; R {r_version}</div>
+  <div class="report-meta report-meta-spec">Specification version {spec_version}</div>
 </header>
 {summary_html}
+{inputs_html}
 {messages_html}
 <div id="inspect-panels" hidden>
 {inspect_panels_html}

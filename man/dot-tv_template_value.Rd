@@ -4,7 +4,7 @@
 \alias{.tv_template_value}
 \title{Coerce a user-supplied template value while preserving line structure}
 \usage{
-.tv_template_value(x, default = "", markdown_cleanup = TRUE, dta = NULL)
+.tv_template_value(x, default = "", markdown_cleanup = TRUE)
 }
 \description{
 Unlike \code{\link[=.tv_scalar]{.tv_scalar()}}, this keeps caller-provided line breaks and tabs so a

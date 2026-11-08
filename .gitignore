@@ -18,9 +18,10 @@ renv/staging
 renv/settings.json
 .Renviron
 *docx
-# Keep the bundled numbered Word reference template used by the built-in
+# Keep the bundled Word templates: the numbered reference template used by the built-in
 # write_dta() DOCX/PDF writer (a required package asset, not a scratch export).
-!inst/extdata/templates/dta_numbered_template.docx
+!inst/extdata/word-templates/dta_numbered_template.docx
+!inst/extdata/word-templates/clinical_dta_template.docx
 .tmp*
 ..Rcheck/00check.log
 instructions_shiny.txt
@@ -42,8 +43,8 @@ graphify-out/
 dta-templates/
 *.dta-party.yaml
 # ...except the packaged, anonymised worked examples under
-# inst/extdata/templates/ and the starter set create_template_repo() copies
-# from inst/extdata/template-repo-skeleton/, which are shipped package data,
+# inst/extdata/library/parties/ and the starter set create_template_repo() copies
+# from inst/extdata/template-repo-skeleton/parties/, which are shipped package data,
 # not private information -- keep them trackable.
 #
 # Forgetting the second of these is not a cosmetic mistake: the file stays on
@@ -51,8 +52,9 @@ dta-templates/
 # while the BUILT package ships a skeleton whose creation template references
 # a party profile that is not there. That reached CI as a party_slot_invalid
 # failure on all five platforms and nothing before it.
-!inst/extdata/templates/*.dta-party.yaml
-!inst/extdata/template-repo-skeleton/*.dta-party.yaml
+!inst/extdata/library/parties/*.dta-party.yaml
+!inst/extdata/template-repo-skeleton/parties/*.dta-party.yaml
+!inst/qualification/fixtures/**/*.dta-party.yaml
 
 # `R CMD check` writes <pkg>.Rcheck/ beside the package and `R CMD build`
 # leaves a <pkg>_<version>.tar.gz. Both are regenerated on demand and must
@@ -65,3 +67,4 @@ dta-templates/
 /step3_examples.R
 /step4_usage_and_aliases.R
 /check_output.txt
+.dtatools-lib/

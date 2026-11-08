@@ -507,3 +507,9 @@ body {
 .inspect-overlay-close:hover {
   color: var(--bi-ink);
 }
+
+.report-subtitle {
+  font-size: 1.125rem;
+  margin: 0 0 0.5rem 0;
+  opacity: 0.95;
+}

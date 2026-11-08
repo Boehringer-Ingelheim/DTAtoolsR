@@ -1,0 +1,4 @@
+kind: dta_creation_template
+id: dup1
+version: "1.0"
+abstract: true

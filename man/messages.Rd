@@ -9,17 +9,28 @@ messages(x, ...)
 \arguments{
 \item{x}{A \code{DTA}, \code{DTADataSet}, or \code{DTADataSetTabular} object.}
 
-\item{...}{Additional method arguments.}
+\item{...}{Method arguments:
+\itemize{
+\item \code{tables} (\code{DTADataSet} and \code{DTADataSetTabular} methods): names or
+indices of the tables to report on; \code{NULL} for all.
+\item \code{datasets} (\code{DTA} method): \code{NULL}, dataset names, or indices.
+\item \code{source}: where validation details are read from, one of \code{"auto"}
+(the default), \code{"memory"} or \code{"artifact"}.
+\item \code{as_tibble}: logical, default \code{TRUE}. Return a tibble when the
+\code{tibble} package is installed.
+}}
 }
 \value{
 A data.frame (or tibble when \code{as_tibble = TRUE} and package \code{tibble}
 is installed) with columns:
-\code{dataset}, \code{target}, \code{severity}, \code{source}, \code{rule_id},
+\code{id} (sequential integer), \code{dataset}, \code{target}, \code{severity}, \code{source}
+(\code{"columnspec"}, \code{"rule"} or \code{"import"}), \code{rule_id},
 \code{row}, \code{column}, \code{keyword}, \code{message}.
 }
 \description{
 Returns one row per validation message to support debugging workflows.
-The output combines column spec and rule failures into a single flat table.
+The output combines column spec, rule and import failures into a single
+flat table.
 
 Methods are available for \code{DTA}, \code{DTADataSet}, and \code{DTADataSetTabular}.
 }

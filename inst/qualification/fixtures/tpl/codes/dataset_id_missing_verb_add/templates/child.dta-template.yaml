@@ -1,0 +1,16 @@
+kind: dta_creation_template
+id: verb_child
+version: "1.0"
+abstract: true
+extends: verb_parent@1.0
+datasets:
+  remove: [ds0]
+  add:
+    - type: tabular
+      description: Added, but no identifier
+      files: {filename: c.csv, type: csv}
+      columns:
+        - {id: COL1, type: SAS Char}
+  modify:
+    - {id: ds1, description: Modified}
+  order: [ds1]

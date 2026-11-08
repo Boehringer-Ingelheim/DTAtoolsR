@@ -537,7 +537,7 @@
     DTAtools
   </a>
   <div class="header-spacer"></div>
-  <span class="version-badge">v0.25.0</span>
+  <span class="version-badge">v0.26.0</span>
   <button class="theme-toggle" id="themeToggle">
     <span id="themeIcon">🌙</span>
     <span id="themeLabel">Dark</span>
@@ -689,7 +689,7 @@ library(DTAtools)</code></pre>
       <div class="step-connector">↓</div>
       <div class="step">
         <div class="step-num">5</div>
-        <div class="step-body"><strong>Drill into errors</strong> — use <code>messages()</code> for the error list and <code>inspect()</code> for row-level detail</div>
+        <div class="step-body"><strong>Drill into errors</strong> — use <code>messages()</code> for the error list, <code>explain_messages()</code> for a plain-language reading and <code>inspect()</code> for row-level detail</div>
       </div>
     </div>
 
@@ -744,7 +744,7 @@ messages(dta)</code></pre>
         <tbody>
           <tr>
             <td><code>dataset</code> / <code>target</code></td>
-            <td>Which dataset and table was validated (<code>dataset</code> is the dataset name, <code>target</code> is the table name within it)</td>
+            <td>Which dataset and table was validated (<code>dataset</code> is the dataset id, <code>target</code> is the table name within it)</td>
             <td>Name strings</td>
           </tr>
           <tr>
@@ -851,8 +851,9 @@ messages(dta)</code></pre>
     <div class="code-wrap">
       <div class="code-label"><span>YAML</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
       <pre><code class="language-yaml">datasets:
-  - name: my_data
+  - id: my_data
     type: tabular
+    name: My data
     files:
       filename: "my_data.csv"
       type: csv
@@ -896,7 +897,7 @@ messages(dta)</code></pre>
       <div class="callout-body">
         <strong>Two YAML shapes: full DTA vs. single dataset</strong>
         <p>The YAML above (starting with <code>datasets:</code>) is the format for <code>read_dta_from_yaml()</code>, which loads a full agreement with metadata.</p>
-        <p>If you use <code>read_dataset_from_yaml()</code> (for a single dataset without metadata), the YAML must start <em>directly</em> with <code>name:</code>, <code>type:</code>, <code>files:</code>, <code>columns:</code> — <strong>no <code>datasets:</code> wrapper</strong>. See Section 4.1 for an example.</p>
+        <p>If you use <code>read_dataset_from_yaml()</code> (for a single dataset without metadata), the YAML must start <em>directly</em> with <code>id:</code>, <code>type:</code>, <code>files:</code>, <code>columns:</code> — <strong>no <code>datasets:</code> wrapper</strong>. See Section 4.1 for an example.</p>
       </div>
     </div>
 
@@ -1142,7 +1143,7 @@ messages(dta)</code></pre>
       <div class="code-label"><span>YAML</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
       <pre><code class="language-yaml">- id: age_range
   type: col_range
-  column: AGE
+  columns: AGE
   min: 18
   max: 65</code></pre>
     </div>
@@ -1164,13 +1165,13 @@ messages(dta)</code></pre>
       <pre><code class="language-yaml"># Single column must be unique
 - id: patient_unique
   type: col_unique
-  column: PATIENT_ID
+  columns: PATIENT_ID
 
 # Combination of PATIENT_ID + VISIT must be unique
 # (same patient can appear in multiple visits, just not twice in the same visit)
 - id: patient_visit_unique
   type: col_unique
-  column:
+  columns:
     - PATIENT_ID
     - VISIT</code></pre>
     </div>
@@ -1364,7 +1365,7 @@ my_data <- data.frame(
   VISIT      = c("V01", "V02")
 )
 
-ds <- DTADataSetTabular(name = "my_dataset", specs = my_specs,
+ds <- DTADataSetTabular(id = "my_dataset", specs = my_specs,
                         tables = list(my_table = my_data))
 ds <- check(ds)
 results(ds)</code></pre>
@@ -1758,6 +1759,11 @@ validate_file_stream(specs, "transfer.csv", on_missing_column = "stop")</code></
             <td>data.frame</td>
           </tr>
           <tr>
+            <td class="cheat-fn">explain_messages(dta)</td>
+            <td>Print each error in plain language: should be vs. actual</td>
+            <td>data.frame (invisible)</td>
+          </tr>
+          <tr>
             <td class="cheat-fn">validation_status(dta)</td>
             <td>Compact status per table</td>
             <td>data.frame</td>
@@ -1814,7 +1820,8 @@ validate_file_stream(specs, "transfer.csv", on_missing_column = "stop")</code></
       <div class="code-label"><span>YAML — copy-paste template</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
       <pre><code class="language-yaml"># Minimal DTAtools specification
 datasets:
-  - name: my_dataset          # must match what you pass to load_file()
+  - id: my_dataset            # must match what you pass to load_file()
+    name: My dataset          # optional human-readable name
     type: tabular
     files:
       filename: "my_data.csv" # or a regex pattern
@@ -1846,7 +1853,7 @@ datasets:
 <!-- FOOTER -->
 <footer class="site-footer">
   <p>
-    DTAtools v0.25.0 — R package for Data Transfer Agreement validation &nbsp;·&nbsp;
+    DTAtools v0.26.0 — R package for Data Transfer Agreement validation &nbsp;·&nbsp;
     <a href="https://github.com/Boehringer-Ingelheim/DTAtoolsR" target="_blank">GitHub Repository</a>
     &nbsp;·&nbsp;
     <a href="https://github.com/Boehringer-Ingelheim/DTAtoolsR/issues" target="_blank">Report an Issue</a>

@@ -303,7 +303,7 @@ ds_edit_menu <- function(type = "tabular") {
       )),
       tags$li(ds_edit_menu_item(
         "edit_meta", "&#x1F4CB;", "Details",
-        "Name, description and template info"
+        "ID, name, description and template info"
       )),
       tags$li(tags$hr(class = "dropdown-divider")),
       tags$li(ds_edit_menu_item(
@@ -498,7 +498,14 @@ click_guard_script <- function() {
   // see an idle server, conclude no observer exists, and re-open the very
   // double-click window this guard is for. It only ever delays the release
   // of a button that has NO observer behind it, which costs nothing.
-  var SANITY_HOLD    = 1500;
+  // Five seconds, not the 1.5 it started at: a CPU-starved server (several
+  // R test runs hogging the machine) took longer than that to so much as
+  // acknowledge a click, the hold expired, and every repeat click a waiting
+  // user made went through -- each re-opening the same dialog once the
+  // server caught up. The round trip this waits for is the server's busy
+  // message, not the work itself, so five seconds is generous on a healthy
+  // machine and still shorter than anyone waits before clicking again.
+  var SANITY_HOLD    = 5000;
   var DOWNLOAD_HOLD  = 2000;  // ms a download link stays guarded
   var CEILING        = 30000; // ms failsafe release
   var CEILING_TRIES  = 4;     // ...re-armed at most this often while busy
@@ -649,28 +656,24 @@ format_stale_age <- function(seconds) {
   sprintf("%d day%s ago", days, if (days == 1) "" else "s")
 }
 
-# One resolved source's status line: its name and a scheme badge, plus --
-# only when it is CURRENTLY being served from a stale cache (a failed git
-# refresh that fell back to the last good checkout, see resolve_git_source())
-# -- a warning naming how old that cache is. A source that failed outright
-# (ok == FALSE) has no status of its own to show here; template_source_
-# diagnostics_ui() below is where that belongs, because a failed source's
-# only useful fact is its error.
+# One resolved source's status line, shown only while it is being served from
+# a stale cache (a failed git refresh that fell back to the last good checkout,
+# see resolve_git_source()): its name, its scheme and how old that cache is. A
+# healthy source has nothing to report -- the picker's library filter and each
+# template's own badge already name it -- and a source that failed outright
+# (ok == FALSE) belongs to template_source_diagnostics_ui() below, because a
+# failed source's only useful fact is its error.
 template_source_status_row <- function(source) {
-  if (!isTRUE(source$ok)) {
+  if (!isTRUE(source$ok) || !isTRUE(source$stale)) {
     return(NULL)
   }
   div(
-    class = "tmpl-source-status",
+    class = "tmpl-source-status msg-hint",
     tags$strong(as.character(source$name %||% "")),
-    " ",
-    tags$span(class = "badge bg-secondary", as.character(source$scheme %||% "")),
-    if (isTRUE(source$stale)) {
-      tags$span(
-        class = "msg-hint", style = "color:#b45309;",
-        sprintf(" — serving a stale cache (%s)", format_stale_age(source$stale_age))
-      )
-    }
+    sprintf(
+      " (%s) could not be refreshed and is serving its cached copy, last fetched %s.",
+      as.character(source$scheme %||% ""), format_stale_age(source$stale_age)
+    )
   )
 }
 
@@ -679,23 +682,54 @@ template_source_status_row <- function(source) {
 # ever reaches here, so this never has to know how to strip a credential
 # itself. NULL when nothing failed, so a call site can splice this straight
 # into a tagList() without an extra length() check first.
-template_source_diagnostics_ui <- function(sources) {
+#
+# The library-layout warnings (a file outside its kind's folder, or a source
+# pointed at a kind folder, see build_template_index()), shown as a compact
+# list. `x` is the template index, whose "layout_warnings" attribute is read,
+# or that attribute's value itself (a character vector); the picker never has
+# to recognise a layout problem by its message text.
+template_layout_warnings <- function(x) {
+  if (is.data.frame(x)) x <- attr(x, "layout_warnings")
+  as.character(x %||% character(0))
+}
+
+template_source_diagnostics_ui <- function(sources, layout_warnings = character(0)) {
   failed <- Filter(function(s) !isTRUE(s$ok), sources %||% list())
-  if (length(failed) == 0) {
+  layout <- template_layout_warnings(layout_warnings)
+  if (length(failed) == 0 && length(layout) == 0) {
     return(NULL)
   }
+  shown <- utils::head(layout, 10L)
   tagList(
-    div(
-      class = "msg-hint", style = "color:#b91c1c;",
-      tags$strong("Some template sources could not be loaded:")
-    ),
-    tags$ul(lapply(failed, function(s) {
-      tags$li(sprintf(
-        "%s (%s): %s",
-        as.character(s$name %||% ""), as.character(s$scheme %||% ""),
-        as.character(s$error %||% "unknown error")
-      ))
-    }))
+    if (length(failed) > 0) {
+      tagList(
+        div(
+          class = "msg-hint", style = "color:#b91c1c;",
+          tags$strong("Some template sources could not be loaded:")
+        ),
+        tags$ul(lapply(failed, function(s) {
+          tags$li(sprintf(
+            "%s (%s): %s",
+            as.character(s$name %||% ""), as.character(s$scheme %||% ""),
+            as.character(s$error %||% "unknown error")
+          ))
+        }))
+      )
+    },
+    if (length(layout) > 0) {
+      tagList(
+        div(
+          class = "msg-hint", style = "color:#b91c1c;",
+          tags$strong("Some template files are in the wrong folder:")
+        ),
+        tags$ul(
+          lapply(shown, tags$li),
+          if (length(layout) > length(shown)) {
+            tags$li(sprintf("… and %d more", length(layout) - length(shown)))
+          }
+        )
+      )
+    }
   )
 }
 
@@ -718,7 +752,7 @@ template_provenance_block <- function(prov) {
     lapply(ds_prov, function(d) {
       ndev <- length(d$deviations %||% list())
       meta_field_text(
-        as.character(d$name %||% ""),
+        as.character(d$id %||% ""),
         sprintf(
           "%s@%s — %d deviation%s",
           as.character(d$template %||% ""), as.character(d$version %||% ""),
@@ -753,6 +787,68 @@ template_provenance_block <- function(prov) {
         ""
       }
     ),
+    meta_field_text(
+      "Mixins",
+      if (length(prov$mixins %||% character(0)) > 0) {
+        paste(as.character(prov$mixins), collapse = ", ")
+      } else {
+        ""
+      }
+    ),
     if (length(ds_rows) > 0) tagList(div(class = "section-label", "Datasets"), ds_rows)
+  )
+}
+
+# ---- Brand bar and footer -------------------------------------------------------
+# Both are built from the app config (R/app_config.R), so a template library can
+# rename the app, swap the logo and drop or repoint the links. Text goes through
+# htmltools (escaped); nothing from the config is ever passed to HTML(). The
+# config parser has already restricted links to http(s)/mailto and the logo to a
+# data: URI or the packaged file name.
+
+brand_link <- function(href, label) {
+  if (is.null(href)) {
+    return(NULL)
+  }
+  tags$a(
+    class = "brand-link", href = href,
+    target = "_blank", rel = "noopener noreferrer", label
+  )
+}
+
+brandbar_ui <- function(cfg = dta_app_config_defaults()) {
+  b <- cfg$branding
+  div(
+    class = "app-brandbar",
+    tags$img(class = "brand-logo", src = b$logo, alt = b$logo_alt),
+    div(
+      div(class = "brand-title", b$app_title),
+      if (nzchar(b$app_subtitle)) div(class = "brand-sub", b$app_subtitle)
+    ),
+    div(
+      class = "app-actions",
+      uiOutput("edit_gate", inline = TRUE),
+      brand_link(cfg$links$report_issue, "Report issues"),
+      brand_link(cfg$links$about, "About"),
+      brand_link(cfg$links$documentation, "Documentation")
+    )
+  )
+}
+
+app_footer_ui <- function(cfg = dta_app_config_defaults(), version = "") {
+  sep <- tags$span(class = "foot-sep", `aria-hidden` = "true")
+  label <- cfg$branding$footer_label
+  repo <- cfg$links$repository
+  tags$footer(
+    class = "app-footer",
+    tags$span(class = "foot-name", "DTAtools"),
+    if (nzchar(version)) tags$span(class = "foot-ver", version),
+    if (nzchar(label)) tagList(sep, tags$span(label)),
+    if (!is.null(repo)) {
+      tagList(sep, tags$a(
+        href = repo, target = "_blank", rel = "noopener noreferrer",
+        "GitHub repository"
+      ))
+    }
   )
 }

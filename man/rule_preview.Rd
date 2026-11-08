@@ -17,7 +17,9 @@ A character string representing a preview of the rules
 \description{
 Provides a preview of the rules contained within a \code{DTAColumnSpecCollection} object.
 If the collection contains more than 5 rules, it returns the IDs of the first four rules,
-an ellipsis, and the rules ID. If there are 5 or fewer rules, it returns all rules.
+an ellipsis, and the last rule's ID. If there are 5 or fewer rules, it
+returns all rules' IDs. If the collection has no rules (\code{rules} is
+\code{NULL}), it returns \code{"not set"}.
 }
 \examples{
 x <- create_example_DTAColumnSpecCollection()

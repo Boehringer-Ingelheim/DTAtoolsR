@@ -3,7 +3,22 @@
 # app's helper files are auto-sourced by Shiny at launch and are not part of
 # the package namespace).
 
-Sys.setenv(NOT_CRAN = "true")
+# Path of `filename` inside library root `root`, routed by its kind suffix:
+# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
+# for everything else (creation and dataset templates, and the plain data
+# files that sit beside them, which resolve relative to the template).
+# Creates the folder, so a fixture can write straight to the returned path.
+lib_path <- function(root, filename) {
+  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
+    "parties"
+  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
+    "vocabulary"
+  } else {
+    "templates"
+  }
+  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
+  file.path(root, sub, filename)
+}
 
 # cli wraps a long condition message at the console width, which breaks a naive
 # substring match the moment the wrap lands inside the text being asserted on.
@@ -45,7 +60,7 @@ write_vocabulary_fixture <- function(
   filename = NULL
 ) {
   filename <- filename %||% paste0(id, ".dta-vocabulary.yaml")
-  path <- file.path(dir, filename)
+  path <- lib_path(dir, filename)
   writeLines(
     c(
       kind_line,
@@ -137,6 +152,76 @@ test_that("read_vocabulary() rejects an unknown type and a vocabulary with nothi
   )
   expect_false(isTRUE(empty$ok))
   expect_match(empty$error, "defines no 'terms'", fixed = TRUE)
+})
+
+test_that("columns: accepts bare ids, mappings and a lone mapping; absent is empty", {
+  read_vocabulary <- app_fn("read_vocabulary")
+  dir <- withr::local_tempdir()
+
+  mixed <- read_vocabulary(write_vocabulary_fixture(
+    dir,
+    filename = "m.dta-vocabulary.yaml",
+    extra_lines = c("columns:", "  - VISIT", "  - id: VISITNAM", "    field: label")
+  ))$value
+  expect_identical(
+    mixed$columns,
+    list(list(id = "VISIT", field = "code"), list(id = "VISITNAM", field = "label"))
+  )
+
+  flow <- read_vocabulary(write_vocabulary_fixture(
+    dir,
+    filename = "f.dta-vocabulary.yaml", extra_lines = "columns: [VISIT, VISITNUM]"
+  ))$value
+  expect_identical(vapply(flow$columns, function(cl) cl$id, character(1)), c("VISIT", "VISITNUM"))
+
+  # Written without the leading `-`: one entry, not the ids "VISITNAM" and "label".
+  lone <- read_vocabulary(write_vocabulary_fixture(
+    dir,
+    filename = "l.dta-vocabulary.yaml",
+    extra_lines = c("columns:", "  id: VISITNAM", "  field: label")
+  ))$value
+  expect_identical(lone$columns, list(list(id = "VISITNAM", field = "label")))
+
+  expect_identical(read_vocabulary(write_vocabulary_fixture(dir))$value$columns, list())
+})
+
+test_that("columns: rejects an entry with no id, or with a field other than code/label", {
+  read_vocabulary <- app_fn("read_vocabulary")
+  dir <- withr::local_tempdir()
+
+  no_id <- read_vocabulary(write_vocabulary_fixture(
+    dir,
+    filename = "n.dta-vocabulary.yaml", extra_lines = c("columns:", "  - field: label")
+  ))
+  expect_false(isTRUE(no_id$ok))
+  expect_match(no_id$error, "every 'columns' entry must name a column id", fixed = TRUE)
+
+  bad_field <- read_vocabulary(write_vocabulary_fixture(
+    dir,
+    filename = "b.dta-vocabulary.yaml",
+    extra_lines = c("columns:", "  - id: VISIT", "    field: decode")
+  ))
+  expect_false(isTRUE(bad_field$ok))
+  expect_match(bad_field$error, "column 'VISIT' has invalid field 'decode'", fixed = TRUE)
+
+  # A misspelt key must not read as a valid entry that silently writes codes.
+  typo <- read_vocabulary(write_vocabulary_fixture(
+    dir,
+    filename = "t.dta-vocabulary.yaml",
+    extra_lines = c("columns:", "  - id: VISIT", "    feild: label")
+  ))
+  expect_false(isTRUE(typo$ok))
+  expect_match(typo$error, "unknown key 'feild'", fixed = TRUE)
+})
+
+test_that("columns: ids are trimmed", {
+  read_vocabulary <- app_fn("read_vocabulary")
+  dir <- withr::local_tempdir()
+  vocab <- read_vocabulary(write_vocabulary_fixture(
+    dir,
+    extra_lines = c("columns:", "  - id: ' VISIT '")
+  ))$value
+  expect_identical(vocab$columns[[1]]$id, "VISIT")
 })
 
 
@@ -251,7 +336,7 @@ vocab_resolver_for <- function(dir) {
   read_vocabulary <- app_fn("read_vocabulary")
   function(ref) {
     id <- sub("@.*$", "", ref)
-    path <- file.path(dir, paste0(id, ".dta-vocabulary.yaml"))
+    path <- lib_path(dir, paste0(id, ".dta-vocabulary.yaml"))
     if (!file.exists(path)) {
       return(NULL)
     }
@@ -291,6 +376,22 @@ test_that("extends: adds, removes, and replaces terms in place", {
     c("SCR", "C1D1", "C2D1")
   )
   expect_identical(resolved$terms[[1]]$label, "Screening (oncology)")
+})
+
+test_that("columns: is the vocabulary's own and is not inherited through extends:", {
+  read_vocabulary <- app_fn("read_vocabulary")
+  resolve_vocabulary_inheritance <- app_fn("resolve_vocabulary_inheritance")
+  dir <- withr::local_tempdir()
+  write_vocabulary_fixture(dir, id = "visit", extra_lines = "columns: [VISIT]")
+  child <- read_vocabulary(write_vocabulary_fixture(
+    dir,
+    id = "visit_onc", term_lines = character(0), extra_lines = "extends: visit@1.0"
+  ))$value
+
+  resolved <- resolve_vocabulary_inheritance(child, vocab_resolver_for(dir))
+  # The terms are inherited, the column declaration is not.
+  expect_identical(vapply(resolved$terms, function(t) t$code, character(1)), c("SCR", "C1D1", "EOT"))
+  expect_identical(resolved$columns, list())
 })
 
 test_that("a child's own terms: replaces the inherited list outright", {
@@ -428,6 +529,105 @@ test_that("vocabulary_values() yields codes or labels, falling back to the code"
 })
 
 
+# ---- Suggesting ------------------------------------------------------------
+
+# Resolved vocabularies by ref, in the shape read_vocabulary() produces. The
+# real index-backed resolver is driven by the column-editor test in
+# test-shinyapp-server.R; here the ranking itself is what is under test.
+suggest_library <- function() {
+  vocab <- function(id, codes, labels = codes, columns = list()) {
+    list(
+      id = id,
+      terms = unname(Map(function(c, l) list(code = c, label = l, description = NULL), codes, labels)),
+      columns = columns
+    )
+  }
+  lib <- list(
+    "nyu@1.0" = vocab("nyu", c("N", "Y", "U"), columns = list(list(id = "AEFL", field = "code"))),
+    "gf_test@1.0" = vocab("gf_test", "TRNSCPTN", "Transcription", columns = list(
+      list(id = "GFTESTCD", field = "code"), list(id = "GFTEST", field = "label")
+    )),
+    "yn@1.0" = vocab("yn", c("N", "Y"))
+  )
+  list(
+    # "broken" throws and "missing" resolves to nothing; both must be skipped.
+    refs = c("broken@1.0", "missing@1.0", names(lib)),
+    resolve = function(ref) if (identical(ref, "broken@1.0")) stop("unreadable") else lib[[ref]]
+  )
+}
+
+test_that("a vocabulary naming the column is suggested for it, with the declared field", {
+  vocabulary_suggestion <- app_fn("vocabulary_suggestion")
+  lib <- suggest_library()
+
+  expect_identical(
+    vocabulary_suggestion("GFTESTCD", character(0), lib$refs, lib$resolve),
+    list(ref = "gf_test@1.0", field = "code", reason = "declared")
+  )
+  # Case-insensitive, and the decode half gets the labels.
+  expect_identical(
+    vocabulary_suggestion("gftest", "Transcription", lib$refs, lib$resolve),
+    list(ref = "gf_test@1.0", field = "label", reason = "declared")
+  )
+  # Declared and fitting beats a tighter vocabulary that merely fits.
+  expect_identical(
+    vocabulary_suggestion("AEFL", c("Y", "N"), lib$refs, lib$resolve)$ref,
+    "nyu@1.0"
+  )
+})
+
+test_that("an undeclared column is matched by its values, tightest vocabulary first", {
+  vocabulary_suggestion <- app_fn("vocabulary_suggestion")
+  lib <- suggest_library()
+
+  # nyu is listed first and also holds Y/N; yn is the exact fit.
+  expect_identical(
+    vocabulary_suggestion("XXFL", c("Y", "N"), lib$refs, lib$resolve),
+    list(ref = "yn@1.0", field = "code", reason = "values")
+  )
+  expect_identical(
+    vocabulary_suggestion("XXTEST", "Transcription", lib$refs, lib$resolve),
+    list(ref = "gf_test@1.0", field = "label", reason = "values")
+  )
+  # Values that fit somewhere else beat a declaration they have drifted from...
+  expect_identical(
+    vocabulary_suggestion("GFTESTCD", c("Y", "N"), lib$refs, lib$resolve)$ref,
+    "yn@1.0"
+  )
+  # ...and with nothing fitting, the drifted declaration still wins.
+  expect_identical(
+    vocabulary_suggestion("GFTESTCD", "OTHER", lib$refs, lib$resolve),
+    list(ref = "gf_test@1.0", field = "code", reason = "declared")
+  )
+})
+
+test_that("an older version never wins over the newer one, even with fewer terms", {
+  vocabulary_suggestion <- app_fn("vocabulary_suggestion")
+  terms <- function(codes) lapply(codes, function(c) list(code = c, label = c, description = NULL))
+  # Picker order: newest version first within an id.
+  lib <- list(
+    "a@2.0" = list(id = "a", terms = terms(c("A", "B", "C"))),
+    "b@1.0" = list(id = "b", terms = terms(c("A", "B"))),
+    "a@1.0" = list(id = "a", terms = terms("A"))
+  )
+  resolve <- function(ref) lib[[ref]]
+
+  expect_identical(vocabulary_suggestion("X", "A", names(lib), resolve)$ref, "b@1.0")
+  expect_identical(vocabulary_suggestion("X", "A", c("a@2.0", "a@1.0"), resolve)$ref, "a@2.0")
+})
+
+test_that("nothing is suggested when nothing points at a vocabulary", {
+  vocabulary_suggestion <- app_fn("vocabulary_suggestion")
+  lib <- suggest_library()
+
+  expect_null(vocabulary_suggestion("ZZ", character(0), lib$refs, lib$resolve))
+  expect_null(vocabulary_suggestion("ZZ", "Q", lib$refs, lib$resolve))
+  # A new column whose id is not typed yet.
+  expect_null(vocabulary_suggestion(NULL, NULL, lib$refs, lib$resolve))
+  expect_null(vocabulary_suggestion("GFTEST", character(0), character(0), lib$resolve))
+})
+
+
 # ---- The column binding ----------------------------------------------------
 
 test_that("normalise_values_from() accepts the shorthand and the full mapping", {
@@ -486,7 +686,7 @@ test_that("normalise_values_from() reads 'vocabulary' with [[, not $", {
 # mid-flight: `columns` is a list of plain column lists, not DTAColumnSpecs.
 vocab_dataset_body <- function(columns) {
   list(
-    name = "ds1",
+    id = "ds1",
     type = "tabular",
     files = list(filename = "ds1.tsv", type = "tsv"),
     columns = columns
@@ -586,7 +786,7 @@ test_that("dataset_has_vocabulary_binding() distinguishes bound from unbound bod
   has_binding <- app_fn("dataset_has_vocabulary_binding")
 
   expect_false(has_binding(vocab_dataset_body(list(list(id = "A")))))
-  expect_false(has_binding(list(name = "empty")))
+  expect_false(has_binding(list(id = "empty")))
   expect_true(has_binding(vocab_dataset_body(list(
     list(id = "A"), list(id = "B", values_from = "visit@1.0")
   ))))
@@ -916,7 +1116,7 @@ test_that("overrides write into the addressed column and clear its binding", {
 
 # A temp source directory holding a vocabulary, a dataset template bound to it,
 # and a creation template offering a slot over the same column.
-vocab_slot_source_dir <- function(slot_lines) {
+vocab_slot_source_dir <- function(slot_lines, dataset_id_line = "  id: ds1") {
   dir <- withr::local_tempdir(.local_envir = parent.frame())
   write_vocabulary_fixture(dir)
 
@@ -926,7 +1126,7 @@ vocab_slot_source_dir <- function(slot_lines) {
       "id: bound_ds",
       "version: \"1.0\"",
       "dataset:",
-      "  name: ds1",
+      dataset_id_line,
       "  type: tabular",
       "  files: {filename: x.csv, type: csv}",
       "  columns:",
@@ -934,7 +1134,7 @@ vocab_slot_source_dir <- function(slot_lines) {
       "      type: SAS Char",
       "      values_from: visit@1.0"
     ),
-    file.path(dir, "bound_ds.dta-dataset-template.yaml")
+    lib_path(dir, "bound_ds.dta-dataset-template.yaml")
   )
 
   writeLines(
@@ -949,7 +1149,7 @@ vocab_slot_source_dir <- function(slot_lines) {
       "  - template: bound_ds@1.0",
       slot_lines
     ),
-    file.path(dir, "with_slot.dta-template.yaml")
+    lib_path(dir, "with_slot.dta-template.yaml")
   )
 
   dir
@@ -1059,25 +1259,6 @@ test_that("vocabulary_slots merge by id across extends:", {
   a <- Filter(function(s) identical(s$id, "a"), slots)[[1]]
   expect_identical(as.character(a$default), "Y")
   expect_identical(as.character(a$target), "datasets.ds1.columns.A.values")
-})
-
-test_that("template_provenance() records vocabulary selections as a sibling of selections", {
-  prov_fn <- app_fn("template_provenance")
-
-  with_sel <- prov_fn(
-    list(id = "t", version = "1.0"), list(id = "t", version = "1.0"),
-    selections = list(opt = "x"),
-    vocab_selections = list(visit_choice = c("SCR", "EOT"))
-  )
-  expect_identical(with_sel$vocabulary_selections$visit_choice, c("SCR", "EOT"))
-  # A sibling, never an entry inside `selections`: rebase replays `selections`
-  # through the template's `options:`, where a slot id is not an option id.
-  expect_null(with_sel$selections$visit_choice)
-
-  # Omitted entirely when the template offered no slots, so an unaffected
-  # document's provenance block does not grow an empty key.
-  without <- prov_fn(list(id = "t", version = "1.0"), list(id = "t", version = "1.0"), selections = list())
-  expect_false("vocabulary_selections" %in% names(without))
 })
 
 

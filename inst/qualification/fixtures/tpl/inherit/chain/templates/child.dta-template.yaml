@@ -1,0 +1,4 @@
+kind: dta_creation_template
+id: chain_child
+version: "1.0"
+extends: chain_parent@1.0

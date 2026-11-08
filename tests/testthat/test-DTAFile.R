@@ -85,7 +85,12 @@ test_that("Testing pattern with DTAFileTSV", {
 
   x <- read_file(file_info, path)
 
-  expect_s3_class(x, c("R6", "Table", "ArrowTabular", "ArrowObject"))
+  # ANY-match on "R6" alone would also accept an un-materialised Dataset,
+  # Scanner or RecordBatchReader -- pin the real Table and its shape instead.
+  expect_true(all(c("Table", "ArrowTabular") %in% class(x)))
+  expect_equal(ncol(x), 33)
+  expect_equal(nrow(x), 490)
+  expect_true(all(c("STUDYID", "DOMAIN") %in% names(x)))
 })
 
 
@@ -154,7 +159,13 @@ test_that("DTAFileDelim reads tab-delimited files", {
   expect_true(matches_filename(file_info, basename(path)))
 
   x <- read_file(file_info, path)
-  expect_s3_class(x, c("R6", "Table", "ArrowTabular", "ArrowObject"))
+
+  # ANY-match on "R6" alone would also accept an un-materialised Dataset,
+  # Scanner or RecordBatchReader -- pin the real Table and its shape instead.
+  expect_true(all(c("Table", "ArrowTabular") %in% class(x)))
+  expect_equal(ncol(x), 33)
+  expect_equal(nrow(x), 490)
+  expect_true(all(c("STUDYID", "DOMAIN") %in% names(x)))
 })
 
 
@@ -647,7 +658,7 @@ test_that("the two parse settings survive the factory and a YAML round trip", {
   # DTAFileFactory. A key that never reaches the constructor is a key a user
   # can write and never see honoured.
   parsed <- yaml::yaml.load(paste(
-    "name: encoded",
+    "id: encoded",
     "type: tabular",
     "files:",
     "  type: tsv",
@@ -1074,6 +1085,25 @@ test_that("the reader plan's encoding argument overrides the handler's", {
   )
 })
 
+test_that("a declared missing value adds to Arrow's default NA markers rather than replacing them", {
+  # Before the fix, dta_reader_na_values() returned unique(c("", declared)),
+  # dropping "NA" from the set the readers fall back to when `na` is NULL --
+  # so a literal "NA" cell stopped reading as missing the moment a handler
+  # declared any missing_values of its own. Both readers must keep treating
+  # "NA" as missing AND honour the newly declared marker.
+  path <- file.path(tempdir(), "declared_missing.csv")
+  on.exit(unlink(path), add = TRUE)
+  writeLines(c("ID,VAL", "A001,NA", "A002,.", "A003,5"), path)
+
+  handler <- DTAFileCSV(basename(path), missing_values = ".")
+
+  eager <- as.data.frame(read_file(handler, path))
+  expect_identical(is.na(eager$VAL), c(TRUE, TRUE, FALSE))
+
+  lazy <- as.data.frame(open_file(handler, path))
+  expect_identical(is.na(lazy$VAL), c(TRUE, TRUE, FALSE))
+})
+
 
 # ---- pattern_description reaches the concrete subclasses ---------------------
 # DTAFile has carried a `pattern_description` property from the start, and the
@@ -1112,7 +1142,7 @@ test_that("a pattern description survives the factory and a YAML round trip", {
   expect_equal(f@pattern_description, "one file per batch")
 
   ds <- dta_dataset_from_list(list(
-    name = "described",
+    id = "described",
     type = "tabular",
     files = list(
       type = "tsv", filename = "gf_.*[.]tsv$", pattern = TRUE,
@@ -1251,7 +1281,7 @@ test_that("a handler can carry several file names", {
 
 test_that("a filename sequence from YAML becomes a character vector", {
   ds <- dta_dataset_from_list(list(
-    name = "multi_name",
+    id = "multi_name",
     type = "tabular",
     files = list(
       type = "csv", filename = list("site_a.csv", "site_b.csv"),

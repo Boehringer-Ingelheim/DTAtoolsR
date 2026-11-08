@@ -14,12 +14,18 @@ Run everything from the repo root.
 | Tests | `Rscript -e "devtools::test()"` (one file: `devtools::test(filter='DTAFile')`) |
 | Style R code | `Rscript .github/scripts/style.R` |
 | Regenerate docs | `Rscript -e "roxygen2::roxygenise()"` |
-| Full check (= CI) | `Rscript -e "rcmdcheck::rcmdcheck(args='--no-manual')"` |
+| Full check (= CI) | `Rscript -e "rcmdcheck::rcmdcheck(args='--no-manual', env=c(NOT_CRAN='true'))"` |
 | Fast hooks | `pre-commit run --all-files` (also runs in CI) |
 
 In PowerShell, `R` is an alias for `Invoke-History` — always use `Rscript`, and
 quote `-e` with double quotes so the argument survives. If `Rscript` is not on
 `PATH`, `CLAUDE.local.md` holds the absolute path for this machine.
+
+`NOT_CRAN` is part of the full-check command, not decoration: `R CMD check` does
+not set it, and without it every `skip_on_cran()` test skips — including the two
+in `test-generic-guards.R` that are the only way to observe a package-load
+failure. The `R-CMD-check` workflow sets the same variable, so leaving it out
+locally means checking something CI does not.
 
 `.Rprofile` sources `renv/activate.R`, which repoints `.libPaths()` at a project
 library keyed by the project *directory name*. The main checkout's is populated;
@@ -97,7 +103,7 @@ contract.
 - **Merging PRs**: Never call `gh pr merge --auto` or `gh pr merge` immediately
   assuming GitHub will wait. Instead, explicitly poll and wait with `gh pr checks`
   or `gh run list --branch` until **all** CI workflows (`R-CMD-check` on all OS
-  matrix targets, `manifest-sync`, `r-style`, `pre-commit`) have finished and
+  matrix targets, `r-style`, `pre-commit`) have finished and
   reported passing status (`pass` / `completed success`) before initiating a merge.
 - Graphify is installed but produces nothing here: its extractor has no `.R`
   parser, so a build reports "No code files found". Use `Explore`, not a graph.
@@ -141,6 +147,25 @@ contract.
   `Rscript .github/scripts/style.R` yourself before committing, never
   `styler::style_pkg()` (see Commands above for why); do not hand-format.
 
+## Qualification suite
+
+`inst/qualification/` is a second, separately-run test suite that produces
+audit-grade evidence (IQ/OQ/PQ) for an *installed* copy of the package. It is
+not part of `devtools::test()`; it runs on demand via `run_qualification()`.
+
+**If you change the package, it probably needs updating too** — a new export
+must be listed and covered, a changed behaviour means a changed requirement
+and not just a changed test, a fixed defect must be closed in the register,
+and anything under `inst/` needs the file manifest regenerated. The rules are
+enforced by meta-checks that fail the run, not by review.
+
+Read `inst/qualification/docs/maintaining.md` before touching it. It is
+task-oriented: find what you changed, do what it says. `inst/qualification/README.md`
+covers running and reviewing a qualification instead.
+
+The one rule that governs everything there: **an expected value never comes
+from the software.** Never paste observed output in as an expectation.
+
 ## Guardrails
 
 - Never hand-edit `man/`, `NAMESPACE`, or `renv.lock` — they are generated.
@@ -155,8 +180,8 @@ contract.
   entry, not a version bump.
 - Never bump the version unless I ask for it. A bump is a release step of its
   own, not a side effect of a feature branch: `Version:` in `DESCRIPTION` moves
-  together with `inst/shiny/dta_app/VERSION`, the two version entries in the
-  app's `manifest.json`, the badge and footer in `docs/index.html`, and the
+  together with `inst/shiny/dta_app/VERSION`, the badge and footer in
+  `docs/index.html`, and the
   `CHANGELOG.md` heading — all rewritten by
   `Rscript .github/scripts/bump_version.R <version>` (or the **Bump version**
   workflow), and checked by `check_version_sync.R` in CI. A stray bump also

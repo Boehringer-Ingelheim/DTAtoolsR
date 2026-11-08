@@ -27,113 +27,6 @@ test_that("format_datasets_summary on a DTA with zero datasets is valid, non-emp
   expect_identical(out, "No datasets")
 })
 
-test_that("format_datasets_detail lists every dataset's column ids and rule ids", {
-  dta <- app_fixture_dta()
-  ds_names <- names(dta@datasets)
-  out <- app_fn("format_datasets_detail")(dta)
-
-  for (nm in ds_names) {
-    expect_match(out, paste0("## Dataset: ", nm), fixed = TRUE)
-    ds <- DTAtools::datasets(dta, nm)
-
-    col_ids <- names(ds@specs@columns)
-    for (col_id in col_ids) {
-      expect_match(out, paste0("**", col_id, "**"), fixed = TRUE)
-    }
-
-    rule_ids <- vapply(ds@specs@rules, function(r) r@id, character(1))
-    for (rule_id in rule_ids) {
-      expect_match(out, paste0("**", rule_id, ":**"), fixed = TRUE)
-    }
-  }
-})
-
-test_that("format_datasets_detail on a DTA with zero datasets is valid, non-NA text (possibly empty)", {
-  dta <- app_fixture_dta()
-  dta@datasets <- list()
-
-  out <- app_fn("format_datasets_detail")(dta)
-  expect_false(is.na(out))
-  expect_identical(out, "")
-})
-
-test_that(".format_rule_detail formats a col_condition (IF/THEN) rule", {
-  f <- app_fn(".format_rule_detail")
-  l <- list(
-    type = "col_condition",
-    condition = list(VISIT = list(equals = "V03")),
-    then = list(STATUS = list(equals = "COMPLETED"))
-  )
-  expect_identical(f(l), "IF VISIT equals V03 THEN STATUS equals COMPLETED")
-})
-
-test_that(".format_rule_detail formats a col_range rule", {
-  f <- app_fn(".format_rule_detail")
-  l <- list(type = "col_range", columns = "AGE", min = 18, max = 65)
-  expect_identical(f(l), "AGE in [18, 65]")
-})
-
-test_that(".format_rule_detail formats a col_unique rule", {
-  f <- app_fn(".format_rule_detail")
-  l <- list(type = "col_unique", columns = c("SUBJECT_ID", "VISIT"))
-  expect_identical(f(l), "unique(SUBJECT_ID, VISIT)")
-})
-
-test_that(".format_rule_detail formats a group_condition rule", {
-  f <- app_fn(".format_rule_detail")
-  l <- list(
-    type = "group_condition",
-    group_by = c("SUBJECT_ID", "VISIT"),
-    conditions = list(c1 = list(STATUS = list(equals = "FAILED"))),
-    constraints = list(list(type = "requires", `if` = "c1", then = "c1"))
-  )
-  expect_identical(f(l), "group(SUBJECT_ID, VISIT): 1 condition(s), 1 constraint(s)")
-})
-
-test_that(".format_rule_detail falls back to the raw type token for an unrecognised rule type, and to empty for no rule", {
-  f <- app_fn(".format_rule_detail")
-  expect_identical(f(list(type = "mystery_type")), "mystery_type")
-  expect_identical(f(NULL), "")
-})
-
-test_that("format_datasets_detail matches the fixture's real rule shapes end to end", {
-  # The fixture DTA (inst/extdata/clinical_dta.yaml) carries all three rule
-  # shapes .format_rule_detail() handles; assert the exact phrasing survives
-  # the full format_datasets_detail() pipeline for one of each.
-  dta <- app_fixture_dta()
-  out <- app_fn("format_datasets_detail")(dta)
-
-  expect_match(out, "IF VISIT equals V03 THEN STATUS equals COMPLETED", fixed = TRUE)
-  expect_match(out, "AGE in [18, 65]", fixed = TRUE)
-  expect_match(out, "unique(SUBJECT_ID, VISIT)", fixed = TRUE)
-})
-
-test_that("format_datasets_detail keeps a file handler's filename separate from its endings", {
-  # Before the fix, handler_expected() glued the allowed-endings restriction
-  # onto the filename, so the exported spec read
-  # "- ^report_.* (pdf, zip) (3 files) -- ...", two adjacent parenthesised
-  # groups, and the declared filename/pattern could not be read back verbatim
-  # from the export. handler_expected() now returns the filename/pattern
-  # ONLY; the endings restriction is surfaced by handler_endings() as its own
-  # labelled field.
-  h <- DTAtools::DTAFileAny(
-    filename = "^report_.*", pattern = TRUE, extensions = c("pdf", "zip")
-  )
-  ds <- DTAtools::DTADataSetFile(name = "reports", files = list(h))
-  dta_obj <- DTAtools::DTA(datasets = list(reports = ds))
-
-  expect_equal(app_fn("handler_expected")(h), "^report_.*")
-
-  out <- app_fn("format_datasets_detail")(dta_obj)
-
-  # The filename/pattern is verbatim, immediately after "- " -- not with
-  # "(pdf, zip)" glued directly onto it.
-  expect_match(out, "- ^report_.* (1 file) (allowed endings: pdf, zip) [regex]", fixed = TRUE)
-  expect_no_match(out, "^report_.* (pdf, zip)", fixed = TRUE)
-  # The endings restriction still shows up, in its own labelled field.
-  expect_match(out, "allowed endings: pdf, zip", fixed = TRUE)
-})
-
 test_that("embed_yaml_markdown appends the DTA's YAML to the original markdown text", {
   dta <- app_fixture_dta()
   md <- "# My Export\n\nSome narrative text."
@@ -143,10 +36,12 @@ test_that("embed_yaml_markdown appends the DTA's YAML to the original markdown t
   expect_match(out, "# My Export", fixed = TRUE)
   expect_match(out, "Some narrative text.", fixed = TRUE)
   # The embedded block is a machine-readable YAML rendering of the DTA,
-  # fenced in an HTML comment; a dataset name from the fixture must appear
-  # inside it.
+  # fenced in an HTML comment; the fixture dataset must appear inside it, as a
+  # list entry that opens with its id. (Not "name: clinical_data": that is a
+  # substring of the file pattern's `filename: clinical_data...` and would
+  # pass whatever the dataset is called.)
   expect_match(out, "EMBEDDED DTA YAML", fixed = TRUE)
-  expect_match(out, "name: clinical_data", fixed = TRUE)
+  expect_match(out, "- id: clinical_data", fixed = TRUE)
   expect_match(out, "END EMBEDDED DTA YAML", fixed = TRUE)
 })
 
@@ -155,7 +50,7 @@ test_that("embed_yaml_markdown still embeds the YAML when the markdown text is e
   out <- app_fn("embed_yaml_markdown")("", dta)
 
   expect_match(out, "EMBEDDED DTA YAML", fixed = TRUE)
-  expect_match(out, "name: clinical_data", fixed = TRUE)
+  expect_match(out, "- id: clinical_data", fixed = TRUE)
 })
 
 test_that("list_available_templates finds the real bundled .docx template", {
@@ -165,12 +60,16 @@ test_that("list_available_templates finds the real bundled .docx template", {
   # environment before sourcing the helper files, so this resolves correctly
   # both under devtools::test() (pkgload's shim) and under R CMD check
   # (base::system.file() against the installed package).
+  #
+  # The exemplar has to be a real fill-in template: dta_numbered_template.docx
+  # was used here until the listing learned to exclude documents with no
+  # placeholders in them, and it is no longer offered.
   templates <- app_fn("list_available_templates")()
-  expect_true("dta_numbered_template.docx" %in% templates)
+  expect_true("clinical_dta_template.docx" %in% templates)
 
-  path <- app_fn("get_template_path")("dta_numbered_template.docx")
+  path <- app_fn("get_template_path")("clinical_dta_template.docx")
   expect_true(file.exists(path))
-  expect_match(path, "dta_numbered_template\\.docx$")
+  expect_match(path, "clinical_dta_template\\.docx$")
 })
 
 test_that("get_template_path returns NULL (not an error) for an unknown template name", {
@@ -193,11 +92,60 @@ test_that("get_template_path refuses a name that escapes the templates directory
   expect_null(get_template_path("..\\..\\DESCRIPTION"))
   expect_null(get_template_path(file.path(tempdir(), "planted.docx")))
   expect_null(get_template_path(NA_character_))
-  expect_null(get_template_path(c("dta_numbered_template.docx", "other.docx")))
+  expect_null(get_template_path(c("clinical_dta_template.docx", "other.docx")))
 
   # A traversal that ends in a real bundled template name must not be repaired
-  # into a hit either -- it is simply not the offered name.
-  expect_null(get_template_path("../templates/dta_numbered_template.docx"))
+  # into a hit either -- it is simply not the offered name. The name has to be
+  # one the listing actually offers, or this asserts nothing about traversal.
+  expect_null(get_template_path("../word-templates/clinical_dta_template.docx"))
+})
+
+test_that("template_has_placeholders is TRUE for the real bundled fill-in template", {
+  path <- app_fixture_path("word-templates/clinical_dta_template.docx")
+  expect_true(app_fn("template_has_placeholders")(path))
+})
+
+test_that("template_has_placeholders is FALSE for the numbered-heading styles reference document", {
+  # dta_numbered_template.docx is not a fill-in template: it is the reference
+  # document .new_numbered_docx() (R/documentBuilders.R) opens purely for its
+  # numbered heading styles, and it carries zero {PLACEHOLDER} markers. This is
+  # the regression list_available_templates() must no longer offer it for --
+  # before the fix, a user who picked it got a Word document containing none
+  # of their DTA, with no warning.
+  path <- app_fixture_path("word-templates/dta_numbered_template.docx")
+  expect_false(app_fn("template_has_placeholders")(path))
+})
+
+test_that("template_has_placeholders is FALSE, not an error, for a non-docx file or a missing path", {
+  fake_docx <- tempfile(fileext = ".docx")
+  writeLines("just some text, not a zip archive", fake_docx)
+  on.exit(unlink(fake_docx, force = TRUE), add = TRUE)
+
+  expect_false(app_fn("template_has_placeholders")(fake_docx))
+  expect_false(app_fn("template_has_placeholders")(file.path(tempdir(), "no-such-file.docx")))
+})
+
+test_that("template_has_placeholders finds a placeholder split across Word runs", {
+  # Word freely splits a typed placeholder across multiple runs (spell-check
+  # state, revision ids, a stray formatting toggle); a raw grep on
+  # document.xml would miss a token split this way, which is why the scan
+  # reads paragraph *text* instead.
+  path <- tempfile(fileext = ".docx")
+  on.exit(unlink(path, force = TRUE), add = TRUE)
+  doc <- officer::read_docx()
+  doc <- officer::body_add_fpar(
+    doc,
+    officer::fpar(officer::ftext("{DTA_"), officer::ftext("TITLE}"))
+  )
+  print(doc, target = path)
+
+  expect_true(app_fn("template_has_placeholders")(path))
+})
+
+test_that("list_available_templates excludes the numbered-heading styles reference document", {
+  templates <- app_fn("list_available_templates")()
+  expect_false("dta_numbered_template.docx" %in% templates)
+  expect_true("clinical_dta_template.docx" %in% templates)
 })
 
 test_that("the export modal is built by app.R, with no orphaned UI builder", {
@@ -281,7 +229,19 @@ test_that("find_chrome_binary ignores an override pointing at a missing file", {
 # markdown_to_pdf_via_chrome() is intentionally NOT tested here: it shells
 # out to a real Chrome/Edge binary via system2() to print a PDF, which is an
 # external-process integration concern outside the scope of these unit
-# tests (and not reliably available/deterministic in CI).
+# tests (and not reliably available/deterministic in CI). What it hands the
+# browser is pinned instead: scripts are blocked by a CSP in the page itself,
+# because the Chromium flags that claim to do it either do nothing
+# (--disable-javascript) or also break --print-to-pdf (--blink-settings).
+test_that("the Chrome PDF route blocks scripts with a CSP, not with a browser flag", {
+  src <- app_source(file.path("R", "utils_export.R"))
+  # default-src 'none' blocks scripts (and every fetch: images, frames) and
+  # nothing re-allows a script source.
+  expect_match(src, "Content-Security-Policy\\\" content=\\\"default-src 'none';", fixed = TRUE)
+  expect_no_match(src, "script-src", fixed = TRUE)
+  expect_no_match(src, "\"--disable-javascript\"", fixed = TRUE)
+  expect_no_match(src, "\"--blink-settings", fixed = TRUE)
+})
 
 test_that("the export modal defaults to Word with the YAML specification embedded", {
   # Deliberate defaults: Word is the format users actually hand over, and the
@@ -291,13 +251,12 @@ test_that("the export modal defaults to Word with the YAML specification embedde
   # sees each time.
   app_code <- paste(readLines(file.path(.shiny_app_dir(), "app.R"), warn = FALSE), collapse = "\n")
 
-  fmt <- regmatches(
-    app_code,
-    regexpr('(?s)radioButtons\\("export_format".{0,300}?selected = "[a-z]+"', app_code, perl = TRUE)
-  )
-  expect_length(fmt, 1)
-  expect_match(fmt, 'selected = "word"', fixed = TRUE)
-  expect_false(grepl('selected = "markdown"', fmt, fixed = TRUE))
+  # The selection is no longer a literal in app.R: it comes from the library's
+  # app config via export_document_options() (dta-app.yaml `default_document`),
+  # whose stock default is Word. Pin both halves -- the dialog reads the option,
+  # and the default option is Word.
+  expect_match(app_code, "selected = export_choices$default_format", fixed = TRUE)
+  expect_identical(app_fn("export_document_options")()$default_format, "word")
 
   yaml_box <- regmatches(
     app_code,
@@ -327,5 +286,642 @@ test_that("the export modal names itself once", {
   expect_equal(
     length(gregexpr('"Export Document"', modal, fixed = TRUE)[[1]]),
     1L
+  )
+})
+
+test_that("raw LaTeX in document text does not reach the generated .tex", {
+  skip_if_not(rmarkdown::pandoc_available())
+
+  # The markdown pandoc_convert() reads here is built from document text a
+  # third party controls (metadata title, dataset description, contact
+  # names, ...), so the reader has to be pinned to a dialect without raw
+  # passthrough: left at the default "markdown" reader, a `\input{}` planted
+  # in any of those fields is typeset verbatim into the PDF, reading an
+  # arbitrary server-side file into the delivered document.
+  backslash <- rawToChar(as.raw(92))
+  md_file <- tempfile(fileext = ".md")
+  on.exit(unlink(md_file, force = TRUE), add = TRUE)
+  writeLines(
+    c(
+      "# Study Title",
+      "",
+      paste0("Some narrative text with a raw command: ", backslash, "input{some/path.tex}"),
+      "",
+      "More surrounding prose that must survive conversion."
+    ),
+    md_file
+  )
+
+  tex_file <- tempfile(fileext = ".tex")
+  on.exit(unlink(tex_file, force = TRUE), add = TRUE)
+  rmarkdown::pandoc_convert(
+    input = normalizePath(md_file),
+    from = "markdown-raw_tex-raw_html-raw_attribute",
+    to = "latex",
+    output = tex_file
+  )
+  tex <- paste(readLines(tex_file, warn = FALSE), collapse = "\n")
+
+  expect_false(grepl(paste0(backslash, "input{"), tex, fixed = TRUE))
+  # The rest of the line must still have made it through, so the assertion
+  # above fails on a conversion that silently dropped the whole line rather
+  # than on one that neutralised only the raw command.
+  expect_match(tex, "More surrounding prose that must survive conversion", fixed = TRUE)
+})
+
+test_that("raw HTML in document text does not reach the generated HTML", {
+  skip_if_not(rmarkdown::pandoc_available())
+
+  # Same reasoning as the LaTeX case above: a <script> planted in document
+  # text must not survive as a live tag, or it executes in the headless
+  # browser that markdown_to_pdf_via_chrome() drives server-side.
+  md_file <- tempfile(fileext = ".md")
+  on.exit(unlink(md_file, force = TRUE), add = TRUE)
+  writeLines(
+    c(
+      "# Study Title",
+      "",
+      "Some narrative text with a raw tag: <script>alert(1)</script>",
+      "",
+      "More surrounding prose that must survive conversion."
+    ),
+    md_file
+  )
+
+  html_file <- tempfile(fileext = ".html")
+  on.exit(unlink(html_file, force = TRUE), add = TRUE)
+  rmarkdown::pandoc_convert(
+    input = normalizePath(md_file),
+    from = "markdown-raw_tex-raw_html-raw_attribute",
+    to = "html5",
+    output = html_file
+  )
+  html <- paste(readLines(html_file, warn = FALSE), collapse = "\n")
+
+  expect_false(grepl("<script>", html, fixed = TRUE))
+  expect_match(html, "More surrounding prose that must survive conversion", fixed = TRUE)
+})
+
+test_that("editor tables escape attacker-controlled text but keep the Actions buttons live", {
+  skip_if_not_installed("DT")
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("bslib")
+  skip_if_not_installed("shinyjs")
+
+  # The previous version of this test built its OWN one-row data frame and
+  # called DT::datatable() on it directly: it proved DT escapes correctly
+  # when handed the right `escape=` argument, and nothing about
+  # output$file_tbl, output$col_tbl or output$rule_tbl (app.R), the three real
+  # call sites that each independently pass `escape = -ncol(ov)`. It would
+  # have kept passing had all three reverted to `escape = FALSE`.
+  #
+  # Driving the real render through shiny::testServer() only gets partway,
+  # and it is worth being explicit about the wall: DT::renderDataTable()
+  # defaults to `server = TRUE` (all three call sites take that default), and
+  # in server mode the render strips `x$data` before the value testServer can
+  # read is built -- the escaped cells are computed later, per AJAX request,
+  # by DT:::dataTablesFilter(), reached only through a live browser round
+  # trip. shiny's MockShinySession (what testServer runs on) deliberately
+  # refuses that round trip -- its handleRequest is `stop("for internal use
+  # only")` and its data-object registry is guarded the same way -- so no
+  # amount of testServer plumbing reaches the actual escaped output. What IS
+  # reachable, and what the first block below checks, is that the real render
+  # runs against real edited state without error and in the real
+  # `serverSide = TRUE` configuration.
+  #
+  # The escaping guarantee itself -- the actual point of this test -- is
+  # checked the same way the original test did (DT's own preRenderHook, kept
+  # off DT's private internals), but now against the LIVE overview each call
+  # site builds (dta_handlers_overview()/dta_columns_overview()/
+  # dta_rules_overview(), fed by state this block edits through the real
+  # editor inputs) and the identical `DT::datatable()` arguments each call
+  # site uses. The Actions column is the one stand-in left: row_action_buttons()
+  # is a closure private to the server function, unreachable from a test, so a
+  # representative button tag takes its place there.
+  #
+  # A source-level pin closes the remaining gap: it fails if any call site's
+  # `escape = -ncol(ov)` argument itself is ever edited away, which is exactly
+  # the regression neither the render check nor the escaping check above can
+  # see.
+
+  app_server_dir <- function() .shiny_app_dir()
+  app_file_input <- function(filename) {
+    path <- app_fixture_path(filename)
+    data.frame(
+      name = filename, size = file.size(path), type = "", datapath = path,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  xss <- "<img src=x onerror=alert(1)>"
+  escaped_xss <- "&lt;img src=x onerror=alert(1)&gt;"
+
+  # Re-escape the LIVE overview data through the same call DT::datatable()
+  # receives at each real site (rownames/escape are what decide escaping;
+  # class/width/options do not, and are dropped as noise).
+  escaped_cells <- function(ov) {
+    ov$Actions <- "<button>x</button>" # stand-in -- see the WHY comment above
+    wid <- DT::datatable(ov, rownames = FALSE, selection = "none", escape = -ncol(ov))
+    unlist(wid$preRenderHook(wid)$x$data)
+  }
+
+  check_table <- function(output_json, ov) {
+    out <- unclass(output_json)
+    expect_match(out, '"serverSide":true', fixed = TRUE)
+    expect_match(out, ">Actions<", fixed = TRUE)
+
+    cells <- escaped_cells(ov)
+    expect_true(any(grepl(escaped_xss, cells, fixed = TRUE)))
+    expect_false(any(grepl(xss, cells, fixed = TRUE)))
+    expect_true(any(grepl("<button>x</button>", cells, fixed = TRUE)))
+  }
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+
+    # file_tbl: attacker text in a handler's pattern description.
+    session$setInputs(edit_files = 1)
+    session$setInputs(file_add = 1)
+    session$setInputs(
+      file_filename = "extra.csv", file_type = "csv", file_pattern = FALSE,
+      file_pattern_description = xss
+    )
+    session$setInputs(file_save = 1)
+    expect_null(rv$file_msg)
+    check_table(output$file_tbl, app_fn("dta_handlers_overview")(rv$dta, "clinical_data"))
+
+    # col_tbl: attacker text in a column's description.
+    session$setInputs(edit_cols = 1)
+    session$setInputs(col_add = 1)
+    session$setInputs(
+      col_id = "ZZXSS", col_label = "Test column", col_backend = "SAS",
+      col_type = "Char", col_format = "", col_length = "10",
+      col_nullable = TRUE, col_values = "", col_pattern = "",
+      col_desc = xss
+    )
+    session$setInputs(col_save = 1)
+    expect_null(rv$col_msg)
+    check_table(output$col_tbl, app_fn("dta_columns_overview")(rv$dta, "clinical_data"))
+
+    # rule_tbl: attacker text in a rule's description.
+    session$setInputs(edit_rules = 1)
+    session$setInputs(rule_add = 1)
+    session$setInputs(rule_type = "col_unique")
+    session$setInputs(rule_id = "zzxss_unique", rule_desc = xss, rule_cols = "SUBJECT_ID")
+    session$setInputs(rule_save = 1)
+    expect_null(rv$rule_msg)
+    check_table(output$rule_tbl, app_fn("dta_rules_overview")(rv$dta, "clinical_data"))
+  })
+
+  app_code <- app_source("app.R")
+  for (id in c("file_tbl", "col_tbl", "rule_tbl")) {
+    block <- regmatches(
+      app_code,
+      regexpr(
+        paste0("(?s)output\\$", id, " <- DT::renderDataTable\\(\\{.*?\\n  \\}\\)"),
+        app_code,
+        perl = TRUE
+      )
+    )
+    expect_length(block, 1)
+    expect_match(block, "escape = -ncol(ov)", fixed = TRUE)
+  }
+})
+
+# ---- Markdown / PDF export: the file and the name must agree ---------------
+#
+# The handler made its temp file with the extension of the REQUESTED format, so
+# a PDF export wrote Markdown into "dta-export-*.pdf" and then derived the PDF
+# path from it with sub("\.md$", ".pdf", ...) -- the same path. Pandoc was then
+# told to read and write one file, and when no PDF route worked the Markdown
+# text was delivered under a ".pdf" name.
+
+first_bytes <- function(path, n = 5L) {
+  rawToChar(readBin(path, "raw", n = n))
+}
+
+# Drive the export modal's Export button in markdown mode with "PDF" ticked and
+# hand back what the server queued for download. The file is read INSIDE the
+# server block: the app deletes its export files when the session ends, which
+# is before testServer() returns.
+run_markdown_pdf_export <- function() {
+  out <- list()
+  shiny::testServer(.shiny_app_dir(), {
+    rv$dta <- app_fixture_dta()
+    session$setInputs(
+      export_format = "markdown",
+      export_as_pdf = TRUE,
+      export_include_yaml_md = FALSE
+    )
+    session$setInputs(export_do = 1)
+    out$path <<- export_state$file_path
+    out$name <<- export_state$file_name
+    out$exists <<- file.exists(out$path)
+    out$head <<- if (out$exists) first_bytes(out$path) else ""
+    out$text <<- if (out$exists) paste(readLines(out$path, warn = FALSE, n = 200L), collapse = "\n") else ""
+  })
+  out
+}
+
+test_that("a PDF export without pandoc, LaTeX or a browser still delivers a PDF", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("bslib")
+  skip_if_not_installed("DT")
+  skip_if_not_installed("shinyjs")
+  skip_if_not_installed("rmarkdown")
+  # No pandoc rules out routes 1 and 2; R's own device must still deliver.
+  local_mocked_bindings(pandoc_available = function(...) FALSE, .package = "rmarkdown")
+
+  res <- run_markdown_pdf_export()
+
+  expect_equal(tolower(tools::file_ext(res$name)), "pdf")
+  expect_equal(tolower(tools::file_ext(res$path)), "pdf")
+  expect_equal(res$head, "%PDF-")
+})
+
+test_that("a PDF export that cannot make a PDF delivers Markdown under a .md name", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("bslib")
+  skip_if_not_installed("DT")
+  skip_if_not_installed("shinyjs")
+  skip_if_not_installed("rmarkdown")
+  # No pandoc, and R's own PDF devices fail too: the documented fallback.
+  local_mocked_bindings(pandoc_available = function(...) FALSE, .package = "rmarkdown")
+  local_mocked_bindings(
+    cairo_pdf = function(...) stop("no device"),
+    pdf = function(...) stop("no device"),
+    .package = "grDevices"
+  )
+
+  res <- run_markdown_pdf_export()
+
+  expect_equal(tolower(tools::file_ext(res$name)), "md")
+  expect_equal(tolower(tools::file_ext(res$path)), "md")
+  expect_true(res$exists)
+  expect_false(startsWith(res$head, "%PDF"))
+  expect_match(res$text, "#", fixed = TRUE)
+})
+
+test_that("a PDF export that succeeds delivers a real PDF under a .pdf name", {
+  skip_on_cran()
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("bslib")
+  skip_if_not_installed("DT")
+  skip_if_not_installed("shinyjs")
+  skip_if_not_installed("rmarkdown")
+  skip_if_not(rmarkdown::pandoc_available(), "pandoc is not available")
+  skip_if_not(
+    app_fn("has_pdf_engine")() || nzchar(app_fn("find_chrome_binary")()),
+    "no PDF engine or Chrome/Edge is available"
+  )
+
+  res <- run_markdown_pdf_export()
+
+  # Whichever route produced it, the extension and the content agree.
+  expect_equal(tolower(tools::file_ext(res$name)), "pdf")
+  expect_equal(tolower(tools::file_ext(res$path)), "pdf")
+  expect_true(res$exists)
+  expect_equal(res$head, "%PDF-")
+})
+
+test_that("embed_yaml_markdown keeps a '-->' in the document from closing the comment", {
+  # An HTML comment ends at the first "-->"; a title carrying one would
+  # otherwise expose the rest of the YAML as live markdown/HTML.
+  dta <- app_fixture_dta()
+  dta@metadata@title <- "a --> <img src=x> --!> b"
+
+  out <- app_fn("embed_yaml_markdown")("", dta)
+
+  closers <- gregexpr("--!?>", out)[[1]]
+  expect_length(closers, 1)
+  expect_true(endsWith(out, "END EMBEDDED DTA YAML ========== -->"))
+  expect_match(out, "a --&gt; <img src=x> --!&gt; b", fixed = TRUE)
+})
+
+test_that("pandoc_no_images_filter turns planted images into their alt text", {
+  skip_if_not(rmarkdown::pandoc_available(), "pandoc not available")
+  filter <- app_fn("pandoc_no_images_filter")()
+  on.exit(unlink(filter), add = TRUE)
+  md <- tempfile(fileext = ".md")
+  html <- tempfile(fileext = ".html")
+  on.exit(unlink(c(md, html)), add = TRUE)
+  writeLines(
+    "**Title:** ![alt words](http://169.254.169.254/x.png) and ![](file:///etc/x.png)",
+    md
+  )
+
+  rmarkdown::pandoc_convert(
+    md,
+    from = "markdown-raw_tex-raw_html-raw_attribute", to = "html5",
+    output = html, options = c("--lua-filter", filter)
+  )
+  out <- paste(readLines(html, warn = FALSE), collapse = "\n")
+
+  expect_false(grepl("<img", out, fixed = TRUE))
+  expect_false(grepl("169.254.169.254", out, fixed = TRUE))
+  expect_match(out, "alt words", fixed = TRUE)
+})
+
+test_that("csv_formula_safe defuses formula-leading text cells and leaves the rest", {
+  df <- data.frame(
+    column = c("=HYPERLINK(\"http://x\")", "+1", "-2", "@SUM(A1)", "\tx", "plain", NA),
+    row = c(1L, 2L, 3L, 4L, 5L, 6L, 7L),
+    table = factor(c("=t", "t", "t", "t", "t", "t", "t")),
+    stringsAsFactors = FALSE
+  )
+
+  out <- app_fn("csv_formula_safe")(df)
+
+  expect_identical(
+    out$column,
+    c("'=HYPERLINK(\"http://x\")", "'+1", "'-2", "'@SUM(A1)", "'\tx", "plain", NA)
+  )
+  expect_identical(out$row, df$row)
+  expect_identical(out$table, c("'=t", rep("t", 6)))
+})
+
+# ---- the app's own PDF chain (dta_export_pdf) --------------------------------
+# soffice -> pandoc -> R's own graphics device. None of it was reached by any
+# test before; the external converters are mocked away so the built-in route,
+# the one every machine without LibreOffice or LaTeX takes, is what runs.
+
+test_that("dta_is_pdf() accepts a PDF and rejects anything else", {
+  is_pdf <- app_fn("dta_is_pdf")
+  pdf_file <- withr::local_tempfile(fileext = ".pdf")
+  grDevices::pdf(pdf_file)
+  graphics::plot.new()
+  grDevices::dev.off()
+  expect_true(is_pdf(pdf_file))
+
+  txt <- withr::local_tempfile(fileext = ".pdf")
+  writeLines("not a pdf at all", txt)
+  expect_false(is_pdf(txt))
+  expect_false(is_pdf(file.path(tempdir(), "no-such-file.pdf")))
+  expect_false(is_pdf(NULL))
+})
+
+test_that("dta_markdown_to_pdf() renders a long document onto several pages", {
+  out <- withr::local_tempfile(fileext = ".pdf")
+  lines <- c(
+    "# Heading", "", "**Label:** value", "", "- a bullet",
+    "| A | B |", "|---|---|", "| 1 | 2 |", "---",
+    rep("A line of ordinary body text that takes up its own line.", 150)
+  )
+  app_fn("dta_markdown_to_pdf")(lines, out)
+  expect_true(app_fn("dta_is_pdf")(out))
+
+  # Pagination, checked on a device whose output can be read back:
+  # dta_markdown_to_pdf() prefers cairo_pdf(), which packs its page objects into
+  # compressed streams, so draw the same lines with the renderer it uses onto an
+  # uncompressed pdf() and count "/Type /Page" (not "/Type /Pages") there.
+  plain <- withr::local_tempfile(fileext = ".pdf")
+  grDevices::pdf(plain, width = 8.27, height = 11.69, compress = FALSE)
+  app_fn("dta_render_markdown")(lines)
+  grDevices::dev.off()
+  bytes <- readBin(plain, "raw", file.size(plain))
+  pages <- length(grepRaw("/Type[[:space:]]*/Page[^s]", bytes, all = TRUE))
+  expect_gt(pages, 1)
+})
+
+test_that("dta_markdown_to_pdf() falls back to pdf() when cairo only warns that it cannot load", {
+  # macOS without XQuartz: capabilities("cairo") is TRUE, cairo_pdf() warns
+  # "failed to load cairo DLL" and opens no device.
+  testthat::local_mocked_bindings(
+    cairo_pdf = function(...) {
+      warning("failed to load cairo DLL")
+      invisible(NULL)
+    },
+    .package = "grDevices"
+  )
+  out <- withr::local_tempfile(fileext = ".pdf")
+  app_fn("dta_markdown_to_pdf")(c("# Heading", "", "Some body text."), out)
+  expect_true(app_fn("dta_is_pdf")(out))
+})
+
+test_that("without LibreOffice or pandoc, the PDF is rendered from the full Markdown export", {
+  env <- app_env()
+  rendered <- NULL
+  # rlang::local_bindings(), not testthat::local_mocked_bindings(): the latter
+  # resolves `.env` to its top-level namespace (shiny's, for app_env()) and so
+  # cannot see the app helpers. This patches app_env() itself and restores it
+  # when the test ends, so the shared environment is left as it was found.
+  rlang::local_bindings(
+    dta_find_soffice = function() "",
+    dta_pandoc_to_pdf = function(docx, file) FALSE,
+    dta_markdown_to_pdf = function(lines, file) {
+      rendered <<- lines
+      grDevices::pdf(file)
+      graphics::plot.new()
+      grDevices::dev.off()
+      invisible(file)
+    },
+    .env = env
+  )
+  dta <- create_example_DTA()
+  out <- withr::local_tempfile(fileext = ".pdf")
+  app_fn("dta_export_pdf")(dta, out)
+
+  expect_true(app_fn("dta_is_pdf")(out))
+  md <- withr::local_tempfile(fileext = ".md")
+  write_dta(dta, file = md, format = "md", include_signatures = FALSE, signature_list = NULL, quiet = TRUE)
+  expected <- readLines(md, warn = FALSE)
+  # The whole export reached the renderer -- not a stand-in page. Only the
+  # generation timestamp may differ between the two writes.
+  stamp <- function(x) grep("Generated", x, invert = TRUE, value = TRUE)
+  expect_identical(stamp(rendered), stamp(expected))
+  expect_false(any(grepl("could not be generated", rendered, fixed = TRUE)))
+})
+
+test_that("when the Markdown export fails too, the PDF export fails instead of writing a stub", {
+  env <- app_env()
+  real_write_dta <- DTAtools::write_dta
+  rlang::local_bindings(
+    dta_find_soffice = function() "",
+    dta_pandoc_to_pdf = function(docx, file) FALSE,
+    .env = env
+  )
+  testthat::local_mocked_bindings(
+    write_dta = function(dta, file, format = "docx", ...) {
+      if (identical(format, "md")) stop("markdown writer exploded")
+      real_write_dta(dta, file = file, format = format, ...)
+    },
+    .package = "DTAtools"
+  )
+  out <- withr::local_tempfile(fileext = ".pdf")
+  writeLines("stale bytes", out)
+
+  res <- app_fn("dta_export")(create_example_DTA(), out, "pdf")
+  expect_false(res$ok)
+  expect_match(res$error, "Could not produce a PDF", fixed = TRUE)
+  expect_match(res$error, "markdown writer exploded", fixed = TRUE)
+  expect_false(file.exists(out))
+})
+
+# ---- Library word templates and the config-driven export options -------------
+
+app_fixture_template <- function() {
+  path <- system.file("extdata", "word-templates", "clinical_dta_template.docx", package = "DTAtools")
+  expect_true(nzchar(path))
+  path
+}
+
+# A normalised app config built from a real dta-app.yaml in a temp library ROOT
+# that holds a copy of the packaged Word template as export-templates/our_dta.docx.
+library_cfg <- function(yaml_lines, .local_envir = parent.frame()) {
+  lib <- withr::local_tempdir(.local_envir = .local_envir)
+  dir.create(file.path(lib, "export-templates"))
+  expect_true(file.copy(app_fixture_template(), file.path(lib, "export-templates", "our_dta.docx")))
+  writeLines(yaml_lines, file.path(lib, "dta-app.yaml"))
+  list(dir = lib, cfg = app_fn("parse_dta_app_config")(file.path(lib, "dta-app.yaml"))$config)
+}
+
+# A normalised config from `exports:` lines alone.
+exports_cfg <- function(..., .local_envir = parent.frame()) {
+  f <- withr::local_tempfile(fileext = ".yaml", .local_envir = .local_envir)
+  writeLines(c("exports:", paste0("  ", c(...))), f)
+  app_fn("parse_dta_app_config")(f)$config
+}
+
+test_that("list_available_templates adds library templates after the bundled ones, with config labels", {
+  lc <- library_cfg(c(
+    "exports:",
+    "  word_templates:",
+    "    - file: export-templates/our_dta.docx",
+    "      label: Our DTA template"
+  ))
+  got <- app_fn("list_available_templates")(lc$cfg)
+
+  expect_true("clinical_dta_template.docx" %in% got)
+  expect_identical(unname(got[["Our DTA template"]]), "library:our_dta.docx")
+  expect_identical(names(got)[[length(got)]], "Our DTA template")
+})
+
+test_that("bundled_word_templates: false leaves only the library templates", {
+  lc <- library_cfg(c(
+    "exports:",
+    "  bundled_word_templates: false",
+    "  word_templates:",
+    "    - file: export-templates/our_dta.docx"
+  ))
+  got <- app_fn("list_available_templates")(lc$cfg)
+
+  expect_identical(unname(got), "library:our_dta.docx")
+  expect_null(app_fn("get_template_path")("clinical_dta_template.docx", lc$cfg))
+})
+
+test_that("get_template_path resolves a library template inside the library and still refuses traversal", {
+  lc <- library_cfg(c(
+    "exports:",
+    "  bundled_word_templates: false",
+    "  word_templates:",
+    "    - file: export-templates/our_dta.docx"
+  ))
+  get_path <- app_fn("get_template_path")
+
+  path <- get_path("library:our_dta.docx", lc$cfg)
+  expect_identical(
+    normalizePath(path, winslash = "/"),
+    normalizePath(file.path(lc$dir, "export-templates", "our_dta.docx"), winslash = "/")
+  )
+  # Not offered by the stock config, so not resolvable there.
+  expect_null(get_path("library:our_dta.docx"))
+  # The client may send anything over the websocket.
+  expect_null(get_path("library:../../DESCRIPTION", lc$cfg))
+  expect_null(get_path("library:other.docx", lc$cfg))
+  expect_null(get_path("../our_dta.docx", lc$cfg))
+  expect_null(get_path("our_dta.docx", lc$cfg))
+  expect_null(get_path(file.path(lc$dir, "export-templates", "our_dta.docx"), lc$cfg))
+})
+
+test_that("export_document_options offers only what exports.document allows", {
+  stock <- app_fn("export_document_options")()
+  expect_true(stock$any)
+  expect_identical(unname(stock$format_choices), c("markdown", "word"))
+  expect_true(stock$pdf_choice)
+  expect_identical(unname(stock$mode_choices), c("builtin", "custom"))
+
+  pdf_only <- app_fn("export_document_options")(exports_cfg("document: [markdown_pdf]"))
+  expect_identical(unname(pdf_only$format_choices), "markdown")
+  expect_false(pdf_only$pdf_choice)
+  expect_true(pdf_only$pdf_forced)
+  expect_true(pdf_only$allowed("markdown", as_pdf = TRUE))
+  expect_false(pdf_only$allowed("markdown", as_pdf = FALSE))
+  expect_false(pdf_only$allowed("word"))
+
+  md_only <- app_fn("export_document_options")(exports_cfg("document: [markdown]"))
+  expect_false(md_only$pdf_choice)
+  expect_false(md_only$pdf_forced)
+  expect_true(md_only$allowed("markdown", as_pdf = FALSE))
+  expect_false(md_only$allowed("markdown", as_pdf = TRUE))
+
+  word_only <- app_fn("export_document_options")(exports_cfg("document: [word]"))
+  expect_identical(unname(word_only$format_choices), "word")
+  expect_identical(unname(word_only$mode_choices), "builtin")
+  expect_true(word_only$allowed("word", word_mode = "builtin"))
+  expect_false(word_only$allowed("word", word_mode = "custom"))
+
+  none <- app_fn("export_document_options")(exports_cfg("document: []"))
+  expect_false(none$any)
+  expect_false(none$allowed("word"))
+  expect_false(none$allowed("markdown"))
+})
+
+test_that("word_template counts as offered only when a template exists to pick", {
+  lc <- library_cfg(c(
+    "exports:",
+    "  document: [word_template]",
+    "  bundled_word_templates: false",
+    "  word_templates:",
+    "    - file: export-templates/our_dta.docx"
+  ))
+  o <- app_fn("export_document_options")(lc$cfg)
+  expect_identical(unname(o$mode_choices), "custom")
+  expect_identical(o$default_mode, "custom")
+  expect_true(o$allowed("word", word_mode = "custom"))
+  expect_false(o$allowed("word", word_mode = "builtin"))
+
+  # Same selection with nothing to pick: not offered at all.
+  cfg <- lc$cfg
+  cfg$exports$word_templates <- cfg$exports$word_templates[0, ]
+  expect_false(app_fn("export_document_options")(cfg)$any)
+})
+
+test_that("default_document picks the preselected format, mode and PDF state", {
+  o <- app_fn("export_document_options")(exports_cfg("default_document: markdown_pdf"))
+  expect_identical(o$default_format, "markdown")
+  expect_true(o$default_pdf)
+
+  o <- app_fn("export_document_options")(exports_cfg("default_document: markdown"))
+  expect_identical(o$default_format, "markdown")
+  expect_false(o$default_pdf)
+})
+
+test_that("two library Word templates with one file name: the first is offered and the duplicate is named in a warning", {
+  lib <- withr::local_tempdir()
+  dir.create(file.path(lib, "a"))
+  dir.create(file.path(lib, "b"))
+  expect_true(file.copy(app_fixture_template(), file.path(lib, "a", "same.docx")))
+  expect_true(file.copy(app_fixture_template(), file.path(lib, "b", "same.docx")))
+  writeLines(c(
+    "exports:",
+    "  bundled_word_templates: false",
+    "  word_templates:",
+    "    - {file: a/same.docx, label: First}",
+    "    - {file: b/same.docx, label: Second}"
+  ), file.path(lib, "dta-app.yaml"))
+  cfg <- app_fn("parse_dta_app_config")(file.path(lib, "dta-app.yaml"))$config
+
+  expect_warning(
+    got <- app_fn("list_available_templates")(cfg),
+    "same.docx",
+    fixed = TRUE
+  )
+  expect_identical(got, c(First = "library:same.docx"))
+  expect_match(
+    # get_template_path() re-lists, so it repeats the duplicate warning asserted above.
+    normalizePath(suppressWarnings(app_fn("get_template_path")("library:same.docx", cfg)), winslash = "/"),
+    "/a/same.docx",
+    fixed = TRUE
   )
 })

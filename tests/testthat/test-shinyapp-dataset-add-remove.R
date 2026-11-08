@@ -64,7 +64,7 @@ test_that("an unrecognised type is rejected, changing nothing", {
   expect_equal(names_fn(dta), "clinical_data")
 })
 
-test_that("a duplicate name is rejected, changing nothing", {
+test_that("a duplicate id is rejected, changing nothing", {
   add <- app_fn("dta_add_dataset")
   names_fn <- app_fn("dta_dataset_names")
 
@@ -72,22 +72,22 @@ test_that("a duplicate name is rejected, changing nothing", {
   r <- add(dta, "clinical_data")
 
   expect_false(r$ok)
-  expect_match(r$error, "already exists")
+  expect_match(r$error, "A dataset with ID 'clinical_data' already exists.", fixed = TRUE)
   # The DTA handed in is untouched: the collision was caught before any write.
   expect_equal(names_fn(dta), "clinical_data")
 })
 
-test_that("an empty name is rejected with a message rather than an S7 abort", {
+test_that("an empty id is rejected with a message rather than an S7 abort", {
   add <- app_fn("dta_add_dataset")
 
   for (bad in list("", "   ", NULL)) {
     r <- add(app_fixture_dta(), bad)
     expect_false(r$ok)
-    expect_match(r$error, "name is required")
+    expect_match(r$error, "A dataset ID is required.", fixed = TRUE)
   }
 })
 
-test_that("a name is trimmed before it is stored", {
+test_that("an id is trimmed before it is stored", {
   add <- app_fn("dta_add_dataset")
   names_fn <- app_fn("dta_dataset_names")
 
@@ -96,21 +96,69 @@ test_that("a name is trimmed before it is stored", {
   expect_true(r$ok)
   expect_true("new_ds" %in% names_fn(r$value))
   expect_false("  new_ds  " %in% names_fn(r$value))
+  expect_equal(DTAtools::datasets(r$value, "new_ds")@id, "new_ds")
 })
 
-test_that("a description is stored, and a blank one is unset rather than empty", {
+test_that("a name and a description are stored, and blank ones are unset rather than empty", {
   add <- app_fn("dta_add_dataset")
 
-  with_desc <- add(app_fixture_dta(), "new_ds", description = "A new dataset")
-  expect_true(with_desc$ok)
-  expect_equal(
-    DTAtools::datasets(with_desc$value, "new_ds")@description,
-    "A new dataset"
+  with_both <- add(app_fixture_dta(), "new_ds",
+    name = "A new dataset", description = "What it holds, in words"
+  )
+  expect_true(with_both$ok)
+  ds <- DTAtools::datasets(with_both$value, "new_ds")
+  expect_equal(ds@id, "new_ds")
+  expect_equal(ds@name, "A new dataset")
+  expect_equal(ds@description, "What it holds, in words")
+
+  # Each is stored independently of the other.
+  only_name <- add(app_fixture_dta(), "new_ds", name = "Only a label")
+  expect_true(only_name$ok)
+  ds <- DTAtools::datasets(only_name$value, "new_ds")
+  expect_equal(ds@name, "Only a label")
+  expect_null(ds@description)
+
+  only_desc <- add(app_fixture_dta(), "new_ds", description = "Only a description")
+  expect_true(only_desc$ok)
+  ds <- DTAtools::datasets(only_desc$value, "new_ds")
+  expect_null(ds@name)
+  expect_equal(ds@description, "Only a description")
+
+  for (blank in list("", "   ", NULL)) {
+    r <- add(app_fixture_dta(), "new_ds", name = blank, description = blank)
+    expect_true(r$ok)
+    ds <- DTAtools::datasets(r$value, "new_ds")
+    expect_null(ds@name)
+    expect_null(ds@description)
+  }
+})
+
+test_that("a name and a description reach a file dataset too", {
+  add <- app_fn("dta_add_dataset")
+
+  r <- add(app_fixture_dta(), "raw",
+    type = "file",
+    name = "Raw export", description = "The files as delivered"
   )
 
-  blank_desc <- add(app_fixture_dta(), "new_ds", description = "   ")
-  expect_true(blank_desc$ok)
-  expect_null(DTAtools::datasets(blank_desc$value, "new_ds")@description)
+  expect_true(r$ok)
+  ds <- DTAtools::datasets(r$value, "raw")
+  expect_true(inherits(ds, "DTAtools::DTADataSetFile"))
+  expect_equal(ds@id, "raw")
+  expect_equal(ds@name, "Raw export")
+  expect_equal(ds@description, "The files as delivered")
+})
+
+test_that("two datasets may be added with the same name, but not the same id", {
+  add <- app_fn("dta_add_dataset")
+  names_fn <- app_fn("dta_dataset_names")
+
+  dta <- add(app_fixture_dta(), "first", name = "Shared label")$value
+  r <- add(dta, "second", name = "Shared label")
+
+  expect_true(r$ok)
+  expect_equal(names_fn(r$value), c("clinical_data", "first", "second"))
+  expect_equal(DTAtools::datasets(r$value, "second")@name, "Shared label")
 })
 
 test_that("a new dataset is appended last, leaving existing positions unchanged", {
@@ -142,7 +190,9 @@ test_that("an added dataset of each type survives a YAML round trip", {
   read_yaml_text <- app_fn("dta_read_yaml_text")
 
   dta <- app_fixture_dta()
-  dta <- add(dta, "new_tabular", type = "tabular")$value
+  dta <- add(dta, "new_tabular",
+    type = "tabular", name = "New tabular", description = "Rows and columns"
+  )$value
   dta <- add(dta, "new_file", type = "file")$value
 
   ser <- to_yaml(dta)
@@ -155,8 +205,17 @@ test_that("an added dataset of each type survives a YAML round trip", {
   fil <- DTAtools::datasets(loaded$value, "new_file")
   expect_true(inherits(tab, "DTAtools::DTADataSetTabular"))
   expect_equal(tab@type, "tabular")
+  # id, name and description each come back as themselves -- none is read as
+  # another (`name:` is a label and must not be taken for the identifier of an
+  # entry that already carries an `id:`).
+  expect_equal(tab@id, "new_tabular")
+  expect_equal(tab@name, "New tabular")
+  expect_equal(tab@description, "Rows and columns")
   expect_true(inherits(fil, "DTAtools::DTADataSetFile"))
   expect_equal(fil@type, "file")
+  expect_equal(fil@id, "new_file")
+  expect_null(fil@name)
+  expect_null(fil@description)
 })
 
 # ---- Removing a dataset ------------------------------------------------------
@@ -254,7 +313,7 @@ test_that("removing one of two datasets keeps the sidebar rendered", {
   shiny::testServer(.shiny_app_dir(), {
     session$setInputs(dta_file = sidebar_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
-    session$setInputs(add_ds_name = "second_ds", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "second_ds", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
     expect_equal(names(rv$structure), c("clinical_data", "second_ds"))
 
@@ -272,7 +331,7 @@ test_that("removing one of two datasets keeps the sidebar rendered", {
     expect_false(grepl("second_ds", nav, fixed = TRUE))
 
     metrics <- paste(as.character(output$summary_metrics$html), collapse = "")
-    expect_match(metrics, "datasets", fixed = TRUE)
+    expect_match(metrics, "dataset", fixed = TRUE)
     expect_match(metrics, ">1<") # one dataset left in the overview count
 
     header <- paste(as.character(output$workspace_header$html), collapse = "")
@@ -289,7 +348,7 @@ test_that("removing the first dataset keeps the sidebar pointing at the second",
   shiny::testServer(.shiny_app_dir(), {
     session$setInputs(dta_file = sidebar_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
-    session$setInputs(add_ds_name = "second_ds", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "second_ds", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
 
     # Select the FIRST dataset via its nav row, then remove it.
@@ -304,6 +363,111 @@ test_that("removing the first dataset keeps the sidebar pointing at the second",
     nav <- paste(as.character(output$dataset_nav_ui$html), collapse = "")
     expect_match(nav, "second_ds", fixed = TRUE)
     expect_false(grepl("clinical_data", nav, fixed = TRUE))
+    expect_false(grepl("Clinical data table", nav, fixed = TRUE))
+  })
+})
+
+# ---- the add-dataset dialog: id, name and description -----------------------
+#
+# A dataset is identified by its ID (required, the key in the specification and
+# in every validation message); the name is its human-readable label and the
+# description a long free text, both optional. The dialog asks for the three
+# separately, and the app must put each where it belongs.
+
+test_that("the add-dataset modal asks for an id, a name, a description and a type", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("bslib")
+  skip_if_not_installed("DT")
+  skip_if_not_installed("shinyjs")
+
+  shiny::testServer(.shiny_app_dir(), {
+    session$setInputs(dta_file = sidebar_upload(app_fixture_path("clinical_dta.yaml")))
+    unlock_editing(session)
+    session$setInputs(add_dataset_open = 1)
+
+    html <- paste(as.character(output$add_ds_body$html), collapse = "")
+
+    # The identifier and the label are two separate text inputs ...
+    expect_match(html, '<input id="add_ds_id" type="text"', fixed = TRUE)
+    expect_match(html, '<input id="add_ds_name" type="text"', fixed = TRUE)
+    # ... the long description is a textarea, not a single line ...
+    expect_match(html, '<textarea id="add_ds_description"', fixed = TRUE)
+    # ... and the type chooser is still there.
+    expect_match(html, 'name="add_ds_type"', fixed = TRUE)
+    # Only the ID is marked required; the others say they are optional.
+    expect_match(html, "Name (optional)", fixed = TRUE)
+    expect_match(html, "Description (optional)", fixed = TRUE)
+  })
+})
+
+test_that("saving the add-dataset dialog stores the id, name and description separately", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("bslib")
+  skip_if_not_installed("DT")
+  skip_if_not_installed("shinyjs")
+
+  shiny::testServer(.shiny_app_dir(), {
+    session$setInputs(dta_file = sidebar_upload(app_fixture_path("clinical_dta.yaml")))
+    unlock_editing(session)
+    session$setInputs(
+      add_ds_id = "dm", add_ds_name = "Demographics",
+      add_ds_description = "One row per subject.", add_ds_type = "tabular"
+    )
+    session$setInputs(add_ds_save = 1)
+
+    expect_null(rv$add_ds_msg)
+    expect_equal(names(rv$structure), c("clinical_data", "dm"))
+    ds <- DTAtools::datasets(rv$dta, "dm")
+    expect_equal(ds@id, "dm")
+    expect_equal(ds@name, "Demographics")
+    expect_equal(ds@description, "One row per subject.")
+    # The structure carries the LABEL for the nav, not the id.
+    expect_equal(rv$structure[["dm"]]$label, "Demographics")
+  })
+})
+
+test_that("saving the add-dataset dialog with a blank name leaves the name unset", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("bslib")
+  skip_if_not_installed("DT")
+  skip_if_not_installed("shinyjs")
+
+  shiny::testServer(.shiny_app_dir(), {
+    session$setInputs(dta_file = sidebar_upload(app_fixture_path("clinical_dta.yaml")))
+    unlock_editing(session)
+    session$setInputs(
+      add_ds_id = "dm", add_ds_name = "   ",
+      add_ds_description = "", add_ds_type = "tabular"
+    )
+    session$setInputs(add_ds_save = 1)
+
+    expect_null(rv$add_ds_msg)
+    ds <- DTAtools::datasets(rv$dta, "dm")
+    expect_null(ds@name)
+    expect_null(ds@description)
+    # With no name the nav label falls back to the id.
+    expect_equal(rv$structure[["dm"]]$label, "dm")
+  })
+})
+
+test_that("saving the add-dataset dialog without an id is rejected, naming the ID", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("bslib")
+  skip_if_not_installed("DT")
+  skip_if_not_installed("shinyjs")
+
+  shiny::testServer(.shiny_app_dir(), {
+    session$setInputs(dta_file = sidebar_upload(app_fixture_path("clinical_dta.yaml")))
+    unlock_editing(session)
+    # A name alone is not an identifier: the dataset cannot be keyed by it.
+    session$setInputs(
+      add_ds_id = "", add_ds_name = "Demographics", add_ds_type = "tabular"
+    )
+    session$setInputs(add_ds_save = 1)
+
+    expect_false(rv$add_ds_msg$ok)
+    expect_match(rv$add_ds_msg$error, "A dataset ID is required.", fixed = TRUE)
+    expect_equal(names(rv$structure), "clinical_data")
   })
 })
 
@@ -325,22 +489,40 @@ test_that("removing the first dataset keeps the sidebar pointing at the second",
 # both directions (workspace on load, landing on reset) -- the failure mode of
 # an over-eager isolate() is a layout frozen on the landing page.
 
+# Local copy of the autosave-slot cleanup in test-shinyapp-server.R /
+# test-shinyapp-create-empty.R / test-shinyapp-edit-mode.R -- deliberately
+# duplicated rather than shared (see the rationale in
+# test-shinyapp-create-empty.R). Only the test below sets a client id, so
+# only it needs this.
+clean_session_file <- function() {
+  f <- list.files(tempdir(),
+    pattern = "^dtatools_app_session.*\\.rds$", full.names = TRUE
+  )
+  unlink(f, force = TRUE)
+  invisible(f)
+}
+
 test_that("doc_token moves only on load, restore and reset -- not on mutations", {
   skip_if_not_installed("shiny")
   skip_if_not_installed("bslib")
   skip_if_not_installed("DT")
   skip_if_not_installed("shinyjs")
 
+  # A stale autosave from another test file (tempdir() is shared for the
+  # whole run) must not leak into this test via a false restore.
+  clean_session_file()
   shiny::testServer(.shiny_app_dir(), {
-    # A client id first, so every autosave lands in a restorable session file.
-    session$setInputs(dta_client_id = strrep("e", 32))
+    # A client id first, so every autosave lands in a restorable session
+    # file. This file's id must stay exclusive: every a-f letter is already
+    # claimed by another shinyapp test file, hence a digit.
+    session$setInputs(dta_client_id = strrep("1", 32))
 
     session$setInputs(dta_file = sidebar_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
     expect_equal(rv$doc_token, 1)
 
     # Mutations of the loaded document: the token must not move.
-    session$setInputs(add_ds_name = "second_ds", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "second_ds", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
     expect_equal(names(rv$structure), c("clinical_data", "second_ds"))
     expect_equal(rv$doc_token, 1)

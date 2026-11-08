@@ -13,7 +13,10 @@ write_dataset_metadata(
   include_file_specs = TRUE,
   include_rules = TRUE,
   signature_list = NULL,
-  quiet = FALSE
+  quiet = FALSE,
+  document_name = NULL,
+  organisation = NULL,
+  organisation_unit = NULL
 )
 }
 \arguments{
@@ -21,22 +24,41 @@ write_dataset_metadata(
 
 \item{file}{Character. Output file path}
 
-\item{format}{Character. Output format: "docx" (default), "pdf", or "md"}
+\item{format}{Character. Output format: "docx", "pdf", or "md". If NULL
+(the default), inferred from the file extension, falling back to "docx"
+when the file has none.}
 
 \item{overwrite}{Logical. Whether to overwrite existing files. Default: FALSE.}
 
-\item{include_signatures}{Logical. Whether to include signature section. Default: TRUE.}
+\item{include_signatures}{Logical. Whether to include the signature section.
+Default: TRUE. In DOCX/PDF the section appears only when \code{signature_list}
+is non-empty.}
 
-\item{include_file_specs}{Logical. Whether to include file specifications. Default: TRUE.}
+\item{include_file_specs}{Logical. Whether to include file specifications.
+Default: TRUE. Ignored for \code{format = "md"}, which always includes them.}
 
-\item{include_rules}{Logical. Whether to include validation rules (DTADataSetTabular only). Default: TRUE.}
+\item{include_rules}{Logical. Whether to include validation rules
+(DTADataSetTabular only). Default: TRUE. Ignored for \code{format = "md"},
+which always includes them.}
 
-\item{signature_list}{List of signatories}
+\item{signature_list}{List of signatories, each a list with \code{name}, \code{role}
+and optionally \code{organization} (or \code{org}) fields.}
 
 \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
+
+\item{document_name}{Optional character: what this kind of document is
+called, shown as the main title of the export; the dataset specification
+follows beneath it. A vector is joined with \code{" / "}. \code{NULL} (the default)
+uses "Data Transfer Agreement".}
+
+\item{organisation, organisation_unit}{Optional single strings naming the
+organisation (and unit within it) issuing the document. When given they are
+shown on the title page (Word/PDF) or in the top header block (Markdown);
+the dataset document has no running header. \code{NULL} or empty (the default)
+shows nothing.}
 }
 \value{
-Invisibly returns the document object
+Invisibly \code{NULL}. The document is written to \code{file}.
 }
 \description{
 Creates a professionally formatted DOCX, PDF, or Markdown document from a DTADataSet object,

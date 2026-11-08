@@ -1,0 +1,16 @@
+kind: dta_creation_template
+id: mx_assay
+version: "1.0"
+abstract: true
+base: {}
+datasets:
+  - id: qa_data
+    type: tabular
+    files:
+      filename: qa_data.tsv
+      type: tsv
+    columns:
+      - id: SUBJID
+        type: SAS Char
+        format: SAS $10.
+        nullable: No

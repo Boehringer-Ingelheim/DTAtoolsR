@@ -1,0 +1,5 @@
+kind: dta_creation_template
+id: fs_empty
+version: "1.0"
+extends: fs_parent@1.0
+datasets: []

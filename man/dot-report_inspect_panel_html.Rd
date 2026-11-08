@@ -13,7 +13,8 @@ same message \code{id}, as returned by
 legitimately return more than one row per id (a rule's failing-row
 preview, or multiple group_condition violations); every row is used
 where it matters (the "actual" tables), while metadata that's constant
-across rows (\code{id}, \code{type}, \code{message}, \code{headline}) is read from the first.}
+across rows (\code{id}, \code{type}, \code{message}) is read from the first. The panel
+headline is not a column: it is built from \code{message}.}
 
 \item{rule_def}{Optional S7 rule object to describe; \code{NULL} for
 columnspec/import messages, or when the rule definition could not be

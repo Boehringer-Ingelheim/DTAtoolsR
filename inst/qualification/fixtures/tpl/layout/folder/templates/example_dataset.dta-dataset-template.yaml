@@ -1,0 +1,11 @@
+# REQ-TMPL-031: a structurally valid dataset template.
+kind: dta_dataset_template
+id: layout_dataset
+version: "1.0"
+label: Layout qualification dataset
+dataset:
+  id: records
+  type: tabular
+  columns:
+    - id: SUBJECT
+      type: SAS Char

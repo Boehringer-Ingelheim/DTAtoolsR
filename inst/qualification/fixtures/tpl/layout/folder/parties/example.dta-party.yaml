@@ -1,0 +1,8 @@
+# REQ-TMPL-031: a structurally valid party profile.
+kind: dta_party_profile
+id: layout_party
+version: "1.0"
+role: supplier
+label: Layout qualification party
+affiliation:
+  name: Example Supplier

@@ -2,13 +2,17 @@
 % Please edit documentation in R/documentBuilders.R
 \name{.add_bold_subheading}
 \alias{.add_bold_subheading}
-\title{Add a bold subheading paragraph — used for nesting deeper than officer's default
-template supports (it only defines "heading 1" through "heading 3").}
+\title{Add a bold subheading paragraph — used where heading styles cannot be
+relied on: officer's default template only defines "heading 1" through
+"heading 3"
+(write_dta() uses .new_numbered_docx(), which provides headings 1-4).}
 \usage{
 .add_bold_subheading(doc, text)
 }
 \description{
-Add a bold subheading paragraph — used for nesting deeper than officer's default
-template supports (it only defines "heading 1" through "heading 3").
+Add a bold subheading paragraph — used where heading styles cannot be
+relied on: officer's default template only defines "heading 1" through
+"heading 3"
+(write_dta() uses .new_numbered_docx(), which provides headings 1-4).
 }
 \keyword{internal}

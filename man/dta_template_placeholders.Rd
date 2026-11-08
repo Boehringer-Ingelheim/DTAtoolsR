@@ -8,16 +8,22 @@ dta_template_placeholders(dta = NULL)
 }
 \arguments{
 \item{dta}{Optional \link{DTA} object. When supplied, the returned values are the
-resolved text for that object. When \code{NULL} (the default) they are short
-descriptions of what each placeholder means.}
+resolved text for that object's inline placeholders; a block, region or
+dataset entry has no text value of its own outside of a repetition, so it
+keeps its description either way. When \code{NULL} (the default) every entry
+is a short description of what the placeholder means.}
 }
 \value{
 A named character vector whose names are the brace-delimited
 placeholder tokens (\code{"{DTA_TITLE}"} and so on), in documentation order.
 The values are \describe{
 \item{descriptions}{when \code{dta} is \code{NULL}.}
-\item{the resolved text}{when \code{dta} is a \link{DTA}.}
+\item{the resolved text}{when \code{dta} is a \link{DTA}, for inline placeholders;
+a block, region or dataset entry keeps its description either way.}
 }
+The returned vector also carries a \code{kind} attribute: a character vector,
+named like the return value, of \code{"inline"}, \code{"block"}, \code{"region"} or
+\code{"dataset"}.
 }
 \description{
 \code{\link[=export_with_template]{export_with_template()}} fills a fixed set of \code{{PLACEHOLDER}} markers from a
@@ -25,9 +31,29 @@ The values are \describe{
 \code{DTA}, what each one would currently expand to -- rather than exporting a
 document to find out, or reading the list out of the documentation by hand.
 }
+\details{
+A placeholder is one of four kinds. An \strong{inline} placeholder resolves to a
+string substituted into a run of text, and may sit mid-sentence. A \strong{block}
+replaces a whole paragraph with rendered Word content -- a table, a
+heading, a list -- so it must be the only text in its paragraph, in the
+document body. A \strong{region} marker (\verb{\{#DATASETS\}} / \verb{\{/DATASETS\}}) opens
+and closes a span of the document body that is repeated once per dataset;
+each marker, too, must be alone in its own body paragraph. A \strong{dataset}
+placeholder (such as \code{{DATASET_NAME}}) resolves inside a region, once per
+repetition, to a value of the dataset that repetition belongs to. All four
+kinds share one token grammar and are told apart by the \code{kind} attribute of
+the returned vector, not by the vector's type.
+}
 \examples{
 # What can a template refer to?
 head(dta_template_placeholders())
+
+# A block placeholder's description, and how to tell it from an inline one.
+dta_template_placeholders()[["{COLUMN_SPECS}"]]
+attr(dta_template_placeholders(), "kind")[["{COLUMN_SPECS}"]]
+
+# The placeholders usable inside a {#DATASETS} repeating region.
+dta_template_placeholders()[attr(dta_template_placeholders(), "kind") == "dataset"]
 
 # What would those become for a real DTA?
 dta <- read_dta_from_yaml(

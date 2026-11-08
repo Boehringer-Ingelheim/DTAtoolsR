@@ -5,7 +5,11 @@
 #' @import S7
 #' @importFrom cli cli_h1
 #'
-#' @param datasets A named list of DTADataSet objects.
+#' @param datasets A list of DTADataSet objects, keyed by their \code{id}. An
+#'   unnamed list is keyed automatically; a named one must use each dataset's
+#'   \code{id} as its name. Ids must be unique -- \code{check()} looks datasets
+#'   up by id, so a repeated id would validate one entry twice and the other
+#'   never.
 #' @param metadata A DTAMetaData object.
 #' @param ... If metadata is not set, additional arguments are passed to
 #'   DTAMetaData(...).
@@ -22,13 +26,13 @@
 #'
 #' # Create the DTADataSet object
 #' data_obj <- DTADataSetTabular(
-#'   name = "example",
+#'   id = "example",
 #'   specs = create_example_DTAColumnSpecCollection(1),
 #'   tables = tables
 #' )
 #'
 #' DTA(
-#'   datasets = list(data = data_obj),
+#'   datasets = list(example = data_obj),
 #'   metadata = create_example_DTAMetaData()
 #' )
 #' @export
@@ -41,10 +45,10 @@ DTA <- S7::new_class(
   ) {
     if (inherits(datasets, "DTAtools::DTADataSet")) {
       datasets <- list(datasets)
-      names(datasets) <- datasets[[1]]@name
+      names(datasets) <- datasets[[1]]@id
     }
     if (is.list(datasets) && !is.null(datasets) && is.null(names(datasets))) {
-      names(datasets) <- vapply(datasets, function(x) x@name, character(1))
+      names(datasets) <- vapply(datasets, function(x) x@id, character(1))
     }
 
     if (is.null(metadata)) {
@@ -59,7 +63,55 @@ DTA <- S7::new_class(
   properties = list(
     datasets = class_list,
     metadata = class_DTAMetaData
-  )
+  ),
+  validator = function(self) {
+    ds <- self@datasets
+    # An empty or NULL @datasets is a legitimate DTA with nothing bound yet
+    # (see dta_from_list() and the Shiny app's "remove last dataset" flow) --
+    # there is nothing to name, so there is nothing to check here.
+    if (length(ds) == 0) {
+      return(NULL)
+    }
+
+    nms <- names(ds)
+    # `is.null(nms)` is checked before `is.na()`/`nzchar()` run over it: both
+    # return a zero-length result on NULL rather than erroring, which would
+    # silently skip the very case -- a datasets list assembled with no names
+    # at all -- this exists to catch.
+    if (is.null(nms) || any(is.na(nms) | !nzchar(nms))) {
+      cli_abort(
+        "Every entry in @datasets must have a non-empty name; check() reads and
+        writes @datasets[[name]], so an unnamed, empty or NA name is
+        indistinguishable from one that collides with another entry."
+      )
+    }
+
+    dupes <- unique(nms[duplicated(nms)])
+    if (length(dupes) > 0) {
+      # Interpolated, not pasted: a dataset name is arbitrary text, and a
+      # literal "{" in it would otherwise be parsed as a cli expression -- see
+      # the same reasoning in print(DTA) and method(datasets, DTA) above.
+      cli_abort(
+        "@datasets has duplicate name{?s}: {.val {dupes}}. check() reads and
+        writes @datasets[[name]], so a repeated name is validated twice under
+        one entry and never under the other."
+      )
+    }
+
+    # The key IS the id. results() reports a dataset under its @id while
+    # messages(), check() and the exports report it under its key, so a key that
+    # differs from the id splits one dataset into two names across reports.
+    ids <- vapply(ds, function(d) {
+      if (inherits(d, "DTAtools::DTADataSet")) d@id else NA_character_
+    }, character(1))
+    mismatch <- !is.na(ids) & ids != nms
+    if (any(mismatch)) {
+      cli_abort(c(
+        "Every entry in @datasets must be keyed by its dataset's id.",
+        x = "{cli::qty(sum(mismatch))}Key{?s} {.val {nms[mismatch]}} hold{?s/} dataset{?s} with id{?s} {.val {ids[mismatch]}}."
+      ))
+    }
+  }
 )
 
 
@@ -68,7 +120,7 @@ DTA <- S7::new_class(
 #' Method to get Metadata from a DTA object.
 #' @param x An object of class DTA
 #' @param ... Not used by current methods; reserved for future extensions.
-#' @return A list with metadata information
+#' @return A \code{DTAMetaData} object
 #' @examples
 #' dta_obj <- create_example_DTA()
 #' metadata(dta_obj)
@@ -90,8 +142,8 @@ method(metadata, DTA) <- function(x) {
 #'   \describe{
 #'     \item{name}{Optional single character or single integer. If NULL
 #'       (the default), returns a list of all datasets. If character, returns
-#'       the dataset with that name. If integer, returns the dataset at that
-#'       index.}
+#'       the dataset with that \code{id} (its key in the DTA). If integer,
+#'       returns the dataset at that index.}
 #'   }
 #' @return Either a list of DTADataSet objects or a single DTADataSet.
 #' @examples
@@ -137,7 +189,7 @@ method(datasets, DTA) <- function(x, name = NULL) {
 
   missing <- setdiff(name, names(all_datasets))
   if (length(missing) > 0) {
-    cli_abort("The following datasets{?s} not found: {.field {missing}}")
+    cli_abort("The following dataset{?s} not found: {.field {missing}}")
   }
 
   return(all_datasets[[name]])
@@ -259,7 +311,8 @@ method(`[`, DTA) <- function(x, i) {
 #'     \code{\link{check}()}.}
 #' }
 #'
-#' @param x A \code{DTA} or \code{DTADataSetTabular} object.
+#' @param x A \code{DTA}, \code{DTADataSetTabular} or \code{DTADataSetFile}
+#'   object.
 #' @param ... Additional arguments passed to the method.
 #' @return The updated object.
 #' @seealso \code{\link{check}()}, whose \code{batch_rows} and \code{max_errors}
@@ -334,11 +387,10 @@ method(load_file, DTA) <- function(
 
   dataset_object <- do.call(load_file, args)
 
-  if (is.numeric(dataset)) {
-    x@datasets[[dataset]] <- dataset_object
-  } else {
-    x@datasets[[dataset_object@name]] <- dataset_object
-  }
+  # Written back under the key it was read from (name or index alike), never
+  # under the object's own id: the two are kept equal by the validator, but a
+  # write-back keyed on the object could only ever disagree by adding an entry.
+  x@datasets[[dataset]] <- dataset_object
 
   x
 }
@@ -535,8 +587,8 @@ dta_overall_summary_message <- function(total_invalid,
 # Both unknown-severity paths abort rather than falling through. `switch()`
 # without a default arm returns NULL invisibly for an unmatched string, so a
 # severity added to a builder but not here would make that summary line vanish
-# silently -- the same class of defect as the two this change fixes, in the
-# code that fixes them.
+# silently -- a verdict line missing or wrong where the builders above decide
+# what it must say.
 #' @keywords internal
 dta_emit_summary_message <- function(summary_message) {
   severity <- summary_message$severity
@@ -560,7 +612,7 @@ dta_emit_summary_message <- function(summary_message) {
 #' Provides comprehensive validation summary across all datasets.
 #'
 #' @section Options that tune a scan:
-#' Three options change how a streamed table is read. None of them changes
+#' Four options change how a streamed table is read. None of them changes
 #' what is reported: a table gets the same verdict, the same counts and the
 #' same error detail whatever they are set to.
 #'
@@ -734,6 +786,11 @@ method(check, DTA) <- function(
   if (is.null(x@datasets) || length(x@datasets) == 0) {
     cli_abort("DTA object has no datasets to check.")
   }
+
+  # The datasets print their own "run explain_messages()" hint; inside a DTA
+  # check only the final summary should.
+  dta_check_state$nested <- TRUE
+  on.exit(dta_check_state$nested <- FALSE, add = TRUE)
 
   state <- dta_benchmark_begin(benchmark)
   # The reset cannot live only inside dta_benchmark_end(): several branches
@@ -941,6 +998,9 @@ method(check, DTA) <- function(
       total_unchecked = total_unchecked,
       total_undelivered = total_undelivered
     ))
+    if (total_invalid > 0 || total_import_errors > 0) {
+      cli::cli_alert_info("Run {.fn explain_messages} on the checked object to see what failed and why.")
+    }
   }
 
   attr(x, "last_validation_summary") <- summary_df
@@ -1041,7 +1101,8 @@ method(print, DTA) <- function(x, ...) {
 #' @title Create Example DTA Object
 #' @description
 #' Creates an example DTA object for demonstration purposes.
-#' @param index index of the example to create
+#' @param index Index of the example to create. Only \code{1} is currently
+#'   available; any other value is an error (or, for \code{2}, \code{NULL}).
 #' @importFrom cli cli_abort
 #' @return An object of class DTA with example data
 #' @examples
@@ -1049,18 +1110,17 @@ method(print, DTA) <- function(x, ...) {
 #' print(example_dta)
 #' @export
 create_example_DTA <- function(index = 1) {
-  switch(index,
-    `1` = {
-      DTA(
-        datasets = list(
-          create_example_DTADataSetTabular(2),
-          create_example_DTADataSetTabular(3)
-        ),
-        metadata = create_example_DTAMetaData()
-      )
-    },
-    `2` = {},
+  # Not switch(): a numeric `index` selects by POSITION there, and an index
+  # past the last alternative returns NULL instead of reaching the abort.
+  if (!identical(as.numeric(index), 1)) {
     cli_abort("No example found with index {index}.")
+  }
+  DTA(
+    datasets = list(
+      create_example_DTADataSetTabular(2),
+      create_example_DTADataSetTabular(3)
+    ),
+    metadata = create_example_DTAMetaData()
   )
 }
 
@@ -1081,11 +1141,15 @@ read_dta_from_yaml <- function(file) {
     cli_abort("YAML file does not exist: {.file {file}}")
   }
 
+  # Lint the file first (path form, so an unquoted `version:` is seen), so the
+  # caller gets every problem at once instead of the first constructor error.
+  dta_lint_enforce(lint_dta(file))
+
   yaml_data <- yaml::read_yaml(file)
 
   # Metadata is optional: a DTA may carry datasets without a metadata section
   # (see dta_from_list()). Do not abort here on a missing 'metadata' element.
-  dta_from_list(yaml_data)
+  dta_from_list_build(yaml_data)
 }
 
 
@@ -1106,6 +1170,12 @@ dta_from_list <- function(x) {
     cli_abort("x is not a list")
   }
 
+  dta_lint_enforce(lint_dta(x))
+  dta_from_list_build(x)
+}
+
+# The construction half of dta_from_list(); callers have linted already.
+dta_from_list_build <- function(x) {
   if (is.null(x$datasets)) {
     cli_alert_warning("No 'datasets' section found in list")
     x$datasets <- list()

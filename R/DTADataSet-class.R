@@ -4,46 +4,54 @@
 #' @import S7
 #' @importFrom cli cli_alert_info cli_abort
 #' @importFrom stringr str_flatten_comma
-#' @param name Character. Name of the container.
+#' @param id Character. Identifier of the dataset: its key in a DTA's
+#'   \code{datasets}, in every validation message and in \code{load_file()}.
 #' @param type Character. Dataset type: either \code{"tabular"}, whose files
 #'   are read and validated against column specifications, or \code{"file"},
 #'   whose files are only checked for presence, readability and non-emptiness.
 #' @param files a list of DTAFile objects specifying input file information.
-#' @param description Character or NA. Free-text description of the dataset.
-#' @param template_source Character or NA. Source of the template used to
+#' @param name Character or NULL. Human-readable name of the dataset, e.g.
+#'   \code{"Demographics"}; shown in place of the \code{id} where one is set.
+#' @param description Character or NULL. Long free-text description of the
+#'   dataset.
+#' @param template_source Character or NULL. Source of the template used to
 #'   generate the dataset specification.
-#' @param template_version Character or NA. Version of the template used.
-#' @param template_date Character or NA. Date of the template used.
+#' @param template_version Character or NULL. Version of the template used.
+#' @param template_date Character or NULL. Date of the template used.
 #' @return An object of class DTADataSet.
 #'
 #' @examples
 #' ds <- DTADataSet(
-#'   name = "example_dataset",
+#'   id = "example_dataset",
 #'   type = "file",
-#'   files = list(create_example_DTAFileCSV())
+#'   files = list(create_example_DTAFileCSV()),
+#'   name = "Example dataset"
 #' )
 #' ds
 #' @export
 DTADataSet <- S7::new_class(
   "DTADataSet",
   constructor = function(
-    name,
+    id,
     type,
     files = list(),
+    name = NULL,
     description = NULL,
     template_source = NULL,
     template_version = NULL,
     template_date = NULL
   ) {
+    if (missing(id)) dta_abort_missing_dataset_id()
     if (inherits(files, "DTAtools::DTAFile")) {
       files <- list(files)
     }
 
     new_object(
       S7_object(),
-      name = name,
+      id = id,
       type = type,
       files = files,
+      name = name,
       description = description,
       template_source = template_source,
       template_version = template_version,
@@ -51,17 +59,24 @@ DTADataSet <- S7::new_class(
     )
   },
   properties = list(
-    name = class_character,
+    id = class_character,
     type = class_character,
     files = class_list, # list of DTAFile
+    name = class_character_or_null,
     template_source = class_character_or_null,
     template_version = class_character_or_null,
     template_date = class_character_or_null,
     description = class_character_or_null
   ),
   validator = function(self) {
-    if (!is.character(self@name) || length(self@name) != 1 || self@name == "") {
-      cli_abort("Property 'name' must be a single non-empty string.")
+    if (!is.character(self@id) || length(self@id) != 1 || is.na(self@id) || self@id == "") {
+      cli_abort("Property 'id' must be a single non-empty string.")
+    }
+    for (p in c("name", "description")) {
+      v <- S7::prop(self, p)
+      if (!is.null(v) && (length(v) != 1 || is.na(v))) {
+        cli_abort("Property {.field {p}} must be a single string or NULL.")
+      }
     }
     if (!all(sapply(self@files, inherits, "DTAtools::DTAFile"))) {
       cli_abort("All elements in 'files' must be of class 'DTAFile'")
@@ -94,7 +109,7 @@ max_number_of_files <- new_generic("max_number_of_files", "x")
 #' @return numeric: number of files
 #' @examples
 #' ds <- DTADataSet(
-#'   name = "example_dataset",
+#'   id = "example_dataset",
 #'   type = "file",
 #'   files = list(create_example_DTAFileCSV())
 #' )
@@ -126,7 +141,7 @@ min_number_of_files <- new_generic("min_number_of_files", "x")
 #' @return numeric: number of files
 #' @examples
 #' ds <- DTADataSet(
-#'   name = "example_dataset",
+#'   id = "example_dataset",
 #'   type = "file",
 #'   files = list(create_example_DTAFileCSV())
 #' )
@@ -143,7 +158,7 @@ method(min_number_of_files, DTADataSet) <- function(x, ...) {
 #' @export
 method(print, DTADataSet) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTADataSet}> : {.field {x@name}}")
+  cli_text("<{.emph DTADataSet}> : {.field {x@id}}")
 
   print_info(x)
   invisible(x)
@@ -160,6 +175,9 @@ if (!exists("print_info", mode = "function", inherits = FALSE)) {
   print_info <- new_generic("print_info", "x")
 }
 method(print_info, DTADataSet) <- function(x) {
+  if (!is.null(x@name)) {
+    cli_text("- Name: {x@name}")
+  }
   if (!is.null(x@description)) {
     cli_text("- Description: {x@description}")
   }
@@ -227,7 +245,7 @@ method(print_short_info, DTADataSet) <- function(x, ...) {
   # coerce type 'object' to vector of type 'character'" (cli tried to
   # evaluate the stray `{x}` as the function argument `x` itself). Braces
   # inside an interpolated value are escaped by cli itself.
-  nm <- x@name
+  nm <- x@id
   ty <- x@type
 
   if (max_n == 0) {
@@ -256,6 +274,9 @@ read_dataset_from_yaml <- function(file) {
     cli_abort("YAML file does not exist: {.file {file}}")
   }
 
+  # Lint first, as read_dta_from_yaml() does: every problem at once.
+  dta_lint_enforce(lint_dta(file))
+
   yaml_data <- yaml::read_yaml(file)
 
   dta_dataset_from_list(yaml_data)
@@ -266,29 +287,64 @@ read_dataset_from_yaml <- function(file) {
 #' @description
 #' Constructs a DTADataSet object from a list
 #' @param x List
-#' @param recursive Logical, if TRUE (default) processes nested datasets
+#' @param recursive Unused. It is only set to \code{FALSE} by the function's
+#'   own recursive call for a list of datasets and is never read; leave it at
+#'   its default.
 #' @importFrom cli cli_abort
-#' @return An object of class DTADataSet
+#' @return A \code{DTADataSet} object, or, when \code{x} is a list of dataset
+#'   specifications, a list of \code{DTADataSet} objects.
 #' @examples
 #' file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
 #' yaml_dataset <- yaml::read_yaml(file)
 #' dataset <- dta_dataset_from_list(yaml_dataset)
 #' @export
 dta_dataset_from_list <- function(x, recursive = TRUE) {
-  if (is.null(x$name)) {
-    if (!is.null(x[[1]]$name)) {
+  # `[[`/names, not `$`: `$` partial-matches, so a list holding only
+  # `identifier:` would pass for one holding `id:`.
+  is_entry <- function(e) {
+    is.list(e) && any(c("id", "name", "type") %in% names(e))
+  }
+  if (!is_entry(x)) {
+    if (length(x) > 0 && is_entry(x[[1]])) {
       # there are multiple datasets which need to be processed separately
       return(lapply(x, dta_dataset_from_list, recursive = FALSE))
     } else {
-      cli_abort("List must contain a 'name' field or be a list of datasets.")
+      cli_abort("List must contain an {.field id} field or be a list of datasets.")
     }
   }
 
-  if (is.null(x$type)) {
-    cli_abort("Dataset '{x$name}' must contain a 'type'")
+  id <- x[["id"]]
+  if (is.null(id)) dta_abort_missing_dataset_id()
+  if (is.null(x[["type"]])) {
+    cli_abort("Dataset {.val {id}} must contain a {.field type}.")
   }
 
   do.call(DTADataSetFactory, x)
+}
+
+
+# The constructors' `id` has no default, so a call that omits it would
+# otherwise fail with base R's bare "argument "id" is missing".
+#' @keywords internal
+dta_abort_missing_dataset_id <- function() {
+  cli::cli_abort(
+    "A dataset needs an {.arg id}, its identifier; {.arg name} is only the human-readable label."
+  )
+}
+
+# What to call a dataset where a person reads it: its name, else its id.
+#' @keywords internal
+dta_dataset_label <- function(ds) {
+  nm <- ds@name
+  if (is.null(nm) || !nzchar(nm)) ds@id else nm
+}
+
+# A heading that names the dataset AND keeps its id visible, since the id is
+# what every validation message and `{COLUMN_SPECS:<id>}` refers to.
+#' @keywords internal
+dta_dataset_heading <- function(ds) {
+  label <- dta_dataset_label(ds)
+  if (identical(label, ds@id)) label else paste0(label, " (", ds@id, ")")
 }
 
 
@@ -298,9 +354,10 @@ dta_dataset_from_list <- function(x, recursive = TRUE) {
 #' @param x An object of class DTADataSet.
 #' @param ... Additional arguments:
 #'   \describe{
-#'     \item{name}{Optional single character or single integer. if NULL, returns a
-#'       list of all files. If character, returns the datasets with the specified name.
-#'       If integer, returns the datasets at the specified index.}
+#'     \item{name}{Optional single character or single integer. if NULL, returns
+#'       a list of all file handlers. If character, returns the file handler
+#'       with the specified name. If integer, returns the file handler at the
+#'       specified index.}
 #'   }
 #' @return A list of DTAFile objects, or a single DTAFile object when a name
 #'   or index is provided.
@@ -338,7 +395,7 @@ method(files, DTADataSet) <- function(x, name = NULL) {
 
   missing <- setdiff(name, names(all_files))
   if (length(missing) > 0) {
-    cli_abort("The following datasets{?s} not found: {.field {missing}}")
+    cli_abort("The following file{?s} not found: {.field {missing}}")
   }
 
   return(all_files[[name]])
@@ -380,7 +437,10 @@ if (!exists("load_file", mode = "function", inherits = FALSE)) {
 
 #' @title Load file into DTADataSet
 #' @description
-#' Convenience wrapper that dispatches to \code{load_file()} for a dataset.
+#' The \code{load_file()} method for the abstract \code{DTADataSet} base class.
+#' It is not implemented: it always aborts, directing the caller to
+#' \code{DTADataSetTabular} or \code{DTADataSetFile}, which have their own
+#' methods.
 #' @param x An object of class \code{DTADataSet}.
 #' @param ... Additional named arguments:
 #'   \describe{
@@ -388,9 +448,9 @@ if (!exists("load_file", mode = "function", inherits = FALSE)) {
 #'       file handler within the dataset. Defaults to \code{1}.}
 #'     \item{file}{Path to the input file to be read.}
 #'     \item{name}{Optional name under which the loaded table should be stored.
-#'       Defaults to \code{basename(file)}.}
+#'       Defaults to \code{tools::file_path_sans_ext(basename(file))}.}
 #'   }
-#' @return The updated dataset object.
+#' @return Never returns; always signals an error on this base class.
 #' @usage load_file(x, ...)
 #' @name load_file
 #' @export
@@ -450,7 +510,7 @@ dta_table_id_to_names <- function(x, tables = NULL) {
   # function used to.
   if (length(all_names) == 0 && length(x@tables) > 0) {
     cli::cli_abort(c(
-      "The tables of dataset {.field {x@name}} have no names.",
+      "The tables of dataset {.field {x@id}} have no names.",
       i = "Every table is addressed by name; supply a named list or use {.fn load_file}."
     ))
   }
@@ -479,7 +539,7 @@ dta_table_id_to_names <- function(x, tables = NULL) {
 
 #' @keywords internal
 dta_default_validation_artifact_dir <- function(x) {
-  safe_name <- gsub("[^A-Za-z0-9_-]", "_", x@name)
+  safe_name <- gsub("[^A-Za-z0-9_-]", "_", x@id)
   file.path(tempdir(), "DTAtools_validation", safe_name)
 }
 

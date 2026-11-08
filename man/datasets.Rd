@@ -13,8 +13,8 @@ datasets(x, ...)
 \describe{
 \item{name}{Optional single character or single integer. If NULL
 (the default), returns a list of all datasets. If character, returns
-the dataset with that name. If integer, returns the dataset at that
-index.}
+the dataset with that \code{id} (its key in the DTA). If integer,
+returns the dataset at that index.}
 }}
 }
 \value{

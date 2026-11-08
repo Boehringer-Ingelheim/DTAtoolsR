@@ -490,8 +490,9 @@ if (!exists("check", mode = "function", inherits = FALSE)) {
 
 #' Create a DTAColumnSpecStructure Object
 #'
-#' Constructs a DTAColumnSpecStructure object for a specified backend (e.g., SAS or R),
-#' based on the provided type, format, and length. The function validates that the
+#' Constructs a DTAColumnSpecStructure object for a specified backend (currently
+#' only SAS), based on the provided type, format, and length. The function
+#' validates that the
 #' prefixes of type and format are supported and match, then dispatches to the appropriate
 #' backend-specific constructor.
 #'
@@ -565,13 +566,13 @@ DTAColumnSpecStructureFactory <- function(
 }
 
 
-#' @title Create a DTADataSetFactory Object
+#' @title Create a DTADataSet Object
 #'
 #' @description
-#' Constructs a DTADataSetFactory object for a specified backend (e.g., SAS or R),
-#' based on the provided type.
+#' Constructs a DTADataSetTabular or DTADataSetFile object, according to
+#' `type`.
 #'
-#' @param type Character. The type specification, potentially prefixed with a backend identifier.
+#' @param type Character. Dataset type, \code{"tabular"} or \code{"file"}.
 #' @param columns A list with column specifications (optional)
 #' @param rules A list of rules specifications (optional)
 #' @param files Specification of the dataset's file handlers (optional). Either
@@ -579,22 +580,23 @@ DTAColumnSpecStructureFactory <- function(
 #'   parses to -- or an unnamed list of such lists, one per handler, the shape a
 #'   YAML \code{files:} sequence parses to. \code{NULL} or an empty list yields a
 #'   dataset with no file handlers.
-#' @param ... Character. Arguments passed on to the specific backend constructor.
+#' @param ... Further arguments passed on to the \code{DTADataSetTabular()}
+#'   or \code{DTADataSetFile()} constructor, according to \code{type}.
 #' @importFrom cli cli_abort
 #' @return An object derived from class \code{DTADataSet} like \code{DTADataSetTabular},
-#' depending on the backend specified.
+#' depending on \code{type}.
 #'
 #' @examples
 #' DTADataSetFactory(
 #'   type = "file",
-#'   name = "mydataset",
+#'   id = "mydataset",
 #'   files = list(type = "csv", filename = "clinical_data.csv")
 #' )
 #'
 #' # Several file handlers: an unnamed list of handler specifications.
 #' DTADataSetFactory(
 #'   type = "file",
-#'   name = "mydataset",
+#'   id = "mydataset",
 #'   files = list(
 #'     list(type = "csv", filename = "clinical_data.csv"),
 #'     list(type = "tsv", filename = "gf_data_small_smirna.tsv")
@@ -718,7 +720,7 @@ dta_file_handlers_from_list <- function(files) {
 #' so this factory builds what it is asked for and the dataset has the final
 #' say.
 #'
-#' @param type Character. The type specification, potentially prefixed with a backend identifier.
+#' @param type Character. File type, \code{"csv"}, \code{"tsv"} or \code{"any"}.
 #' @param ... Additional arguments passed to the specific backend constructor.
 #'   For `type = "any"` this includes the optional `extensions` restriction; see
 #'   \code{\link{DTAFileAny}}.

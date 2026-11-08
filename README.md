@@ -42,7 +42,7 @@ once installed).
   `col_unique`, `group_condition`)
 - File-presence validation (`DTADataSetFile`) for non-tabular deliverables
 - Detailed, queryable validation results (`results()`, `messages()`,
-  `inspect()`)
+  `inspect()`, `explain_messages()`)
 - Export validated tables to disk with optional compression and MD5
   checksums
 - Generate Word documentation tables directly from specifications, or the
@@ -84,11 +84,11 @@ results(dta)
 Not every delivery needs a full DTA with metadata. When you only need to
 validate *one* dataset, read the dataset definition directly with
 `read_dataset_from_yaml()` — a standalone dataset YAML has the same shape as
-one entry under a DTA's `datasets:` list (`name`, `type`, `files`, `columns`,
-`rules`), just without the surrounding `metadata:` wrapper:
+one entry under a DTA's `datasets:` list (`id`, `type`, `name`,
+`description`, `files`, `columns`, `rules`), just without the surrounding `metadata:` wrapper:
 
 ```r
-# dataset.yaml has: name, type, files, columns, rules — no top-level metadata
+# dataset.yaml has: id, type, name, description, files, columns, rules — no top-level metadata
 ds <- read_dataset_from_yaml("dataset.yaml")
 
 ds <- load_file(ds, file = csv_path, handler_index = 1)
@@ -123,7 +123,7 @@ specs_imp <- DTAColumnSpecCollection(columns = list(
 ))
 
 ds_imp <- DTADataSetTabular(
-  name   = "import_demo",
+  id     = "import_demo",
   specs  = specs_imp,
   tables = list(demo = data.frame(SUBJECT_ID = c("SUBJ0001", "SUBJ0002"),
                                   AGE        = c("34", "unknown")))
@@ -144,9 +144,11 @@ inspect(ds_imp, id = msgs$id[msgs$source == "import"][1])
 as.data.frame(get_table(ds_imp, "demo"))   # the offending cell is now NA
 ```
 
-> `check()` prints a per-axis console report for the column spec and rule passes
-> but not for the import pass. When a table fails with no visible reason,
-> read `n_import_errors` from `results()` or filter `messages()` on
+> `check()` on an in-memory table prints a per-axis console report for all three
+> passes, including a "validating imports" heading that names the row, column
+> and raw text of each value that did not fit. The streaming path does not print
+> an import heading, so when a streamed table fails with no visible reason, read
+> `n_import_errors` from `results()` or filter `messages()` on
 > `source == "import"`.
 
 See the [vignette's Import Errors
@@ -216,6 +218,8 @@ DTA                              ← top-level agreement container
 4. `messages(x)` — one-row-per-error detail table (`source`, column, row, rule,
    message, `id`)
 5. `inspect(x, id = N)` — deep-dive into a specific error message by its `id`
+6. `explain_messages(x)` — the same findings in plain language: what each value
+   should have been and what it was
 
 📖 See the [vignette's Package Architecture section](vignettes/DTAtools.Rmd) for the fully annotated diagram plus a node-by-node explanation.
 
@@ -230,7 +234,7 @@ specification contains definitions of:
   values. See [YAML Column Format](#yaml-column-format).
 - **rules:** cross-column logic, e.g. "if column A is empty, column B must
   contain a value". See
-  [YAML Schema Rule Specification](#yaml-rule-specification).
+  [YAML Schema Rule Specification](#yaml-schema-rule-specification).
 - **metadata:** DTA/DTS metadata — title, version, contacts, transmission
   schedule. See [YAML Metadata](#yaml-metadata).
 
@@ -240,12 +244,12 @@ common:
 1. **A full DTA/DTS document** (`metadata:` + one or more `datasets:`) —
    `read_dta_from_yaml()`. The recommended entry point for production use;
    see the [Quickstart](#quickstart) above.
-2. **A single, self-contained dataset definition** (`name`, `type`, `files`,
+2. **A single, self-contained dataset definition** (`id`, `type`, `files`,
    `columns`, `rules` — no top-level `metadata:`) — `read_dataset_from_yaml()`.
    Ideal when you only need to validate one dataset, e.g. while iterating on
    a spec. Also shown in the [Quickstart](#quickstart) above.
 3. **A bare list of column specs** (just `columns:` plus optional `rules:`,
-   no `name`/`type`/`files`) — `import_specs_from_yaml()`. The most manual
+   no `id`/`type`/`files`) — `import_specs_from_yaml()`. The most manual
    option: you build the `DTADataSetTabular` wrapper yourself.
 
 ```r
@@ -265,7 +269,7 @@ col2  <- DTAColumnSpec(id = "VISIT",   type = "SAS Char", nullable = TRUE)
 specs <- DTAColumnSpecCollection(columns = list(STUDYID = col1, VISIT = col2))
 
 table <- data.frame(STUDYID = c("1234", "1234"), VISIT = c("V01", "V02"))
-data_obj <- DTADataSetTabular(name = "my_dataset", specs = specs,
+data_obj <- DTADataSetTabular(id = "my_dataset", specs = specs,
                               tables = list(my_table = table))
 data_obj <- check(data_obj)
 
@@ -448,7 +452,7 @@ are readable — without validating their internal structure.
 
 ```r
 ds_file <- DTADataSetFile(
-  name  = "delivery_check",
+  id    = "delivery_check",
   paths = c("clinical_data.csv", "study_report.pdf")
 )
 ds_file <- check(ds_file)
@@ -462,7 +466,7 @@ endings you will accept:
 
 ```r
 ds_file <- DTADataSetFile(
-  name  = "delivery_check",
+  id    = "delivery_check",
   files = list(
     DTAFileAny(
       filename    = "^report_.*",
@@ -492,14 +496,14 @@ under the hood when loading a full DTA YAML.
 ```r
 # Tabular dataset (column spec validation)
 ds_tab <- DTADataSetTabular(
-  name   = "clinical_data",
+  id     = "clinical_data",
   specs  = specs,
   tables = list(clinical_data = read.csv("clinical_data.csv"))
 )
 
 # File dataset (presence check)
 ds_fi <- DTADataSetFile(
-  name  = "delivery_manifest",
+  id    = "delivery_manifest",
   paths = c("clinical_data.csv", "study_report.pdf")
 )
 
@@ -534,6 +538,20 @@ write_table_to_file(
   write_md5sum_to_file = TRUE
 )
 ```
+
+### Linting a DTA
+
+`lint_dta()` reports every problem in a DTA definition at once, instead of
+stopping at the first one. It takes a YAML path, a parsed list, or a `DTA`,
+`DTADataSet` or column-spec collection object:
+
+```r
+lint_dta(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
+```
+
+Each finding has a `severity` of `error` or `warning` and a `code`. A clean
+definition gives zero rows. With `strict = TRUE`, the call aborts when there
+are errors.
 
 ## Additional features
 
@@ -576,8 +594,82 @@ write_dta(dta, "clinical_dta.docx")
 write_dta(dta, "clinical_dta.docx", template = "my_template.docx")
 ```
 
+#### What a Word template can ask for
+
+A template is an ordinary `.docx` containing `{PLACEHOLDER}` markers.
+`dta_template_placeholders()` lists every marker that exists, and given a `DTA`
+resolves each one, so there is no need to export a document to find out what a
+token will become.
+
+Markers come in four kinds, distinguished by the `"kind"` attribute of that list.
+**Inline** markers resolve to text and may sit anywhere, including mid-sentence
+and in headers and footers: `{DTA_TITLE}`, `{SUPPLIER_NAME}`,
+`{TRANSMISSION_FREQUENCY}`, `{TOTAL_COLUMNS}` and so on.
+
+**Block** markers expand to document structure — tables, headings, lists — built
+by the same renderers the built-in layout uses:
+
+| Marker | Renders |
+| --- | --- |
+| `{COLUMN_SPECS}` | a column specification table per tabular dataset |
+| `{VALIDATION_RULES}` | a validation rule table per tabular dataset |
+| `{FILE_SPECS}` | the expected-file table per dataset |
+| `{DATASETS}` | a full section per dataset: type, description, files, columns, rules |
+| `{SUPPLIER_CONTACTS_TABLE}`, `{RECEIVER_CONTACTS_TABLE}` | contacts as a table |
+| `{SIGNATURES_TABLE}` | the approval and signature table |
+| `{VERSION_HISTORY_TABLE}` | version history as a table |
+| `{AUTHORIZED_CORRECTIONS_LIST}` | the authorized-for-corrections names |
+| `{STUDY_TABLE}` | structured study and protocol identifiers |
+| `{AGREEMENT_SECTIONS}` | titled narrative sections in their stored order |
+
+The first four take an optional dataset id — `{COLUMN_SPECS:ADSL}` renders
+one dataset, the bare form renders every applicable one under its own heading.
+
+A block marker must be **the only text in its paragraph**, and must sit in the
+document body rather than a header, a footer or a table cell; anything left over
+is named in a warning. Tables are sized to the template's own text column, and
+headings use the template's `heading N` style when it defines one. A value
+supplied through `template_variables` overrides a marker of either kind and is
+always rendered as text.
+
+**Repeating a region per dataset.** A paragraph holding only `{#DATASETS}`,
+paired with a later paragraph holding only `{/DATASETS}`, marks a repeating
+region: everything between the two — paragraphs and tables alike — is emitted
+once per dataset the DTA declares, in the DTA's own dataset order, and the
+marker paragraphs themselves do not appear. A DTA with no datasets produces no
+region at all.
+
+```
+{#DATASETS}
+{DATASET_NAME} ({DATASET_ID})    <- the author's own Heading 2
+{DATASET_DESCRIPTION}
+{FILE_SPECS}
+{COLUMN_SPECS}
+{VALIDATION_RULES}
+{/DATASETS}
+```
+
+Seven placeholders resolve inside a repetition to that one dataset's own values:
+`{DATASET_ID}`, `{DATASET_NAME}` (the id when the dataset has no name),
+`{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`, `{DATASET_FILE_COUNT}`,
+`{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}` (the last two are `0`
+for a non-tabular dataset). A dataset block marker
+written bare inside a region binds to the current dataset and contributes only
+its table, without the heading it would generate outside a region — the
+region's own paragraphs are what supply the heading. An explicit
+`{COLUMN_SPECS:ADSL}` inside a region is unaffected and renders exactly as it
+does anywhere else.
+
+A region marker must be the only text in its paragraph too, and regions do not
+nest — an inner `{#DATASETS}` is left as ordinary text, though sequential
+regions in the same document are fine. A marker that is not alone in its
+paragraph, or that has no counterpart to open or close it, is left as written
+and named in the warning above.
+
 PDF output builds the Word document and converts it, which needs an external
-tool: LibreOffice (`soffice`), TinyTeX, or pandoc with another PDF engine.
+tool: Microsoft Word (Windows) or LibreOffice (`soffice`), which keep the
+layout and running headers and footers, or TinyTeX, or pandoc with another PDF
+engine, which re-typeset the document and lose them.
 `dta_pdf_backend()` reports which will be used, or `NULL` if none is installed —
 in which case `tinytex::install_tinytex()` adds one from R without
 administrator rights. `write_dta(format = "pdf")` verifies the `%PDF` signature
@@ -614,9 +706,14 @@ the suggested packages **shiny**, **bslib** and **DT**.
 run_dta_app()
 ```
 
+To host it on Posit Connect, create Git-backed content from this repository's
+**root** directory (`/`). The root `app.R` installs the deployed checkout's
+DTAtools and serves the app bundled with it, so the app and the package always
+come from the same commit.
+
 ### Private templates
 
-The `dta-template.yaml` files packaged in `inst/extdata/templates` are
+The `dta-template.yaml` files packaged in `inst/extdata/library` are
 examples only — a real Data Transfer Specification names a real supplier and
 real contacts, and must never live in an open-source package. `run_dta_app()`
 can instead load its "Create new from template" family from a private git
@@ -625,13 +722,48 @@ through environment variables. On Posit Connect, one content variable is
 enough to switch the app to your own private templates:
 
 ```r
+# The repository root holds the library folders (templates/, parties/, vocabulary/, export-templates/).
 DTATOOLS_TEMPLATE_SOURCES = "acme=git:https://bitbucket.example.com/scm/proj/dta-templates.git#main"
 ```
 
 `create_template_repo()` scaffolds a new private template repository to point
 that variable at — a small, cross-referencing worked example of the four
-template kinds plus a ready-to-run validation CI workflow, not a blank
-directory to fill in from nothing.
+template kinds, each in its own folder, a comprehensive authoring `README.md`
+at the root, and a ready-to-run validation CI workflow, not a blank directory
+to fill in from nothing:
+
+```text
+my-templates/
+  README.md
+  .gitignore
+  dta-app.yaml
+  templates/
+    starter.dta-template.yaml
+    starter_dataset.dta-dataset-template.yaml
+  parties/
+    starter_supplier.dta-party.yaml
+  vocabulary/
+    starter_terms.dta-vocabulary.yaml
+  export-templates/
+    README.md
+  .github/workflows/validate-templates.yml
+```
+
+`validate_template(".", strict = TRUE)` at the repository root validates the
+four folders and reports a template file in the wrong place (for example a
+party profile left in `templates/`, or any template file at the root) as an
+error. The app's `dir:`/`pkg:`/`git:` sources use the same layout; the older
+flat and mixed-`templates/` layouts are no longer read, and the scaffolded
+`README.md` explains how to reorganise an existing repository.
+
+The optional `dta-app.yaml` at the repository root customises the app that serves the library:
+organisation, title, logo, colours, links, which features and export formats are
+offered (including a read-only mode). Every `.docx` in `export-templates/` with a `{PLACEHOLDER}` marker is
+offered automatically as a Word export template. With no
+file the app looks as before, except that no organisation name is shown until you
+set `organisation.name`. `validate_template()` checks the file too. See
+"Customising the app from the library" in the
+[private templates vignette](vignettes/private-templates.Rmd).
 
 See the [private templates vignette](vignettes/private-templates.Rmd)
 (`vignette("private-templates")`) for the full variable reference, the
@@ -652,15 +784,21 @@ Column specifications can contain:
   date/time types keep the text as written and validate it by pattern. A
   value that does not fit is an import error — see
   [The Three Validation Axes](#the-three-validation-axes).
-- `format`: (optional) a SAS format string, e.g. `SAS 10.`, `SAS $10.`
+- `format`: (optional) a SAS format string, e.g. `SAS 10.`, `SAS $10.`. Values
+  must fit the declared format; `BEST` formats are not enforced.
 - `length`: (optional) maximum character length
 - `nullable`: (mandatory) whether the column may be empty (`true`/`false` or
   `Yes`/`No`)
 - `pattern`: (optional) a regex the values must match
 - `values`: (optional) a closed list of allowed values
+- `examples`: (optional) example values; each must match `pattern`, and they
+  cannot be combined with `values`
+- `colclass`: (optional) a column category, one of `patient_info`,
+  `measurement_patient`, `measurement`, `visit_related`, `date_related`,
+  `study_info`, `wide_format`, `long_format`, `wide_and_long_format`
 
-> **Note:** `values` and `pattern` are mutually exclusive — a column has
-> either a closed value list or a regex pattern, not both.
+> **Note:** `values` excludes both `pattern` and `examples` — a column has
+> either a closed value list or a regex pattern (with optional examples), not both.
 
 Example of a column `SUBJECT_ID` with a pattern:
 
@@ -716,6 +854,7 @@ Supported operators in both `condition` and `then`:
 - `less_equal`: Number
 - `less`: Number
 - `min` / `max`: Number range
+- `range`: `[lo, hi]` list of two numbers (inclusive)
 - `in`: List of strings / numbers
 - `not_in`: List of strings / numbers
 - `empty`: Boolean
@@ -771,13 +910,14 @@ rules:
 
 #### `col_range`
 
-Ensures that all values in a numeric column fall within `[min, max]`.
+Ensures that all values in a numeric column fall within `[min, max]`. The bounds can also be
+given as `range: [18, 65]` in place of `min`/`max`.
 
 ```yaml
 rules:
   - id: age_range
     type: col_range
-    column: AGE
+    columns: AGE
     min: 18
     max: 65
 ```
@@ -792,12 +932,12 @@ rules:
   # Single column uniqueness
   - id: subject_unique
     type: col_unique
-    column: SUBJECT_ID
+    columns: SUBJECT_ID
 
   # Composite key uniqueness
   - id: subject_visit_unique
     type: col_unique
-    column:
+    columns:
       - SUBJECT_ID
       - VISIT
 ```
@@ -882,7 +1022,8 @@ rules:
 ## YAML Metadata
 
 `metadata:` captures the administrative information of a DTA/DTS: title,
-version, receiver/supplier contacts, and the transmission schedule.
+version, study identity, receiver/supplier contacts, the transmission schedule
+and ordered agreement clauses.
 
 ```yaml
 metadata:
@@ -890,6 +1031,18 @@ metadata:
   version: "1.0"
   date: 2026-01-15
   header: Boehringer Ingelheim
+
+  study:
+    id: DEMO-001
+    protocol_id: PROTOCOL-01
+
+  sections:
+    responsibilities:
+      title: Responsibilities
+      text: |
+        The receiver reviews each delivered file.
+
+        Discrepancies are reported to the supplier for correction.
 
   receiver:
     affiliation:
@@ -918,7 +1071,57 @@ metadata:
     notification: email
     date_first_transfer: 2026-02-01
     date_last_transfer: 2026-03-31
+    extent: cumulative
+    scope: All completed records available at the agreed cut-off.
+    packaging: One tab-delimited file per dataset.
+    security: Use the approved secure transfer channel.
+    checksum: Verify the agreed checksum before processing.
+    test_requirements: Review a test transfer before the first scheduled delivery.
+    blinding_requirements: Follow the trial-approved list of fields to withhold.
 ```
+
+`study` is optional and accepts `id` and `protocol_id` as nonblank strings.
+It is separate from the presentation-oriented `header` and never changes a
+dataset's `STUDYID` constraint.
+
+`sections` is an optional **ordered mapping**, not an unnamed sequence. Each
+unique key starts with a letter and contains only letters, digits and
+underscores. Its `title` is a nonblank string and `text` is plain text with
+paragraph breaks; empty text is allowed while drafting. The app supports
+adding, editing, deleting and reordering sections. Empty `study` and `sections`
+are omitted from YAML, so legacy documents need no migration.
+
+The extra transmission entries above are optional text, not executed services.
+They do not implement encryption, delivery, checksum verification, blinding
+or approval. Existing transmission extensions are retained when editing.
+The Metadata tab exposes these fields alongside the existing tri-state
+test-upload and blinded-transfer flags.
+
+Default Word/Markdown exports include study identity and the ordered sections.
+Custom Word templates must place `{STUDY_ID}` / `{PROTOCOL_ID}` for inline text,
+or standalone `{STUDY_TABLE}` / `{AGREEMENT_SECTIONS}` paragraphs for structured
+content. User-supplied Word templates are not silently rewritten.
+
+## Qualification
+
+Deploying the package where it gates clinical data usually means showing that
+the copy on that machine behaves as specified. `run_qualification()` does that
+and writes the evidence:
+
+```r
+DTAtools::run_qualification("~/dta-qualification")
+```
+
+It runs an installation, operational and performance qualification against the
+installed package and produces a Validation Summary Report, a requirements
+traceability matrix, per-step expected-versus-observed records, a record of the
+environment, and a hash manifest covering the whole bundle. Reports are written
+as Markdown always, and as HTML, Word and PDF where the tooling exists.
+
+This is separate from the package's developer tests, which are not installed
+and are not traced to requirements. See `inst/qualification/README.md` for the
+tiers, what each optional dependency adds, and how to review, sign and verify a
+run. `qualification_requirements()` lists the requirements being verified.
 
 ## Technical
 
@@ -962,6 +1165,7 @@ row-level validation.
 | `results(x)`                   | Summary table: status and per-axis error counts per table   |
 | `messages(x)`                  | Detailed error table: id, source, row, column, rule, message |
 | `inspect(x, id)`               | Deep detail for a specific error: row context, failing rows, original imported text |
+| `explain_messages(x, id, n)`   | Print each error in plain language (should be vs. actual); returns the rows invisibly |
 | `validation_status(x)`         | Compact status data frame, one row per table                |
 | `validation_errors(x, table)`  | Full raw error output for one table                          |
 | `clear_validation(x)`          | Discard stored validation state for one or all tables        |
@@ -999,7 +1203,7 @@ specs <- DTAColumnSpecCollection(columns = list(STUDYID = col1, VISIT = col2))
 
 - All rules must include a unique `id`.
 - Rule `type` must match exactly one of the supported types
-  (`col_condition`, `col_range`, `col_unique`).
+  (`col_condition`, `col_range`, `col_unique`, `group_condition`).
 - Missing or malformed rules trigger validation errors before data
   evaluation.
 - `values` and `pattern` on a column spec are mutually exclusive.

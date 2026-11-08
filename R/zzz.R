@@ -1,6 +1,7 @@
 utils::globalVariables(c(
   "Format", "nullable", "description", "id",
-  "instancePath", "keyword", "columnspec", "data", "."
+  "instancePath", "keyword", "columnspec", "data", ".", ".n",
+  "Name", "Role"
 ))
 
 .onLoad <- function(...) {

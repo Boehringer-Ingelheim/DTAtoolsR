@@ -23,7 +23,10 @@ installed, returns a tibble. Otherwise returns a base data.frame.}
 \value{
 A tibble/data.frame with one or more rows per requested id.
 Detail fields are appended as flat columns prefixed with
-\code{schema_}, \code{context_}, and \code{failing_}.
+\code{columnspec_}, \code{context_}, \code{failing_}, \code{import_}
+and \code{group_violation_}. Summary fields of the validation result are
+added as \code{details_*} columns, and the class of the rule behind a
+rule message as \code{rule_definition_class}.
 }
 \description{
 Displays detailed, human-friendly diagnostics for one or more validation
@@ -38,4 +41,7 @@ ds <- check(create_example_DTADataSetTabular(2), quiet = TRUE)
 # Every message, numbered, then one of them in full.
 messages(ds)
 inspect(ds, id = 1)
+}
+\seealso{
+\code{\link{explain_messages}} for the same findings in plain language.
 }

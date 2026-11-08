@@ -11,7 +11,22 @@
 # around, so the not-yet-written template index never has to exist for this
 # suite to run.
 
-Sys.setenv(NOT_CRAN = "true")
+# Path of `filename` inside library root `root`, routed by its kind suffix:
+# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
+# for everything else (creation and dataset templates, and the plain data
+# files that sit beside them, which resolve relative to the template).
+# Creates the folder, so a fixture can write straight to the returned path.
+lib_path <- function(root, filename) {
+  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
+    "parties"
+  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
+    "vocabulary"
+  } else {
+    "templates"
+  }
+  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
+  file.path(root, sub, filename)
+}
 
 # cli wraps a long condition message across lines at the console width, which
 # breaks a naive substring/regexp match the moment the wrap lands inside the
@@ -207,15 +222,22 @@ test_that("dta_template_merge_datasets() keys on `template`, ahead of a conflict
   expect_equal(result[[1]]$template, "gf@2.0")
 })
 
-test_that("dta_template_merge_datasets() keys on `source`, ahead of a conflicting `name`", {
+test_that("dta_template_merge_datasets() keys on `source`, ahead of a conflicting `id`", {
   fn <- app_fn("dta_template_merge_datasets")
-  parent_ds <- list(list(source = "shared.yaml", name = "parent_name", val = "p"))
-  child_ds <- list(list(source = "shared.yaml", name = "child_name", val = "c"))
 
-  result <- fn(parent_ds, child_ds)
+  for (field in "id") {
+    parent_ds <- list(list(source = "shared.yaml", val = "p"))
+    child_ds <- list(list(source = "shared.yaml", val = "c"))
+    parent_ds[[1]][[field]] <- "parent_ident"
+    child_ds[[1]][[field]] <- "child_ident"
 
-  expect_length(result, 1)
-  expect_equal(result[[1]]$val, "c")
+    result <- fn(parent_ds, child_ds)
+
+    # Had the identifier driven the key, "parent_ident" != "child_ident" would
+    # have appended a second entry.
+    expect_length(result, 1)
+    expect_equal(result[[1]]$val, "c")
+  }
 })
 
 test_that("dta_template_merge_datasets() keys a plain character entry by the string itself", {
@@ -244,18 +266,29 @@ test_that("`template: gf@3.0` and `template: gf@4.0` resolve to the SAME key and
 
 test_that("dta_template_merge_datasets() drops an inherited entry when the child sets remove: true", {
   fn <- app_fn("dta_template_merge_datasets")
-  parent_ds <- list(list(name = "n1"), list(name = "n2"))
-  child_ds <- list(list(name = "n1", remove = TRUE))
+  parent_ds <- list(list(id = "n1"), list(id = "n2"))
+  child_ds <- list(list(id = "n1", remove = TRUE))
 
   result <- fn(parent_ds, child_ds)
 
   expect_length(result, 1)
-  expect_equal(result[[1]]$name, "n2")
+  expect_equal(result[[1]]$id, "n2")
+})
+
+test_that("dta_template_dataset_key() keys on as, template, source, then id", {
+  key_of <- app_fn("dta_template_dataset_key")
+
+  expect_equal(key_of(list(as = "z", template = "t@1.0", source = "s", id = "i", name = "n")), "z")
+  expect_equal(key_of(list(template = "t@1.0", source = "s", id = "i", name = "n")), "t")
+  expect_equal(key_of(list(source = "s", id = "i", name = "n")), "s")
+  expect_equal(key_of(list(id = "i", name = "n")), "i")
+  # `name` is a label, not an identifier, so it never keys an entry.
+  expect_true(is.na(key_of(list(type = "tabular"))))
 })
 
 test_that("dta_template_merge_datasets() appends an unkeyable entry as-is, never merging it", {
   fn <- app_fn("dta_template_merge_datasets")
-  # Neither entry has as/template/source/name, and neither is a bare
+  # Neither entry has as/template/source/id, and neither is a bare
   # character -- dta_template_dataset_key() has nothing to key either one on.
   parent_ds <- list(list(inline = "parent-only-field"))
   child_ds <- list(list(inline = "child-only-field"))
@@ -640,13 +673,31 @@ test_that("the verb form and the bare form agree wherever both can say the thing
   expect_identical(bare, verbs)
 })
 
-test_that("datasets: verbs key on the dataset identity, not on an id field", {
-  # `datasets:` entries have no `id:` -- they are keyed by `as:`/`template:`/
-  # `source:`/`name:` -- so the verbs have to run off the same identity
-  # function the bare form uses, or they would silently match nothing.
+test_that("datasets: verbs key on the dataset identity, not on a generic id field", {
+  # A `datasets:` entry is keyed by `as:`/`template:`/`source:` or, for an
+  # inline dataset, by its own `id:` -- never by
+  # a bare `id` field the way `options:` entries are -- so the verbs have to run
+  # off the same identity function the bare form uses, or they would silently
+  # match nothing.
   result <- verb_resolve("datasets", list(remove = "d1"))
 
   expect_length(result, 0)
+})
+
+test_that("datasets: verbs address an inline dataset by its id", {
+  parent <- four_state_parent()
+  parent$datasets <- list(
+    list(as = "d1", template = "dt@1.0"),
+    list(id = "inline_ds", type = "tabular")
+  )
+  child <- four_state_child(datasets = list(remove = "inline_ds"))
+
+  result <- app_fn("resolve_template_inheritance")(
+    child, make_resolver(list(parent = parent))
+  )$def$datasets
+
+  expect_length(result, 1)
+  expect_equal(result[[1]]$as, "d1")
 })
 
 test_that("an empty inherit: list means none, not everything", {
@@ -812,6 +863,205 @@ test_that("a template that seals nothing carries no sealed key at all", {
   expect_false("required" %in% names(result$def))
 })
 
+# ---- sealed vs. option/party-slot effects -----------------------------------
+#
+# The checks above compare the DEFINITION at a sealed path before and after
+# the merge (dta_template_path_get()) -- but an option's `target:`/`effects:`,
+# or a party slot's `target:`, does not write its metadata field until
+# create_dta_from_template() applies it, long after the merge. A child can
+# ADD a brand-new option/party-slot targeting a sealed field, or MODIFY an
+# inherited one that already does, and `base:` itself never moves -- so the
+# plain before/after comparison sees no change and the seal would silently
+# fail to protect the very field it names.
+
+sealed_option_parent <- function(sealed = "base.metadata.title", options = list(),
+                                 party_slots = list()) {
+  list(
+    id = "parent", version = "1.0",
+    base = list(metadata = list(title = "P title", header = "P header")),
+    options = options,
+    party_slots = party_slots,
+    sealed = sealed
+  )
+}
+
+sealed_option_resolve <- function(parent, ...) {
+  app_fn("resolve_template_inheritance")(
+    c(list(id = "child", version = "1.0", extends = "parent"), list(...)),
+    make_resolver(list(parent = parent))
+  )
+}
+
+test_that("an option a child ADDS cannot target a field an ancestor sealed", {
+  parent <- sealed_option_parent()
+
+  expect_error_message_contains(
+    sealed_option_resolve(parent, options = list(
+      list(id = "sneaky", label = "Sneaky", target = "metadata.title")
+    )),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("the same field is fine when the PARENT declares the option and the child leaves it alone", {
+  # A template's own seal does not bind itself: the parent may write straight
+  # to the field it seals, and a descendant that never touches that option is
+  # not violating anything.
+  parent <- sealed_option_parent(options = list(
+    list(id = "o1", label = "Title", target = "metadata.title")
+  ))
+
+  result <- sealed_option_resolve(parent)
+
+  expect_equal(result$def$options[[1]]$target, "metadata.title")
+})
+
+test_that("a child MODIFYING an inherited option that targets a sealed field is a violation", {
+  parent <- sealed_option_parent(options = list(
+    list(id = "o1", label = "Title", target = "metadata.title", default = "Standard")
+  ))
+
+  expect_error_message_contains(
+    sealed_option_resolve(parent, options = list(
+      modify = list(list(id = "o1", default = "Overridden"))
+    )),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("an option targeting an UNsealed field is unaffected by an unrelated seal", {
+  parent <- sealed_option_parent()
+
+  result <- sealed_option_resolve(parent, options = list(
+    list(id = "o2", label = "Header", target = "metadata.header")
+  ))
+
+  expect_equal(result$def$options[[1]]$target, "metadata.header")
+})
+
+test_that("an option reaching a sealed field through `effects:` (not `target:`) is caught too", {
+  parent <- sealed_option_parent()
+
+  expect_error_message_contains(
+    sealed_option_resolve(parent, options = list(list(
+      id = "sneaky", label = "Sneaky", type = "boolean",
+      effects = list("yes" = list(list(path = "metadata.title", value = "Sneaky")))
+    ))),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("an option reaching a sealed field through `effects_all:` is caught too", {
+  parent <- sealed_option_parent()
+
+  expect_error_message_contains(
+    sealed_option_resolve(parent, options = list(list(
+      id = "sneaky", label = "Sneaky",
+      effects_all = list(list(path = "metadata.title", value = "Sneaky"))
+    ))),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("a `target:` next to an unrelated `effects_all:` block is still checked", {
+  # `$effects` partially matches `effects_all`; read by partial match, the
+  # effects_all block would stand in for `effects:` and hide the target.
+  parent <- sealed_option_parent()
+
+  expect_error_message_contains(
+    sealed_option_resolve(parent, options = list(list(
+      id = "sneaky", label = "Sneaky", target = "metadata.title",
+      effects_all = list(list(path = "metadata.header", value = "H"))
+    ))),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("an option reaching a sealed field through a `set:` map inside `effects_all:` is caught too", {
+  parent <- sealed_option_parent()
+
+  expect_error_message_contains(
+    sealed_option_resolve(parent, options = list(list(
+      id = "sneaky", label = "Sneaky",
+      effects_all = list(list(set = list("metadata.title" = "Sneaky")))
+    ))),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("a party slot a child ADDS cannot target a field an ancestor sealed", {
+  parent <- sealed_option_parent(sealed = "base.metadata.supplier")
+
+  expect_error_message_contains(
+    sealed_option_resolve(parent, party_slots = list(
+      list(id = "ps1", target = "metadata.supplier")
+    )),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("a party slot targeting the OTHER metadata field is unaffected by an unrelated seal", {
+  parent <- sealed_option_parent(sealed = "base.metadata.supplier")
+
+  result <- sealed_option_resolve(parent, party_slots = list(
+    list(id = "ps1", target = "metadata.receiver")
+  ))
+
+  expect_equal(result$def$party_slots[[1]]$target, "metadata.receiver")
+})
+
+test_that("validate_template() reports sealed_violation, and fails instantiation, for an option effect that reaches a sealed field", {
+  # End-to-end through the package's own validate_template(), which sys.
+  # sources this same engine file (see the file banner at the top of this
+  # test file) -- so this is the one test in the suite that also proves the
+  # abort message still classifies as "sealed_violation"
+  # (R/validateTemplate.R), not just that resolve_template_inheritance()
+  # aborts.
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: parent_tpl",
+      "version: \"1.0\"",
+      "sealed: [\"base.metadata.title\"]",
+      "base:",
+      "  metadata:",
+      "    title: Standard Title",
+      "datasets:",
+      "  - id: placeholder"
+    ),
+    lib_path(dir, "parent.dta-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: child_tpl",
+      "version: \"1.0\"",
+      "extends: parent_tpl@1.0",
+      "options:",
+      "  - id: sneaky_title",
+      "    label: Title override",
+      "    target: metadata.title",
+      "    default: Sneaky"
+    ),
+    lib_path(dir, "child.dta-template.yaml")
+  )
+
+  result <- validate_template(dir)
+  child_rows <- result[result$id == "child_tpl", , drop = FALSE]
+
+  expect_true(any(child_rows$code == "sealed_violation"))
+
+  # At this width cli wraps the abort between "which" and "an ancestor
+  # sealed", so a classifier matching the rendered text would call it
+  # extends_unresolved. The condition class does not depend on wrapping.
+  withr::local_options(cli.width = 65)
+  wrapped <- validate_template(dir)
+  expect_true(any(wrapped$code[wrapped$id == "child_tpl"] == "sealed_violation"))
+  expect_false(any(wrapped$code[wrapped$id == "child_tpl"] == "extends_unresolved"))
+  expect_true(any(child_rows$code == "instantiate_failed"))
+})
+
 test_that("a duplicate dataset key is rejected rather than silently appended", {
   # SEAL BYPASS, pinned. `datasets:` matched each child entry to at most one
   # parent entry and appended the rest unconditionally, so a child could write
@@ -874,4 +1124,344 @@ test_that("a required list field is unfilled when everything inside it is blank"
   # A logical or numeric value is a real answer, including the falsy ones.
   expect_true(fn(FALSE))
   expect_true(fn(0))
+})
+
+# ---- mixins ------------------------------------------------------------------
+#
+# Spec rules M1-M11. Mixins are abstract, flat and add-only: folded into the
+# effective parent, any overlap an error. Conditions are asserted by CLASS; the
+# only message text matched is package-authored ids, with fixed = TRUE.
+
+mx_def <- function(id, version = "1.0", ...) {
+  c(list(id = id, version = version, abstract = TRUE), list(...))
+}
+
+mx_child <- function(mixins, ...) {
+  c(list(id = "child", version = "1.0", mixins = mixins), list(...))
+}
+
+mx_resolve <- function(child, defs) {
+  app_fn("resolve_template_inheritance")(child, make_resolver(defs))
+}
+
+mx_ids <- function(items) vapply(items, function(x) x$id, character(1))
+
+mx_flat <- function(err) gsub("\\s+", " ", conditionMessage(err))
+
+test_that("dta_template_mixin_refs() reads absent, string, list and character forms", {
+  fn <- app_fn("dta_template_mixin_refs")
+  expect_identical(fn(list()), character(0))
+  expect_identical(fn(list(mixins = NULL)), character(0))
+  expect_identical(fn(list(mixins = "a@1.0")), "a@1.0")
+  expect_identical(fn(list(mixins = list("a", "b@latest"))), c("a", "b@latest"))
+  expect_identical(fn(list(mixins = c("a", "b"))), c("a", "b"))
+})
+
+test_that("dta_template_mixin_refs() rejects non-strings, blanks, NA and duplicates", {
+  fn <- app_fn("dta_template_mixin_refs")
+  expect_error(fn(list(mixins = 7)), class = "dta_template_mixin_invalid")
+  expect_error(fn(list(mixins = list("a", 1))), class = "dta_template_mixin_invalid")
+  expect_error(fn(list(mixins = list("a", ""))), class = "dta_template_mixin_invalid")
+  expect_error(fn(list(mixins = c("a", NA))), class = "dta_template_mixin_invalid")
+  expect_error(fn(list(mixins = list(a = "x"))), class = "dta_template_mixin_invalid")
+  expect_error(fn(list(mixins = list("a", "a"))), class = "dta_template_mixin_invalid")
+})
+
+test_that("mixins fold into an empty parent when there is no extends, in listed order", {
+  defs <- list(
+    "m1" = mx_def("m1",
+      options = list(list(id = "o1"), list(id = "o2")),
+      datasets = list(list(as = "d1")), base = list(metadata = list(a = 1))
+    ),
+    "m2" = mx_def("m2",
+      options = list(list(id = "o3")),
+      party_slots = list(list(id = "p1")), vocabulary_slots = list(list(id = "v1")),
+      base = list(metadata = list(b = 2))
+    )
+  )
+  res <- mx_resolve(mx_child(list("m1", "m2")), defs)
+
+  expect_identical(mx_ids(res$def$options), c("o1", "o2", "o3"))
+  expect_identical(mx_ids(res$def$party_slots), "p1")
+  expect_identical(mx_ids(res$def$vocabulary_slots), "v1")
+  expect_identical(res$def$datasets[[1]]$as, "d1")
+  expect_equal(res$def$base, list(metadata = list(a = 1, b = 2)))
+  expect_identical(res$lineage, character(0))
+  expect_identical(res$mixins, c("m1@1.0", "m2@1.0"))
+})
+
+test_that("permuting the mixins changes only the order of appended entries", {
+  defs <- list(
+    "m1" = mx_def("m1", options = list(list(id = "o1")), base = list(x = list(a = 1))),
+    "m2" = mx_def("m2", options = list(list(id = "o2")), base = list(x = list(b = 2)))
+  )
+  ab <- mx_resolve(mx_child(list("m1", "m2")), defs)
+  ba <- mx_resolve(mx_child(list("m2", "m1")), defs)
+
+  expect_identical(mx_ids(ab$def$options), c("o1", "o2"))
+  expect_identical(mx_ids(ba$def$options), c("o2", "o1"))
+  expect_setequal(names(ab$def$base$x), names(ba$def$base$x))
+  expect_identical(ba$mixins, c("m2@1.0", "m1@1.0"))
+})
+
+test_that("mixins fold on top of an extends chain", {
+  defs <- list(
+    "p" = list(
+      id = "p", version = "1.0", base = list(metadata = list(title = "P")),
+      options = list(list(id = "po")), datasets = list(list(as = "pd"))
+    ),
+    "m" = mx_def("m", options = list(list(id = "mo")), base = list(metadata = list(extra = "E")))
+  )
+  res <- mx_resolve(mx_child(list("m"), extends = "p"), defs)
+
+  expect_identical(mx_ids(res$def$options), c("po", "mo"))
+  expect_identical(res$def$base$metadata$title, "P")
+  expect_identical(res$def$base$metadata$extra, "E")
+  expect_identical(res$lineage, "p@1.0")
+  expect_identical(res$mixins, "m@1.0")
+})
+
+test_that("a def with neither extends nor mixins returns itself with empty lineage and mixins", {
+  res <- mx_resolve(list(id = "x", version = "1.0", base = list(a = 1)), list())
+  expect_identical(res$lineage, character(0))
+  expect_identical(res$mixins, character(0))
+  expect_equal(res$def$base, list(a = 1))
+})
+
+test_that("the merged result carries no mixins key, and a descendant inherits the content only", {
+  defs <- list(
+    "m" = mx_def("m", options = list(list(id = "mo"))),
+    "p" = list(id = "p", version = "1.0", mixins = list("m"))
+  )
+  res <- mx_resolve(list(id = "c", version = "1.0", extends = "p"), defs)
+
+  expect_false("mixins" %in% names(res$def))
+  expect_identical(mx_ids(res$def$options), "mo")
+  expect_identical(res$mixins, "m@1.0")
+  expect_identical(res$lineage, "p@1.0")
+})
+
+test_that("own mixins come first, then the parent's", {
+  defs <- list(
+    "m1" = mx_def("m1", options = list(list(id = "o1"))),
+    "m2" = mx_def("m2", options = list(list(id = "o2"))),
+    "p" = list(id = "p", version = "1.0", mixins = list("m1"))
+  )
+  res <- mx_resolve(mx_child(list("m2"), extends = "p"), defs)
+  expect_identical(res$mixins, c("m2@1.0", "m1@1.0"))
+  expect_identical(mx_ids(res$def$options), c("o1", "o2"))
+})
+
+test_that("re-listing a mixin the extends chain already mixed in is a conflict", {
+  defs <- list(
+    "m1" = mx_def("m1", options = list(list(id = "o1"))),
+    "p" = list(id = "p", version = "1.0", mixins = list("m1"))
+  )
+  err <- tryCatch(mx_resolve(mx_child(list("m1"), extends = "p"), defs), error = identity)
+  expect_s3_class(err, "dta_template_mixin_conflict")
+  expect_match(mx_flat(err), "m1@1.0", fixed = TRUE)
+  expect_match(mx_flat(err), "already mixed in by an ancestor", fixed = TRUE)
+})
+
+test_that("a different version of an ancestor's mixin follows the ordinary overlap rule", {
+  defs <- list(
+    "m1" = mx_def("m1", version = "1.0", options = list(list(id = "o1"))),
+    "m1@2.0" = mx_def("m1", version = "2.0", options = list(list(id = "o1"))),
+    "p" = list(id = "p", version = "1.0", mixins = list("m1"))
+  )
+  expect_error(
+    mx_resolve(mx_child(list("m1@2.0"), extends = "p"), defs),
+    class = "dta_template_mixin_conflict"
+  )
+})
+
+test_that("an overlap is a conflict in each section kind, naming both contributors", {
+  cases <- list(
+    options = list(options = list(list(id = "same"))),
+    party_slots = list(party_slots = list(list(id = "same"))),
+    vocabulary_slots = list(vocabulary_slots = list(list(id = "same"))),
+    datasets = list(datasets = list(list(as = "same")))
+  )
+  for (section in names(cases)) {
+    defs <- list(
+      "ma" = do.call(mx_def, c(list("ma"), cases[[section]])),
+      "mb" = do.call(mx_def, c(list("mb"), cases[[section]]))
+    )
+    err <- tryCatch(mx_resolve(mx_child(list("ma", "mb")), defs), error = identity)
+    expect_s3_class(err, "dta_template_mixin_conflict")
+    msg <- mx_flat(err)
+    expect_match(msg, "mb@1.0", fixed = TRUE)
+    expect_match(msg, "mixin ma@1.0", fixed = TRUE)
+    expect_match(msg, section, fixed = TRUE)
+    expect_match(msg, "same", fixed = TRUE)
+  }
+})
+
+test_that("a mixin overlapping the extends chain names the chain as the earlier contributor", {
+  defs <- list(
+    "p" = list(id = "p", version = "1.0", options = list(list(id = "o1"))),
+    "m" = mx_def("m", options = list(list(id = "o1")))
+  )
+  err <- tryCatch(mx_resolve(mx_child(list("m"), extends = "p"), defs), error = identity)
+  expect_s3_class(err, "dta_template_mixin_conflict")
+  expect_match(mx_flat(err), "the extends chain", fixed = TRUE)
+})
+
+test_that("a dataset template: pin collides with the same dataset at another version", {
+  defs <- list(
+    "ma" = mx_def("ma", datasets = list(list(template = "gf@1.0"))),
+    "mb" = mx_def("mb", datasets = list(list(template = "gf@2.0")))
+  )
+  expect_error(
+    mx_resolve(mx_child(list("ma", "mb")), defs),
+    class = "dta_template_mixin_conflict"
+  )
+})
+
+test_that("base overlaps conflict at the dotted path; disjoint branches merge deeply", {
+  defs <- list(
+    "ma" = mx_def("ma", base = list(metadata = list(supplier = list(name = "A", city = "X")))),
+    "mb" = mx_def("mb", base = list(metadata = list(supplier = list(name = "B")))),
+    "mc" = mx_def("mc", base = list(metadata = list(supplier = list(country = "DE"))))
+  )
+  err <- tryCatch(mx_resolve(mx_child(list("ma", "mb")), defs), error = identity)
+  expect_s3_class(err, "dta_template_mixin_conflict")
+  expect_match(mx_flat(err), "metadata.supplier.name", fixed = TRUE)
+  expect_match(mx_flat(err), "mixin ma@1.0", fixed = TRUE)
+
+  ok <- mx_resolve(mx_child(list("ma", "mc")), defs)
+  expect_equal(
+    ok$def$base$metadata$supplier,
+    list(name = "A", city = "X", country = "DE")
+  )
+})
+
+test_that("a base collision of mapping with scalar, or with an empty value, is a conflict", {
+  defs <- list(
+    "ma" = mx_def("ma", base = list(k = list(a = 1))),
+    "mb" = mx_def("mb", base = list(k = "scalar")),
+    "mc" = mx_def("mc", base = list(k = list()))
+  )
+  expect_error(mx_resolve(mx_child(list("ma", "mb")), defs), class = "dta_template_mixin_conflict")
+  expect_error(mx_resolve(mx_child(list("ma", "mc")), defs), class = "dta_template_mixin_conflict")
+})
+
+test_that("a base overlap with the extends chain is a conflict", {
+  defs <- list(
+    "p" = list(id = "p", version = "1.0", base = list(metadata = list(title = "P"))),
+    "m" = mx_def("m", base = list(metadata = list(title = "M")))
+  )
+  expect_error(
+    mx_resolve(mx_child(list("m"), extends = "p"), defs),
+    class = "dta_template_mixin_conflict"
+  )
+})
+
+test_that("entries without a key are appended and cannot conflict", {
+  defs <- list(
+    "ma" = mx_def("ma", datasets = list(list(note = "x"))),
+    "mb" = mx_def("mb", datasets = list(list(note = "x")))
+  )
+  res <- mx_resolve(mx_child(list("ma", "mb")), defs)
+  expect_length(res$def$datasets, 2)
+})
+
+test_that("duplicate keys inside one mixin are rejected", {
+  defs <- list("m" = mx_def("m", options = list(list(id = "o"), list(id = "o"))))
+  expect_error(mx_resolve(mx_child(list("m")), defs), class = "rlang_error")
+})
+
+test_that("the child may modify and remove mixin-provided entries like inherited ones", {
+  defs <- list("m" = mx_def("m",
+    options = list(list(id = "o1", label = "Orig"), list(id = "o2")),
+    datasets = list(list(as = "d1"), list(as = "d2")),
+    base = list(metadata = list(a = 1, b = 2))
+  ))
+  child <- mx_child(list("m"),
+    options = list(list(id = "o1", label = "Changed"), list(id = "o2", remove = TRUE)),
+    datasets = list(list(as = "d1", remove = TRUE)),
+    base = list(metadata = list(a = 10))
+  )
+  res <- mx_resolve(child, defs)
+
+  expect_identical(mx_ids(res$def$options), "o1")
+  expect_identical(res$def$options[[1]]$label, "Changed")
+  expect_identical(vapply(res$def$datasets, function(d) d$as, character(1)), "d2")
+  expect_equal(res$def$base$metadata, list(a = 10, b = 2))
+})
+
+test_that("an unresolvable mixin raises dta_template_mixin_unresolved naming the template and ref", {
+  err <- tryCatch(mx_resolve(mx_child(list("ghost@9.9")), list()), error = identity)
+  expect_s3_class(err, "dta_template_mixin_unresolved")
+  expect_match(mx_flat(err), "child", fixed = TRUE)
+  expect_match(mx_flat(err), "ghost@9.9", fixed = TRUE)
+  expect_false(grepl("cycle detected", mx_flat(err), fixed = TRUE))
+  expect_false(grepl("exceeds the depth limit", mx_flat(err), fixed = TRUE))
+})
+
+test_that("every M2 violation makes the mixin invalid", {
+  bad <- list(
+    not_abstract = list(id = "m", version = "1.0", options = list(list(id = "o"))),
+    extends = mx_def("m", extends = "p"),
+    mixins = mx_def("m", mixins = list("q")),
+    sealed = mx_def("m", sealed = "base.x"),
+    required = mx_def("m", required = "base.x"),
+    variants = mx_def("m", variants = list(id = "v")),
+    order = mx_def("m", order = "o"),
+    verb_form = mx_def("m", options = list(add = list(list(id = "o")))),
+    remove_entry = mx_def("m", options = list(list(id = "o", remove = TRUE))),
+    legacy_base_datasets = mx_def("m", base = list(datasets = list(list(as = "d")))),
+    base_scalar = mx_def("m", base = list("x"))
+  )
+  for (nm in names(bad)) {
+    expect_error(
+      mx_resolve(mx_child(list("m")), list(m = bad[[nm]], p = list(id = "p", version = "1"))),
+      class = "dta_template_mixin_invalid",
+      info = nm
+    )
+  }
+})
+
+test_that("a null content section or a null inside base makes the mixin invalid", {
+  # Parsed from YAML so the null is the real names()-present-but-NULL shape.
+  for (yaml_text in c(
+    "id: m\nversion: '1.0'\nabstract: true\noptions: ~\n",
+    "id: m\nversion: '1.0'\nabstract: true\ndatasets: ~\n",
+    "id: m\nversion: '1.0'\nabstract: true\nbase: ~\n",
+    "id: m\nversion: '1.0'\nabstract: true\nbase:\n  metadata:\n    a: ~\n"
+  )) {
+    m <- yaml::yaml.load(yaml_text)
+    expect_error(
+      mx_resolve(mx_child(list("m")), list(m = m)),
+      class = "dta_template_mixin_invalid",
+      info = yaml_text
+    )
+  }
+})
+
+test_that("a brace expression in a mixin id is shown, never evaluated", {
+  defs <- list(m = list(id = "{stop('boom')}", version = "1.0", options = list(list(id = "o"))))
+  err <- tryCatch(mx_resolve(mx_child(list("m")), defs), error = identity)
+  expect_s3_class(err, "dta_template_mixin_invalid")
+  expect_match(conditionMessage(err), "stop('boom')", fixed = TRUE)
+})
+
+test_that("a seal on the extends chain applies to mixin content that writes a sealed path", {
+  defs <- list(
+    "p" = list(
+      id = "p", version = "1.0", sealed = "base.metadata.title",
+      base = list(metadata = list(title = "Fixed"))
+    ),
+    "m_opt" = mx_def("m_opt", options = list(
+      list(id = "o", target = "metadata.title")
+    ))
+  )
+  expect_error(
+    mx_resolve(mx_child(list("m_opt"), extends = "p"), defs),
+    class = "dta_template_sealed_violation"
+  )
+
+  defs$m_ok <- mx_def("m_ok", options = list(list(id = "o", target = "metadata.other")))
+  res <- mx_resolve(mx_child(list("m_ok"), extends = "p"), defs)
+  expect_identical(mx_ids(res$def$options), "o")
 })

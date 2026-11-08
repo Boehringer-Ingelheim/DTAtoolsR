@@ -8,9 +8,11 @@
 # newcomer reverse-engineering the four file kinds from the vignette alone.
 #
 # The worked example it copies from -- inst/extdata/template-repo-skeleton/ --
-# is deliberately its own directory, not a subset of inst/extdata/templates/
+# mirrors the output layout: README.md and dta-app.yaml at the root, then one
+# folder per file kind (templates/, parties/, vocabulary/, export-templates/).
+# It is deliberately its own directory, not a subset of inst/extdata/library/
 # (the packaged biomarker_gf family used in examples and tests elsewhere).
-# Those two serve different audiences: inst/extdata/templates/ demonstrates
+# Those two serve different audiences: inst/extdata/library/ demonstrates
 # every feature the template engine has, at the cost of being a fairly
 # involved read; the skeleton is meant to be copied verbatim into a fresh
 # repository and understood in one sitting, so it stays deliberately small.
@@ -48,10 +50,10 @@
 # rather than duplicated once per provider, because the failure mode
 # (system.file() silently returning "") is identical for all three.
 .dta_create_repo_ci_asset_file <- function(asset_name) {
-  file <- system.file("extdata", "templates", asset_name, package = "DTAtools")
+  file <- system.file("extdata", "ci", asset_name, package = "DTAtools")
   if (!nzchar(file) || !file.exists(file)) {
     cli::cli_abort(c(
-      "Could not locate the bundled CI asset ({.file inst/extdata/templates/{asset_name}}).",
+      "Could not locate the bundled CI asset ({.file inst/extdata/ci/{asset_name}}).",
       "i" = "This usually means a development checkout is missing {.file inst/},
         or DTAtools was installed from a broken build."
     ))
@@ -68,17 +70,20 @@
   c(".Rproj.user", ".Rhistory", "*.Rproj")
 }
 
-# The starter template YAML files shipped in the skeleton -- everything
-# there except README.md. Discovered from the directory's actual contents
-# rather than hard-coded, so a future change to the skeleton (renaming a
-# starter file, adding a fifth) cannot silently drift out of sync with what
-# this function copies.
+# The example files shipped in the skeleton -- every file under it, relative
+# to the skeleton, except the root README.md (which .dta_create_repo_targets()
+# adds on its own, whatever `examples` says). Discovered from the directory's
+# actual contents rather than hard-coded, so a future change to the skeleton
+# (renaming a starter file, adding a folder) cannot silently drift out of sync
+# with what this function copies. A folder's own README.md (such as
+# export-templates/README.md) is an example file like any other.
 .dta_create_repo_example_files <- function(skeleton_dir) {
-  list.files(skeleton_dir, pattern = "[.]ya?ml$", full.names = FALSE)
+  files <- list.files(skeleton_dir, recursive = TRUE, full.names = FALSE, all.files = FALSE)
+  files[files != "README.md"]
 }
 
 # Where each CI provider's bundled asset is written inside the created
-# repository, and which file under inst/extdata/templates/ it is copied from.
+# repository, and which file under inst/extdata/ci/ it is copied from.
 # A named list keyed by provider name rather than three near-identical `if`
 # blocks, so a fourth provider (Bamboo, GitLab CI, ...) is one new list entry
 # rather than a new branch that has to stay in sync with the provider names
@@ -154,24 +159,53 @@
 #' @description
 #' Creates a directory laid out the way a private DTAtools template
 #' repository is meant to be: a small, self-consistent worked example of the
-#' four template kinds (a creation template, a dataset template, a party
-#' profile, a controlled vocabulary), a `README.md` explaining them, a
+#' four template kinds (a creation template and a dataset template in
+#' `templates/`, a party profile in `parties/`, a controlled vocabulary in
+#' `vocabulary/`), an app configuration `dta-app.yaml` and an
+#' `export-templates/` folder for Word templates, a root-level
+#' `README.md` with the full authoring guide, a
 #' `.gitignore`, and -- by default -- a GitHub Actions workflow that runs
 #' [validate_template()] against the repository on every push and pull
-#' request. The result already passes `validate_template(path, strict =
-#' TRUE)` unmodified, so it is a starting point to edit rather than a stub to
-#' fill in from nothing. See `vignette("private-templates", package =
+#' request. With the default `examples = TRUE`, the result already passes
+#' `validate_template(path, strict = TRUE)` unmodified, so it is a starting
+#' point to edit rather than a stub to fill in from nothing. See `vignette("private-templates", package =
 #' "DTAtools")` for how to point the bundled Shiny app at the directory this
 #' creates.
+#' @details
+#' The scaffold mirrors the bundled skeleton, with the full authoring guide
+#' at the root and one folder per kind of file:
+#'
+#' ```text
+#' <path>/README.md
+#' <path>/.gitignore
+#' <path>/dta-app.yaml                            (app configuration, all commented out)
+#' <path>/templates/starter.dta-template.yaml
+#' <path>/templates/starter_dataset.dta-dataset-template.yaml
+#' <path>/parties/starter_supplier.dta-party.yaml
+#' <path>/vocabulary/starter_terms.dta-vocabulary.yaml
+#' <path>/export-templates/README.md              (drop Word .docx templates here)
+#' <path>/.github/workflows/validate-templates.yml  (ci = "github", default)
+#' <path>/bitbucket-pipelines.yml                 (ci = "bitbucket")
+#' <path>/Jenkinsfile                             (ci = "jenkins")
+#' ```
+#'
+#' Only the selected CI files are written. [validate_template()] detects the
+#' layout from the repository root: point it (and the app's template sources)
+#' at `<path>` itself, never at one of the folders inside it.
 #' @param path A single non-empty character string: the directory to create
 #'   the repository in. Created recursively when it does not already exist.
 #'   Aborts via [cli::cli_abort()] if `path` names an existing file rather
 #'   than a directory.
 #' @param examples A single `TRUE`/`FALSE` (default `TRUE`). When `TRUE`,
-#'   copies the four starter template YAML files into `path`, alongside
-#'   `README.md`. When `FALSE`, only `README.md`, `.gitignore` and (if `ci`
-#'   asks for any provider) its CI file(s) are written -- no template files,
-#'   for a caller who wants the scaffolding without the worked example.
+#'   writes the four starter templates into `templates/`, `parties/` and
+#'   `vocabulary/` beneath `path`, plus the commented-out `dta-app.yaml` and
+#'   `export-templates/README.md`. `README.md` stays at the repository root.
+#'   When `FALSE`, only `README.md`,
+#'   `.gitignore` and (if `ci` asks for any provider) its CI file(s) are
+#'   written -- no template files, for a caller who wants the scaffolding
+#'   without the worked example. Such a repository has no templates yet, so
+#'   [validate_template()] reports the error `no_templates` and the generated
+#'   CI workflow fails until a template is added.
 #' @param ci Either a single `TRUE`/`FALSE` (default `TRUE`), or a character
 #'   vector naming one or more of `"github"`, `"bitbucket"`, `"jenkins"`
 #'   (duplicates are silently dropped). `TRUE` is shorthand for `"github"`
@@ -240,8 +274,9 @@ create_template_repo <- function(path, examples = TRUE, ci = TRUE, overwrite = F
   for (i in seq_along(targets)) {
     dest <- dest_paths[[i]]
     src <- targets[[i]]
-    # Needed for the workflow's nested .github/workflows/ destination; a
-    # no-op everywhere else, since `path` itself was already created above.
+    # Needed for the kind folders and the workflow's .github/workflows/
+    # destination; a no-op everywhere else, since `path` itself was already
+    # created above.
     dir.create(dirname(dest), recursive = TRUE, showWarnings = FALSE)
 
     ok <- if (is.na(src)) {
@@ -256,10 +291,18 @@ create_template_repo <- function(path, examples = TRUE, ci = TRUE, overwrite = F
   }
 
   path_out <- normalizePath(path, winslash = "/", mustWork = TRUE)
+  # Without the starter files there is nothing to validate yet: the suggested
+  # command would only fail with `no_templates`, and so would any CI just
+  # written, until the first template is added.
+  next_step <- if (isTRUE(examples)) {
+    "Next: {.code validate_template(\"{path_out}\", strict = TRUE)}"
+  } else {
+    "Next: add your template files to {.file templates/}, {.file parties/} and {.file vocabulary/}; until then {.fn validate_template} (and any CI written) fails with {.code no_templates}."
+  }
   cli::cli_inform(c(
-    "v" = "Created a template repository at {.file {path_out}}.",
+    "v" = "Created a template repository at {.file {path_out}} (files go in {.file templates/}, {.file parties/}, {.file vocabulary/} and {.file export-templates/}).",
     "*" = "Wrote {.file {names(targets)}}.",
-    "i" = "Next: {.code validate_template(\"{path_out}\", strict = TRUE)}"
+    "i" = next_step
   ))
   invisible(path_out)
 }

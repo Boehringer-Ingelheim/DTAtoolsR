@@ -5,9 +5,10 @@
 \title{DTADataSetFile Class}
 \usage{
 DTADataSetFile(
-  name,
+  id,
   paths = character(),
   files = list(),
+  name = NULL,
   description = NULL,
   template_source = NULL,
   template_version = NULL,
@@ -15,20 +16,29 @@ DTADataSetFile(
 )
 }
 \arguments{
-\item{name}{Character. Name of the container.}
+\item{id}{Character. Identifier of the dataset: its key in a DTA's
+\code{datasets}, in every validation message and in \code{load_file()}.}
 
 \item{paths}{Character vector of file paths to validate.}
 
-\item{files}{A list of DTAFile objects specifying input file information.}
+\item{files}{A list of DTAFile objects specifying input file information.
+Any handler that is not a \code{DTAFileAny} is rebuilt as one, keeping its
+filename, pattern, file-count limits and info.
+When \code{files} is empty, one \code{DTAFileAny} handler is built per
+entry of \code{paths}.}
 
-\item{description}{Character or NULL. Optional description.}
+\item{name}{Character or NULL. Human-readable name of the dataset, e.g.
+\code{"Delivery reports"}; shown in place of the \code{id} where one is set.}
 
-\item{template_source}{Character or NA. Source of the template used to
+\item{description}{Character or NULL. Long free-text description of the
+dataset.}
+
+\item{template_source}{Character or NULL. Source of the template used to
 generate the dataset specification.}
 
-\item{template_version}{Character or NA. Version of the template used.}
+\item{template_version}{Character or NULL. Version of the template used.}
 
-\item{template_date}{Character or NA. Date of the template used.}
+\item{template_date}{Character or NULL. Date of the template used.}
 }
 \value{
 An object of class DTADataSetFile.
@@ -41,7 +51,7 @@ or more referenced files exist, are readable, and are not empty.
 path <- tempfile(fileext = ".pdf")
 writeLines("a delivered report", path)
 
-ds <- DTADataSetFile(name = "delivery", paths = path)
+ds <- DTADataSetFile(id = "delivery", paths = path, name = "Delivery reports")
 validation_status(check(ds, quiet = TRUE))
 
 unlink(path)

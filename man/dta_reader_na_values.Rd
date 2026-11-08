@@ -16,8 +16,8 @@ own default (\code{c("", "NA")}) rather than narrowing it.
 }
 \description{
 Maps a \code{DTAFileTabular} handler's declared \code{missing_values} onto the \code{na}
-argument the readers expect. An empty cell is always treated as missing
-regardless of what a handler declares; anything in \code{missing_values} adds to
-that rather than replacing it.
+argument the readers expect. Both readers default (when \code{na} is \code{NULL}) to
+Arrow's own \code{c("", "NA")}; anything a handler declares in \code{missing_values}
+is ADDED to that default set, never used in place of it.
 }
 \keyword{internal}

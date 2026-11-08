@@ -2,7 +2,7 @@
 % Please edit documentation in R/evaluateRules.R
 \name{rule_check_group_condition}
 \alias{rule_check_group_condition}
-\title{Rule: check_group_condition}
+\title{Rule: group_condition}
 \usage{
 rule_check_group_condition(rule, df, numeric_cache = NULL)
 }
@@ -15,11 +15,29 @@ rule_check_group_condition(rule, df, numeric_cache = NULL)
 \code{NULL} to convert each column on demand.}
 }
 \value{
-A list with elements \code{id}, \code{valid}, and \code{message}.
+A list with elements \code{id}, \code{valid}, and \code{message}. When the rule
+fails on a constraint, it also has \code{details}: a list with one element per
+violating group and constraint, each holding \code{constraint_id}, \code{group},
+\code{message}, \code{rows} and \code{rows_truncated}.
 }
 \description{
 Evaluates named conditions per group and applies constraints between those
 condition outcomes.
+}
+\details{
+Each condition is evaluated per row, then reduced per group with a scope:
+\code{"any"} (the default; some row of the group matches) or \code{"all"} (every row
+of the group matches). Constraints are lists with a \code{type}:
+\itemize{
+\item \code{mutually_exclusive}: \code{left} and \code{right} name conditions, with optional
+\code{left_scope} and \code{right_scope}. A group violates it when both sides hold.
+\item \code{requires}: \code{if} and \code{then} name conditions, with optional \code{if_scope} and
+\code{then_scope}. A group violates it when \code{if} holds and \code{then} does not.
+}
+
+Either type accepts an optional \code{message} (replaces the generated text) and
+\code{id} (reported as \code{constraint_id}). Constraints of any other type are
+ignored.
 }
 \examples{
 df <- data.frame(

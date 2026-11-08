@@ -1,3 +1,82 @@
+# A mapping is an ordinary named list, not a data frame or a list array.
+# Empty lists are the absent representation for study and sections.
+.dta_metadata_is_mapping <- function(value) {
+  if (!is.list(value) || is.object(value) || !is.null(dim(value))) {
+    return(FALSE)
+  }
+  nms <- names(value)
+  length(value) == 0 ||
+    (!is.null(nms) && !anyNA(nms) && all(nzchar(nms)) && !anyDuplicated(nms))
+}
+
+# Validate without trimming or otherwise changing the author's stored text.
+.dta_metadata_is_text <- function(value, blank = TRUE) {
+  is.character(value) && length(value) == 1L && is.null(dim(value)) &&
+    !is.na(value) && (blank || nzchar(trimws(value, whitespace = "[\\h\\v]")))
+}
+
+.dta_metadata_validate_study <- function(study) {
+  if (!.dta_metadata_is_mapping(study)) {
+    return("study must be a named list with unique, non-empty field names.")
+  }
+  errors <- character()
+  unknown <- setdiff(names(study), c("id", "protocol_id"))
+  if (length(unknown) > 0) {
+    errors <- c(errors, paste0("study has unknown fields: ", paste(unknown, collapse = ", "), "."))
+  }
+  for (field in intersect(names(study), c("id", "protocol_id"))) {
+    if (!.dta_metadata_is_text(study[[field]], blank = FALSE)) {
+      errors <- c(errors, paste0("study$", field, " must be a single non-NA, nonblank character string."))
+    }
+  }
+  errors
+}
+
+.dta_metadata_validate_sections <- function(sections) {
+  if (!.dta_metadata_is_mapping(sections)) {
+    return("sections must be a named list with unique, non-empty identifiers.")
+  }
+  errors <- character()
+  for (id in names(sections)) {
+    # \z anchors to the actual end, so a final newline is not a valid ID.
+    if (!grepl("^[A-Za-z][A-Za-z0-9_]*\\z", id, perl = TRUE)) {
+      errors <- c(errors, paste0("sections identifier '", id, "' must match ^[A-Za-z][A-Za-z0-9_]*$."))
+    }
+    section <- sections[[id]]
+    path <- paste0("sections$", id)
+    if (!.dta_metadata_is_mapping(section) || !setequal(names(section), c("title", "text"))) {
+      errors <- c(errors, paste0(path, " must be a record with exactly 'title' and 'text' fields."))
+      next
+    }
+    if (!.dta_metadata_is_text(section$title, blank = FALSE)) {
+      errors <- c(errors, paste0(path, "$title must be a single non-NA, nonblank character string."))
+    }
+    if (!.dta_metadata_is_text(section$text)) {
+      errors <- c(errors, paste0(path, "$text must be a single non-NA character string (blank is allowed)."))
+    }
+  }
+  errors
+}
+
+.dta_metadata_validate_transmission_text <- function(transmission) {
+  fields <- c(
+    "extent", "scope", "packaging", "security", "checksum",
+    "test_requirements", "blinding_requirements"
+  )
+  errors <- character()
+  # Index occurrences, not unique names: an invalid duplicate must not escape
+  # validation. Do not impose a closed schema on existing extension fields.
+  for (i in which(names(transmission) %in% fields)) {
+    if (!.dta_metadata_is_text(transmission[[i]])) {
+      errors <- c(errors, paste0(
+        "transmission$", names(transmission)[[i]],
+        " must be a single non-NA character string (blank is allowed)."
+      ))
+    }
+  }
+  errors
+}
+
 #' @title Render Date Values as ISO Strings
 #' @description
 #' \code{yaml::write_yaml()} has no date type: it writes a \code{Date} as its
@@ -43,8 +122,35 @@ method(as.list, DTAMetaData) <- function(x, ...) {
     authorized_for_corrections = x@authorized_for_corrections,
     # Machine-owned provenance. Unlike import_issues this MUST round-trip: it
     # is what the rebase feature will trust.
-    template = x@template
+    template = x@template,
+    study = x@study,
+    sections = x@sections
   )
+
+  # Write the original text of a date that raised an import issue, so the
+  # constructor reproduces the same issue on read. Only while the field still
+  # holds what that text resolved to; a value changed since load is written as is.
+  for (issue in x@import_issues) {
+    if (!issue$reason %in% c("trailing_residue", "not_convertible")) next
+    current <- switch(issue$column,
+      "date" = x@date,
+      "transmission$date_first_transfer" = x@transmission$date_first_transfer,
+      "transmission$date_last_transfer" = x@transmission$date_last_transfer,
+      next
+    )
+    resolved <- .parse_metadata_date(issue$raw, issue$column, require_date = TRUE)$value
+    unchanged <- if (identical(issue$reason, "not_convertible")) {
+      length(current) == 0 || is.na(current)
+    } else {
+      inherits(current, "Date") && identical(current, resolved)
+    }
+    if (!unchanged) next
+    if (identical(issue$column, "date")) {
+      result$date <- issue$raw
+    } else {
+      result$transmission[[sub("transmission$", "", issue$column, fixed = TRUE)]] <- issue$raw
+    }
+  }
 
   keep <- vapply(
     names(result),
@@ -63,7 +169,8 @@ method(as.list, DTAMetaData) <- function(x, ...) {
 # state `""` expresses for a scalar. Dropping it would erase a distinction the
 # class can actually represent.
 .dta_metadata_empty_list_is_absent <- c(
-  "version_history", "receiver", "supplier", "transmission", "template"
+  "version_history", "receiver", "supplier", "transmission", "template",
+  "study", "sections"
 )
 
 # Whether one metadata field is absent, and so not written at all.
@@ -114,7 +221,9 @@ get_authorized_for_corrections <- function(x) {
 #' @param x A DTAMetaData object
 #' @param name_only Logical. If TRUE, return only names; if FALSE, return full contact objects
 #'
-#' @return A character vector of reviewer names or list of reviewer contact objects
+#' @return A character vector of reviewer names or list of reviewer contact
+#'   objects; \code{NULL} when there is no receiver or the receiver has no
+#'   contacts.
 #'
 #' @examples
 #' md <- create_example_DTAMetaData(2)
@@ -246,7 +355,10 @@ get_version_history_df <- function(x) {
 
 
 #' @title Validate Transmission Dates
-#' @description Check that transmission dates are valid (either Date objects or non-empty character phrases)
+#' @description Check that transmission dates are valid (either Date objects or
+#' non-empty character phrases).
+#' The check also fails when both dates are Date objects and the first transfer
+#' date is after the last.
 #'
 #' @param x A DTAMetaData object
 #'

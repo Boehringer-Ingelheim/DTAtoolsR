@@ -4,22 +4,25 @@
 \alias{.add_dataset_specs_section}
 \title{Add Column Specifications + Validation Rules sections for one dataset (DOCX).
 Used standalone by write_dataset_metadata() (heading_level = 2) and embedded
-within write_dta()'s per-dataset "Datasets" section (heading_level = NULL, which
-uses bold subheadings instead of doc heading styles to avoid needing a
-non-existent "heading 4" style).}
+within write_dta()'s per-dataset "Datasets" section (heading_level = NULL,
+which uses bold subheadings instead of doc heading styles, so it also works
+on a template such as officer's default that lacks the deeper heading
+styles).}
 \usage{
 .add_dataset_specs_section(
   doc,
   dataset,
   include_rules = TRUE,
-  heading_level = 2
+  heading_level = 2,
+  furniture_meta = NULL
 )
 }
 \description{
 Add Column Specifications + Validation Rules sections for one dataset (DOCX).
 Used standalone by write_dataset_metadata() (heading_level = 2) and embedded
-within write_dta()'s per-dataset "Datasets" section (heading_level = NULL, which
-uses bold subheadings instead of doc heading styles to avoid needing a
-non-existent "heading 4" style).
+within write_dta()'s per-dataset "Datasets" section (heading_level = NULL,
+which uses bold subheadings instead of doc heading styles, so it also works
+on a template such as officer's default that lacks the deeper heading
+styles).
 }
 \keyword{internal}
