@@ -188,18 +188,18 @@
 #   A plain vector lists every entry; a missing entry reads "missing":
 #   "is one of "A" or missing". It matches a missing value.
 #   A list (YAML sequence) is listed without its empty (YAML ~) and missing
-#   entries, which are explained in parentheses instead, because the
-#   evaluator mostly does not read them as "missing". The evaluator
+#   entries, which are explained in parentheses instead, because most of
+#   them are not read as "missing" (see below). The evaluator
 #   (dta_equality_bound()) compares a list as numbers only when the column
 #   holds numbers and the flattened list is numeric, or is text of which
 #   every entry that is not missing reads as a number (a text "2" counts; a
 #   list of logical values only does not, since flattening keeps it logical,
 #   while true next to a number flattens to 1; an empty entry is dropped);
 #   otherwise it compares text, and a missing entry is the text "NA" (unless
-#   it is a missing text entry, see below), an empty one the text "NULL".
+#   it is a missing text entry, see below). An empty entry (YAML ~) is read as
+#   a missing text entry.
 #   Since the list is known, the wording names only what depends on the
 #   column:
-#     empty entry:   "an empty entry, which matches only the text "NULL""
 #     missing entry, list compares as numbers: "a missing entry, which
 #                    matches a missing value if C holds numbers and
 #                    otherwise only the text "NA""
@@ -207,7 +207,7 @@
 #                    text "NA", never a missing value"
 #   as "one of a or b (the list also holds <entry>[, and <entry>])" or, with
 #   no other entry, "one of the entries of a list that holds only <entry>".
-#     missing text entry (YAML .na.character, NA_character_): "a missing
+#     missing text entry (YAML ~, .na.character, NA_character_): "a missing
 #                    entry, which matches a missing value" in a column of any
 #                    type (match() keeps it missing while the other entries
 #                    become text); next to it, any other missing entry reads
@@ -525,9 +525,8 @@
 
 # The values of an in/not_in test. A plain vector lists every entry, a
 # missing one as "missing". A list (YAML sequence) is listed without its empty
-# (NULL) and missing entries, which the evaluator mostly does not read as
-# "missing" (see the comment block at the top); they are explained in
-# parentheses.
+# (NULL) and missing entries, which are explained in parentheses (see the
+# comment block at the top).
 # `missing` is "yes", "no" or "depends": whether `in` holds for a missing
 # value.
 .rule_set_values <- function(value, col) {
@@ -545,15 +544,12 @@
   # A missing text entry (YAML .na.character) stays a true missing value when
   # match() turns the list into text, so it matches a missing value in a
   # column of any type; any other missing entry becomes the text "NA".
-  is_na_text <- is_na & vapply(value, is.character, logical(1))
+  # An empty entry (YAML ~) is read as a missing text entry (see
+  # dta_condition_mask()).
+  is_na_text <- is_null | (is_na & vapply(value, is.character, logical(1)))
   is_na_other <- is_na & !is_na_text
   shown <- .rule_values(value[!is_null & !is_na])
   bodies <- character(0)
-  if (any(is_null)) {
-    bodies <- c(bodies, paste0(
-      "an empty entry, which matches only the text ", .rule_value("NULL")
-    ))
-  }
   missing <- "no"
   if (any(is_na_text)) {
     missing <- "yes"
