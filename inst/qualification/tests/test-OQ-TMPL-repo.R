@@ -1,6 +1,6 @@
 # create_template_repo(): scaffolding a new template repository, and the
 # guarantee that both it and every packaged example validate cleanly.
-# REQ-TMPL-026 .. REQ-TMPL-030.
+# REQ-TMPL-026 .. REQ-TMPL-030, REQ-TMPL-048.
 #
 # Every call here writes into qa_tempdir() -- never into the package's own
 # inst/extdata/ -- and every create_template_repo() call is wrapped in
@@ -9,12 +9,20 @@
 
 tmpl_fixture <- function(...) file.path(qa_suite_root(), "fx", "t", ...)
 
-# Expected scaffold paths below are written from REQ-TMPL-026, not discovered
-# from the installed skeleton or the function under qualification.
+# Expected scaffold paths below are written from REQ-TMPL-026 and
+# REQ-TMPL-048, not discovered from the installed skeleton or the function
+# under qualification.
+skill_files <- file.path(
+  ".claude/skills/dta-template-authoring",
+  c(
+    "SKILL.md", "references/composition.md", "references/linting.md",
+    "references/repository-architecture.md"
+  )
+)
 
 # ---- REQ-TMPL-026: the default write set, and examples = FALSE ------------
 
-test_that("OQ-TMPL-049 | the defaults write the scaffolding, the skeleton library files and a GitHub workflow | REQ-TMPL-026", {
+test_that("OQ-TMPL-049 | the defaults write the scaffolding, the skeleton library files, a GitHub workflow and the agent skill | REQ-TMPL-026 REQ-TMPL-048", {
   dir <- qa_tempdir()
   out <- suppressMessages(create_template_repo(dir))
 
@@ -27,9 +35,16 @@ test_that("OQ-TMPL-049 | the defaults write the scaffolding, the skeleton librar
     "vocabulary/starter_terms.dta-vocabulary.yaml",
     "dta-app.yaml",
     "export-templates/README.md",
-    ".github/workflows/validate-templates.yml"
+    ".github/workflows/validate-templates.yml",
+    skill_files
   ))
   qa_step("exactly the documented default file set is written", expected, written)
+  bundled <- system.file("extdata", "agent-skills", "dta-template-authoring", package = "DTAtools")
+  qa_step(
+    "with the defaults too, every skill file is byte-identical to the bundled copy",
+    unname(tools::md5sum(file.path(bundled, sub("^[.]claude/skills/dta-template-authoring/", "", skill_files)))),
+    unname(tools::md5sum(file.path(dir, skill_files)))
+  )
   qa_step("the return value names the directory just written to", normalizePath(dir, winslash = "/"), out)
 })
 
@@ -39,8 +54,8 @@ test_that("OQ-TMPL-050 | examples = FALSE omits the library files but keeps the 
 
   written <- sort(list.files(dir, recursive = TRUE, all.files = TRUE, no.. = TRUE))
   qa_step(
-    "only .gitignore, README.md and the default GitHub workflow remain",
-    sort(c(".gitignore", "README.md", ".github/workflows/validate-templates.yml")), written
+    "only .gitignore, README.md, the default GitHub workflow and the agent skill remain",
+    sort(c(".gitignore", "README.md", ".github/workflows/validate-templates.yml", skill_files)), written
   )
 })
 
@@ -48,7 +63,7 @@ test_that("OQ-TMPL-050 | examples = FALSE omits the library files but keeps the 
 
 test_that("OQ-TMPL-051 | ci = FALSE writes no CI file and no .github directory | REQ-TMPL-027", {
   dir <- qa_tempdir()
-  suppressMessages(create_template_repo(dir, examples = FALSE, ci = FALSE))
+  suppressMessages(create_template_repo(dir, examples = FALSE, ci = FALSE, agent_skill = FALSE))
 
   written <- sort(list.files(dir, recursive = TRUE, all.files = TRUE, no.. = TRUE))
   qa_step("only the two scaffolding files", sort(c(".gitignore", "README.md")), written)
@@ -57,7 +72,10 @@ test_that("OQ-TMPL-051 | ci = FALSE writes no CI file and no .github directory |
 
 test_that("OQ-TMPL-052 | ci accepts a combination of providers, each to its own destination | REQ-TMPL-027", {
   dir <- qa_tempdir()
-  suppressMessages(create_template_repo(dir, examples = FALSE, ci = c("github", "bitbucket", "jenkins")))
+  suppressMessages(create_template_repo(
+    dir,
+    examples = FALSE, ci = c("github", "bitbucket", "jenkins"), agent_skill = FALSE
+  ))
 
   written <- sort(list.files(dir, recursive = TRUE, all.files = TRUE, no.. = TRUE))
   expected <- sort(c(
@@ -76,6 +94,72 @@ test_that("OQ-TMPL-053 | an unrecognised ci provider, or an empty ci vector, is 
   # "no providers" in plain language -- only FALSE is accepted for that.
   err_empty <- tryCatch(create_template_repo(qa_tempdir(), ci = character(0)), error = function(e) e)
   qa_check("an empty character vector is rejected too, not treated as FALSE", inherits(err_empty, "condition"))
+})
+
+# ---- REQ-TMPL-048: the agent skill ------------------------------------------
+
+test_that("OQ-TMPL-115 | the agent skill is written byte-identical, with the front matter an agent loads it by | REQ-TMPL-048", {
+  dir <- qa_tempdir()
+  suppressMessages(create_template_repo(dir, examples = FALSE, ci = FALSE))
+
+  written <- sort(list.files(dir, recursive = TRUE, all.files = TRUE, no.. = TRUE))
+  qa_step(
+    "examples = FALSE and ci = FALSE still write the skill beside the scaffolding",
+    sort(c(".gitignore", "README.md", skill_files)), written
+  )
+
+  bundled <- system.file("extdata", "agent-skills", "dta-template-authoring", package = "DTAtools")
+  rel <- sub("^[.]claude/skills/dta-template-authoring/", "", skill_files)
+  qa_step(
+    "every skill file is byte-identical to the bundled copy",
+    unname(tools::md5sum(file.path(bundled, rel))),
+    unname(tools::md5sum(file.path(dir, skill_files)))
+  )
+
+  lines <- readLines(file.path(dir, skill_files[[1]]), encoding = "UTF-8")
+  fences <- which(lines == "---")
+  qa_check("SKILL.md opens with a front matter block", length(fences) >= 2 && fences[[1]] == 1L)
+  front <- yaml::yaml.load(paste(lines[(fences[[1]] + 1L):(fences[[2]] - 1L)], collapse = "\n"))
+  qa_step("whose name is the skill's folder name", "dta-template-authoring", front$name)
+  qa_check(
+    "and whose description is a non-empty string",
+    is.character(front$description) && length(front$description) == 1L && nzchar(front$description)
+  )
+})
+
+test_that("OQ-TMPL-116 | agent_skill = FALSE writes no .claude directory, and a non-logical value is rejected | REQ-TMPL-048", {
+  dir <- qa_tempdir()
+  suppressMessages(create_template_repo(dir, agent_skill = FALSE))
+  qa_check("no .claude directory exists", !dir.exists(file.path(dir, ".claude")))
+
+  bad <- qa_tempdir()
+  err <- tryCatch(create_template_repo(bad, agent_skill = "yes"), error = function(e) e)
+  qa_check("a character value raises a condition", inherits(err, "condition"))
+  qa_check("naming agent_skill", grepl("agent_skill", conditionMessage(err), fixed = TRUE))
+  qa_step("and nothing is written", character(0), list.files(bad, all.files = TRUE, no.. = TRUE))
+})
+
+test_that("OQ-TMPL-117 | a pre-existing skill file is a conflict under the overwrite guard | REQ-TMPL-048 REQ-TMPL-028", {
+  dir <- qa_tempdir()
+  skill_md <- file.path(dir, skill_files[[1]])
+  dir.create(dirname(skill_md), recursive = TRUE)
+  writeLines("team edit", skill_md)
+
+  err <- tryCatch(create_template_repo(dir), error = function(e) e)
+  qa_check("without overwrite, a condition is raised", inherits(err, "condition"))
+  qa_check("naming the conflicting SKILL.md", grepl("SKILL.md", conditionMessage(err), fixed = TRUE))
+  qa_step("the existing file is left as it was", "team edit", readLines(skill_md))
+  qa_step(
+    "and nothing else is written",
+    skill_files[[1]], list.files(dir, recursive = TRUE, all.files = TRUE, no.. = TRUE)
+  )
+
+  suppressMessages(create_template_repo(dir, overwrite = TRUE))
+  bundled <- system.file("extdata", "agent-skills", "dta-template-authoring", "SKILL.md", package = "DTAtools")
+  qa_step(
+    "overwrite = TRUE replaces it with the bundled SKILL.md",
+    unname(tools::md5sum(bundled)), unname(tools::md5sum(skill_md))
+  )
 })
 
 # ---- REQ-TMPL-028: the overwrite guard --------------------------------------

@@ -1,0 +1,17 @@
+kind: dta_creation_template
+id: tiv_parent
+version: "1.0"
+abstract: true
+base:
+  metadata:
+    title: Parent with a party slot
+datasets:
+  - id: ds1
+    type: tabular
+    files: {filename: a.csv, type: csv}
+    columns:
+      - {id: STATUS, type: SAS Char}
+party_slots:
+  - id: supplier
+    label: Supplier
+    target: metadata.supplier
