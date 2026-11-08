@@ -143,6 +143,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   a short guide to reading the rules precedes the first rules table of a
   document. The console `print()` of a column-condition rule uses the same
   wording.
+- The HTML validation report, `explain_messages()`, the template guide and the
+  Shiny app describe a rule with the same wording as the Word and Markdown
+  exports instead of three different dialects. A uniqueness rule over several
+  columns is worded as one combination of values, not as if each column had to
+  be unique on its own. The template guide lists a rule as `Rule ID` and
+  `Description` and reports any change to a rule (a bound, a requirement, a
+  condition) as changed, not only a change to its author's description. The
+  app's rules overview shows every operator of a column and no longer sets the
+  text in a monospace font.
+- **Breaking:** the Markdown export of `write_dta()` and
+  `write_dataset_metadata()` is redesigned and follows the Word layout. It has
+  numbered chapters in the same order (approval and signatures, document
+  information, study, parties, process information, agreement sections,
+  datasets), a linked table of contents, and tables for the document facts,
+  the parties' organisations and contacts, the transmission, the files and
+  their format, the columns and the approval block. Allowed values are listed in
+  full, not cut after five. Every author text is escaped, so it cannot change
+  the structure of the document. The footer carries no timestamp, so the same
+  specification always produces the same bytes. A parser of the old format
+  (`**Title:**` lines, `Exact rule definitions`, per-column headings) must be
+  adapted.
+- `write_dataset_metadata()` honours `include_file_specs`, `include_rules` and
+  `include_signatures` for Markdown as well, and its Word document is built
+  like the agreement document: numbered chapters, the full description, the
+  same `Files` chapter name, and a title page with the dataset's facts.
+- A missing file name or column type reads "(not specified)" and an unset
+  `nullable` reads "No (default)", the same in Word, Markdown and the template
+  blocks. The contact and dataset blocks of a Word template (`{*_CONTACTS_TABLE}`,
+  `{DATASETS}`, `{SUPPLIER_CONTACTS}`, `{PROCESS_INFORMATION}`) use the same
+  tables and labels as the built-in layout, with "Yes" instead of "yes".
+- The app builds a PDF from the new Markdown with working table-of-contents
+  links and line breaks inside table cells.
 - Tables written into a user's Word template by block placeholders such as
   `{DATASETS}` and `{VALIDATION_RULES}` now have a fixed column grid scaled to
   the template's text width. Before, Word sized the columns from their
@@ -206,6 +238,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- The Word document of `write_dataset_metadata()` no longer prints the day it
+  was generated, shows the full description instead of its first 80 characters,
+  and no longer labels the document version with the template version in its
+  footer.
+- A rule that cannot be evaluated (a range over two columns, an unknown
+  operator) is described as such instead of as a valid rule; `equals: true` is
+  no longer worded as "is present"; a list of values is worded as "one of", not
+  as all of them; large numbers are written in full instead of as `1e+08`.
 - PDF export through the TinyTeX backend now retries with `xelatex` when
   `pdflatex` cannot typeset a character, for example the "≠" in the
   description of a not-equal rule. `write_dta(format = "pdf")` used to fail for
