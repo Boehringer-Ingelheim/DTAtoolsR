@@ -6,7 +6,15 @@
 \usage{
 translate_rule_to_human(rule)
 }
+\arguments{
+\item{rule}{A \code{DTARule} object.}
+}
+\value{
+A single string, lines separated by \code{"\\n"}.
+}
 \description{
-Translate a rule to human-readable format
+Thin wrapper around the shared rule wording in \code{R/rulePhrasing.R}: the
+complete plain-English description, one line per statement, list items
+starting with a bullet. Rules are never rendered as code.
 }
 \keyword{internal}

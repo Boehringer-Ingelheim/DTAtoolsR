@@ -13,7 +13,8 @@ and write_dta()'s per-dataset sections.}
 \item{width}{Total table width in inches, or \code{NULL} to keep the built widths.}
 }
 \description{
-Build a validation rules table (flextable). Shared by write_dataset_metadata()
-and write_dta()'s per-dataset sections.
+Two columns, \verb{Rule ID | Description}. The description is the complete
+plain-English wording from \code{R/rulePhrasing.R} (bold labels, bulleted
+lists); a rule is never shown as code, YAML or in a monospace font.
 }
 \keyword{internal}
