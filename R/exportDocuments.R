@@ -1308,6 +1308,10 @@ dta_pdf_backend <- function() {
 #' Specifications, Validation Rules; chapters without content are left out).
 #' It is deterministic: UTF-8 with LF line endings and no time stamp.
 #'
+#' The Word (and PDF) document has the same chapters, numbered, after a title
+#' page with the same fact table; its running header and footer name the
+#' dataset and the template it was taken from. It carries no time stamp either.
+#'
 #' @import S7
 #' @importFrom officer read_docx
 #' @importFrom cli cli_abort cli_alert_success
@@ -1335,9 +1339,9 @@ dta_pdf_backend <- function() {
 #'   uses "Data Transfer Agreement".
 #' @param organisation,organisation_unit Optional single strings naming the
 #'   organisation (and unit within it) issuing the document. When given they are
-#'   shown on the title page (Word/PDF) or in the top header block (Markdown);
-#'   the dataset document has no running header. `NULL` or empty (the default)
-#'   shows nothing.
+#'   shown on the title page and in the running header of every later page
+#'   (Word/PDF) or in the top header block (Markdown). `NULL` or empty (the
+#'   default) shows nothing.
 #'
 #' @return Invisibly `NULL`. The document is written to `file`.
 #'
@@ -1404,53 +1408,52 @@ write_dataset_metadata <- function(
   invisible(NULL)
 }
 
+# The Word document of write_dataset_metadata(): the frame of write_dta() --
+# headings numbered 1, 1.1, ... (.new_numbered_docx()), a title page without
+# running header or footer, and a running header and footer on every later
+# page -- with the chapters of the Markdown document: Approval & Signatures
+# (only with signatories), Description, Files, Column Specifications and
+# Validation Rules (the latter two for a tabular dataset); `include_*` switch
+# them off. Nothing in it depends on the day it is written.
 #' @keywords internal
 .write_dataset_docx <- function(dataset, include_signatures, include_file_specs, include_rules, signature_list) {
-  doc <- officer::read_docx()
+  doc <- .new_numbered_docx()
+  title <- paste0("Dataset Specification: ", dta_dataset_heading(dataset))
+  furniture <- .dataset_furniture(dataset, title)
 
-  # Title section
   doc <- .add_title_section(
     doc,
     title = .export_document_name(),
-    subtitle = paste0("Dataset Specification: ", dta_dataset_heading(dataset)),
-    date = Sys.Date(),
-    version = dataset@template_version
+    subtitle = title,
+    facts = .dataset_document_facts(dataset)
   )
 
-  # Approval signatures come before the descriptive content, matching write_dta().
-  if (include_signatures) {
-    doc <- .add_signature_section(doc, signature_list)
+  # Approval comes first, as in write_dta(); without signatories there is no
+  # chapter.
+  if (isTRUE(include_signatures)) {
+    doc <- .add_signature_section(doc, signature_list, level = 1)
   }
 
-  # Basic metadata
-  metadata <- list("ID" = dataset@id)
-  if (!is.null(dataset@name)) metadata[["Name"]] <- dataset@name
-  if (!is.null(dataset@description)) metadata[["Description"]] <- dataset@description
-  if (!is.null(dataset@template_source)) metadata[["Template Source"]] <- dataset@template_source
-  if (!is.null(dataset@template_version)) metadata[["Template Version"]] <- dataset@template_version
-  if (!is.null(dataset@template_date)) metadata[["Template Date"]] <- dataset@template_date
-
-  doc <- .add_metadata_section(doc, "Dataset Information", metadata)
-
-  # File specifications
-  if (include_file_specs && length(dataset@files) > 0) {
-    doc <- .add_file_specifications(doc, dataset@files)
+  description <- dataset@description
+  description <- if (is.null(description)) character(0) else description[!is.na(description)]
+  if (length(description) > 0 && any(nzchar(trimws(description)))) {
+    doc <- .add_heading(doc, "Description", level = 1)
+    doc <- .add_text_paragraphs(doc, paste(description, collapse = "\n\n"))
+    doc <- .add_spacer(doc)
   }
 
-  # Column specifications (DTADataSetTabular only)
+  if (isTRUE(include_file_specs)) {
+    doc <- .add_file_specifications(doc, dataset@files, title = "Files", heading_level = 1)
+  }
+
   if (inherits(dataset, "DTAtools::DTADataSetTabular")) {
-    doc <- .add_dataset_specs_section(doc, dataset, include_rules = include_rules, heading_level = 2)
+    doc <- .add_dataset_specs_section(doc, dataset,
+      include_rules = include_rules, heading_level = 1, furniture = furniture
+    )
   }
 
-  # Footer
-  doc <- .add_footer_section(
-    doc,
-    version = dataset@template_version,
-    template_version = dataset@template_version,
-    document_date = Sys.Date()
-  )
-
-  doc
+  # The final section (portrait) carries the running header and footer too.
+  officer::body_set_default_section(doc, .section_props(doc, "portrait", type = "nextPage", furniture = furniture))
 }
 
 # The Markdown document of write_dataset_metadata(): the same frame as the DTA

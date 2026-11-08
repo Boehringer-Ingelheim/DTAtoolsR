@@ -387,7 +387,8 @@ test_that(".column_specs_df shows type details, patterns and examples", {
   ))
   df <- .column_specs_df(specs)
   expect_identical(df$Type[1], "SAS Char (8)\nFormat: $8.\nR class: visit_related")
-  expect_identical(df$Type[2:4], rep("unspecified", 3))
+  # No type given: the missing value reads as everywhere else.
+  expect_identical(df$Type[2:4], rep("(not specified)", 3))
   expect_identical(df$`Allowed Values / Pattern`[2], "Pattern: ^[A-Z]{2}$")
   expect_identical(df$Description[2:3], c("Two letters\nExamples: AB, CD", "Examples: x, y"))
   expect_identical(df$Label, c("", "", "", "Label D"))
@@ -401,13 +402,23 @@ test_that(".column_specs_df joins values given as a list like a plain vector", {
   expect_identical(.column_specs_df(specs)$`Allowed Values / Pattern`, "1234, 5678")
 })
 
-test_that(".column_specs_df shows an unset nullable as 'Not specified'", {
-  # KNOWN DEFECT, pinned rather than endorsed: the validation engine treats an
-  # unset `nullable` as "No" (columnSpecChecks.R), so "Not specified" misleads.
-  # The Markdown redesign changes it to "No (default)"; switch this assertion
-  # to that text when the fix lands.
-  specs <- DTAColumnSpecCollection(columns = list(DTAColumnSpec(id = "A")))
-  expect_identical(.column_specs_df(specs)$Nullable, "Not specified")
+test_that(".column_specs_df shows an unset nullable as 'No (default)'", {
+  # The validation engine treats an unset `nullable` as not nullable
+  # (columnSpecChecks.R), so the document says so instead of "Not specified".
+  specs <- DTAColumnSpecCollection(columns = list(
+    DTAColumnSpec(id = "A"),
+    DTAColumnSpec(id = "B", nullable = FALSE),
+    DTAColumnSpec(id = "C", nullable = TRUE)
+  ))
+  expect_identical(.column_specs_df(specs)$Nullable, c("No (default)", "No", "Yes"))
+})
+
+test_that(".file_specs_df shows a missing file name as '(not specified)'", {
+  # A valid DTAFile always has a file name; the property is removed behind the
+  # validator's back to reach the fallback a damaged object would take.
+  f <- DTAFileCSV(filename = "a.csv")
+  attr(f, "filename") <- NULL
+  expect_identical(.file_specs_df(list(f))$`File Name / Pattern`, "(not specified)")
 })
 
 test_that(".column_specs_df returns an empty frame without columns", {

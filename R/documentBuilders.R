@@ -2,9 +2,14 @@
 #' @noRd
 NULL
 
-#' Create and add a title page section to a Word document
+#' Title page of the dataset document (write_dataset_metadata())
+#'
+#' Title, subtitle, organisation line and the fact table, closed as a section
+#' of its own without running header or footer, as the cover of write_dta().
+#' Nothing on it depends on the day the document is written.
+#' @param facts A key/value data.frame (see .pairs_df()); zero rows for none.
 #' @keywords internal
-.add_title_section <- function(doc, title, subtitle = NULL, date = Sys.Date(), version = NULL) {
+.add_title_section <- function(doc, title, subtitle = NULL, facts = NULL) {
   # A DTA may legitimately carry datasets without metadata (e.g. a standalone
   # dataset YAML), in which case `title` is NULL/empty. Normalize it to a single,
   # safe display string so we never pass a zero-length or NA value to officer.
@@ -52,17 +57,68 @@ NULL
     )
   }
 
-  doc <- .add_spacer(doc)
-
-  # ISO 8601 (YYYY-MM-DD): locale-independent, unlike "%B %d, %Y", whose month
-  # name is taken from LC_TIME and differs per workstation.
-  doc <- .add_body_par(doc, paste("Date:", .format_document_date(date)), color = THEME_COLORS$gray_mid)
-  if (!is.null(version)) {
-    doc <- .add_body_par(doc, paste("Version:", version), color = THEME_COLORS$gray_mid)
+  for (i in seq_len(3)) {
+    doc <- .add_spacer(doc)
   }
 
-  doc <- officer::body_add_break(doc)
+  if (!is.null(facts) && nrow(facts) > 0) {
+    ft <- .kv_table(facts, width = 4.6, label_width = 1.3)
+    doc <- flextable::body_add_flextable(doc, ft, align = "left")
+  }
 
+  .end_section_orientation(doc, "portrait")
+}
+
+#' Running header and footer of the dataset document
+#'
+#' The frame of write_dta()'s (`.page_furniture()`), filled from the dataset:
+#' header and footer name the document ("Dataset Specification: ..."), the
+#' footer adds the template version and date and, on a small second line, the
+#' template the dataset was taken from. No date of the run.
+#' @param dataset A `DTADataSet`.
+#' @param title The document title, e.g. "Dataset Specification: Demographics (demographics)".
+#' @return A function of the text-column width returning list(header, footer),
+#'   as `.section_props(furniture =)` takes it.
+#' @keywords internal
+.dataset_furniture <- function(dataset, title) {
+  text <- function(x) if (is.null(x) || length(x) == 0 || is.na(x[[1]])) "" else as.character(x[[1]])
+  source <- text(dataset@template_source)
+  version <- text(dataset@template_version)
+  template <- if (nzchar(source)) list(id = source, version = version, date = dataset@template_date) else list()
+  bits <- c(
+    if (nzchar(version)) paste("Template version", version),
+    .format_document_date(dataset@template_date)
+  )
+  bits <- bits[nzchar(bits)]
+  function(width) {
+    .running_furniture(
+      header_title = title,
+      footer_left = title,
+      footer_right = paste(bits, collapse = paste0("  ", intToUtf8(0xB7), "  ")),
+      footer_small = .template_provenance_text(template),
+      width = width
+    )
+  }
+}
+
+#' Author text as paragraphs: a blank line separates two paragraphs, a single
+#' line break inside a paragraph stays a line break.
+#' @keywords internal
+.add_text_paragraphs <- function(doc, text) {
+  text <- gsub("\r\n|\r", "\n", text)
+  paragraphs <- strsplit(paste0(text, "\n\n"), "\n\n", fixed = TRUE)[[1]]
+  for (paragraph in paragraphs) {
+    lines <- strsplit(paste0(paragraph, "\n"), "\n", fixed = TRUE)[[1]]
+    chunks <- list()
+    for (i in seq_along(lines)) {
+      if (i > 1L) chunks <- c(chunks, list(officer::run_linebreak()))
+      chunks <- c(chunks, list(officer::ftext(lines[[i]], .house_fp_text())))
+    }
+    doc <- officer::body_add_fpar(
+      doc,
+      do.call(officer::fpar, c(chunks, list(fp_p = officer::fp_par(padding.bottom = 2))))
+    )
+  }
   doc
 }
 
@@ -352,32 +408,6 @@ NULL
   doc
 }
 
-#' Add metadata section with key-value pairs
-#' @keywords internal
-.add_metadata_section <- function(doc, title, metadata_list, truncate = TRUE) {
-  if (!is.null(title) && nzchar(title)) {
-    doc <- .add_heading(doc, title, level = 2)
-  }
-
-  # Create a two-column table for metadata
-  if (length(metadata_list) > 0) {
-    pairs <- .format_metadata_pairs(metadata_list, truncate = truncate)
-
-    # Create flextable
-    ft <- flextable::flextable(pairs)
-    ft <- flextable::set_header_labels(ft, key = "Item", value = "Details")
-    ft <- flextable::width(ft, j = 1, width = 1.6)
-    ft <- flextable::width(ft, j = 2, width = 4.7)
-    ft <- .style_table(ft)
-    ft <- flextable::bold(ft, j = 1, bold = TRUE, part = "body")
-
-    doc <- flextable::body_add_flextable(doc, ft)
-  }
-
-  doc <- .add_spacer(doc)
-  doc
-}
-
 #' Add study identity, sharing the built-in and template-block layout
 #' @keywords internal
 .add_study_section <- function(doc, study, heading = .add_heading, level = 2) {
@@ -399,45 +429,10 @@ NULL
   doc <- heading(doc, "Agreement Sections", level = level)
   for (section in sections) {
     doc <- heading(doc, section$title, level = level + 1)
-    text <- gsub("\r\n|\r", "\n", section$text)
-    paragraphs <- strsplit(paste0(text, "\n\n"), "\n\n", fixed = TRUE)[[1]]
-    for (paragraph in paragraphs) {
-      lines <- strsplit(paste0(paragraph, "\n"), "\n", fixed = TRUE)[[1]]
-      chunks <- list()
-      for (i in seq_along(lines)) {
-        if (i > 1L) chunks <- c(chunks, list(officer::run_linebreak()))
-        chunks <- c(chunks, list(officer::ftext(lines[[i]], .house_fp_text())))
-      }
-      doc <- officer::body_add_fpar(
-        doc,
-        do.call(officer::fpar, c(chunks, list(fp_p = officer::fp_par(padding.bottom = 2))))
-      )
-    }
+    doc <- .add_text_paragraphs(doc, section$text)
     doc <- .add_spacer(doc)
   }
   doc
-}
-
-#' Build a professional flextable of individual contacts (one row per person)
-#' @keywords internal
-.build_contacts_flextable <- function(contacts) {
-  df <- .contacts_to_df(contacts)
-  if (nrow(df) == 0) {
-    return(NULL)
-  }
-
-  ft <- flextable::flextable(df)
-  ft <- flextable::width(ft, j = 1, width = 1.3)
-  ft <- flextable::width(ft, j = 2, width = 1.5)
-  ft <- flextable::width(ft, j = 3, width = 1.3)
-  ft <- flextable::width(ft, j = 4, width = 2.0)
-  ft <- flextable::width(ft, j = 5, width = 1.1)
-  ft <- flextable::width(ft, j = 6, width = 0.8)
-  ft <- flextable::width(ft, j = 7, width = 0.8)
-  ft <- flextable::width(ft, j = 8, width = 1.1)
-  ft <- .style_table(ft, center_cols = c(6, 7, 8))
-
-  ft
 }
 
 #' Build the version-history table (flextable). Shared by the built-in layout and
@@ -828,14 +823,15 @@ NULL
 }
 
 #' Add Column Specifications + Validation Rules sections for one dataset (DOCX).
-#' Used standalone by write_dataset_metadata() (heading_level = 2) and embedded
-#' within write_dta()'s per-dataset "Datasets" section (heading_level = NULL,
-#' which uses bold subheadings instead of doc heading styles, so it also works
-#' on a template such as officer's default that lacks the deeper heading
-#' styles).
+#' Used standalone by write_dataset_metadata() (heading_level = 1) and embedded
+#' within write_dta()'s per-dataset "Datasets" section (heading_level = 3);
+#' heading_level = NULL uses bold subheadings instead of doc heading styles, so
+#' it also works on a template such as officer's default that lacks the deeper
+#' heading styles. The sections it closes carry the running header and footer
+#' of `furniture_meta` (a DTAMetaData) or of `furniture` (see .section_props()).
 #' @keywords internal
 .add_dataset_specs_section <- function(doc, dataset, include_rules = TRUE, heading_level = 2,
-                                       furniture_meta = NULL) {
+                                       furniture_meta = NULL, furniture = NULL) {
   if (!inherits(dataset, "DTAtools::DTADataSetTabular")) {
     return(doc)
   }
@@ -850,7 +846,7 @@ NULL
   # orphan). officer terminates a section for the content *already added*,
   # hence: close the preceding portrait content first, add the tables, then
   # close them as landscape.
-  doc <- .end_section_orientation(doc, "portrait", furniture_meta)
+  doc <- .end_section_orientation(doc, "portrait", furniture_meta, furniture = furniture)
 
   doc <- add_section_heading(doc, "Column Specifications")
   ft <- .build_column_specs_table(dataset@specs)
@@ -873,7 +869,7 @@ NULL
     doc <- .add_spacer(doc)
   }
 
-  doc <- .end_section_orientation(doc, "landscape", furniture_meta)
+  doc <- .end_section_orientation(doc, "landscape", furniture_meta, furniture = furniture)
 
   doc
 }
@@ -906,25 +902,4 @@ NULL
   ft <- .fit_table_width(ft, width)
 
   ft
-}
-
-#' Add a closing paragraph with generation time and version metadata
-#' (a "Generated: ... | Document Version: ..." line; no page numbers).
-#' @keywords internal
-.add_footer_section <- function(doc, version = NULL, template_version = NULL, document_date = Sys.Date()) {
-  # This is typically handled through section properties, but for simplicity,
-  # we can add a footer-like paragraph at the end
-
-  footer_text <- paste(
-    "Generated:",
-    format(Sys.time(), "%Y-%m-%d %H:%M"),
-    if (!is.null(version)) paste("| Document Version:", version) else "",
-    if (!is.null(template_version)) paste("| Template Version:", template_version) else "",
-    sep = " "
-  )
-
-  doc <- .add_spacer(doc)
-  doc <- .add_body_par(doc, footer_text, size = FONT_SIZES$footer, color = THEME_COLORS$gray_mid)
-
-  doc
 }

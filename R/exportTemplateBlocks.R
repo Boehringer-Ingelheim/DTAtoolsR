@@ -436,8 +436,8 @@
   doc
 }
 
-#' `{DATASETS}` block: the full per-dataset section -- description, files,
-#' columns, rules -- optionally without the dataset-name heading (for a
+#' `{DATASETS}` block: the full per-dataset section -- description, fact
+#' table (ID, Type, template), files, columns, rules -- optionally without the dataset-name heading (for a
 #' region-bound repetition; the Files/Column Specifications/Validation Rules
 #' sub-headings always stay)
 #' @keywords internal
@@ -452,10 +452,13 @@
     if (isTRUE(heading)) {
       doc <- .tv_block_heading(doc, dta_dataset_heading(ds), level = 2)
     }
-    doc <- .add_body_par(doc, paste0("Type: ", ds@type))
+    # Description, then the fact table (ID, Type, template), as in the
+    # built-in layout.
     if (!is.null(ds@description) && nzchar(ds@description)) {
       doc <- .add_body_par(doc, ds@description)
+      doc <- .add_spacer(doc)
     }
+    doc <- .tv_block_table(doc, .kv_table(.dataset_facts(ds)), "")
 
     doc <- .tv_block_heading(doc, "Files", level = 3)
     doc <- .tv_block_table(doc, .build_file_specs_table(ds@files, width = NULL), "No files specified.")
@@ -476,13 +479,14 @@
 }
 
 #' `{SUPPLIER_CONTACTS_TABLE}` / `{RECEIVER_CONTACTS_TABLE}` block: contacts for
-#' one side of the agreement as a table
+#' one side of the agreement, in the contact table of the built-in layout
+#' (`.build_party_contacts_table()`)
 #' @keywords internal
 .tv_block_render_contacts <- function(doc, dta, arg, side) {
   org <- if (identical(side, "supplier")) dta@metadata@supplier else dta@metadata@receiver
   title <- if (identical(side, "supplier")) "Supplier Contacts" else "Receiver Contacts"
   doc <- .tv_block_heading(doc, title, level = 2)
-  .tv_block_table(doc, .build_contacts_flextable(.tv_get(org, "contacts")), "No contacts specified.")
+  .tv_block_table(doc, .build_party_contacts_table(.tv_get(org, "contacts")), "No contacts specified.")
 }
 
 #' `{SIGNATURES_TABLE}` block: the approval and signatures table

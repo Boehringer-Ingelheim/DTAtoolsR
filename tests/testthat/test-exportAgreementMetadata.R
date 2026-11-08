@@ -222,16 +222,16 @@ test_that("NA transfer decisions stay unspecified in scalar and process placehol
   paragraphs <- .docx_paragraphs(out)
   expect_true("Test: []" %in% paragraphs)
   expect_true("Blinded: []" %in% paragraphs)
-  expect_false(any(grepl("Test Upload: No", paragraphs, fixed = TRUE)))
-  expect_false(any(grepl("Blinded Transfer: No", paragraphs, fixed = TRUE)))
+  expect_false(any(grepl("Test upload: No", paragraphs, fixed = TRUE)))
+  expect_false(any(grepl("Blinded transfer: No", paragraphs, fixed = TRUE)))
 
   dta@metadata@transmission <- list(test_upload = FALSE, blinded_transfer = FALSE)
   export_with_template(dta, template, out, quiet = TRUE, fallback = FALSE)
   paragraphs <- .docx_paragraphs(out)
   expect_true("Test: [No]" %in% paragraphs)
   expect_true("Blinded: [No]" %in% paragraphs)
-  expect_true(any(grepl("Test Upload: No", paragraphs, fixed = TRUE)))
-  expect_true(any(grepl("Blinded Transfer: No", paragraphs, fixed = TRUE)))
+  expect_true(any(grepl("Test upload: No", paragraphs, fixed = TRUE)))
+  expect_true(any(grepl("Blinded transfer: No", paragraphs, fixed = TRUE)))
 
   export_with_template(
     dta, template, out,

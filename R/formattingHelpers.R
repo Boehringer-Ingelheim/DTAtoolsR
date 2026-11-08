@@ -487,41 +487,6 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
   out
 }
 
-#' Convert a list of contact records into a data.frame with one row per contact,
-#' exposing name, role, department, email, phone and the reviewer/backup/signature flags.
-#' @keywords internal
-.contacts_to_df <- function(contacts) {
-  empty_df <- data.frame(
-    Name = character(), Role = character(), Department = character(),
-    Email = character(), Phone = character(), Reviewer = character(),
-    Backup = character(), `Signature Required` = character(),
-    stringsAsFactors = FALSE, check.names = FALSE
-  )
-
-  if (is.null(contacts) || length(contacts) == 0) {
-    return(empty_df)
-  }
-
-  rows <- lapply(contacts, function(ct) {
-    if (!is.list(ct)) {
-      ct <- list(name = as.character(ct))
-    }
-    data.frame(
-      Name = if (!is.null(ct$name)) as.character(ct$name) else "",
-      Role = if (!is.null(ct$role)) as.character(ct$role) else "",
-      Department = if (!is.null(ct$department)) as.character(ct$department) else "",
-      Email = if (!is.null(ct$email)) as.character(ct$email) else "",
-      Phone = if (!is.null(ct$phone)) as.character(ct$phone) else "",
-      Reviewer = if (isTRUE(ct$reviewer)) "Yes" else "No",
-      Backup = if (isTRUE(ct$backup)) "Yes" else "No",
-      `Signature Required` = if (isTRUE(ct$signature)) "Yes" else "No",
-      stringsAsFactors = FALSE, check.names = FALSE
-    )
-  })
-
-  do.call(rbind, rows)
-}
-
 #' Auto-derive the list of authorized signatories (Organization, Name, Role) from
 #' the receiver/supplier contacts flagged with signature = TRUE. Explicit entries
 #' supplied via `signature_list` are appended (duplicates by Name+Organization skipped).

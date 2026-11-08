@@ -273,7 +273,7 @@ test_that("write_dataset_metadata markdown lists the id, name and description of
   expect_false(any(grepl("^\\| Name \\|", md_bare)))
 })
 
-test_that("write_dataset_metadata docx titles a dataset by name and id and tables ID, Name, Description", {
+test_that("write_dataset_metadata docx titles a dataset by name and id and tables its facts", {
   ds <- create_example_DTADataSetTabular(2)
   ds@description <- "One row per subject, as delivered by the CRO."
   out_docx <- tempfile(fileext = ".docx")
@@ -288,16 +288,118 @@ test_that("write_dataset_metadata docx titles a dataset by name and id and table
   paragraphs <- summary$text[summary$content_type == "paragraph"]
   expect_true("Dataset Specification: Demographics (demographics)" %in% paragraphs)
 
-  # The metadata table opens with the header, then ID, Name, Description in
-  # that order -- the identifier first, the label second, the long text last.
+  # The title page carries the fact table of the Markdown head: the
+  # identifier first, then the name and the type (create_example_DTADataSetTabular()
+  # is a "tabular" dataset without template provenance). No header row.
   cells <- summary$text[summary$content_type == "table cell"]
   expect_identical(
-    cells[1:8],
-    c(
-      "Item", "Details", "ID", "demographics", "Name", "Demographics",
-      "Description", "One row per subject, as delivered by the CRO."
-    )
+    cells[1:6],
+    c("Dataset ID", "demographics", "Name", "Demographics", "Type", "Tabular")
   )
+  # The description is a chapter of its own, as in the Markdown document.
+  expect_identical(
+    paragraphs[which(paragraphs == "Description") + 1L],
+    "One row per subject, as delivered by the CRO."
+  )
+})
+
+test_that("write_dataset_metadata docx has the chapters of the Markdown document, numbered", {
+  ds <- create_example_DTADataSetTabular(2)
+  ds@description <- "Demographics."
+  signatories <- list(list(name = "Jane Roe", role = "Data Manager", organization = "Acme"))
+
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dataset_metadata(ds, out, quiet = TRUE, signature_list = signatories)
+  s <- officer::docx_summary(officer::read_docx(out))
+  expect_identical(
+    s$text[s$style_name %in% "heading 1"],
+    c("Approval & Signatures", "Description", "Files", "Column Specifications", "Validation Rules")
+  )
+  expect_false(any(grepl("^heading [2-9]$", s$style_name)))
+  expect_false("File Specifications" %in% s$text)
+  expect_false("Dataset Information" %in% s$text)
+
+  # Numbered: the document is built on the bundled numbered template, whose
+  # "heading 1" style carries a list numbering (1, 2, 3 ...).
+  ex <- tempfile()
+  on.exit(unlink(ex, recursive = TRUE, force = TRUE), add = TRUE)
+  utils::unzip(out, files = "word/styles.xml", exdir = ex)
+  styles <- xml2::read_xml(file.path(ex, "word", "styles.xml"))
+  h1 <- xml2::xml_find_first(
+    styles,
+    ".//*[local-name()='style'][*[local-name()='name'][@*[local-name()='val']='heading 1']]"
+  )
+  expect_length(xml2::xml_find_all(h1, ".//*[local-name()='numPr']"), 1L)
+
+  # include_* switch chapters off; without signatories (or with
+  # include_signatures = FALSE) there is no approval chapter.
+  out2 <- tempfile(fileext = ".docx")
+  on.exit(unlink(out2, force = TRUE), add = TRUE)
+  write_dataset_metadata(ds, out2,
+    quiet = TRUE, signature_list = signatories,
+    include_signatures = FALSE, include_file_specs = FALSE, include_rules = FALSE
+  )
+  s2 <- officer::docx_summary(officer::read_docx(out2))
+  expect_identical(s2$text[s2$style_name %in% "heading 1"], c("Description", "Column Specifications"))
+})
+
+test_that("write_dataset_metadata docx is deterministic and carries no time stamp", {
+  ds <- create_example_DTADataSetTabular(2)
+  ds@template_source <- "demo_template"
+  ds@template_version <- "4.2"
+  ds@template_date <- "2025-03-14"
+  write_parts <- function() {
+    out <- tempfile(fileext = ".docx")
+    on.exit(unlink(out, force = TRUE), add = TRUE)
+    write_dataset_metadata(ds, out, quiet = TRUE, organisation = "Acme Pharma")
+    ex <- tempfile()
+    on.exit(unlink(ex, recursive = TRUE, force = TRUE), add = TRUE)
+    utils::unzip(out, exdir = ex)
+    parts <- list.files(file.path(ex, "word"), "^(document|header[0-9]+|footer[0-9]+)[.]xml$")
+    stats::setNames(
+      lapply(parts, function(p) readBin(file.path(ex, "word", p), "raw", file.size(file.path(ex, "word", p)))),
+      parts
+    )
+  }
+  first <- write_parts()
+  second <- write_parts()
+  # Byte for byte, without any normalisation.
+  expect_identical(first, second)
+  expect_true(any(startsWith(names(first), "footer")))
+
+  text <- vapply(first, function(x) gsub("<[^>]+>", "", rawToChar(x)), character(1))
+  expect_false(any(grepl("Generated", text, fixed = TRUE)))
+  expect_false(any(grepl(format(Sys.Date(), "%Y-%m-%d"), text, fixed = TRUE)))
+
+  # Header and footer name the document and the template it came from.
+  footers <- text[startsWith(names(text), "footer")]
+  for (f in footers) {
+    expect_match(f, "Dataset Specification: Demographics (demographics)", fixed = TRUE)
+    expect_match(f, "Template version 4.2", fixed = TRUE)
+    expect_match(f, "Template: demo_template \u00b7 version 4.2 \u00b7 2025-03-14", fixed = TRUE)
+  }
+  headers <- text[startsWith(names(text), "header")]
+  for (h in headers) {
+    expect_match(h, "Dataset Specification: Demographics (demographics)", fixed = TRUE)
+    expect_match(h, "Acme Pharma", fixed = TRUE)
+  }
+})
+
+test_that("write_dataset_metadata docx shows a long description in full", {
+  ds <- create_example_DTADataSetTabular(2)
+  long <- paste(
+    "Subject-level demographics delivered once per data cut by the CRO, one row per",
+    "randomised subject, including screen failures that were never dosed."
+  )
+  expect_gt(nchar(long), 80)
+  ds@description <- long
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dataset_metadata(ds, out, quiet = TRUE)
+  paragraphs <- .docx_paragraphs(out)
+  expect_true(long %in% paragraphs)
+  expect_false(any(grepl("...", paragraphs, fixed = TRUE)))
 })
 
 test_that("write_dta docx places Process Information before Datasets", {
@@ -407,8 +509,8 @@ test_that("landscape sections are really rotated, keep page size, add no blank p
 })
 
 test_that("write_dataset_metadata also lands its specs table in landscape", {
-  # The second caller of .add_dataset_specs_section(): heading_level = 2 and an
-  # optional rules block, followed by a footer that must stay portrait.
+  # The second caller of .add_dataset_specs_section(): heading_level = 1 and an
+  # optional rules block; the chapters before it, and the end, stay portrait.
   ds <- create_example_DTADataSetTabular(2)
 
   out_docx <- tempfile(fileext = ".docx")
@@ -417,14 +519,15 @@ test_that("write_dataset_metadata also lands its specs table in landscape", {
 
   expect_identical(.docx_orientation_of(out_docx, "Column Specifications"), "landscape")
   expect_identical(.docx_orientation_of(out_docx, "Variable Name"), "landscape")
-  expect_identical(.docx_orientation_of(out_docx, "Dataset Information"), "portrait")
-  expect_identical(.docx_orientation_of(out_docx, "Generated:"), "portrait")
+  expect_identical(.docx_orientation_of(out_docx, "Files"), "portrait")
 
+  # The tables close the document, as in write_dta(): no "Generated" line or
+  # other trailing paragraph follows them on a portrait page of its own.
   blocks <- .docx_blocks_with_orientation(out_docx)
-  expect_identical(blocks$orientation[nrow(blocks)], "portrait")
+  expect_identical(blocks$orientation[nrow(blocks)], "landscape")
 
   # include_rules = FALSE leaves a landscape section holding only the column
-  # table; the surrounding document must still return to portrait.
+  # table, and it still closes the document.
   no_rules <- tempfile(fileext = ".docx")
   on.exit(unlink(no_rules, force = TRUE), add = TRUE)
   write_dataset_metadata(ds,
@@ -437,7 +540,7 @@ test_that("write_dataset_metadata also lands its specs table in landscape", {
     .docx_blocks_with_orientation(no_rules)$orientation[
       nrow(.docx_blocks_with_orientation(no_rules))
     ],
-    "portrait"
+    "landscape"
   )
 
   geom <- .docx_section_geometry(no_rules)

@@ -14,8 +14,10 @@
 #   the Word table (check.names = FALSE); zero rows when there is nothing to
 #   show. Cells may contain "\n" line breaks and the bullet U+2022 that
 #   .format_any_value() produces.
-# * Missing scalars become "" (and the row is dropped from a pairs builder);
-#   MISSING_VALUE_DISPLAY is used only where the Word layout always used it.
+# * Missing scalars become "" (and the row is dropped from a pairs builder).
+#   A value the specification requires but does not give (a file name, a column
+#   type, a file encoding) reads MISSING_VALUE_DISPLAY; "(none)" means a list
+#   that is given and empty.
 
 # A character data.frame with the given column names and no rows.
 .empty_text_df <- function(columns) {
@@ -189,7 +191,7 @@
     }
 
     data.frame(
-      `File Name / Pattern` = if (!is.null(f@filename)) paste(f@filename, collapse = ", ") else "pattern_not_specified",
+      `File Name / Pattern` = if (!is.null(f@filename)) paste(f@filename, collapse = ", ") else MISSING_VALUE_DISPLAY,
       `Match Type` = match_type,
       `Format` = .file_format_label(f),
       `Expected Count` = paste0(
@@ -249,8 +251,9 @@
 }
 
 # One row per column specification: Variable Name, Label, Type (backend, type,
-# length, then "Format:" and "R class:" lines), Nullable (Yes / No / Not
-# specified), Allowed Values / Pattern (the complete list of values -- never
+# length, then "Format:" and "R class:" lines; MISSING_VALUE_DISPLAY when the
+# type is not given), Nullable (Yes / No, or "No (default)" when it is not given:
+# the validation engine treats an unset `nullable` as not nullable), Allowed Values / Pattern (the complete list of values -- never
 # shortened -- and the pattern) and Description (plus "Examples:"). `specs_collection`
 # is a DTAColumnSpecCollection; zero rows when it has no columns.
 .column_specs_df <- function(specs_collection) {
@@ -264,7 +267,7 @@
 
   rows <- lapply(specs_collection@columns, function(spec) {
     # Get type
-    type_str <- "unspecified"
+    type_str <- MISSING_VALUE_DISPLAY
     if (!is.null(spec@structure) && !is.null(spec@structure@type)) {
       type_str <- spec@structure@type
       if (!is.null(spec@structure@backend) && nzchar(spec@structure@backend)) {
@@ -285,11 +288,12 @@
       type_str <- paste0(type_str, "\nR class: ", spec@colclass)
     }
 
-    # Get nullable
+    # An unset `nullable` is checked as FALSE (columnSpecChecks.R), so it reads
+    # "No (default)", not as if it were left open.
     nullable_str <- if (!is.null(spec@nullable)) {
       ifelse(spec@nullable, "Yes", "No")
     } else {
-      "Not specified"
+      "No (default)"
     }
 
     # Allowed values and pattern, both when both are given, never truncated:

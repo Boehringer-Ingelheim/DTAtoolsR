@@ -507,6 +507,10 @@ dta_template_placeholders <- function(dta = NULL) {
 
 
 #' Render a detailed contact block with signature lines for signers
+#'
+#' Per contact: name, role, department, email, phone and address, then the
+#' responsibilities of the built-in contact table (Signatory / Reviewer /
+#' Backup, each "Yes"), and a signature line for a signatory.
 #' @keywords internal
 .tv_contacts_block <- function(org) {
   contacts <- .tv_get(org, "contacts")
@@ -524,8 +528,11 @@ dta_template_placeholders <- function(dta = NULL) {
     if (!is.null(ct$department) && nzchar(ct$department)) lines <- c(lines, paste0("  - Department: ", ct$department))
     if (!is.null(ct$email) && nzchar(ct$email)) lines <- c(lines, paste0("  - Email: ", ct$email))
     if (!is.null(ct$phone) && nzchar(ct$phone)) lines <- c(lines, paste0("  - Phone: ", ct$phone))
-    if (isTRUE(ct$reviewer)) lines <- c(lines, "  - Reviewer: yes")
-    if (isTRUE(ct$backup)) lines <- c(lines, "  - Backup: yes")
+    address <- .tv_scalar(ct$address)
+    if (nzchar(address)) lines <- c(lines, paste0("  - Address: ", address))
+    if (isTRUE(ct$signature)) lines <- c(lines, "  - Signatory: Yes")
+    if (isTRUE(ct$reviewer)) lines <- c(lines, "  - Reviewer: Yes")
+    if (isTRUE(ct$backup)) lines <- c(lines, "  - Backup: Yes")
     if (isTRUE(ct$signature)) {
       lines <- c(lines, "  - Signature: ______________________________   Date: ______________")
     }
@@ -567,6 +574,9 @@ dta_template_placeholders <- function(dta = NULL) {
 
 
 #' Render process information block (transmission, handling, corrections)
+#'
+#' Transmission keys carry the reader-facing labels of the built-in layout
+#' (`.transmission_label()`, as `.transmission_pairs()`).
 #' @keywords internal
 .tv_process_information_block <- function(meta) {
   lines <- character(0)
@@ -574,19 +584,23 @@ dta_template_placeholders <- function(dta = NULL) {
   if (!is.null(trans) && length(trans) > 0) {
     lines <- c(lines, "- Transmission")
     if (!is.null(trans$type) && nzchar(as.character(trans$type))) {
-      lines <- c(lines, paste0("  - Type: ", as.character(trans$type)))
+      lines <- c(lines, paste0("  - ", .transmission_label("type"), ": ", as.character(trans$type)))
     }
     if (!is.null(trans$frequency) && nzchar(as.character(trans$frequency))) {
-      lines <- c(lines, paste0("  - Frequency: ", as.character(trans$frequency)))
+      lines <- c(lines, paste0("  - ", .transmission_label("frequency"), ": ", as.character(trans$frequency)))
     }
     if (!is.null(trans$notification) && nzchar(as.character(trans$notification))) {
-      lines <- c(lines, paste0("  - Notification: ", as.character(trans$notification)))
+      lines <- c(lines, paste0("  - ", .transmission_label("notification"), ": ", as.character(trans$notification)))
     }
     if (!is.null(trans$date_first_transfer) && nzchar(as.character(trans$date_first_transfer))) {
-      lines <- c(lines, paste0("  - First transfer: ", as.character(trans$date_first_transfer)))
+      lines <- c(lines, paste0(
+        "  - ", .transmission_label("date_first_transfer"), ": ", as.character(trans$date_first_transfer)
+      ))
     }
     if (!is.null(trans$date_last_transfer) && nzchar(as.character(trans$date_last_transfer))) {
-      lines <- c(lines, paste0("  - Last transfer: ", as.character(trans$date_last_transfer)))
+      lines <- c(lines, paste0(
+        "  - ", .transmission_label("date_last_transfer"), ": ", as.character(trans$date_last_transfer)
+      ))
     }
     extra_fields <- setdiff(
       names(trans),
@@ -595,7 +609,7 @@ dta_template_placeholders <- function(dta = NULL) {
     for (key in extra_fields) {
       value <- .tv_scalar(trans[[key]])
       if (nzchar(value)) {
-        lines <- c(lines, paste0("  - ", .title_case_field(key), ": ", value))
+        lines <- c(lines, paste0("  - ", .transmission_label(key), ": ", value))
       }
     }
   }

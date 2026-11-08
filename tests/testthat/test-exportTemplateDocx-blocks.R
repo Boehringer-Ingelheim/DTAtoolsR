@@ -929,3 +929,61 @@ test_that("a template that defines no heading styles at all still exports, via t
   )
   expect_gt(sum(summary$content_type == "table cell"), 0)
 })
+
+# A DTA whose supplier has two contacts given here in full, so the expected
+# table can be written down from the input.
+.block_contacts_dta <- function() {
+  meta <- DTAMetaData(
+    title = "Contacts",
+    supplier = list(
+      affiliation = list(name = "Supplier Ltd"),
+      contacts = list(
+        list(name = "Bo Chan", email = "bo@example.org", backup = TRUE),
+        list(
+          name = "Ann Lee", role = "Lead Data Manager", department = "Data Management",
+          email = "ann@example.org", phone = "555-0100", address = "1 Main Road, Town",
+          signature = TRUE, reviewer = TRUE
+        )
+      )
+    )
+  )
+  DTA(datasets = list(create_example_DTADataSetTabular(2)), metadata = meta)
+}
+
+test_that("{SUPPLIER_CONTACTS_TABLE} is the contact table of the built-in layout", {
+  template <- .make_template("{SUPPLIER_CONTACTS_TABLE}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  export_with_template(.block_contacts_dta(), template, out, quiet = TRUE)
+
+  s <- officer::docx_summary(officer::read_docx(out))
+  cells <- s$text[s$content_type == "table cell"]
+  # Name with the role beneath it, Department, Contact (email, phone, address),
+  # Responsibilities; the backup-only contact is listed last.
+  expect_identical(cells, c(
+    "Name", "Department", "Contact", "Responsibilities",
+    "Ann Lee\nLead Data Manager", "Data Management",
+    "ann@example.org\n555-0100\n1 Main Road, Town", "Signatory\nReviewer",
+    "Bo Chan", "", "bo@example.org", "Backup"
+  ))
+  expect_false(any(c("Signature Required", "Reviewer", "Email") %in% cells[1:4]))
+})
+
+test_that("{DATASETS} shows the dataset facts of the built-in layout instead of a raw type line", {
+  ds <- create_example_DTADataSetTabular(2)
+  ds@description <- "Demographics, one row per subject."
+  dta <- DTA(datasets = list(ds), metadata = DTAMetaData(title = "T"))
+  template <- .make_template("{DATASETS}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  export_with_template(dta, template, out, quiet = TRUE)
+
+  s <- officer::docx_summary(officer::read_docx(out))
+  expect_false("Type: tabular" %in% s$text)
+  expect_true("Demographics, one row per subject." %in% s$text)
+  cells <- s$text[s$content_type == "table cell"]
+  # The first table is the fact table: ID, then the type in title case.
+  expect_identical(cells[1:4], c("ID", "demographics", "Type", "Tabular"))
+})
