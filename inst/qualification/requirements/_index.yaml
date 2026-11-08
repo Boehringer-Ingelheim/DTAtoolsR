@@ -44,7 +44,7 @@ areas:
     min_tests: 102
   - area: EXPORT
     title: Document and data export
-    min_tests: 54
+    min_tests: 58
   - area: REPORT
     title: The standalone HTML validation report
     min_tests: 17

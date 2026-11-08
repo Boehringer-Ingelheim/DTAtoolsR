@@ -413,6 +413,26 @@ body {
   color: var(--bi-grey);
 }
 
+/* The rule wording is set as paragraphs and lists inside each <dd>: no gap
+   above the first paragraph, a small one between paragraphs, and a list
+   indented just enough for its bullets to sit inside the box. */
+.inspect-explain dd p {
+  margin: 0.25rem 0 0;
+}
+
+.inspect-explain dd p:first-child {
+  margin-top: 0;
+}
+
+.inspect-explain dd ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.inspect-explain dd li + li {
+  margin-top: 0.125rem;
+}
+
 /* Multi-row "actual" detail -- every failing/offending row captured for the
    message, not just the first (a rule violation is often clearer across
    several rows at once). */

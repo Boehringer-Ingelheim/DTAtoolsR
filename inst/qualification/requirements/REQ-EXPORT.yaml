@@ -486,16 +486,66 @@ requirements:
 
   - id: REQ-EXPORT-036
     text: >
-      write_dta() (docx and md) and write_dataset_metadata() shall render, for
-      every declared validation rule, a YAML definition that, parsed, equals
-      the rule's type and every declared parameter - columns, bounds,
-      operators and values, grouping columns, named conditions, and each
-      constraint's id, condition names, scopes and message - independently of
-      its description.
+      For every declared validation rule, write_dta() (docx and md),
+      write_dataset_metadata() (docx and md) and the {VALIDATION_RULES} and
+      {DATASETS} template blocks of export_with_template() shall show the
+      rule's id and a description in plain English that states the rule type
+      and every declared parameter: the columns, each bound together with
+      whether it is inclusive, each test of a condition (When ...) and of a
+      requirement (... must ...) with its values, text values in typographic
+      double quotes, patterns, the grouping columns, every named condition,
+      and for every group constraint its id, the scope of each side (at least
+      one row or every row), the conditions it relates and its message. The
+      description shall contain no YAML or other code: the rules table of a
+      Word document shall have exactly the columns Rule ID and Description
+      (no Definition column), no rule text shall be set in a monospace font,
+      and a Markdown document shall contain no code block and no code span.
+      A rule's author-written description shall appear as its own line
+      labelled Purpose, in addition to and never in place of the mechanical
+      description. Spellings the evaluator treats as the same test, and
+      bounds stored as integer or as double, shall produce identical wording.
     risk: medium
     category: functional
-    covers: [write_dta, write_dataset_metadata]
-    source: R/formattingHelpers.R; R/documentBuilders.R
+    covers: [write_dta, write_dataset_metadata, export_with_template]
+    source: >
+      R/rulePhrasing.R (the wording specification in its leading comment
+      block); R/documentBuilders.R; R/formattingHelpers.R;
+      R/exportTemplateBlocks.R
+    notes: >
+      Replaces the former requirement that each rule be rendered as a YAML
+      definition next to its description; a quality reviewer reading a signed
+      agreement must not have to read code to know what a rule checks.
+      Literal sentence forms, from the specification in R/rulePhrasing.R, with
+      C a column, a and b numbers and v a value. Range: "Every value in column
+      C must be a number from a to b, inclusive." (an infinite bound: "... a
+      number that is at most b." / "... at least a."), with "Missing values:
+      Missing values are not checked." and "Non-numeric values: A value that
+      is present but is not a number violates the rule." Unique: "No two rows
+      may have the same value in column C." or "No two rows may have the same
+      combination of values in columns A and B.", with "Missing values: Two
+      missing values count as the same value." Condition: "When <C is ...>,
+      <C must ...>." with the operator phrases is/must be equal to v, not
+      equal to v, one of a, b or c, not one of ..., greater than v, less than
+      v, at least v, at most v, from a to b, inclusive, matches/match the
+      pattern "p", empty, not empty; notes "If C is missing, the condition is
+      not met and the row is not checked." (IF side) and "If C is missing in a
+      row that meets the condition, the rule is violated." (THEN side), and
+      for a numeric test on the THEN side "A value in C that is not a number
+      violates the rule." Group condition: "Rows are grouped by the value in
+      column G; within each group, the requirements below must hold.", a
+      Conditions list "<name>: a row in which <C is ...>", and a Requirements
+      list "<id>: If S of a group meets condition I, then S of that group must
+      meet condition T." or "<id>: Within a group, it must not happen that S
+      meets condition L and also S meets condition R.", S being "at least one
+      row" (scope any, the default) or "every row" (scope all), each followed
+      by "If not, the message is "<message>"." or, without a message, "If not,
+      a message naming the group and its rows is reported."; an omitted
+      constraint id reads constraint_<i>. Text values are set in typographic
+      double quotes (U+201C, U+201D). Equivalent spellings with identical
+      wording, by design: equals/equal, not_equals/not_equal,
+      greater_equal/min, less_equal/max, range/min with max; integer and
+      double storage of the same number read the same (18L and 18 are both
+      "18").
 
   - id: REQ-EXPORT-037
     text: >
@@ -536,3 +586,28 @@ requirements:
     category: interface
     covers: [write_dta, export_with_template, dta_template_placeholders]
     source: R/exportTemplateDocx.R; R/exportDocuments.R
+
+  - id: REQ-EXPORT-039
+    text: >
+      No human-readable output shall show a validation rule as code, and the
+      same rule shall read in the same words in every one of them. For a
+      given rule, the Word and Markdown documents of write_dta() and
+      write_dataset_metadata(), the {VALIDATION_RULES} and {DATASETS} blocks
+      of export_with_template(), the rule explanation of a violated rule in
+      the HTML report of write_validation_report() and the output of
+      explain_messages() shall state the rule with the identical sentences of
+      REQ-EXPORT-036 (the HTML report and explain_messages() giving the rule
+      statement as the expected value and the Purpose and missing-value
+      lines beside it), and none of them shall contain a YAML key of the rule
+      definition (type:, columns:, condition:, then:, group_by:,
+      constraints:), a code block, a code span, an HTML code or pre element
+      or a monospace font in the rule description.
+    risk: medium
+    category: functional
+    covers: [write_dta, write_dataset_metadata, export_with_template, write_validation_report, explain_messages]
+    source: >
+      R/rulePhrasing.R; R/documentBuilders.R; R/formattingHelpers.R;
+      R/exportTemplateBlocks.R; R/reportRendering.R; R/validationReporting.R
+    notes: >
+      The template guide also describes rules and is to be added to this
+      requirement once its own wording is final.

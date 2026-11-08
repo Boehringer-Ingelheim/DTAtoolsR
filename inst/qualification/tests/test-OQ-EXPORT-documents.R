@@ -697,133 +697,431 @@ test_that("OQ-EXPORT-044 | a document export that fails leaves an existing desti
   )
 })
 
-# ---- rule definitions are exact ---------------------------------------------
+# ---- rules are described in plain English (REQ-EXPORT-036, REQ-EXPORT-039) ----
+#
+# Every expected sentence below is written by hand from the rule wording
+# specification: the leading comment block of R/rulePhrasing.R, restated in
+# the notes of REQ-EXPORT-036. None is read back from an export. The same
+# expected wording is then compared against every output that describes a
+# rule, which is what REQ-EXPORT-039 asks: the same rule reads the same
+# everywhere.
 
-# Parsed YAML maps carry no meaningful key order, so both sides are compared
-# with every map's keys sorted.
-et_sort_keys <- function(x) {
-  if (!is.list(x)) {
-    return(x)
-  }
-  x <- lapply(x, et_sort_keys)
-  if (!is.null(names(x))) x <- x[order(names(x))]
-  x
-}
+# Typographic quotes and the list bullet, built from their code points so the
+# source stays ASCII.
+et_lq <- intToUtf8(0x201c)
+et_rq <- intToUtf8(0x201d)
+et_bullet <- intToUtf8(0x2022)
+et_q <- function(x) paste0(et_lq, x, et_rq)
 
-test_that("OQ-EXPORT-051 | each rule's definition in the Word and Markdown documents parses to the declared rule | REQ-EXPORT-036", {
-  # One rule of each type. Every value is written here from the parameter
-  # documentation of the rule classes, not read back from an export.
-  conds <- list(
-    c1_failed = list(GFSTAT = list(equals = "FAILED")),
-    c2_reported = list(GFORRES = list(empty = FALSE)),
-    c3_not_done = list(GFSTAT = list(equals = "NOT DONE"))
-  )
-  ds <- DTADataSetTabular(
-    id = "rules_demo",
-    specs = DTAColumnSpecCollection(
-      # Rules may only name declared columns.
-      columns = stats::setNames(
-        lapply(
-          c("AGE", "CONSENT", "USUBJID", "VISIT", "GFSTAT", "GFORRES"),
-          function(nm) {
-            if (nm == "AGE") {
-              DTAColumnSpec(id = nm, type = "SAS Num", nullable = TRUE)
-            } else {
-              DTAColumnSpec(id = nm, type = "SAS Char", length = 8, nullable = TRUE)
-            }
-          }
-        ),
-        c("AGE", "CONSENT", "USUBJID", "VISIT", "GFSTAT", "GFORRES")
-      ),
-      rules = list(
-        DTARuleColCondition(
-          id = "r_cond", description = "Same description for all",
-          condition = list(AGE = list(greater = 18L, less = 65L)),
-          then = list(CONSENT = list(empty = FALSE))
-        ),
-        DTARuleColRange(id = "r_range", description = "Same description for all", columns = "AGE", min = 0L, max = 120L),
-        DTARuleColUnique(id = "r_unique", description = "Same description for all", columns = c("USUBJID", "VISIT")),
-        DTARuleGroupCondition(
-          id = "r_group", description = "Same description for all",
-          group_by = c("USUBJID", "VISIT"), conditions = conds,
-          constraints = list(
-            list(type = "mutually_exclusive", left = "c1_failed", right = "c2_reported"),
-            list(
-              type = "requires", id = "needs_not_done", `if` = "c1_failed", then = "c3_not_done",
-              if_scope = "all", message = "A failure needs NOT DONE"
-            )
-          )
-        )
-      )
-    )
-  )
-  dta <- DTA(datasets = list(ds), metadata = DTAMetaData(title = "Rule definitions", version = "1.0"))
-
-  # Per the DTARuleGroupCondition constraints documentation: an omitted id is
-  # constraint_<i>, an omitted scope is "any", and an omitted message is absent.
-  expected <- list(
-    r_cond = list(
-      type = "col_condition",
-      condition = list(AGE = list(greater = 18L, less = 65L)),
-      then = list(CONSENT = list(empty = FALSE))
+# One rule of each type, each exercising the parameters the requirement names:
+# inclusive bounds; a column combination; a When/Then pair with a text value
+# and a numeric test; grouping, named conditions, both constraint kinds, an
+# explicit and a defaulted constraint id, both scopes, an explicit and an
+# absent message. Three carry an author's description (Purpose), one not.
+et_rule_list <- function() {
+  list(
+    DTARuleColRange(
+      id = "r_range", description = "Adults of working age only",
+      columns = "AGE", min = 18, max = 70
     ),
-    r_range = list(type = "col_range", columns = "AGE", min = 0L, max = 120L),
-    r_unique = list(type = "col_unique", columns = c("USUBJID", "VISIT")),
-    r_group = list(
-      type = "group_condition",
-      group_by = c("USUBJID", "VISIT"),
-      conditions = conds,
+    DTARuleColUnique(id = "r_unique", columns = c("USUBJID", "VISIT")),
+    DTARuleColCondition(
+      id = "r_cond", description = "The active arm is dosed",
+      condition = list(ARM = list(equals = "ACTIVE")),
+      then = list(DOSE = list(greater = 0))
+    ),
+    DTARuleGroupCondition(
+      id = "r_group", description = "Failed results are documented",
+      group_by = "USUBJID",
+      conditions = list(
+        failed = list(GFSTAT = list(equals = "FAILED")),
+        not_done = list(GFSTAT = list(equals = "NOT DONE")),
+        reported = list(GFORRES = list(empty = FALSE))
+      ),
       constraints = list(
         list(
-          id = "constraint_1", type = "mutually_exclusive", left = "c1_failed", right = "c2_reported",
-          left_scope = "any", right_scope = "any"
+          type = "requires", id = "needs_not_done", `if` = "failed",
+          then = "not_done", if_scope = "all", message = "A failure needs NOT DONE"
         ),
-        list(
-          id = "needs_not_done", type = "requires", `if` = "c1_failed", then = "c3_not_done",
-          if_scope = "all", then_scope = "any", message = "A failure needs NOT DONE"
-        )
+        list(type = "mutually_exclusive", left = "failed", right = "reported")
       )
     )
   )
-  expected <- et_sort_keys(expected)
+}
+
+et_rule_dataset <- function(rules = et_rule_list(), files = list(), id = "rules_demo") {
+  cols <- c("USUBJID", "VISIT", "AGE", "ARM", "DOSE", "GFSTAT", "GFORRES")
+  DTADataSetTabular(
+    id = id,
+    specs = DTAColumnSpecCollection(
+      # Rules may only name declared columns.
+      columns = stats::setNames(lapply(cols, function(nm) {
+        if (nm %in% c("AGE", "DOSE")) {
+          DTAColumnSpec(id = nm, type = "SAS Num", nullable = TRUE)
+        } else {
+          DTAColumnSpec(id = nm, type = "SAS Char", length = 8, nullable = TRUE)
+        }
+      }), cols),
+      rules = rules
+    ),
+    files = files
+  )
+}
+
+et_rule_dta <- function(ds = et_rule_dataset()) {
+  DTA(datasets = list(ds), metadata = DTAMetaData(title = "Rule wording", version = "1.0"))
+}
+
+# One line of a rule description: a labelled line ("Label: text", or "Label:"
+# introducing a list), an unlabelled sentence, or a list item.
+et_line <- function(text, label = "") list(label = label, text = text, bullet = FALSE)
+et_item <- function(text) list(label = "", text = text, bullet = TRUE)
+
+# The expected description of each rule of et_rule_list(), from the
+# specification. `complete = FALSE` marks a description of which only the
+# leading lines are specified word for word: the specification states the
+# grouped condition's missing-value notes as a principle, not as sentences.
+et_rule_wording <- list(
+  r_range = list(complete = TRUE, lines = list(
+    et_line("Adults of working age only", "Purpose"),
+    et_line("Every value in column AGE must be a number from 18 to 70, inclusive."),
+    et_line("Missing values are not checked.", "Missing values"),
+    et_line("A value that is present but is not a number violates the rule.", "Non-numeric values")
+  )),
+  r_unique = list(complete = TRUE, lines = list(
+    et_line("No two rows may have the same combination of values in columns USUBJID and VISIT."),
+    et_line("Two missing values count as the same value.", "Missing values")
+  )),
+  r_cond = list(complete = TRUE, lines = list(
+    et_line("The active arm is dosed", "Purpose"),
+    et_line(paste0("When ARM is equal to ", et_q("ACTIVE"), ", DOSE must be greater than 0.")),
+    et_line("", "Missing values"),
+    et_item("If ARM is missing, the condition is not met and the row is not checked."),
+    et_item("If DOSE is missing in a row that meets the condition, the rule is violated."),
+    et_line("A value in DOSE that is not a number violates the rule.", "Non-numeric values")
+  )),
+  r_group = list(complete = FALSE, lines = list(
+    et_line("Failed results are documented", "Purpose"),
+    et_line(paste(
+      "Rows are grouped by the value in column USUBJID; within each group,",
+      "the requirements below must hold."
+    )),
+    et_line("", "Conditions"),
+    et_item(paste0("failed: a row in which GFSTAT is equal to ", et_q("FAILED"))),
+    et_item(paste0("not_done: a row in which GFSTAT is equal to ", et_q("NOT DONE"))),
+    et_item("reported: a row in which GFORRES is not empty"),
+    et_line("", "Requirements"),
+    et_item(paste0(
+      "needs_not_done: If every row of a group meets condition failed, then at ",
+      "least one row of that group must meet condition not_done. If not, the ",
+      "message is ", et_q("A failure needs NOT DONE"), "."
+    )),
+    et_item(paste0(
+      "constraint_2: Within a group, it must not happen that at least one row ",
+      "meets condition failed and also at least one row meets condition ",
+      "reported. If not, a message naming the group and its rows is reported."
+    ))
+  ))
+)
+
+# The lines as text: "Label: text", "Label:", the sentence, or "<mark> item".
+et_render_lines <- function(lines, mark) {
+  vapply(lines, function(l) {
+    if (l$bullet) {
+      paste0(mark, " ", l$text)
+    } else if (nzchar(l$label)) {
+      if (nzchar(l$text)) paste0(l$label, ": ", l$text) else paste0(l$label, ":")
+    } else {
+      l$text
+    }
+  }, character(1))
+}
+
+# Keys of a rule definition as YAML would write them: none may appear in a
+# human-readable rule description.
+et_yaml_key_rx <- "(^|\\s)(type|columns|condition|then|group_by|conditions|constraints|if_scope|then_scope|min|max):"
+
+# The body XML of a Word document, for checks on run formatting.
+et_docx_body_xml <- function(path) {
+  dir <- tempfile("docx-xml-")
+  on.exit(unlink(dir, recursive = TRUE, force = TRUE), add = TRUE)
+  utils::unzip(path, files = "word/document.xml", exdir = dir)
+  paste(readLines(file.path(dir, "word", "document.xml"), warn = FALSE, encoding = "UTF-8"), collapse = "\n")
+}
+
+# Every table of a Word document whose header row starts with "Rule ID".
+et_docx_rule_tables <- function(path) {
+  Filter(function(tbl) nrow(tbl) > 0 && identical(tbl$col1[[1]], "Rule ID"), et_docx_tables(path))
+}
+
+# One Word rules table against the expected wording of every rule.
+et_check_word_rule_table <- function(tbl, what, wording = et_rule_wording) {
+  qa_step(
+    paste0(what, ": the rules table has exactly the columns Rule ID and Description"),
+    c("Rule ID", "Description"),
+    unname(unlist(tbl[1, ]))
+  )
+  qa_step(
+    paste0(what, ": the table lists the declared rules, in order"),
+    names(wording), tbl$col1[-1]
+  )
+  for (id in names(wording)) {
+    exp <- wording[[id]]
+    want <- paste(et_render_lines(exp$lines, et_bullet), collapse = "\n")
+    cell <- tbl$col2[match(id, tbl$col1)]
+    got <- if (isTRUE(exp$complete) || is.na(cell)) cell else substr(cell, 1L, nchar(want))
+    qa_step(paste0(what, ": rule ", id, " is described in the specified words"), want, got)
+  }
+  qa_check(
+    paste0(what, ": no rule description holds a YAML key of the rule definition"),
+    !any(grepl(et_yaml_key_rx, tbl$col2[-1]))
+  )
+}
+
+et_check_word_no_monospace <- function(path, what) {
+  xml <- et_docx_body_xml(path)
+  qa_check(
+    paste0(what, ": no text is set in a Consolas or Courier font"),
+    !grepl("Consolas|Courier", xml)
+  )
+}
+
+# Markdown reduced to its text: bold markers and backslash escapes removed,
+# the three escaped HTML characters restored, blank lines dropped.
+et_md_plain <- function(lines) {
+  x <- gsub("**", "", lines, fixed = TRUE)
+  x <- gsub("\\\\([[:punct:]])", "\\1", x)
+  x <- gsub("&lt;", "<", x, fixed = TRUE)
+  x <- gsub("&gt;", ">", x, fixed = TRUE)
+  x <- gsub("&amp;", "&", x, fixed = TRUE)
+  x[nzchar(trimws(x))]
+}
+
+et_check_md_rules <- function(path, what, wording = et_rule_wording) {
+  raw <- readLines(path, warn = FALSE, encoding = "UTF-8")
+  qa_check(paste0(what, ": the file holds no fenced code block"), !any(grepl("^\\s*(```|~~~)", raw)))
+  qa_check(paste0(what, ": the file holds no code span (no backtick at all)"), !any(grepl("`", raw, fixed = TRUE)))
+  qa_check(paste0(what, ": no line holds a YAML key of a rule definition"), !any(grepl(et_yaml_key_rx, raw)))
+
+  plain <- et_md_plain(raw)
+  for (id in names(wording)) {
+    exp <- wording[[id]]
+    want <- et_render_lines(exp$lines, "-")
+    start <- match(want[[1]], plain)
+    qa_check(
+      paste0(what, ": rule ", id, "'s description follows a line that names the rule"),
+      !is.na(start) && start > 1L && startsWith(plain[[start - 1L]], paste0(id, " "))
+    )
+    got <- if (is.na(start)) NA_character_ else plain[start + seq_along(want) - 1L]
+    qa_step(paste0(what, ": rule ", id, " is described in the specified words"), want, got)
+    if (isTRUE(exp$complete) && !is.na(start)) {
+      after <- plain[start + length(want)]
+      qa_check(
+        paste0(what, ": nothing further is added to rule ", id, "'s description"),
+        is.na(after) || !grepl("^(- |Purpose:|Missing values:|Non-numeric values:|Problem:)", after)
+      )
+    }
+  }
+}
+
+test_that("OQ-EXPORT-051 | each rule is described in plain English, naming its type and every parameter, in the Word and Markdown documents | REQ-EXPORT-036 REQ-EXPORT-039", {
+  ds <- et_rule_dataset()
+  dta <- et_rule_dta(ds)
   dir <- qa_tempdir()
 
   docx <- file.path(dir, "rules.docx")
   write_dta(dta, file = docx, quiet = TRUE)
-  tbl <- et_docx_table(docx, "Rule ID")
-  qa_check("the rules table is found", !is.null(tbl))
-  qa_step("the table has a third Definition column", "Definition", tbl$col3[[1]])
-  # Indentation in Word/PDF cells is U+00A0 (pandoc strips ordinary leading spaces).
-  nbsp_to_space <- function(x) gsub("\u00a0", " ", x, fixed = TRUE)
-  from_docx <- lapply(nbsp_to_space(tbl$col3[-1]), yaml::yaml.load)
-  names(from_docx) <- tbl$col1[-1]
-  qa_step("each Word definition parses to the declared rule", expected, et_sort_keys(from_docx))
+  tabs <- et_docx_rule_tables(docx)
+  qa_step("write_dta (docx) has one rules table for the one dataset", 1L, length(tabs))
+  if (length(tabs) >= 1L) et_check_word_rule_table(tabs[[1]], "write_dta (docx)")
+  et_check_word_no_monospace(docx, "write_dta (docx)")
 
   md <- file.path(dir, "rules.md")
   write_dta(dta, file = md, format = "md", quiet = TRUE)
-  lines <- readLines(md, warn = FALSE)
-  qa_check("the Markdown carries an exact-definitions heading", "**Exact rule definitions**" %in% lines)
-  after <- lines[-seq_len(match("**Exact rule definitions**", lines))]
-  from_md <- list()
-  i <- 1L
-  while (i <= length(after)) {
-    if (grepl("^`[^`]+`$", after[[i]])) {
-      id <- gsub("`", "", after[[i]], fixed = TRUE)
-      start <- i + 3L # id line, blank line, opening fence
-      last <- start + match("```", after[start:length(after)]) - 2L
-      from_md[[id]] <- yaml::yaml.load(paste(after[start:last], collapse = "\n"))
-      i <- last + 1L
-    }
-    i <- i + 1L
-  }
-  qa_step("each Markdown definition parses to the declared rule", expected, et_sort_keys(from_md))
+  et_check_md_rules(md, "write_dta (md)")
 
   meta <- file.path(dir, "rules_meta.docx")
   write_dataset_metadata(ds, file = meta, quiet = TRUE)
-  tbl_meta <- et_docx_table(meta, "Rule ID")
-  from_meta <- lapply(nbsp_to_space(tbl_meta$col3[-1]), yaml::yaml.load)
-  names(from_meta) <- tbl_meta$col1[-1]
-  qa_step("each dataset-metadata definition parses to the declared rule", expected, et_sort_keys(from_meta))
+  meta_tabs <- et_docx_rule_tables(meta)
+  qa_step("write_dataset_metadata (docx) has one rules table", 1L, length(meta_tabs))
+  if (length(meta_tabs) >= 1L) et_check_word_rule_table(meta_tabs[[1]], "write_dataset_metadata (docx)")
+  et_check_word_no_monospace(meta, "write_dataset_metadata (docx)")
+
+  meta_md <- file.path(dir, "rules_meta.md")
+  write_dataset_metadata(ds, file = meta_md, format = "md", quiet = TRUE)
+  et_check_md_rules(meta_md, "write_dataset_metadata (md)")
+})
+
+test_that("OQ-EXPORT-055 | equivalent spellings and integer or double bounds produce identical rule wording | REQ-EXPORT-036", {
+  # Pairs the evaluator treats as the same test (R/evaluateRules.R,
+  # dta_condition_operators()): min with max and range; equals and equal;
+  # not_equals and not_equal; less_equal and max; greater_equal and min. Side
+  # A stores bounds as integers, side B as doubles.
+  side_a <- list(
+    DTARuleColRange(id = "w_range", columns = "AGE", min = 18L, max = 70L),
+    DTARuleColCondition(
+      id = "w_band", condition = list(AGE = list(min = 18L, max = 70L)),
+      then = list(ARM = list(equals = "ACTIVE"))
+    ),
+    DTARuleColCondition(
+      id = "w_not", condition = list(ARM = list(not_equals = "ACTIVE")),
+      then = list(DOSE = list(less_equal = 0L))
+    ),
+    DTARuleColCondition(
+      id = "w_least", condition = list(ARM = list(equals = "ACTIVE")),
+      then = list(DOSE = list(greater_equal = 5L))
+    )
+  )
+  side_b <- list(
+    DTARuleColRange(id = "w_range", columns = "AGE", min = 18, max = 70),
+    DTARuleColCondition(
+      id = "w_band", condition = list(AGE = list(range = c(18, 70))),
+      then = list(ARM = list(equal = "ACTIVE"))
+    ),
+    DTARuleColCondition(
+      id = "w_not", condition = list(ARM = list(not_equal = "ACTIVE")),
+      then = list(DOSE = list(max = 0))
+    ),
+    DTARuleColCondition(
+      id = "w_least", condition = list(ARM = list(equal = "ACTIVE")),
+      then = list(DOSE = list(min = 5))
+    )
+  )
+  # The statement of each, from the specification's range form and operator
+  # table.
+  statements <- c(
+    w_range = "Every value in column AGE must be a number from 18 to 70, inclusive.",
+    w_band = paste0("When AGE is from 18 to 70, inclusive, ARM must be equal to ", et_q("ACTIVE"), "."),
+    w_not = paste0("When ARM is not equal to ", et_q("ACTIVE"), ", DOSE must be at most 0."),
+    w_least = paste0("When ARM is equal to ", et_q("ACTIVE"), ", DOSE must be at least 5.")
+  )
+
+  dir <- qa_tempdir()
+  cells <- lapply(list(a = side_a, b = side_b), function(rules) {
+    out <- file.path(dir, paste0("equiv-", length(list.files(dir)), ".docx"))
+    write_dataset_metadata(et_rule_dataset(rules), file = out, quiet = TRUE)
+    tbl <- et_docx_rule_tables(out)[[1]]
+    stats::setNames(tbl$col2[-1], tbl$col1[-1])
+  })
+
+  qa_step(
+    "both spellings are described in exactly the same words, rule for rule",
+    cells$a, cells$b
+  )
+  qa_step(
+    "and each description opens with the statement the specification gives",
+    statements,
+    vapply(cells$a[names(statements)], function(x) strsplit(x, "\n", fixed = TRUE)[[1]][[1]], character(1))
+  )
+})
+
+test_that("OQ-EXPORT-056 | the template rule blocks describe each rule in the same plain-English words as write_dta | REQ-EXPORT-036 REQ-EXPORT-039", {
+  dir <- qa_tempdir()
+  template <- et_write_template(c("{VALIDATION_RULES}", "{DATASETS}"), dir)
+  out <- file.path(dir, "from-template.docx")
+  export_with_template(et_rule_dta(), template = template, output = out, quiet = TRUE, fallback = FALSE)
+
+  tabs <- et_docx_rule_tables(out)
+  qa_step(
+    "one rules table from {VALIDATION_RULES} and one from {DATASETS}",
+    2L, length(tabs)
+  )
+  for (i in seq_along(tabs)) {
+    et_check_word_rule_table(tabs[[i]], c("{VALIDATION_RULES}", "{DATASETS}")[[i]])
+  }
+  et_check_word_no_monospace(out, "the filled template")
+})
+
+# A delivery that violates r_range (AGE 10) and r_cond (ARM ACTIVE, DOSE 0) in
+# its first row and nothing else: the second row is in range, not ACTIVE, and
+# the two rows differ in USUBJID with no FAILED status.
+et_rule_checked <- function(dir) {
+  path <- file.path(dir, "rules.csv")
+  utils::write.csv(
+    data.frame(
+      USUBJID = c("S1", "S2"), VISIT = c("V1", "V1"), AGE = c("10", "30"),
+      ARM = c("ACTIVE", "PLACEBO"), DOSE = c("0", "5"),
+      GFSTAT = c("DONE", "DONE"), GFORRES = c("x", "x"),
+      stringsAsFactors = FALSE
+    ),
+    path,
+    row.names = FALSE, na = ""
+  )
+  ds <- et_rule_dataset(files = list(DTAFileCSV(filename = "rules.csv")))
+  ds <- load_file(ds, file = path, handler_index = 1, stream = "never")
+  check(ds, persist = FALSE, quiet = TRUE)
+}
+
+test_that("OQ-EXPORT-057 | the HTML report explains a violated rule in the same plain-English words, without code | REQ-EXPORT-039", {
+  dir <- qa_tempdir()
+  ds <- et_rule_checked(dir)
+  out <- file.path(dir, "report.html")
+  write_validation_report(et_rule_dta(ds), out, quiet = TRUE)
+  html <- xml2::read_html(out)
+
+  boxes <- xml2::xml_find_all(
+    html, "//div[contains(concat(' ', normalize-space(@class), ' '), ' inspect-explain ')]"
+  )
+  box_id <- vapply(boxes, function(b) {
+    xml2::xml_text(xml2::xml_find_first(b, ".//dt[normalize-space(.)='Rule ID']/following-sibling::dd[1]"), trim = TRUE)
+  }, character(1))
+  qa_step("the violated rules r_range and r_cond are each explained", c("r_cond", "r_range"), sort(unique(box_id)))
+
+  for (id in c("r_range", "r_cond")) {
+    box <- boxes[[match(id, box_id)]]
+    lines <- et_rule_wording[[id]]$lines
+    texts <- vapply(lines, function(l) l$text, character(1))
+    labels <- vapply(lines, function(l) l$label, character(1))
+    qa_step(
+      paste0("rule ", id, ": the explanation states every specified line, in order"),
+      texts[nzchar(texts)],
+      xml2::xml_text(xml2::xml_find_all(box, ".//dd/p | .//dd/ul/li"), trim = TRUE)
+    )
+    dts <- xml2::xml_text(xml2::xml_find_all(box, ".//dt"), trim = TRUE)
+    qa_check(
+      paste0("rule ", id, ": each labelled line keeps its label (Purpose, Missing values, ...)"),
+      all(unique(labels[nzchar(labels)]) %in% dts)
+    )
+    qa_step(
+      paste0("rule ", id, ": the explanation holds no code or pre element"),
+      0L, length(xml2::xml_find_all(box, ".//code | .//pre"))
+    )
+    qa_check(
+      paste0("rule ", id, ": the explanation holds no YAML key of the rule definition"),
+      !grepl(et_yaml_key_rx, xml2::xml_text(box))
+    )
+  }
+})
+
+test_that("OQ-EXPORT-058 | explain_messages states a violated rule in the same plain-English words as the documents | REQ-EXPORT-039", {
+  ds <- et_rule_checked(qa_tempdir())
+  explained <- NULL
+  printed <- withr::with_options(
+    list(cli.width = 10000),
+    testthat::capture_messages(explained <- explain_messages(ds, n = Inf))
+  )
+  printed <- paste(printed, collapse = "")
+  msgs <- as.data.frame(messages(ds))
+  rule_of <- msgs$rule_id[match(explained$id, msgs$id)]
+
+  for (id in c("r_range", "r_cond")) {
+    lines <- et_rule_wording[[id]]$lines
+    statement <- lines[[2]]$text # each of the two opens with Purpose, then the statement
+    qa_step(
+      paste0("rule ", id, ": the expected value is the rule statement"),
+      statement,
+      unique(explained$should_be[rule_of %in% id])
+    )
+    others <- et_render_lines(lines[-2], et_bullet)
+    qa_check(
+      paste0("rule ", id, ": the purpose and the missing- and non-numeric-value lines are printed"),
+      all(vapply(others, grepl, logical(1), x = printed, fixed = TRUE))
+    )
+  }
+  qa_check(
+    "no printed line holds a YAML key of a rule definition",
+    !any(grepl(et_yaml_key_rx, strsplit(printed, "\n", fixed = TRUE)[[1]]))
+  )
 })
 
 # ---- document name and organisation (REQ-EXPORT-037, REQ-EXPORT-038) ----------
