@@ -20,40 +20,33 @@
   summary$text[summary$content_type == "table cell"]
 }
 
-# Given a docx_summary() that contains exactly one "Rule ID" / "Description" /
-# "Definition" table (the shape .build_rules_table() always produces), return
-# the Description text keyed by Rule ID. The header row is dropped positionally
+# Given a docx_summary() that contains exactly one "Rule ID" / "Description"
+# table (the shape .build_rules_table() always produces), return the
+# Description text keyed by Rule ID. The header row is dropped positionally
 # rather than by matching its label text, because a rule id or description
 # could legitimately equal the header text itself.
 .block_rule_table_descriptions <- function(summary) {
   cells <- .block_table_cells(summary)
-  data_cells <- cells[-(1:3)]
-  ids <- data_cells[c(TRUE, FALSE, FALSE)]
-  descriptions <- data_cells[c(FALSE, TRUE, FALSE)]
-  names(descriptions) <- ids
+  data_cells <- cells[-(1:2)]
+  descriptions <- data_cells[c(FALSE, TRUE)]
+  names(descriptions) <- data_cells[c(TRUE, FALSE)]
   descriptions
 }
 
-# Same table, the Definition column (exact YAML) keyed by Rule ID.
-.block_rule_table_definitions <- function(summary) {
-  cells <- .block_table_cells(summary)
-  data_cells <- cells[-(1:3)]
-  definitions <- data_cells[c(FALSE, FALSE, TRUE)]
-  names(definitions) <- data_cells[c(TRUE, FALSE, FALSE)]
-  definitions
-}
-
-# The Definition text of every rules table in the document (found by its
+# The Description text of every rules table in the document (found by its
 # "Rule ID" first cell, so other tables in the same document are ignored),
-# keyed by Rule ID, in document order.
-.block_all_rule_definitions <- function(summary) {
+# keyed by Rule ID, in document order. Fails the test if a rules table is not
+# exactly the two columns Rule ID | Description.
+.block_all_rule_descriptions <- function(summary) {
   cells <- summary[summary$content_type == "table cell", ]
   out <- character(0)
   for (ti in unique(cells$table_index)) {
     text <- cells$text[cells$table_index == ti]
     if (!identical(text[[1]], "Rule ID")) next
-    body <- text[-(1:3)]
-    out <- c(out, stats::setNames(body[c(FALSE, FALSE, TRUE)], body[c(TRUE, FALSE, FALSE)]))
+    expect_identical(text[[2]], "Description")
+    expect_identical(max(cells$cell_id[cells$table_index == ti]), 2L)
+    body <- text[-(1:2)]
+    out <- c(out, stats::setNames(body[c(FALSE, TRUE)], body[c(TRUE, FALSE)]))
   }
   out
 }
@@ -252,7 +245,7 @@ test_that("block tables use a fixed grid that fills the template's text column",
   .expect_block_tables_fill_section(g)
   rules <- Filter(function(tb) identical(tb$first, "Rule ID"), g$tables)
   expect_length(rules, 1L)
-  # The id column must stay readable beside the long Definition column.
+  # The id column must stay readable beside the long Description column.
   expect_gte(rules[[1]]$grid[[1]], 1440)
 })
 
@@ -395,7 +388,7 @@ test_that("block tables follow the template's own margins", {
   expect_lt(widths[[1]], widths[[2]])
 })
 
-test_that("{VALIDATION_RULES} renders each rule's translate_rule_to_human() description", {
+test_that("{VALIDATION_RULES} renders each rule's plain-text description (.rule_text())", {
   ds <- create_example_DTADataSetTabular(2)
   range_rule <- DTARuleColRange(id = "age_range_check", columns = "AGE", min = 18, max = 65)
   unique_rule <- DTARuleColUnique(id = "unique_subj_visit", columns = c("SUBJID", "VISIT"))
@@ -415,10 +408,10 @@ test_that("{VALIDATION_RULES} renders each rule's translate_rule_to_human() desc
   expect_true("unique_subj_visit" %in% cell_text)
 
   descriptions <- .block_rule_table_descriptions(summary)
-  expect_identical(unname(descriptions[["age_range_check"]]), translate_rule_to_human(range_rule))
+  expect_identical(unname(descriptions[["age_range_check"]]), .rule_text(range_rule))
 })
 
-test_that("a DTARuleGroupCondition renders its grouping column and constraints via translate_rule_to_human()", {
+test_that("a DTARuleGroupCondition renders its grouping column and constraints in the plain-text wording (.rule_text())", {
   ds <- create_example_DTADataSetTabular(2)
   rule <- DTARuleGroupCondition(
     id = "block_group_condition_example",
@@ -447,13 +440,12 @@ test_that("a DTARuleGroupCondition renders its grouping column and constraints v
 
   expect_match(cell_text, "SUBJID", fixed = TRUE)
   expect_match(cell_text, "must hold", fixed = TRUE)
-  expect_identical(unname(cell_text), translate_rule_to_human(rule))
+  expect_identical(unname(cell_text), .rule_text(rule))
 })
 
-test_that("{VALIDATION_RULES} and {DATASETS} carry each rule's exact definition", {
-  # The Definition cell must rebuild the rule it was written from. The expected
-  # value is the rule object put in, not anything the renderer produced.
-  rules <- list(
+# Rules of every type for the prose tests below.
+.block_prose_rules <- function() {
+  list(
     DTARuleColRange(id = "age_range_check", columns = "AGE", min = -Inf, max = 65),
     DTARuleColUnique(id = "unique_subj_visit", columns = c("SUBJID", "VISIT")),
     DTARuleColCondition(
@@ -470,13 +462,45 @@ test_that("{VALIDATION_RULES} and {DATASETS} carry each rule's exact definition"
         old = list(AGE = list(greater_equal = 18))
       ),
       constraints = list(
-        list(type = "requires", `if` = "v01", `then` = "old", then_scope = "all", message = "v01: needs adult")
+        list(
+          type = "requires", `if` = "v01", `then` = "old", then_scope = "all",
+          id = "v01_adult", message = "v01: needs adult"
+        )
       )
     )
   )
-  ds <- create_example_DTADataSetTabular(2)
-  ds@specs@rules <- rules
-  dta <- DTA(datasets = list(ds), metadata = create_example_DTAMetaData())
+}
+
+.block_prose_dta <- function(n_datasets = 1L) {
+  sets <- lapply(seq_len(n_datasets), function(k) {
+    ds <- create_example_DTADataSetTabular(2)
+    ds@id <- paste0("prose_", k)
+    ds@specs@rules <- .block_prose_rules()
+    ds
+  })
+  names(sets) <- vapply(sets, function(ds) ds@id, character(1))
+  DTA(datasets = sets, metadata = create_example_DTAMetaData())
+}
+
+# Font (w:rFonts/@w:ascii) of every text run inside the rules tables.
+.block_rules_table_fonts <- function(path) {
+  doc <- xml2::read_xml(.read_docx_body_xml(path))
+  tables <- xml2::xml_find_all(doc, "//*[local-name()='tbl']")
+  is_rules <- vapply(tables, function(tbl) {
+    identical(xml2::xml_text(xml2::xml_find_first(tbl, ".//*[local-name()='tc']")), "Rule ID")
+  }, logical(1))
+  runs <- unlist(lapply(tables[is_rules], function(tbl) {
+    xml2::xml_find_all(tbl, ".//*[local-name()='r'][*[local-name()='t']]")
+  }), recursive = FALSE)
+  vapply(runs, function(run) {
+    f <- xml2::xml_find_all(run, "./*[local-name()='rPr']/*[local-name()='rFonts']/@*[local-name()='ascii']")
+    if (length(f) == 0) NA_character_ else xml2::xml_text(f[[1]])
+  }, character(1))
+}
+
+test_that("{VALIDATION_RULES} and {DATASETS} describe each rule in prose and never as code", {
+  rules <- .block_prose_rules()
+  dta <- .block_prose_dta()
 
   for (token in c("{VALIDATION_RULES}", "{DATASETS}")) {
     template <- .make_template(token)
@@ -484,31 +508,66 @@ test_that("{VALIDATION_RULES} and {DATASETS} carry each rule's exact definition"
     export_with_template(dta, template, out, quiet = TRUE)
     unlink(template, force = TRUE)
 
-    definitions <- .block_all_rule_definitions(.block_docx_summary(out))
-    unlink(out, force = TRUE)
-
-    expect_identical(names(definitions), vapply(rules, function(r) r@id, character(1)), info = token)
+    summary <- .block_docx_summary(out)
+    descriptions <- .block_all_rule_descriptions(summary)
+    expect_identical(names(descriptions), vapply(rules, function(r) r@id, character(1)), info = token)
     for (rule in rules) {
-      rebuilt <- do.call(
-        DTARuleFactory,
-        c(list(id = rule@id, description = rule@description), yaml::yaml.load(gsub("\u00a0", " ", definitions[[rule@id]], fixed = TRUE)))
-      )
-      expect_identical(as.list(rebuilt), as.list(rule), info = paste(token, rule@id))
+      # The cell is the shared wording, line for line.
+      expect_identical(unname(descriptions[[rule@id]]), .rule_text(rule), info = paste(token, rule@id))
     }
+    expect_false("Definition" %in% .block_table_cells(summary), info = token)
+
+    # Nowhere code: no monospace run, no YAML key line, no fence.
+    fonts <- .block_rules_table_fonts(out)
+    expect_gt(length(fonts), 0)
+    expect_false(any(fonts %in% c(FONTS$monospace, "Consolas", "Courier", "Courier New")), info = token)
+    lines <- unlist(strsplit(descriptions, "\n", fixed = TRUE))
+    expect_false(any(grepl("^\\s*(type|condition|conditions|then|columns|constraints|group_by):", lines)), info = token)
+    expect_false(any(grepl("```", lines, fixed = TRUE)), info = token)
+    expect_false(any(grepl("\u00a0", lines, fixed = TRUE)), info = token)
+    unlink(out, force = TRUE)
   }
 
-  # The single-table helpers read the same third column.
+  # Hand-written from the wording specification: the grouped rule names its
+  # requirement id, both scopes and its message.
   template <- .make_template("{VALIDATION_RULES}")
-  on.exit(unlink(template, force = TRUE), add = TRUE)
   out <- tempfile(fileext = ".docx")
-  on.exit(unlink(out, force = TRUE), add = TRUE)
+  on.exit(unlink(c(template, out), force = TRUE), add = TRUE)
   export_with_template(dta, template, out, quiet = TRUE)
-  summary <- .block_docx_summary(out)
-  expect_identical(names(.block_rule_table_definitions(summary)), names(.block_rule_table_descriptions(summary)))
-  expect_identical(
-    unname(.block_rule_table_definitions(summary)),
-    unname(.block_all_rule_definitions(summary))
+  grouped <- .block_rule_table_descriptions(.block_docx_summary(out))[["subject_has_visit"]]
+  expect_match(
+    grouped,
+    paste(
+      "\u2022 v01_adult: If at least one row of a group meets condition v01, then every row",
+      "of that group must meet condition old. A violation is reported with the message",
+      "\u201cv01: needs adult\u201d."
+    ),
+    fixed = TRUE
   )
+  expect_match(grouped, "\u2022 old: a row in which AGE is at least 18", fixed = TRUE)
+})
+
+test_that("rule blocks show the reading guide once per document, before the first rules table", {
+  guide <- .rule_reading_guide()
+  check <- function(lines, n_tables) {
+    template <- .make_template(lines)
+    out <- tempfile(fileext = ".docx")
+    on.exit(unlink(c(template, out), force = TRUE), add = TRUE)
+    export_with_template(.block_prose_dta(n_datasets = 2L), template, out, quiet = TRUE)
+    summary <- .block_docx_summary(out)
+    paras <- summary[summary$content_type == "paragraph", ]
+    for (sentence in guide) {
+      expect_identical(sum(paras$text == sentence), 1L, info = paste(lines, collapse = " "))
+    }
+    cells <- summary[summary$content_type == "table cell", ]
+    rule_tables <- unique(cells$table_index[cells$text == "Rule ID"])
+    expect_length(rule_tables, n_tables)
+    first_table_at <- min(cells$doc_index[cells$table_index %in% rule_tables])
+    expect_lt(paras$doc_index[paras$text == guide[[1]]], first_table_at)
+  }
+  check("{VALIDATION_RULES}", 2L)
+  check("{DATASETS}", 2L)
+  check(c("{VALIDATION_RULES}", "AFTER", "{DATASETS}"), 4L)
 })
 
 test_that("dataset block headings carry the name and keep the id visible beside it", {
@@ -870,4 +929,85 @@ test_that("a template that defines no heading styles at all still exports, via t
       summary$text[summary$content_type == "paragraph"]
   )
   expect_gt(sum(summary$content_type == "table cell"), 0)
+})
+
+# A DTA whose supplier has two contacts given here in full, so the expected
+# table can be written down from the input.
+.block_contacts_dta <- function() {
+  meta <- DTAMetaData(
+    title = "Contacts",
+    supplier = list(
+      affiliation = list(name = "Supplier Ltd"),
+      contacts = list(
+        list(name = "Bo Chan", email = "bo@example.org", backup = TRUE),
+        list(
+          name = "Ann Lee", role = "Lead Data Manager", department = "Data Management",
+          email = "ann@example.org", phone = "555-0100", address = "1 Main Road, Town",
+          signature = TRUE, reviewer = TRUE
+        )
+      )
+    )
+  )
+  DTA(datasets = list(create_example_DTADataSetTabular(2)), metadata = meta)
+}
+
+test_that("{SUPPLIER_CONTACTS_TABLE} is the contact table of the built-in layout", {
+  template <- .make_template("{SUPPLIER_CONTACTS_TABLE}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  export_with_template(.block_contacts_dta(), template, out, quiet = TRUE)
+
+  s <- officer::docx_summary(officer::read_docx(out))
+  cells <- s$text[s$content_type == "table cell"]
+  # Name with the role beneath it, Department, Contact (email, phone, address),
+  # Responsibilities; the backup-only contact is listed last.
+  expect_identical(cells, c(
+    "Name", "Department", "Contact", "Responsibilities",
+    "Ann Lee\nLead Data Manager", "Data Management",
+    "ann@example.org\n555-0100\n1 Main Road, Town", "Signatory\nReviewer",
+    "Bo Chan", "", "bo@example.org", "Backup"
+  ))
+  expect_false(any(c("Signature Required", "Reviewer", "Email") %in% cells[1:4]))
+})
+
+test_that("{PROCESS_INFORMATION} joins a vector-valued transmission field instead of aborting", {
+  meta <- DTAMetaData(
+    title = "T",
+    transmission = list(
+      type = "Full",
+      notification = c("Email", "Phone"),
+      frequency = c("Weekly", "Monthly")
+    )
+  )
+  dta <- DTA(datasets = list(create_example_DTADataSetTabular(2)), metadata = meta)
+  template <- .make_template("{PROCESS_INFORMATION}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  export_with_template(dta, template, out, quiet = TRUE)
+  txt <- .docx_text(out)
+
+  expect_match(txt, "Email, Phone", fixed = TRUE)
+  expect_match(txt, "Weekly, Monthly", fixed = TRUE)
+  expect_match(txt, "Full", fixed = TRUE) # a scalar renders as before
+})
+
+test_that("{DATASETS} shows the dataset facts of the built-in layout instead of a raw type line", {
+  ds <- create_example_DTADataSetTabular(2)
+  ds@description <- "Demographics, one row per subject."
+  dta <- DTA(datasets = list(ds), metadata = DTAMetaData(title = "T"))
+  template <- .make_template("{DATASETS}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  export_with_template(dta, template, out, quiet = TRUE)
+
+  s <- officer::docx_summary(officer::read_docx(out))
+  expect_false("Type: tabular" %in% s$text)
+  expect_true("Demographics, one row per subject." %in% s$text)
+  cells <- s$text[s$content_type == "table cell"]
+  # The first table is the fact table: ID, then the type in title case.
+  expect_identical(cells[1:4], c("ID", "demographics", "Type", "Tabular"))
 })

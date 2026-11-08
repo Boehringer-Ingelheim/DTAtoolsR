@@ -294,9 +294,9 @@ test_that("raw LaTeX in document text does not reach the generated .tex", {
 
   # The markdown pandoc_convert() reads here is built from document text a
   # third party controls (metadata title, dataset description, contact
-  # names, ...), so the reader has to be pinned to a dialect without raw
-  # passthrough: left at the default "markdown" reader, a `\input{}` planted
-  # in any of those fields is typeset verbatim into the PDF, reading an
+  # names, ...), so the reader and filter the app uses must not pass raw
+  # commands on: with the default "markdown" reader, a `\input{}` planted in
+  # any of those fields is typeset verbatim into the PDF, reading an
   # arbitrary server-side file into the delivered document.
   backslash <- rawToChar(as.raw(92))
   md_file <- tempfile(fileext = ".md")
@@ -313,12 +313,14 @@ test_that("raw LaTeX in document text does not reach the generated .tex", {
   )
 
   tex_file <- tempfile(fileext = ".tex")
-  on.exit(unlink(tex_file, force = TRUE), add = TRUE)
+  filter <- app_fn("pandoc_markdown_filter")()
+  on.exit(unlink(c(tex_file, filter), force = TRUE), add = TRUE)
   rmarkdown::pandoc_convert(
     input = normalizePath(md_file),
-    from = "markdown-raw_tex-raw_html-raw_attribute",
+    from = app_fn("pandoc_markdown_reader")(),
     to = "latex",
-    output = tex_file
+    output = tex_file,
+    options = c("--lua-filter", filter)
   )
   tex <- paste(readLines(tex_file, warn = FALSE), collapse = "\n")
 
@@ -349,12 +351,14 @@ test_that("raw HTML in document text does not reach the generated HTML", {
   )
 
   html_file <- tempfile(fileext = ".html")
-  on.exit(unlink(html_file, force = TRUE), add = TRUE)
+  filter <- app_fn("pandoc_markdown_filter")()
+  on.exit(unlink(c(html_file, filter), force = TRUE), add = TRUE)
   rmarkdown::pandoc_convert(
     input = normalizePath(md_file),
-    from = "markdown-raw_tex-raw_html-raw_attribute",
+    from = app_fn("pandoc_markdown_reader")(),
     to = "html5",
-    output = html_file
+    output = html_file,
+    options = c("--lua-filter", filter)
   )
   html <- paste(readLines(html_file, warn = FALSE), collapse = "\n")
 
@@ -599,9 +603,9 @@ test_that("embed_yaml_markdown keeps a '-->' in the document from closing the co
   expect_match(out, "a --&gt; <img src=x> --!&gt; b", fixed = TRUE)
 })
 
-test_that("pandoc_no_images_filter turns planted images into their alt text", {
+test_that("pandoc_markdown_filter turns planted images into their alt text", {
   skip_if_not(rmarkdown::pandoc_available(), "pandoc not available")
-  filter <- app_fn("pandoc_no_images_filter")()
+  filter <- app_fn("pandoc_markdown_filter")()
   on.exit(unlink(filter), add = TRUE)
   md <- tempfile(fileext = ".md")
   html <- tempfile(fileext = ".html")
@@ -613,7 +617,7 @@ test_that("pandoc_no_images_filter turns planted images into their alt text", {
 
   rmarkdown::pandoc_convert(
     md,
-    from = "markdown-raw_tex-raw_html-raw_attribute", to = "html5",
+    from = app_fn("pandoc_markdown_reader")(), to = "html5",
     output = html, options = c("--lua-filter", filter)
   )
   out <- paste(readLines(html, warn = FALSE), collapse = "\n")
@@ -621,6 +625,577 @@ test_that("pandoc_no_images_filter turns planted images into their alt text", {
   expect_false(grepl("<img", out, fixed = TRUE))
   expect_false(grepl("169.254.169.254", out, fixed = TRUE))
   expect_match(out, "alt words", fixed = TRUE)
+})
+
+# ---- Markdown -> PDF: what the package's Markdown needs from the PDF routes ----
+#
+# write_dta(format = "md") writes GFM with a linked, numbered table of contents,
+# entities ("&amp;") and backslash escapes in headings and cells, and "<br>"
+# for a line break inside a table cell. These tests run the app's pandoc setup
+# (reader + filter) to latex/html5/native, which needs pandoc but no LaTeX, and
+# the built-in renderer of the last-resort route. Every expectation is written
+# out from the Markdown/GFM rules, not copied from an output.
+
+# Convert `lines` with the app's reader and filter; returns the output as one
+# string.
+md_via_app_pandoc <- function(lines, to = "native") {
+  md <- withr::local_tempfile(fileext = ".md", .local_envir = parent.frame())
+  out <- withr::local_tempfile(fileext = ".out", .local_envir = parent.frame())
+  filter <- app_fn("pandoc_markdown_filter")()
+  withr::defer(unlink(filter), envir = parent.frame())
+  writeLines(lines, md, useBytes = TRUE)
+  rmarkdown::pandoc_convert(
+    input = md, from = app_fn("pandoc_markdown_reader")(), to = to,
+    output = out, options = c("--lua-filter", filter)
+  )
+  paste(readLines(out, warn = FALSE, encoding = "UTF-8"), collapse = "\n")
+}
+
+count_matches <- function(pattern, x) {
+  m <- gregexpr(pattern, x, fixed = TRUE)[[1]]
+  if (m[[1]] == -1L) 0L else length(m)
+}
+
+test_that("the pandoc reader of the PDF routes is GFM", {
+  # The table of contents links to GFM heading ids ("## 1 Title" -> "1-title");
+  # pandoc's own dialect would derive "title" and break every link.
+  expect_identical(app_fn("pandoc_markdown_reader")(), "gfm")
+})
+
+test_that("<br> in a table cell becomes a line break instead of vanishing", {
+  skip_if_not(rmarkdown::pandoc_available(), "pandoc not available")
+  native <- md_via_app_pandoc(c(
+    "| Name | Contact |",
+    "| --- | --- |",
+    "| Emily | e@x.org<br>321-654<br/>Berlin<BR /> |"
+  ))
+
+  # <br>, <br/> and the upper-case, spaced form are three breaks.
+  expect_identical(count_matches("LineBreak", native), 3L)
+  expect_false(grepl("RawInline", native, fixed = TRUE))
+  expect_false(grepl("<br", native, fixed = TRUE))
+  # The three lines are still there, in order.
+  expect_match(native, "(?s)e@x.org.*LineBreak.*321-654.*LineBreak.*Berlin", perl = TRUE)
+
+  # In LaTeX the cell is typeset as separate lines (pandoc's vtop/hbox form).
+  tex <- md_via_app_pandoc(c(
+    "| Name | Contact |", "| --- | --- |", "| Emily | e@x.org<br>321-654 |"
+  ), to = "latex")
+  expect_match(tex, "hbox{\\strut", fixed = TRUE)
+  expect_false(grepl("<br", tex, fixed = TRUE))
+})
+
+test_that("a signature cell of only line breaks keeps its height", {
+  skip_if_not(rmarkdown::pandoc_available(), "pandoc not available")
+  # pandoc drops trailing line breaks in a cell; the filter leaves a
+  # non-breaking space (U+00A0, shown as "\160" in native) after them so the
+  # row stays tall enough to sign in.
+  native <- md_via_app_pandoc(c(
+    "| Name | Signature |", "| --- | --- |", "| Alice | <br><br> |"
+  ))
+  expect_identical(count_matches("LineBreak", native), 2L)
+  expect_match(native, "Str \"\\160\"", fixed = TRUE)
+})
+
+test_that("raw HTML other than <br> is dropped, its text kept", {
+  skip_if_not(rmarkdown::pandoc_available(), "pandoc not available")
+  native <- md_via_app_pandoc(c(
+    "Text <b>bold</b> and <script>alert(1)</script> and <img src=x onerror=y> end.",
+    "",
+    "<div>block</div>",
+    "",
+    "<!-- a comment -->"
+  ))
+  expect_false(grepl("RawInline|RawBlock", native))
+  expect_false(grepl("script|onerror|<div", native))
+  expect_match(native, "bold", fixed = TRUE)
+  expect_match(native, "end.", fixed = TRUE)
+})
+
+test_that("maths and metadata in document text do not reach LaTeX", {
+  skip_if_not(rmarkdown::pandoc_available(), "pandoc not available")
+  backslash <- rawToChar(as.raw(92))
+  tex <- md_via_app_pandoc(c(
+    "---",
+    paste0("header-includes: ", backslash, "input{/etc/passwd}"),
+    "---",
+    "",
+    paste0("A formula $", backslash, "input{/etc/hostname}$ and $$", backslash, "input{/etc/shadow}$$ and ", backslash, "$5.")
+  ), to = "latex")
+  expect_false(grepl(paste0(backslash, "input{/"), tex, fixed = TRUE))
+  expect_false(grepl("/etc/passwd", tex, fixed = TRUE))
+  # The text is still there, as text: the dollar signs are literal.
+  expect_match(tex, "A formula", fixed = TRUE)
+})
+
+test_that("links to headings stay working internal links in LaTeX and HTML", {
+  skip_if_not(rmarkdown::pandoc_available(), "pandoc not available")
+  md <- c(
+    "## Contents",
+    "",
+    "- [1 Approval &amp; Signatures](#1-approval--signatures)",
+    "  - [1.1 Sub](#11-sub)",
+    "",
+    "## 1 Approval &amp; Signatures",
+    "",
+    "### 1.1 Sub",
+    "",
+    "Body."
+  )
+  # GFM ids: lower-case, "&" dropped, spaces to "-" (so "& " leaves "--").
+  tex <- md_via_app_pandoc(md, to = "latex")
+  expect_match(tex, "\\hyperref[1-approval--signatures]{1 Approval \\& Signatures}", fixed = TRUE)
+  expect_match(tex, "\\label{1-approval--signatures}", fixed = TRUE)
+  expect_match(tex, "\\hyperref[11-sub]{1.1 Sub}", fixed = TRUE)
+  expect_match(tex, "\\label{11-sub}", fixed = TRUE)
+
+  html <- md_via_app_pandoc(md, to = "html5")
+  expect_match(html, "href=\"#1-approval--signatures\"", fixed = TRUE)
+  expect_match(html, "id=\"1-approval--signatures\"", fixed = TRUE)
+})
+
+test_that("entities and backslash escapes are resolved by the pandoc route", {
+  skip_if_not(rmarkdown::pandoc_available(), "pandoc not available")
+  native <- md_via_app_pandoc(c(
+    "## R &amp; D &lt;draft&gt;",
+    "",
+    "| Item | Details |",
+    "| --- | --- |",
+    "| clinical\\_data | a\\|b \\* c \\$5 |"
+  ))
+  expect_match(native, "Str \"&\"", fixed = TRUE)
+  expect_match(native, "Str \"<draft>\"", fixed = TRUE)
+  expect_match(native, "Str \"clinical_data\"", fixed = TRUE)
+  expect_match(native, "Str \"a|b\"", fixed = TRUE)
+  expect_match(native, "Str \"$5\"", fixed = TRUE)
+  expect_false(grepl("&amp;|&lt;|\\\\_", native))
+})
+
+test_that("the package's own Markdown goes through the pandoc route intact", {
+  skip_if_not(rmarkdown::pandoc_available(), "pandoc not available")
+  md <- withr::local_tempfile(fileext = ".md")
+  DTAtools::write_dta(app_fixture_dta(), md, format = "md", overwrite = TRUE, quiet = TRUE)
+  lines <- readLines(md, warn = FALSE, encoding = "UTF-8")
+  # The document has what the filter exists for.
+  expect_true(any(grepl("<br>", lines, fixed = TRUE)))
+  expect_true(any(grepl("](#", lines, fixed = TRUE)))
+
+  tex <- md_via_app_pandoc(lines, to = "latex")
+  expect_false(grepl("<br", tex, fixed = TRUE))
+  expect_false(grepl("&amp;|&lt;|&gt;", tex))
+  # Every internal link has a heading to land on.
+  targets <- unique(regmatches(tex, gregexpr("(?<=hyperref\\[)[^]]+", tex, perl = TRUE))[[1]])
+  labels <- unique(regmatches(tex, gregexpr("(?<=\\\\label\\{)[^}]+", tex, perl = TRUE))[[1]])
+  expect_gt(length(targets), 0L)
+  expect_setequal(setdiff(targets, labels), character(0))
+})
+
+# ---- built-in renderer (route 3) ----------------------------------------------
+
+# Draw `lines` with dta_render_markdown() on a null device and return what was
+# drawn: one row per call of graphics::text() (a word, or a line of a cell),
+# with its position, size (cex) and font (1 plain, 2 bold, 3 italic, 4 both).
+# `ascii` is the transliteration of the fallback device (the bullet glyph is
+# not in the fonts of a plain pdf() device); by default the bullet becomes "*".
+render_drawn <- function(lines, ascii = function(x) gsub("\u2022", "*", x)) {
+  drawn <- list()
+  grDevices::pdf(NULL)
+  on.exit(grDevices::dev.off(), add = TRUE)
+  testthat::with_mocked_bindings(
+    app_fn("dta_render_markdown")(lines, ascii = ascii),
+    text = function(x, y = NULL, labels = NULL, cex = 1, font = 1, ...) {
+      drawn[[length(drawn) + 1L]] <<- data.frame(
+        x = x, y = y, label = as.character(labels), cex = cex, font = font,
+        stringsAsFactors = FALSE
+      )
+      invisible(NULL)
+    },
+    .package = "graphics"
+  )
+  do.call(rbind, drawn)
+}
+
+test_that("dta_md_inline turns links into their text and <br> into a line feed", {
+  inline <- app_fn("dta_md_inline")
+
+  expect_identical(inline("[1 Title](#1-title)"), "1 Title")
+  expect_identical(inline("See [the site](https://example.org/a_b) now"), "See the site now")
+  expect_identical(inline("![alt words](http://x/y.png)"), "alt words")
+  expect_identical(inline("a<br>b"), "a\nb")
+  expect_identical(inline("a<br/>b<BR />c"), "a\nb\nc")
+  expect_identical(inline("<br><br>"), "\n\n")
+  expect_identical(inline("<b>x</b> and <script>y</script>"), "x and y")
+  expect_identical(inline("<https://example.org/p>"), "https://example.org/p")
+  expect_identical(inline("<!-- hidden -->shown"), "shown")
+  # A link text may contain escapes and entities; they survive for decoding.
+  expect_identical(inline("[clinical\\_data &amp; more](#x)"), "clinical\\_data &amp; more")
+  expect_identical(inline(""), "")
+  expect_identical(inline(NA_character_), "")
+})
+
+test_that("dta_md_inline never treats escaped or entity-encoded markup as markup", {
+  inline <- app_fn("dta_md_inline")
+  decode <- app_fn("dta_md_decode")
+
+  # An escaped "<" is text, not a tag; an entity is text, not a break.
+  expect_identical(decode(inline("\\<br\\>")), "<br>")
+  expect_identical(decode(inline("&lt;br&gt;")), "<br>")
+  expect_identical(decode(inline("&lt;script&gt;")), "<script>")
+  expect_identical(decode(inline("\\[x\\](y)")), "[x](y)")
+})
+
+test_that("dta_md_decode resolves backslash escapes and entities, once", {
+  decode <- app_fn("dta_md_decode")
+
+  expect_identical(decode("R &amp; D"), "R & D")
+  expect_identical(decode("&lt;a&gt; &quot;q&quot; &apos;s&apos;"), "<a> \"q\" 's'")
+  expect_identical(decode("&#65;&#x42;&#X43;"), "ABC")
+  expect_identical(decode("clinical\\_data\\*.csv\\$"), "clinical_data*.csv$")
+  expect_identical(decode("a\\|b"), "a|b")
+  expect_identical(decode("back\\\\slash"), "back\\slash")
+  # An escaped ampersand is a literal "&", so the rest stays literal too.
+  expect_identical(decode("\\&amp;"), "&amp;")
+  # Unknown or malformed entities and a lone backslash are left alone.
+  expect_identical(decode("&unknownthing; &#0; &#xD800; &"), "&unknownthing; &#0; &#xD800; &")
+  expect_identical(decode("end\\"), "end\\")
+  expect_identical(decode("plain text"), "plain text")
+})
+
+test_that("dta_md_split_cells splits a table row on unescaped pipes only", {
+  split <- app_fn("dta_md_split_cells")
+
+  expect_identical(split("| a | b | c |"), c("a", "b", "c"))
+  expect_identical(split("a | b"), c("a", "b"))
+  expect_identical(split("| a\\|b | c |"), c("a\\|b", "c"))
+  expect_identical(split("| a |  |"), c("a", ""))
+  expect_identical(split("|  | b |"), c("", "b"))
+  # An escaped backslash before the closing pipe does not escape the pipe.
+  expect_identical(split("| a\\\\ |"), "a\\\\")
+  expect_identical(split("| x<br>y | z |"), c("x<br>y", "z"))
+})
+
+test_that("the built-in renderer draws links, entities, escapes and cell breaks as readable text", {
+  drawn <- render_drawn(c(
+    "# Data Transfer Agreement",
+    "",
+    "**Clinical Data Specification**",
+    "",
+    "## Contents",
+    "",
+    "- [1 Approval &amp; Signatures](#1-approval--signatures)",
+    "  - [1.1 Sub &lt;part&gt;](#11-sub-part)",
+    "",
+    "## 1 Approval &amp; Signatures",
+    "",
+    "| Name | Contact | Note |",
+    "| --- | --- | --- |",
+    "| Emily | a@b.com<br>321-654 | clinical\\_data a\\|b |",
+    "| Sign | <br><br> | **x** |"
+  ))
+  labels <- drawn$label
+
+  # Resolved: the words of the links and headings are drawn, nothing of the
+  # Markdown syntax around them.
+  expect_true(all(c("Approval", "&", "Signatures", "Sub", "<part>") %in% labels))
+  expect_false(any(grepl("](", labels, fixed = TRUE)))
+  expect_false(any(grepl("#1-approval", labels, fixed = TRUE)))
+  expect_false(any(grepl("&amp;|&lt;|&gt;", labels)))
+  expect_false(any(grepl("<br", labels, fixed = TRUE)))
+  expect_false(any(grepl("\\", labels, fixed = TRUE)))
+  # Cell text with escapes comes out as the plain characters.
+  expect_true("clinical_data a|b" %in% labels)
+  expect_true("x" %in% labels)
+
+  # The <br> in the contact cell is a line break: two lines, one under the other.
+  e1 <- drawn[drawn$label == "a@b.com", ]
+  e2 <- drawn[drawn$label == "321-654", ]
+  expect_equal(nrow(e1), 1L)
+  expect_equal(nrow(e2), 1L)
+  expect_equal(e1$x, e2$x)
+  expect_lt(e2$y, e1$y)
+})
+
+test_that("a <br> in running text starts a new line in the built-in renderer", {
+  drawn <- render_drawn(c("First line<br>second line"))
+  first <- drawn[drawn$label == "First", ]
+  second <- drawn[drawn$label == "second", ]
+  expect_lt(second$y, first$y)
+  expect_equal(second$x, drawn$x[1])
+})
+
+test_that("nested list items are indented further than their parents in the built-in renderer", {
+  drawn <- render_drawn(c("- parent", "  - child"))
+  # The bullet glyph is drawn first, then the item's words.
+  parent <- drawn[drawn$label == "parent", ]
+  child <- drawn[drawn$label == "child", ]
+  expect_gt(child$x, parent$x)
+  expect_lt(child$y, parent$y)
+})
+
+test_that("the package's own Markdown renders in the built-in renderer without syntax left over", {
+  md <- withr::local_tempfile(fileext = ".md")
+  DTAtools::write_dta(app_fixture_dta(), md, format = "md", overwrite = TRUE, quiet = TRUE)
+  lines <- readLines(md, warn = FALSE, encoding = "UTF-8")
+  expect_true(any(grepl("<br>", lines, fixed = TRUE)))
+
+  # Draw with the transliteration the non-Unicode fallback device uses, so the
+  # base pdf() device can take the typographic quotes of the rule wording.
+  drawn <- list()
+  grDevices::pdf(NULL)
+  on.exit(grDevices::dev.off(), add = TRUE)
+  ascii <- function(x) iconv(enc2utf8(as.character(x)), "UTF-8", "ASCII", sub = "?")
+  testthat::with_mocked_bindings(
+    app_fn("dta_render_markdown")(lines, ascii = ascii),
+    text = function(x, y = NULL, labels = NULL, ...) {
+      drawn[[length(drawn) + 1L]] <<- as.character(labels)
+      invisible(NULL)
+    },
+    .package = "graphics"
+  )
+  labels <- unlist(drawn)
+
+  expect_gt(length(labels), 50L)
+  expect_false(any(grepl("](#", labels, fixed = TRUE)))
+  expect_false(any(grepl("<br", labels, fixed = TRUE)))
+  expect_false(any(grepl("&amp;|&lt;|&gt;", labels)))
+  expect_false(any(grepl("\\\\[_*|$]", labels)))
+  # Autolinks, rule headings and the italic rule kind leave no syntax behind:
+  # no address in angle brackets, no run of hashes, no asterisk around a word
+  # (a file-name pattern such as "clinical_data.*.csv$" keeps its own).
+  expect_false(any(grepl("[<>]|mailto:|^#+$", labels)))
+  expect_false(any(grepl("^\\*[A-Za-z(]|[A-Za-z)]\\*$", labels)))
+})
+
+test_that("dta_md_inline shows autolinks as their address, whatever the scheme", {
+  inline <- app_fn("dta_md_inline")
+
+  # A bare e-mail address, a mailto: link and other schemes: the address only,
+  # without the angle brackets and without "mailto:".
+  expect_identical(inline("<a@b.org>"), "a@b.org")
+  expect_identical(inline("<emily.turner@testcompany2.com>"), "emily.turner@testcompany2.com")
+  expect_identical(inline("<first+tag_x@sub.example.co.uk>"), "first+tag_x@sub.example.co.uk")
+  expect_identical(inline("<mailto:a@b.org>"), "a@b.org")
+  expect_identical(inline("<MAILTO:a@b.org>"), "a@b.org")
+  expect_identical(inline("<ftp://files.example.org/in/data.csv>"), "ftp://files.example.org/in/data.csv")
+  expect_identical(inline("<sftp://host/x> <https://e.org> <http://e.org/a?b=1>"), "sftp://host/x https://e.org http://e.org/a?b=1")
+  # An autolink followed by <br> keeps its break; "<br" as a local part is an address.
+  expect_identical(inline("<a@b.org><br>321-654"), "a@b.org\n321-654")
+  expect_identical(inline("<br@x.org>"), "br@x.org")
+  # Real tags are still dropped, and a less-than sign that starts no autolink is not one.
+  expect_identical(inline("<b>x</b> <span class=\"c\">y</span>"), "x y")
+  expect_identical(inline("<not an autolink@b.org>"), "")
+  # Escaped brackets are text, not an autolink.
+  expect_identical(app_fn("dta_md_decode")(inline("\\<a@b.org\\>")), "<a@b.org>")
+})
+
+test_that("the built-in renderer draws *italic*, **bold** and both, without the asterisks", {
+  drawn <- render_drawn(c(
+    "Plain *slanted* and **heavy** and **heavy *both* heavy** end.",
+    "",
+    "Literal \\*stars\\* and 5 * 3 * 2 stay.",
+    "",
+    "| Cell | Other |",
+    "| --- | --- |",
+    "| *it* and **bo** | x |"
+  ))
+  font_of <- function(label) drawn$font[drawn$label == label]
+
+  expect_identical(font_of("Plain"), 1)
+  expect_identical(font_of("slanted"), 3)
+  expect_identical(font_of("heavy"), c(2, 2, 2))
+  expect_identical(font_of("both"), 4)
+  expect_identical(font_of("end."), 1)
+  expect_false(any(grepl("*", c("Plain", "slanted", "heavy", "both", "end."), fixed = TRUE)))
+  # No asterisk of the markup is left anywhere in the drawn text.
+  markup_left <- grepl("*", drawn$label, fixed = TRUE) &
+    !drawn$label %in% c("*stars*", "*", "5 * 3 * 2")
+  expect_false(any(markup_left))
+  # An escaped or space-padded asterisk is the character itself.
+  expect_true("*stars*" %in% drawn$label)
+  expect_equal(sum(drawn$label == "*"), 2L)
+  # A table cell shows the words only; cells are one font per column.
+  expect_true("it and bo" %in% drawn$label)
+})
+
+test_that("a line that is one italic span is drawn as a small grey caption", {
+  drawn <- render_drawn(c("*Range*", "*Conditional (IF/THEN)*", "*one* and *two*"))
+
+  expect_identical(drawn$label[1:3], c("Range", "Conditional", "(IF/THEN)"))
+  expect_true(all(drawn$font[1:3] == 3))
+  expect_true(all(drawn$cex[1:3] < 1))
+  # Two italic spans in one line are running text, not a caption: normal size.
+  expect_identical(drawn$label[4:6], c("one", "and", "two"))
+  expect_identical(drawn$font[4:6], c(3, 1, 3))
+  expect_true(all(drawn$cex[4:6] == 1))
+})
+
+test_that("headings of every level 1-6 are drawn in graded sizes without their hashes", {
+  lines <- unlist(lapply(1:6, function(k) {
+    c(paste(strrep("#", k), paste0("Level", k, " name\\_x")), "")
+  }))
+  drawn <- render_drawn(lines)
+  first_words <- drawn[grepl("^Level", drawn$label), ]
+
+  expect_identical(first_words$label, paste0("Level", 1:6))
+  # Strictly smaller from level to level, all bold.
+  expect_true(all(diff(first_words$cex) < 0))
+  expect_true(all(first_words$font == 2))
+  expect_true(all(drawn$font[drawn$label == "name_x"] == 2))
+  expect_false(any(grepl("#", drawn$label, fixed = TRUE)))
+  expect_false(any(grepl("\\", drawn$label, fixed = TRUE)))
+  # Headings are drawn below one another, in reading order.
+  expect_true(all(diff(first_words$y) < 0))
+})
+
+test_that("a rule heading, an emphasised heading and a closing hash run are drawn as titles", {
+  drawn <- render_drawn(c(
+    "##### rule\\_equal\\_example",
+    "##### File format",
+    "## Title with *slant* and <a@b.org> ##",
+    "####### seven hashes are text"
+  ))
+
+  expect_true(all(c("rule_equal_example", "File", "format") %in% drawn$label))
+  expect_true(all(drawn$font[drawn$label %in% c("File", "format")] == 2))
+  # An italic word inside a heading keeps its slant on top of the bold.
+  expect_identical(drawn$font[drawn$label == "slant"], 4)
+  expect_true("a@b.org" %in% drawn$label)
+  expect_false("##" %in% drawn$label)
+  # Seven hashes are not a heading: plain body text, hashes included.
+  expect_true("#######" %in% drawn$label)
+})
+
+test_that("a bold title is followed by its list, with a bullet before every item", {
+  drawn <- render_drawn(
+    c(
+      "**How to read the rules**", "",
+      "- Each rule is checked separately.",
+      "- Text values are compared exactly.",
+      "  - nested point",
+      "",
+      "1. First step", "2) Second step"
+    ),
+    ascii = function(x) gsub("\u2022", "~", x)
+  )
+
+  title <- drawn[drawn$label == "How", ]
+  expect_identical(title$font, 2)
+  bullets <- drawn[drawn$label == "~", ]
+  expect_equal(nrow(bullets), 3L)
+  # Each bullet sits left of its item's first word and on the same line.
+  for (w in c("Each", "Text", "nested")) {
+    word <- drawn[drawn$label == w, ]
+    near <- bullets[abs(bullets$y - word$y) < 1e-9, ]
+    expect_equal(nrow(near), 1L, info = w)
+    expect_lt(near$x, word$x)
+  }
+  # The bulleted lines come under the title, in order; the nested one is indented.
+  expect_lt(drawn$y[drawn$label == "Each"], title$y)
+  expect_lt(drawn$y[drawn$label == "Text"], drawn$y[drawn$label == "Each"])
+  expect_gt(drawn$x[drawn$label == "nested"], drawn$x[drawn$label == "Text"])
+  # Numbered items carry their number instead of a bullet.
+  expect_true(all(c("1.", "2)") %in% drawn$label))
+  expect_lt(drawn$x[drawn$label == "1."], drawn$x[drawn$label == "First"])
+  expect_equal(drawn$y[drawn$label == "1."], drawn$y[drawn$label == "First"])
+})
+
+test_that("autolinks, escapes, entities and <br> in table cells are shown as plain text", {
+  drawn <- render_drawn(c(
+    "| Name | Contact |",
+    "| --- | --- |",
+    "| A | <a@b.org><br><ftp://f.example.org/x><br>**tel** 1 |",
+    "| B | x &lt;br&gt; y &amp; z \\| w \\<k\\> |"
+  ))
+  labels <- drawn$label
+
+  expect_true(all(c("a@b.org", "ftp://f.example.org/x", "tel 1") %in% labels))
+  # The three lines of the first contact cell are one under the other.
+  l1 <- drawn[drawn$label == "a@b.org", ]
+  l2 <- drawn[drawn$label == "ftp://f.example.org/x", ]
+  l3 <- drawn[drawn$label == "tel 1", ]
+  expect_equal(l1$x, l2$x)
+  expect_lt(l2$y, l1$y)
+  expect_lt(l3$y, l2$y)
+  # Entities and escapes are the characters themselves; "&lt;br&gt;" is not a break.
+  expect_true("x <br> y & z | w <k>" %in% labels)
+  expect_false(any(grepl("mailto|&amp;|&lt;", labels)))
+  expect_false(any(grepl("\\", labels, fixed = TRUE)))
+})
+
+test_that("the specification Markdown with rule headings and autolinks renders without syntax left over", {
+  lines <- c(
+    "# Data Transfer Agreement", "",
+    "**Clinical Data Specification**", "",
+    "## Contents", "",
+    "- [1 Approval and Signatures](#1-approval-and-signatures)",
+    "- [3 Parties](#3-parties)",
+    "  - [3.1 Supplier](#31-supplier)",
+    "  - [5.1 Clinical data table (clinical\\_data)](#51-clinical-data-table-clinical_data)", "",
+    "## 3 Parties", "",
+    "### 3.1 Supplier", "",
+    "| Name | Role | Contact | Responsibilities |",
+    "| --- | --- | --- | --- |",
+    paste0(
+      "| Emily Turner | Senior Data Manager | ",
+      "<emily@x.org><br>321-654-0987 | Signatory<br>Reviewer |"
+    ),
+    "| Bob | Analyst | <mailto:bob@x.org><br><ftp://ftp.x.org/in> | |",
+    "| Alice | Lead | <br><br> | R &amp; D |", "",
+    "## 5 Datasets", "",
+    "### 5.1 Clinical data table (clinical\\_data)", "",
+    "#### 5.1.1 Files", "",
+    "| File Name / Pattern | Match Type |",
+    "| --- | --- |",
+    "| clinical\\_data.\\*.csv\\$ | Regex pattern |", "",
+    "##### File format", "",
+    "| File | Delimiter | Quote |",
+    "| --- | --- | --- |",
+    "| clinical\\_data.\\*.csv\\$ | Comma ( , ) | Double quote ( \" ) |", "",
+    "#### 5.1.3 Validation Rules", "",
+    "**How to read the rules**", "",
+    "- Each rule is checked separately for every file of the dataset.",
+    "- Tests such as greater than read the value as a number, such as 1e3 for 1000.", "",
+    "##### rule\\_equal\\_example", "",
+    "*Conditional (IF/THEN)*", "",
+    "When VISIT is equal to \u201cV03\u201d, STATUS must be equal to \u201cCOMPLETED\u201d.", "",
+    "**Missing values:**", "",
+    "- If VISIT is missing, the condition is not met.", "",
+    "##### rule\\_range\\_example", "",
+    "*Range*", "",
+    "Every value in column AGE must be a number from 18 to 65, inclusive.", "",
+    "**Missing values:** Not checked.", "",
+    "---", "",
+    "Clinical Data Specification \u00b7 Version 0.1 \u00b7 2024-06-19"
+  )
+  ascii <- function(x) {
+    x <- gsub("\u2022", "~", x)
+    x <- gsub("[\u201c\u201d]", "\"", x)
+    iconv(enc2utf8(as.character(x)), "UTF-8", "ASCII", sub = "?")
+  }
+  drawn <- render_drawn(lines, ascii = ascii)
+  labels <- drawn$label
+
+  expect_gt(length(labels), 100L)
+  # The only angle bracket, backslash, asterisk or dollar sign in the drawn text
+  # is the file-name pattern, whose characters are escaped in the Markdown.
+  pattern <- "clinical_data.*.csv$"
+  expect_true(pattern %in% labels)
+  rest <- labels[labels != pattern]
+  expect_false(any(grepl("[<>\\\\*#]", rest)))
+  expect_false(any(grepl("&amp;|&lt;|&gt;|mailto", rest)))
+  expect_false(any(grepl("](", labels, fixed = TRUE)))
+  # What the Markdown wrote as autolinks and cell breaks is readable text.
+  expect_true(all(c(
+    "emily@x.org", "321-654-0987", "bob@x.org", "ftp://ftp.x.org/in"
+  ) %in% labels))
+  # Rule headings are titles; the rule kind is a grey italic caption.
+  expect_identical(drawn$font[drawn$label == "rule_equal_example"], 2)
+  expect_identical(drawn$font[drawn$label == "Range"], 3)
+  expect_lt(drawn$cex[drawn$label == "Range"], 1)
+  expect_identical(drawn$font[drawn$label == "format"], 2)
+  expect_equal(drawn$cex[drawn$label == "format"], 1)
+  # The list under the bold title: bullets before every item.
+  expect_gte(sum(labels == "~"), 3L)
 })
 
 test_that("csv_formula_safe defuses formula-leading text cells and leaves the rest", {

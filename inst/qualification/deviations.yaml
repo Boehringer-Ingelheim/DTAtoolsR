@@ -400,6 +400,44 @@ deviations:
     opened: 2026-09-14
     closed: 2026-11-04
 
+  - id: DEV-017
+    title: A Word template export to a relative output path fails
+    status: closed
+    severity: minor
+    affects: [REQ-EXPORT-014, REQ-EXPORT-016]
+    observed: >
+      export_with_template(output = "out.docx") and write_dta(file =
+      "out.docx", template = <path>) -- an output path relative to the working
+      directory -- abort with "Template processing failed: The generated
+      document is not a valid DOCX" and write nothing, while the same call with
+      the absolute path of the same file succeeds. The staging archive is
+      packed with zip::zip(root = <unpacked template folder>), which resolves
+      the relative staging path inside that temporary folder, so the check
+      that follows looks for the staged document where it was never written.
+    expected: >
+      An output path relative to the working directory names the same file as
+      its absolute form: the filled document is written there.
+    impact: >
+      Fails loudly and safely: nothing is written and an existing file at the
+      destination is left alone, so no wrong document can reach a reader. The
+      cost is a template export that cannot be produced at all from a script
+      that names its output relative to the working directory, with an error
+      that points at the document rather than at the path.
+    workaround: >
+      Pass an absolute output path, for example normalizePath(dirname(file))
+      joined with basename(file), or file.path(getwd(), file).
+    resolution: >
+      Closed by making the destination absolute at the top of
+      .dta_write_staged(), so every staged writer packs its staging file at a
+      path that does not depend on the working directory. OQ-EXPORT-062
+      asserts the corrected behaviour.
+    reference: >
+      R/exportTemplateDocx.R (.replace_docx_placeholders -> .dta_write_staged,
+      .zip_docx_dir); inst/qualification/tests/test-OQ-EXPORT-documents.R
+      (OQ-EXPORT-062)
+    opened: 2026-11-08
+    closed: 2026-11-08
+
 limitations:
   - id: LIM-001
     title: A row whose every field is empty is dropped by the CSV reader

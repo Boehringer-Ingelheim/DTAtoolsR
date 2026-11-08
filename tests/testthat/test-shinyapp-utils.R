@@ -120,16 +120,19 @@ test_that("dta_rule_type_label maps known type tokens and falls back for unknown
   expect_equal(label(NULL), "—")
 })
 
-test_that(".dta_cond_to_text renders a condition list as a short readable string", {
-  cond_to_text <- app_fn(".dta_cond_to_text")
+# The wording below is written out by hand from the specification at the top of
+# R/rulePhrasing.R (the typographic quotes are U+201C / U+201D), never copied
+# from what the app shows.
+dq <- function(x) paste0("\u201c", x, "\u201d")
 
-  expect_equal(cond_to_text(list(VISIT = list(equals = "V03"))), "VISIT equals V03")
-  expect_equal(
-    cond_to_text(list(AGE = list(min = 10, max = 100), WEIGHT = list(greater_equal = 5))),
-    "AGE min 10; WEIGHT greater_equal 5"
+test_that("dta_rule_summary gives the plain-English sentence of the package, not pseudo-code", {
+  rule <- DTAtools::DTARuleColUnique(id = "u", columns = c("A", "B"))
+  expect_identical(
+    app_fn("dta_rule_summary")(rule),
+    "No two rows may have the same combination of values in columns A and B."
   )
-  expect_equal(cond_to_text(NULL), "")
-  expect_equal(cond_to_text(list()), "")
+  expect_identical(app_fn("dta_rule_summary")(NULL), "")
+  expect_identical(app_fn("dta_rule_summary")("not a rule"), "")
 })
 
 # ---- supported types / backends --------------------------------------------
@@ -956,14 +959,87 @@ test_that("dta_column_fields splits backend/type/format for one column, NULL whe
   expect_null(app_fn("dta_column_fields")(app_fixture_dta(), "clinical_data", "NO_SUCH_COL"))
 })
 
-test_that("dta_rules_overview builds one row per rule with a human-readable detail", {
+test_that("dta_rules_overview builds one row per rule with the plain-English sentence as detail", {
   overview <- app_fn("dta_rules_overview")(app_fixture_dta(), "clinical_data")
 
   expect_equal(nrow(overview), 8)
   expect_equal(overview$id[3], "rule_range_example")
-  expect_equal(overview$detail[3], "AGE in [18, 65]")
+  expect_equal(
+    overview$detail[3],
+    "Every value in column AGE must be a number from 18 to 65, inclusive."
+  )
   expect_equal(overview$id[5], "rule_unique_example")
-  expect_equal(overview$detail[5], "unique(SUBJECT_ID, VISIT)")
+  expect_equal(
+    overview$detail[5],
+    "No two rows may have the same combination of values in columns SUBJECT_ID and VISIT."
+  )
+  expect_equal(
+    overview$detail[1],
+    paste0("When VISIT is equal to ", dq("V03"), ", STATUS must be equal to ", dq("COMPLETED"), ".")
+  )
+  expect_equal(
+    overview$detail[4],
+    paste0("When CONSENT is equal to ", dq("YES"), ", CONSENT_DATE must not be empty.")
+  )
+})
+
+test_that("the overview text is prose: no pseudo-code, no code span, no raw operator names", {
+  overview <- app_fn("dta_rules_overview")(app_fixture_dta(), "clinical_data")
+
+  for (d in overview$detail) {
+    expect_true(nzchar(d))
+    expect_false(grepl("IF .* THEN|unique\\(|\\bin \\[|constraint\\(s\\)|`", d))
+    expect_false(grepl("\\b(greater_equal|not_equals|less_equal)\\b", d))
+  }
+  # A group rule names its grouping, conditions and requirements in words.
+  expect_match(overview$detail[7], "grouped by the value in column SUBJECT_ID", fixed = TRUE)
+  expect_match(overview$detail[7], "c_has_visit", fixed = TRUE)
+  expect_match(overview$detail[7], "visit_requires_status", fixed = TRUE)
+})
+
+test_that("a column with several tests keeps all of them in the overview", {
+  # The previous renderer printed only the first operator of each column.
+  res <- app_fn("dta_set_rule")(
+    app_fixture_dta(), "clinical_data",
+    id = "multi_op", type = "col_condition",
+    condition = list(VISIT = list(equals = "V03")),
+    then = list(AGE = list(greater = 17, less = 65, not_in = c(20, 30)))
+  )
+  expect_true(res$ok)
+  overview <- app_fn("dta_rules_overview")(res$value, "clinical_data")
+  d <- overview$detail[overview$id == "multi_op"]
+
+  expect_length(d, 1L)
+  expect_match(d, "greater than 17", fixed = TRUE)
+  expect_match(d, "less than 65", fixed = TRUE)
+  expect_match(d, "not be one of 20 or 30", fixed = TRUE)
+})
+
+test_that("a range with only one bound and a condition on a pattern read as the specification says", {
+  res <- app_fn("dta_set_rule")(
+    app_fixture_dta(), "clinical_data",
+    id = "at_least", type = "col_range", columns = "AGE", min = 18, max = Inf
+  )
+  res <- app_fn("dta_set_rule")(
+    res$value, "clinical_data",
+    id = "pat", type = "col_condition",
+    condition = list(CONSENT = list(equals = "YES")),
+    then = list(STUDYID = list(pattern = "^[0-9]+$"))
+  )
+  expect_true(res$ok)
+  overview <- app_fn("dta_rules_overview")(res$value, "clinical_data")
+
+  expect_equal(
+    overview$detail[overview$id == "at_least"],
+    "Every value in column AGE must be a number that is at least 18."
+  )
+  expect_equal(
+    overview$detail[overview$id == "pat"],
+    paste0(
+      "When CONSENT is equal to ", dq("YES"), ", STUDYID must match the pattern ",
+      dq("^[0-9]+$"), "."
+    )
+  )
 })
 
 test_that("dta_rule_fields returns the rule at a 1-based index, NULL out of range", {

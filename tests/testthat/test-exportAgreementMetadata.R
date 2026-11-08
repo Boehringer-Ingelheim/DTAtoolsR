@@ -47,16 +47,23 @@ test_that("Markdown study and sections retain order and escape plain narrative",
   write_dta(dta, out, quiet = TRUE)
   lines <- readLines(out, warn = FALSE, encoding = "UTF-8")
   md <- paste(lines, collapse = "\n")
+  # Numbered chapters in the order of the Word layout; no signatories, no
+  # parties and no process information, and Document Information would only
+  # repeat the head (title, date), so those chapters are left out and the
+  # numbers close up.
   headings <- c(
-    "## Document Information", "## Study", "## Agreement Sections",
-    "### Responsibilities \\| \\`literal\\` \\{PROTOCOL\\_ID\\}",
-    "### Scope", "### Unfinished clause", "## Datasets"
+    "## 1 Study", "## 2 Agreement Sections",
+    "### 2.1 Responsibilities \\| \\`literal\\` \\{PROTOCOL\\_ID\\}",
+    "### 2.2 Scope", "### 2.3 Unfinished clause", "## 3 Datasets"
   )
   expect_true(all(headings %in% lines))
   expect_true(all(diff(match(headings, lines)) > 0))
   expect_match(md, "| Study ID | ST-01 \\{DTA\\_TITLE\\} \\| \\`id\\` \u00fc<br>A |", fixed = TRUE)
-  expect_match(md, "First paragraph \\{DTA\\_TITLE\\} \\| \\`code\\` \u00fc\nSecond line\n\nSecond paragraph &lt;b&gt;literal&lt;/b&gt; &amp; \\{STUDY\\_TABLE\\}", fixed = TRUE)
-  expect_match(md, "### Unfinished clause\n\n", fixed = TRUE)
+  # A line break inside a paragraph stays a (hard) line break, a blank line
+  # still separates two paragraphs.
+  expect_match(md, "First paragraph \\{DTA\\_TITLE\\} \\| \\`code\\` \u00fc\\\nSecond line\n\nSecond paragraph &lt;b&gt;literal&lt;/b&gt; & \\{STUDY\\_TABLE\\}", fixed = TRUE)
+  # A clause without text keeps its heading; the text is shown as missing.
+  expect_match(md, "### 2.3 Unfinished clause\n\n(not specified)\n\n## 3 Datasets", fixed = TRUE)
   expect_false(grepl("<b>literal</b>", md, fixed = TRUE))
 })
 
@@ -163,7 +170,9 @@ test_that("full transmission clauses reach default exports and process placehold
     write_dta(dta, out, quiet = TRUE)
     text <- if (ext == ".docx") .docx_text(out) else paste(readLines(out), collapse = "\n")
     for (value in transmission) {
-      expect_match(text, value, fixed = TRUE)
+      # In Markdown the value is a table cell, so its "|" is escaped.
+      shown <- if (ext == ".md") gsub("|", "\\|", value, fixed = TRUE) else value
+      expect_match(text, shown, fixed = TRUE)
     }
   }
   template <- .make_template("{PROCESS_INFORMATION}")
@@ -198,8 +207,10 @@ test_that("Markdown narrative does not turn list markers or rules into formattin
   on.exit(unlink(out), add = TRUE)
   write_dta(dta, out, quiet = TRUE)
   md <- paste(readLines(out, encoding = "UTF-8"), collapse = "\n")
-  expect_match(md, "### \\# \\[Plain\\] &amp; &lt;safe&gt;", fixed = TRUE)
-  expect_match(md, "\\# Heading\n\n\\- item\n\n1\\. numbered\n\n\\---\n\n\\~\\~\\~\n\nunderlined\n\\=\\=\\=\n\n\\[link\\](url)", fixed = TRUE)
+  # "&" before a space starts no entity and stays as written; a line of "="
+  # under a line of text is escaped once, so it cannot underline a heading.
+  expect_match(md, "### 2.1 \\# \\[Plain\\] & &lt;safe&gt;", fixed = TRUE)
+  expect_match(md, "\\# Heading\n\n\\- item\n\n1\\. numbered\n\n\\---\n\n\\~\\~\\~\n\nunderlined\\\n\\===\n\n\\[link\\](url)", fixed = TRUE)
 })
 
 test_that("NA transfer decisions stay unspecified in scalar and process placeholders", {
@@ -214,16 +225,16 @@ test_that("NA transfer decisions stay unspecified in scalar and process placehol
   paragraphs <- .docx_paragraphs(out)
   expect_true("Test: []" %in% paragraphs)
   expect_true("Blinded: []" %in% paragraphs)
-  expect_false(any(grepl("Test Upload: No", paragraphs, fixed = TRUE)))
-  expect_false(any(grepl("Blinded Transfer: No", paragraphs, fixed = TRUE)))
+  expect_false(any(grepl("Test upload: No", paragraphs, fixed = TRUE)))
+  expect_false(any(grepl("Blinded transfer: No", paragraphs, fixed = TRUE)))
 
   dta@metadata@transmission <- list(test_upload = FALSE, blinded_transfer = FALSE)
   export_with_template(dta, template, out, quiet = TRUE, fallback = FALSE)
   paragraphs <- .docx_paragraphs(out)
   expect_true("Test: [No]" %in% paragraphs)
   expect_true("Blinded: [No]" %in% paragraphs)
-  expect_true(any(grepl("Test Upload: No", paragraphs, fixed = TRUE)))
-  expect_true(any(grepl("Blinded Transfer: No", paragraphs, fixed = TRUE)))
+  expect_true(any(grepl("Test upload: No", paragraphs, fixed = TRUE)))
+  expect_true(any(grepl("Blinded transfer: No", paragraphs, fixed = TRUE)))
 
   export_with_template(
     dta, template, out,
@@ -250,13 +261,13 @@ test_that("rendered Markdown preserves indented narrative without code blocks or
   write_dta(dta, markdown, quiet = TRUE)
   rmarkdown::pandoc_convert(
     markdown,
-    from = "commonmark", to = "html", output = html,
+    from = "gfm", to = "html", output = html,
     options = "--wrap=none"
   )
   rendered <- xml2::read_html(html)
   clauses <- xml2::xml_find_all(
     rendered,
-    ".//h3[.='Spaces' or .='Tab' or .='Mixed']/following-sibling::*[1]"
+    ".//h3[.='2.1 Spaces' or .='2.2 Tab' or .='2.3 Mixed']/following-sibling::*[1]"
   )
   expect_identical(xml2::xml_name(clauses), rep("p", 3))
   paragraphs <- xml2::xml_text(clauses)

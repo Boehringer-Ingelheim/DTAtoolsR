@@ -61,15 +61,8 @@ test_that(".format_scalar_value renders every flavour of NA as one display strin
     expect_equal(out, MISSING_VALUE_DISPLAY)
   }
 
-  pairs <- .format_metadata_pairs(list(x = NA_character_))
-  expect_equal(pairs$key, "x")
-  expect_equal(pairs$value, MISSING_VALUE_DISPLAY)
-
-  expect_equal(.kv_bullets_md(list(x = NA_character_)), "- **x:** (not specified)")
-  expect_equal(.kv_bullets_md(list(x = NA)), "- **x:** (not specified)")
-
   # The bare text "NA" must never reach a rendered document.
-  expect_false(grepl("NA", .kv_bullets_md(list(x = NA)), fixed = TRUE))
+  expect_false(grepl("NA", .format_scalar_value(NA), fixed = TRUE))
 })
 
 test_that("an NA metadata field no longer breaks any export format", {
@@ -89,7 +82,8 @@ test_that("an NA metadata field no longer breaks any export format", {
   # Not merely "no error": the NA field must be rendered as the missing-value
   # placeholder, not as the literal "NA".
   md_lines <- readLines(out_md, warn = FALSE)
-  expect_true(any(grepl("- **type:** (not specified)", md_lines, fixed = TRUE)))
+  expect_true("| Transfer method | (not specified) |" %in% md_lines)
+  expect_false("| Transfer method | NA |" %in% md_lines)
 
   out_docx <- tempfile(fileext = ".docx")
   on.exit(unlink(out_docx, force = TRUE), add = TRUE)
@@ -97,32 +91,6 @@ test_that("an NA metadata field no longer breaks any export format", {
     write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
   )
   expect_true(grepl("(not specified)", .docx_text(out_docx), fixed = TRUE))
-})
-
-test_that(".format_value_list drops values beyond max_items", {
-  expect_equal(.format_value_list(NULL), "(not specified)")
-  expect_equal(.format_value_list(c("a", "b")), "a, b")
-
-  # Only a count survives; values 11..25 are gone from the rendered spec, so a
-  # column's allowed-value list is not fully documented by the export.
-  out <- .format_value_list(1:25, max_items = 10)
-  expect_equal(out, "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ... and 15 more")
-  expect_false(grepl("11", out, fixed = TRUE))
-  expect_true(grepl("... and 15 more", out, fixed = TRUE))
-
-  # The default cut-off is 5.
-  expect_equal(.format_value_list(1:25), "1, 2, 3, 4, 5, ... and 20 more")
-
-  # Lists are unlisted before truncation.
-  expect_equal(.format_value_list(list("a", "b", "c"), max_items = 2), "a, b, ... and 1 more")
-})
-
-test_that(".format_value_list switches to line breaks past max_width", {
-  wide <- c(strrep("x", 30), strrep("y", 40))
-  expect_equal(.format_value_list(wide), paste(wide, collapse = "\n"))
-
-  narrow <- c("x", "y")
-  expect_equal(.format_value_list(narrow), "x, y")
 })
 
 test_that(".format_document_date renders ISO 8601 regardless of LC_TIME", {
@@ -155,56 +123,91 @@ test_that(".title_case_field normalizes snake and dotted field names", {
   expect_equal(.title_case_field("name"), "Name")
 })
 
-test_that("a markdown table cell survives an embedded newline as one row", {
-  # A GFM pipe table is line-based. A description authored as a YAML block
-  # scalar carries real newlines, and each one used to split the row in two --
-  # the renderer then read the tail as a fresh table row, misattributing its
-  # text to the first column and dropping everything after the last pipe.
-  df <- data.frame(
-    id = "age_range",
-    description = "Ages over 100 need:\nsupervisor sign-off | extra consent",
-    stringsAsFactors = FALSE
-  )
-
-  lines <- .df_to_md_table(df)
-
-  # Header, separator, and exactly one body line.
-  expect_length(lines, 3)
-  expect_false(any(grepl("\n", lines, fixed = TRUE)))
-
-  body <- lines[3]
-  expect_match(body, "supervisor sign-off", fixed = TRUE)
-  expect_match(body, "extra consent", fixed = TRUE)
-  # The pipe inside the text stays escaped, so it cannot open a new cell.
-  expect_match(body, "\\|", fixed = TRUE)
-  expect_match(body, "<br>", fixed = TRUE)
+test_that(".title_case_field capitalises non-ASCII letters in any locale", {
+  # Under LC_CTYPE=C toupper() leaves a non-ASCII letter as it is.
+  withr::local_locale(c(LC_CTYPE = "C"))
+  expect_equal(.title_case_field("\u00fcbertragung_art"), "\u00dcbertragung Art")
+  expect_equal(.title_case_field("\u00e9tape"), "\u00c9tape")
 })
 
-test_that("carriage returns are folded the same way as newlines", {
-  df <- data.frame(x = "a\r\nb", stringsAsFactors = FALSE)
-  lines <- .df_to_md_table(df)
-
-  expect_length(lines, 3)
-  expect_equal(lines[3], "| a<br>b |")
-})
-
-test_that("an empty table renders as nothing at all", {
-  expect_equal(.df_to_md_table(NULL), character(0))
-  expect_equal(.df_to_md_table(data.frame()), character(0))
-})
-
-# ---- group_condition rule descriptions --------------------------------------
-# A group_condition rule used to fall through to the default formatter, which
-# printed either the bare author description or "no description available" --
-# none of the grouping columns, named conditions or constraints reached the
-# exported document.
+# ---- .rule_text(): the plain-text rule wording -------------------------------
+# The shared wording in R/rulePhrasing.R, as the Word exports show it. The expected
+# strings below are written out by hand from the wording specification at the
+# top of that file (sentence forms, operator table, notes), never copied from
+# the function's output. U+201C/U+201D quote text values, U+2022 starts a list
+# item.
 
 .gc_rule <- function(...) {
   args <- list(...)
   do.call(DTAtools::DTARuleGroupCondition, args)
 }
 
-test_that("translate_rule_to_human expands a group_condition into its parts", {
+test_that("a range rule reads as a sentence with its bounds and notes", {
+  rule <- DTARuleColRange(id = "age_range", columns = "AGE", min = 18, max = 65)
+  expect_identical(
+    .rule_text(rule),
+    paste(
+      "Every value in column AGE must be a number from 18 to 65, inclusive.",
+      "Missing values: Not checked.",
+      "Non-numeric values: A value that is present but is not a number violates the rule.",
+      sep = "\n"
+    )
+  )
+})
+
+test_that("a unique rule over two columns reads as a combination", {
+  rule <- DTARuleColUnique(id = "unique_keys", columns = c("A", "B"))
+  expect_identical(
+    .rule_text(rule),
+    paste(
+      "No two rows may have the same combination of values in columns A and B.",
+      paste(
+        "Missing values: Two missing values are equal; so are two",
+        "\u201cnot a number\u201d (NaN) values, which are not missing."
+      ),
+      sep = "\n"
+    )
+  )
+})
+
+test_that("a column-condition rule reads its operators, not their key names", {
+  rule <- DTARuleColCondition(
+    id = "adult_status",
+    condition = list(AGE = list(greater = 17)),
+    then = list(STATUS = list(equal = "adult"))
+  )
+  expected <- paste(
+    "When AGE is greater than 17, STATUS must be equal to \u201cadult\u201d.",
+    "Missing values:",
+    "\u2022 If AGE is missing, the condition is not met and the row is not checked.",
+    "\u2022 If STATUS is missing in a row that meets the condition, the rule is violated.",
+    "Non-numeric values: A value in AGE that is not a number does not by itself exempt the row from the check.",
+    sep = "\n"
+  )
+  expect_identical(.rule_text(rule), expected)
+
+  # The author's description is its own Purpose line on top; it never
+  # replaces the condition. An empty description counts as none.
+  described <- DTARuleColCondition(
+    id = "adult_status",
+    description = "Adults are marked as such",
+    condition = list(AGE = list(greater = 17)),
+    then = list(STATUS = list(equal = "adult"))
+  )
+  expect_identical(
+    .rule_text(described),
+    paste("Purpose: Adults are marked as such", expected, sep = "\n")
+  )
+  blank <- DTARuleColCondition(
+    id = "adult_status",
+    description = "",
+    condition = list(AGE = list(greater = 17)),
+    then = list(STATUS = list(equal = "adult"))
+  )
+  expect_identical(.rule_text(blank), expected)
+})
+
+test_that(".rule_text expands a group_condition into its parts", {
   rule <- .gc_rule(
     id = "visit_logic",
     group_by = c("SUBJECT_ID", "VISIT"),
@@ -213,475 +216,111 @@ test_that("translate_rule_to_human expands a group_condition into its parts", {
       c_reported = list(REASND = list(empty = TRUE), ORRES = list(empty = FALSE))
     ),
     constraints = list(
-      list(type = "requires", `if` = "c_failed", `then` = "c_reported")
+      list(
+        type = "requires", `if` = "c_failed", `then` = "c_reported",
+        id = "needs_report", message = "Missing report"
+      )
     )
   )
 
-  txt <- translate_rule_to_human(rule)
-
-  # Never the default fallback.
-  expect_false(grepl("no description available", txt, fixed = TRUE))
-  expect_false(grepl("Rule type", txt, fixed = TRUE))
-
-  # Grouping columns, named as such.
-  expect_match(txt, "grouped by 'SUBJECT_ID' and 'VISIT'", fixed = TRUE)
-
-  # Each named condition is spelled out in terms of its columns, not just named.
-  expect_match(txt, "\"c_failed\": a row where 'REASND' is present", fixed = TRUE)
-  expect_match(txt, "\"c_reported\": a row where 'REASND' is empty/absent AND 'ORRES' is present", fixed = TRUE)
-
-  # The constraint is stated as a requirement.
-  expect_match(txt, "If \"c_failed\" holds", fixed = TRUE)
-  expect_match(txt, "then \"c_reported\" must hold", fixed = TRUE)
+  expect_identical(
+    .rule_text(rule),
+    paste(
+      paste(
+        "Rows are grouped by the combination of values in columns SUBJECT_ID and VISIT;",
+        "within each group, the requirements below must hold."
+      ),
+      "Conditions:",
+      "\u2022 c_failed: a row in which REASND is not empty",
+      "\u2022 c_reported: a row in which REASND is empty and ORRES is not empty",
+      "Requirements:",
+      paste(
+        "\u2022 needs_report: If at least one row of a group meets condition c_failed,",
+        "then at least one row of that group must meet condition c_reported.",
+        "A violation is reported with the message \u201cMissing report\u201d."
+      ),
+      "Missing values:",
+      paste(
+        "\u2022 A missing value in a grouping column counts as a value of its own:",
+        "rows missing it are grouped together."
+      ),
+      "\u2022 A row in which REASND is missing does not meet condition c_failed.",
+      "\u2022 If REASND is missing, this part of condition c_reported counts as met.",
+      "\u2022 A row in which ORRES is missing does not meet condition c_reported.",
+      sep = "\n"
+    )
+  )
 })
 
 test_that("group_condition descriptions distinguish the any and all scopes", {
   # dta_group_scope_truth() reads "any" as at-least-one-row and "all" as
   # every-row; the prose must not blur the two.
   mk <- function(if_scope, then_scope) {
-    translate_rule_to_human(.gc_rule(
+    .rule_text(.gc_rule(
       id = "scoped",
       group_by = "G",
       conditions = list(a = list(A = list(empty = FALSE)), b = list(B = list(empty = FALSE))),
       constraints = list(list(
-        type = "requires", `if` = "a", `then` = "b",
+        type = "requires", `if` = "a", `then` = "b", id = "r",
         if_scope = if_scope, then_scope = then_scope
       ))
     ))
   }
-
-  any_any <- mk("any", "any")
-  expect_match(any_any, "If \"a\" holds for at least one row in the group", fixed = TRUE)
-  expect_match(any_any, "then \"b\" must hold for at least one row in the group", fixed = TRUE)
-
-  any_all <- mk("any", "all")
-  expect_match(any_all, "then \"b\" must hold for every row in the group", fixed = TRUE)
-  expect_false(grepl("then \"b\" must hold for at least one row", any_all, fixed = TRUE))
-
-  all_any <- mk("all", "any")
-  expect_match(all_any, "If \"a\" holds for every row in the group", fixed = TRUE)
+  expect_match(
+    mk("any", "all"),
+    "r: If at least one row of a group meets condition a, then every row of that group must meet condition b.",
+    fixed = TRUE
+  )
+  expect_match(
+    mk("all", "any"),
+    "r: If every row of a group meets condition a, then at least one row of that group must meet condition b.",
+    fixed = TRUE
+  )
 })
 
-test_that("group_condition descriptions state mutual exclusivity", {
-  txt <- translate_rule_to_human(.gc_rule(
-    id = "excl",
-    group_by = "G",
-    conditions = list(a = list(A = list(equals = "X")), b = list(B = list(equals = "Y"))),
-    constraints = list(list(type = "mutually_exclusive", left = "a", right = "b"))
-  ))
-
-  expect_match(txt, "must not both occur in the same group", fixed = TRUE)
-  expect_match(txt, "\"a\" (at least one row) and \"b\" (at least one row)", fixed = TRUE)
+test_that("group_condition descriptions state mutual exclusivity, also under its alias", {
+  mk <- function(type) {
+    .rule_text(.gc_rule(
+      id = "excl",
+      group_by = "G",
+      conditions = list(a = list(A = list(equals = "X")), b = list(B = list(equals = "Y"))),
+      constraints = list(list(type = type, left = "a", right = "b", id = "x"))
+    ))
+  }
+  expected <- paste(
+    "x: Within a group, it must not happen that at least one row meets condition a",
+    "and also at least one row meets condition b.",
+    "A violation is reported with a message naming the group and its rows."
+  )
+  expect_match(mk("mutually_exclusive"), expected, fixed = TRUE)
   # The alias not_both normalises to the same wording.
-  txt_alias <- translate_rule_to_human(.gc_rule(
-    id = "excl2",
-    group_by = "G",
-    conditions = list(a = list(A = list(equals = "X")), b = list(B = list(equals = "Y"))),
-    constraints = list(list(type = "not_both", left = "a", right = "b"))
-  ))
-  expect_match(txt_alias, "must not both occur in the same group", fixed = TRUE)
+  expect_identical(mk("not_both"), mk("mutually_exclusive"))
 })
 
-test_that("group_condition descriptions keep the author summary and add the detail", {
-  rule <- .gc_rule(
-    id = "described",
-    description = "Consented records need a consent date",
-    group_by = "SUBJECT_ID",
-    conditions = list(
-      yes = list(CONSENT = list(equals = "YES")),
-      dated = list(CONSENT_DATE = list(empty = FALSE))
-    ),
-    constraints = list(list(type = "requires", `if` = "yes", `then` = "dated"))
-  )
-
-  txt <- translate_rule_to_human(rule)
-  lines <- strsplit(txt, "\n", fixed = TRUE)[[1]]
-
-  # The author's own wording leads; the expansion follows it.
-  expect_identical(lines[[1]], "Consented records need a consent date")
-  expect_gt(length(lines), 1)
-  expect_match(txt, "grouped by 'SUBJECT_ID'", fixed = TRUE)
-  expect_match(txt, "'CONSENT' = 'YES'", fixed = TRUE)
-})
-
-test_that("all constraints of a multi-constraint group rule are described", {
-  txt <- translate_rule_to_human(.gc_rule(
-    id = "multi",
-    group_by = "G",
-    conditions = list(
-      a = list(A = list(empty = FALSE)),
-      b = list(B = list(empty = FALSE)),
-      c = list(C = list(equals = "NOT DONE"))
-    ),
-    constraints = list(
-      list(type = "mutually_exclusive", left = "a", right = "b"),
-      list(type = "requires", `if` = "a", `then` = "c")
-    )
-  ))
-
-  expect_match(txt, "Requirements:", fixed = TRUE)
-  expect_match(txt, "must not both occur", fixed = TRUE)
-  expect_match(txt, "If \"a\" holds", fixed = TRUE)
-  # Every declared condition is defined, including the one only the second
-  # constraint refers to.
-  for (nm in c("a", "b", "c")) {
-    expect_match(txt, paste0("\"", nm, "\": a row where"), fixed = TRUE)
-  }
-})
-
-# ---- .format_column_constraint() -------------------------------------------
-#
-# The switch used to spell the bounds `greater_than`/`less_than`, which no rule
-# can carry (the engine's operators are `greater`/`less`), and had no branch at
-# all for `equal`, `not_equal`, `range` or `pattern`. Every one of those fell
-# through to the default "'col' <operator> <value>" line, so an exported
-# agreement read "'AGE' greater '18'" or, for a range, "'AGE' range one of
-# ('1', '5')".
-
-test_that(".format_column_constraint renders every engine operator in words", {
-  # Expected strings are written out from the rule semantics (evaluateRules.R:
-  # `x > value`, `x < value`, ...), not copied from the function's output.
-  f <- .format_column_constraint
-
-  expect_equal(f("AGE", list(greater = 18)), "'AGE' > '18'")
-  expect_equal(f("AGE", list(less = 65)), "'AGE' < '65'")
-  expect_equal(f("AGE", list(greater_equal = 18)), "'AGE' \u2265 '18'")
-  expect_equal(f("AGE", list(less_equal = 65)), "'AGE' \u2264 '65'")
-  expect_equal(f("AGE", list(min = 18)), "'AGE' \u2265 '18'")
-  expect_equal(f("AGE", list(max = 65)), "'AGE' \u2264 '65'")
-
-  expect_equal(f("SEX", list(equals = "F")), "'SEX' = 'F'")
-  expect_equal(f("SEX", list(equal = "F")), "'SEX' = 'F'")
-  expect_equal(f("SEX", list(not_equals = "F")), "'SEX' \u2260 'F'")
-  expect_equal(f("SEX", list(not_equal = "F")), "'SEX' \u2260 'F'")
-})
-
-test_that(".format_column_constraint renders range as one interval, not a value list", {
-  # `range` carries TWO numbers that are the ends of one interval; the generic
-  # multi-value branch would call them "one of ('1', '5')", which is a different
-  # statement (1 and 5 only).
-  out <- .format_column_constraint("AGE", list(range = c(1, 5)))
-
-  expect_equal(out, "'AGE' is between '1' and '5'")
-  expect_false(grepl("one of", out, fixed = TRUE))
-})
-
-test_that(".format_column_constraint renders pattern as a match, and keeps set and empty operators", {
-  f <- .format_column_constraint
-
-  expect_equal(f("ID", list(pattern = "^S[0-9]+$")), "'ID' matches pattern '^S[0-9]+$'")
-  expect_equal(f("SEX", list(`in` = c("F", "M"))), "'SEX' is one of ('F', 'M')")
-  expect_equal(f("SEX", list(not_in = c("F", "M"))), "'SEX' is NOT one of ('F', 'M')")
-  expect_equal(f("NOTE", list(empty = TRUE)), "'NOTE' is empty/absent")
-  expect_equal(f("NOTE", list(empty = FALSE)), "'NOTE' is present")
-})
-
-test_that(".format_column_constraint joins several operators on one column with AND", {
-  out <- .format_column_constraint("AGE", list(greater_equal = 18, less = 65))
-
-  expect_equal(out, "'AGE' \u2265 '18' AND 'AGE' < '65'")
-})
-
-test_that("a column-condition rule description reads its operators, not their key names", {
-  rule <- DTARuleColCondition(
-    id = "adult_status",
-    condition = list(AGE = list(greater = 17)),
-    then = list(STATUS = list(equal = "adult"))
-  )
-
-  expect_equal(
-    translate_rule_to_human(rule),
-    "IF 'AGE' > '17' \u2192 THEN 'STATUS' = 'adult'"
-  )
-})
-
-test_that("a column-condition rule with a description keeps the condition below it", {
-  # The description is the author's summary; the IF/THEN reading is appended on
-  # a new line so a description never hides what the rule actually tests.
-  rule <- DTARuleColCondition(
-    id = "adult_status",
-    description = "Adults are marked as such",
-    condition = list(AGE = list(greater = 17)),
-    then = list(STATUS = list(equal = "adult"))
-  )
-
-  expect_identical(
-    translate_rule_to_human(rule),
-    "Adults are marked as such\nIF 'AGE' > '17' \u2192 THEN 'STATUS' = 'adult'"
-  )
-
-  # An empty description counts as none: only the condition is shown.
-  blank <- DTARuleColCondition(
-    id = "adult_status",
-    description = "",
-    condition = list(AGE = list(greater = 17)),
-    then = list(STATUS = list(equal = "adult"))
-  )
-  expect_identical(
-    translate_rule_to_human(blank),
-    "IF 'AGE' > '17' \u2192 THEN 'STATUS' = 'adult'"
-  )
-})
-
-# ---- .rule_definition_yaml() -----------------------------------------------
-#
-# The exact definition is only worth printing if it is lossless, so most of
-# these tests rebuild the rule from the text and compare it with the original.
-# Expected values are the rule objects built here, or literals written out from
-# YAML syntax -- never the function's own output.
-
-# What a reader of the exported document would do with a Definition cell.
-.rt_rebuild <- function(rule, definition) {
-  do.call(
-    DTARuleFactory,
-    c(list(id = rule@id, description = rule@description), yaml::yaml.load(definition))
-  )
-}
-
-.rt_rule <- function(rule) {
-  .rt_rebuild(rule, .rule_definition_yaml(rule))
-}
-
-.rt_rules <- function() {
-  list(
-    col_condition = DTARuleColCondition(
-      id = "adult_status",
-      description = "Adults are marked as such",
-      condition = list(AGE = list(greater = 17)),
-      then = list(STATUS = list(equal = "adult"))
-    ),
-    col_range = DTARuleColRange(id = "age_range", columns = "AGE", min = 18, max = 65),
-    col_unique = DTARuleColUnique(id = "unique_keys", columns = c("A", "B")),
-    group_condition = DTARuleGroupCondition(
-      id = "visit_logic",
-      group_by = c("SUBJECT_ID", "VISIT"),
-      conditions = list(
-        a = list(X = list(empty = FALSE)),
-        b = list(Y = list(equals = "Z"))
-      ),
-      constraints = list(
-        list(type = "requires", `if` = "a", `then` = "b")
-      )
-    )
-  )
-}
-
-test_that(".rule_definition_yaml rebuilds a rule of every type unchanged", {
-  for (rule in .rt_rules()) {
-    expect_identical(as.list(.rt_rule(rule)), as.list(rule), info = rule@type)
-  }
-})
-
-test_that("the definition leaves out nothing a rule class stores", {
-  # as.list() is what the definition is built from; a property it forgot would
-  # be silently missing from every exported definition.
-  for (rule in .rt_rules()) {
-    expect_identical(
-      setdiff(S7::prop_names(rule), names(as.list(rule))),
-      character(0),
-      info = rule@type
-    )
-  }
-})
-
-test_that(".rule_definition_yaml writes the specification syntax, without id or description", {
-  rules <- .rt_rules()
-
-  expect_identical(
-    .rule_definition_yaml(rules$col_range),
-    "type: col_range\ncolumns: AGE\nmin: 18.0\nmax: 65.0"
-  )
-  expect_identical(
-    .rule_definition_yaml(rules$col_unique),
-    "type: col_unique\ncolumns:\n- A\n- B"
-  )
-  expect_identical(
-    .rule_definition_yaml(rules$col_condition),
-    "type: col_condition\ncondition:\n  AGE:\n    greater: 17.0\nthen:\n  STATUS:\n    equal: adult"
-  )
-
-  # Unset constraint fields (here: no message) are not written; the explicit
-  # id, the "all" scopes and a message containing ": " are, the latter quoted.
-  grouped <- DTARuleGroupCondition(
-    id = "g",
-    group_by = "S",
-    conditions = list(
-      a = list(X = list(empty = FALSE)),
-      b = list(X = list(empty = TRUE))
-    ),
-    constraints = list(
-      list(
-        type = "mutually_exclusive", left = "a", right = "b",
-        left_scope = "all", right_scope = "all", id = "cx", message = "bad: both"
-      )
-    )
-  )
-  expect_identical(
-    .rule_definition_yaml(grouped),
-    paste0(
-      "type: group_condition\ngroup_by: S\nconditions:\n  a:\n    X:\n      empty: false\n",
-      "  b:\n    X:\n      empty: true\nconstraints:\n- id: cx\n  type: mutually_exclusive\n",
-      "  left: a\n  right: b\n  left_scope: all\n  right_scope: all\n  message: 'bad: both'"
-    )
-  )
-  expect_identical(as.list(.rt_rule(grouped)), as.list(grouped))
-})
-
-test_that(".rule_definition_yaml survives values that YAML would otherwise reinterpret", {
-  # Each of these is a way plain YAML writing loses information: infinity, a
-  # long list cut short, regex metacharacters and both quote kinds, the strings
-  # yes/no/N that YAML 1.1 reads as booleans, and a value with a line break.
-  hard <- list(
-    DTARuleColRange(id = "open_low", columns = "AGE", min = -Inf, max = 65),
-    DTARuleColRange(id = "open_high", columns = "AGE", min = 0, max = Inf),
-    # More than 7 significant digits: the YAML writer's default precision cut these.
-    DTARuleColRange(id = "long_decimals", columns = "AGE", min = 0.123456789, max = 99999.999),
+test_that(".rule_text never renders a rule as code", {
+  rules <- list(
+    DTARuleColRange(id = "r", columns = "AGE", min = 0.123456789, max = 99999.999),
     DTARuleColCondition(
-      id = "big_threshold",
-      condition = list(AGE = list(greater = 123456789.123)),
-      then = list(FLAG = list(equals = "Y"))
-    ),
-    DTARuleColCondition(
-      id = "thirty_values",
-      condition = list(VISIT = list(`in` = sprintf("V%02d", 1:30))),
-      then = list(FLAG = list(equals = "Y"))
-    ),
-    DTARuleColCondition(
-      id = "numeric_list",
-      condition = list(VISIT = list(not_in = c(1, 2, 3))),
-      then = list(FLAG = list(equals = "N"))
-    ),
-    DTARuleColCondition(
-      id = "pattern_chars",
-      condition = list(CODE = list(pattern = "^(a|b)\\d+'x\"y$")),
-      then = list(NOTE = list(empty = TRUE))
-    ),
-    DTARuleColCondition(
-      id = "yes_and_no",
-      condition = list(ANSWER = list(equals = "yes")),
-      then = list(ANSWER2 = list(not_equals = "no"), N = list(equals = "N"))
-    ),
-    DTARuleColCondition(
-      id = "multi_line",
-      condition = list(NOTE = list(equals = "line1\nline2")),
-      then = list(NOTE2 = list(empty = FALSE))
-    ),
-    DTARuleColCondition(
-      id = "two_operators",
-      condition = list(AGE = list(greater_equal = 18, less = 65)),
-      then = list(NOTE = list(empty = FALSE))
-    ),
-    DTARuleColCondition(
-      id = "three_ticks",
+      id = "c",
       condition = list(CODE = list(pattern = "a```b")),
       then = list(NOTE = list(empty = TRUE))
     ),
-    DTARuleColUnique(id = "yes_column", columns = c("yes", "no", "007", "1e3")),
-    DTARuleGroupCondition(
-      id = "all_scopes",
-      description = "Every row of a group",
-      group_by = c("SUBJECT_ID", "N"),
-      conditions = list(
-        a = list(X = list(empty = FALSE)),
-        b = list(Y = list(equals = "yes"))
-      ),
-      constraints = list(
-        list(
-          type = "requires", `if` = "a", `then` = "b",
-          if_scope = "all", then_scope = "all", id = "needs_b", message = "a needs b: always"
-        ),
-        list(type = "mutually_exclusive", left = "a", right = "b")
-      )
+    .gc_rule(
+      id = "g", group_by = "S",
+      conditions = list(a = list(X = list(empty = FALSE)), b = list(X = list(empty = TRUE))),
+      constraints = list(list(type = "mutually_exclusive", left = "a", right = "b", id = "cx"))
     )
   )
-
-  for (rule in hard) {
-    expect_identical(as.list(.rt_rule(rule)), as.list(rule), info = rule@id)
+  for (rule in rules) {
+    txt <- .rule_text(rule)
+    lines <- strsplit(txt, "\n", fixed = TRUE)[[1]]
+    expect_false(any(grepl("^\\s*(type|condition|then|columns|constraints):", lines)), info = rule@id)
+    expect_false(grepl("```", gsub("\u201ca```b\u201d", "", txt, fixed = TRUE), fixed = TRUE), info = rule@id)
   }
-
-  # The 30 values are all still there, not "... and 25 more".
-  thirty <- .rt_rule(hard[[which(vapply(hard, function(r) r@id, "") == "thirty_values")]])
-  expect_identical(thirty@condition$VISIT$`in`, sprintf("V%02d", 1:30))
+  # Full precision, plain decimals.
+  expect_match(.rule_text(rules[[1]]), "from 0.123456789 to 99999.999, inclusive.", fixed = TRUE)
 })
 
-test_that(".rule_definition_yaml works for a rule without a description", {
-  for (rule in .rt_rules()[c("col_range", "col_unique", "group_condition")]) {
-    expect_null(rule@description)
-    expect_identical(as.list(.rt_rule(rule)), as.list(rule), info = rule@type)
-    expect_false(grepl("description", .rule_definition_yaml(rule), fixed = TRUE), info = rule@type)
-    expect_false(grepl("(^|\n)id:", .rule_definition_yaml(rule)), info = rule@type)
-  }
-})
-
-test_that(".rule_definition_yaml prints doubles at full precision, as YAML numbers", {
-  # Pinned as literals. The yaml writer's `precision = 15` used to print
-  # 99999.999 as 99999.998999999996158 and cut 0.0001234567890123 short.
-  range <- DTARuleColRange(id = "r", columns = "AGE", min = 0.123456789, max = 99999.999)
-  lines <- strsplit(.rule_definition_yaml(range), "\n", fixed = TRUE)[[1]]
-  expect_true("min: 0.123456789" %in% lines)
-  expect_true("max: 99999.999" %in% lines)
-
-  big <- DTARuleColCondition(
-    id = "big",
-    condition = list(AGE = list(greater = 123456789.123)),
-    then = list(FLAG = list(equals = "Y"))
-  )
-  expect_true(
-    "    greater: 123456789.123" %in%
-      strsplit(.rule_definition_yaml(big), "\n", fixed = TRUE)[[1]]
-  )
-
-  # A whole double keeps its ".0" (so it reads back as a double); an integer
-  # does not.
-  whole <- function(v) {
-    strsplit(
-      .rule_definition_yaml(DTARuleColRange(id = "w", columns = "AGE", min = v, max = 100)),
-      "\n",
-      fixed = TRUE
-    )[[1]]
-  }
-  expect_true("min: 18.0" %in% whole(18))
-  expect_true("min: 18" %in% whole(18L))
-  expect_false("min: 18.0" %in% whole(18L))
-})
-
-test_that(".rule_definition_yaml rebuilds awkward numbers exactly", {
-  # Each value is chosen to break a fixed-precision writer: more than 15
-  # significant digits, a sum that is not its decimal spelling, a repeating
-  # fraction, integers beyond 1e15, and tiny magnitudes.
-  values <- list(
-    0.0001234567890123,
-    -0.000123456789012345,
-    0.1 + 0.2,
-    1 / 3,
-    12345678901234567,
-    1e15,
-    1e-9,
-    2^53,
-    .Machine$integer.max
-  )
-  for (v in values) {
-    rule <- DTARuleColCondition(
-      id = "awkward",
-      condition = list(AGE = list(greater = v)),
-      then = list(FLAG = list(equals = "Y"))
-    )
-    expect_identical(
-      as.list(.rt_rule(rule)),
-      as.list(rule),
-      info = paste(format(v, digits = 17), "->", .rule_definition_yaml(rule))
-    )
-  }
-
-  # A vector-valued list of mixed doubles.
-  listed <- DTARuleColCondition(
-    id = "mixed_list",
-    condition = list(AGE = list(`in` = c(0.1, 2.5, 1e-9))),
-    then = list(FLAG = list(equals = "Y"))
-  )
-  expect_identical(
-    as.list(.rt_rule(listed)),
-    as.list(listed),
-    info = .rule_definition_yaml(listed)
-  )
+test_that(".rule_text rejects something that is not a rule", {
+  expect_error(.rule_text("not a rule"), class = "dta_rule_phrasing_error")
 })

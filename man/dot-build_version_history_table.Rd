@@ -15,10 +15,6 @@ as \code{DTAMetaData@version_history} holds them, or \code{NULL}.}
 A flextable, or \code{NULL} when there is no history.
 }
 \description{
-\code{changes} is flattened rather than passed straight into the data.frame: the
-class permits a character vector there, and a vector of length > 1 makes
-\code{data.frame()} abort with "arguments imply differing number of rows". The
-date goes through \code{\link[=.format_document_date]{.format_document_date()}} so it reads the same whatever the
-machine's locale, and whether it arrives as a \code{Date} or as text.
+The rows come from .version_history_df().
 }
 \keyword{internal}

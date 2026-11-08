@@ -600,8 +600,9 @@ dta_check_condition_arity <- function(conditions, arg = "condition") {
         if (n != 2L || missing) "exactly two non-missing values, the lower and upper bound" else NULL
       } else if (operator %in% c("in", "not_in")) {
         # A missing member is allowed: `in: [A, ~]` deliberately selects the
-        # rows that are A or missing, through `%in%`'s own NA matching.
-        if (n < 1L) "one or more values" else NULL
+        # rows that are A or missing. Count list members, not the flattened
+        # vector: unlist() drops a YAML `~`, so `in: [~]` would count none.
+        if (length(value) < 1L) "one or more values" else NULL
       } else if (identical(operator, "empty")) {
         if (!(isTRUE(flat) || isFALSE(flat))) "a single TRUE or FALSE" else NULL
       } else {
@@ -665,6 +666,12 @@ dta_condition_mask <- function(column_name, operator, value, x, converted = NULL
   # narrowing decisions. A bound that does not parse as a number keeps the
   # string comparison exactly as before, and non-numeric columns (Char ids
   # with leading zeros above all) are never touched.
+  if (operator %in% c("in", "not_in") && is.list(value)) {
+    # YAML `~` reads as NULL: unlist() would drop it and `%in%` would match the
+    # text "NULL". Make it a missing member, so `in: [A, ~]` matches A or NA.
+    # Same as a missing text entry (YAML .na.character), which already works.
+    value[lengths(value) == 0L] <- list(NA_character_)
+  }
   if (operator %in% c("equals", "equal", "not_equals", "not_equal", "in", "not_in")) {
     value <- dta_equality_bound(x, value)
   }

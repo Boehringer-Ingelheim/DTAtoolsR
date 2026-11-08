@@ -67,7 +67,7 @@ markdown_to_pdf_via_chrome <- function(md_file, pdf_file,
   html_file <- sub("\\.[^.]+$", ".html", pdf_file)
   header_file <- tempfile(fileext = ".html")
   writeLines(c(
-    # Defence in depth behind the pandoc reader below: the page may run no
+    # Defence in depth behind the pandoc filter below: the page may run no
     # script and load no plugin, whatever reaches it. A meta CSP is what
     # actually does this -- tested 2026-11-04 with headless Edge:
     # `--disable-javascript` is not a Chromium switch (scripts still ran), and
@@ -94,22 +94,18 @@ markdown_to_pdf_via_chrome <- function(md_file, pdf_file,
 
   # md_file is markdown built from document text a third party controls
   # (metadata title, dataset description, error_handling, contact names,
-  # ...), so the reader is pinned to a dialect without raw passthrough --
-  # left at the default "markdown" reader, a `\input{}` planted in any of
-  # those fields reads a server-side file into the PDF, and a `<script>`
-  # in one runs in the headless browser this HTML is about to be printed by.
-  # Images are dropped as well (pandoc_no_images_filter()): raw passthrough
-  # is off, but markdown image syntax is not raw and still becomes an <img>.
-  no_images <- pandoc_no_images_filter()
-  on.exit(unlink(no_images), add = TRUE)
+  # ...): see pandoc_markdown_filter() for what is stripped before the HTML is
+  # printed by the browser (a `<script>`, `\input{}`, images, ...).
+  md_filter <- pandoc_markdown_filter()
+  on.exit(unlink(md_filter), add = TRUE)
   rmarkdown::pandoc_convert(
     input = normalizePath(md_file),
-    from = "markdown-raw_tex-raw_html-raw_attribute",
+    from = pandoc_markdown_reader(),
     to = "html5",
     output = html_file,
     options = c(
       "--standalone", "--include-in-header", header_file,
-      "--lua-filter", no_images
+      "--lua-filter", md_filter
     )
   )
 
@@ -149,14 +145,60 @@ markdown_to_pdf_via_chrome <- function(md_file, pdf_file,
   pdf_file
 }
 
-# Path of a fresh pandoc Lua filter that replaces every image with its alt
-# text; the caller unlinks it. No exported document carries an image of its
-# own, so any image in the markdown came from document text a third party
-# controls -- and pandoc's PDF route downloads a remote image server-side
-# (SSRF) while LaTeX embeds any local image path it is given.
-pandoc_no_images_filter <- function() {
-  path <- tempfile("dta-no-images-", fileext = ".lua")
-  writeLines("function Image(el) return el.caption end", path)
+# How the PDF routes read the Markdown the package writes (write_dta(format =
+# "md")). GFM, because that is the dialect the file is written in: its heading
+# ids ("## 1 Title" -> "1-title") are what the linked table of contents points
+# at, and the default pandoc dialect would derive other ids ("title") and break
+# those links.
+#
+# GFM cannot switch raw HTML off ("gfm-raw_html" still yields RawInline and
+# RawBlock nodes) and has no raw TeX, so what the old reader pinned by
+# extension is enforced by pandoc_markdown_filter() instead.
+pandoc_markdown_reader <- function() "gfm"
+
+# Path of a fresh pandoc Lua filter for that reader; the caller unlinks it. The
+# Markdown is built from document text a third party controls (title, dataset
+# description, error_handling, contact names, ...), so the filter lets nothing
+# through that pandoc would pass on verbatim:
+#   * raw HTML is dropped, except <br> / <br/> / <br />, which the package
+#     writes for a line break inside a table cell and which becomes a real
+#     LineBreak (a PDF has no HTML to carry it, so it would simply vanish);
+#   * images become their alt text: the document carries none of its own, and
+#     pandoc's PDF route fetches a remote image server-side (SSRF) while LaTeX
+#     embeds any local image path it is given;
+#   * maths becomes literal text: a `$\input{file}$` would otherwise be
+#     typeset by LaTeX, reading a server-side file into the PDF;
+#   * metadata is dropped, so a YAML block cannot set header-includes.
+# A cell that ends in a line break keeps one non-breaking space after it:
+# pandoc removes trailing breaks, and the signature cells ("<br><br>") exist to
+# leave room to sign. Links are left alone: a "#anchor" link to a heading stays
+# an internal link in LaTeX and HTML alike.
+pandoc_markdown_filter <- function() {
+  path <- tempfile("dta-markdown-", fileext = ".lua")
+  writeLines(c(
+    "local function is_br(text)",
+    "  return text:lower():match('^<br%s*/?>$') ~= nil",
+    "end",
+    "function RawInline(el)",
+    "  if el.format == 'html' and is_br(el.text) then",
+    "    return pandoc.LineBreak()",
+    "  end",
+    "  return {}",
+    "end",
+    "function RawBlock(el) return {} end",
+    "function Image(el) return el.caption end",
+    "function Math(el) return pandoc.Str(el.text) end",
+    "function Meta(m) return pandoc.Meta({}) end",
+    "local function keep_trailing_break(el)",
+    "  local n = #el.content",
+    "  if n > 0 and el.content[n].t == 'LineBreak' then",
+    "    el.content:insert(pandoc.Str('\\u{00A0}'))",
+    "    return el",
+    "  end",
+    "end",
+    "Plain = keep_trailing_break",
+    "Para = keep_trailing_break"
+  ), path)
   path
 }
 

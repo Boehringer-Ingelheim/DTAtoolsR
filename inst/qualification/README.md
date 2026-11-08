@@ -151,7 +151,7 @@ rendered, which ties the document to the data it describes.
 | `docs/` | the Validation Plan and supporting documents |
 | `docs/maintaining.md` | what to change in this suite when the package changes, and how |
 | `tests/` | the test cases, one file per stage and area |
-| `fixtures/` | small hand-built inputs; anything large is generated at run time |
+| `fx/` | small hand-built inputs (short names keep paths under the 100-byte tar limit); anything large is generated at run time |
 | `baseline/` | the hash manifest of the installed files, checked by the installation stage |
 
 ## How a test case is written

@@ -568,7 +568,7 @@ test_that("small tables stay on one page, and table widths follow the review", {
   txt <- vapply(tbls, function(t) paste(xml2::xml_text(xml2::xml_find_all(t, ".//*[local-name()='t']")), collapse = " "), character(1))
   grid <- function(t) as.numeric(xml2::xml_attr(xml2::xml_find_all(t, "./*[local-name()='tblGrid']/*[local-name()='gridCol']"), "w"))
   # Rules table (<= 15 rows): every row but the last keeps with the next one.
-  rules <- tbls[[which(grepl("What it checks", txt, fixed = TRUE))[[1]]]]
+  rules <- tbls[[which(startsWith(txt, "Rule ID Description"))[[1]]]]
   rows <- xml2::xml_find_all(rules, "./*[local-name()='tr']")
   expect_lte(length(rows) - 1L, 15L)
   keep <- vapply(rows, function(r) length(xml2::xml_find_all(r, ".//*[local-name()='keepNext']")) > 0L, logical(1))
@@ -668,4 +668,144 @@ test_that("a kind folder given as the library aborts with dta_template_guide_no_
     class = "dta_template_guide_no_templates"
   )
   expect_false(dir.exists(out))
+})
+
+# ---- rules in plain English ----------------------------------------------------
+
+# Every table of a docx whose header row is "Rule ID | Description": per table
+# the rows as list(id, description), the description with a Word line break
+# written as "\n", plus the text and boldness of every run and the fonts used.
+tg_rule_tables <- function(file) {
+  ex <- tg_unzip(file)
+  on.exit(unlink(ex, recursive = TRUE), add = TRUE)
+  x <- xml2::read_xml(file.path(ex, "word", "document.xml"))
+  par_text <- function(p) {
+    paste(vapply(
+      xml2::xml_find_all(p, ".//*[local-name()='t' or local-name()='br']"),
+      function(n) if (xml2::xml_name(n) == "br") "\n" else xml2::xml_text(n),
+      character(1)
+    ), collapse = "")
+  }
+  out <- list()
+  for (t in xml2::xml_find_all(x, "//*[local-name()='tbl']")) {
+    rows <- xml2::xml_find_all(t, "./*[local-name()='tr']")
+    cells <- lapply(rows, function(r) xml2::xml_find_all(r, "./*[local-name()='tc']"))
+    cell_text <- function(tc) paste(vapply(xml2::xml_find_all(tc, ".//*[local-name()='p']"), par_text, character(1)), collapse = "\n")
+    if (length(cells[[1]]) == 2L && identical(cell_text(cells[[1]][[1]]), "Rule ID") &&
+      identical(cell_text(cells[[1]][[2]]), "Description")) {
+      body <- cells[-1]
+      runs <- xml2::xml_find_all(t, ".//*[local-name()='r']")
+      out[[length(out) + 1L]] <- list(
+        run_text = vapply(runs, function(r) paste(xml2::xml_text(xml2::xml_find_all(r, "./*[local-name()='t']")), collapse = ""), character(1)),
+        run_bold = vapply(runs, function(r) {
+          b <- xml2::xml_find_first(r, "./*[local-name()='rPr']/*[local-name()='b']")
+          !inherits(b, "xml_missing") && !(xml2::xml_attr(b, "val") %in% c("false", "0"))
+        }, logical(1)),
+        fonts = unique(xml2::xml_attr(xml2::xml_find_all(t, ".//*[local-name()='rFonts']"), "ascii")),
+        id = vapply(body, function(r) cell_text(r[[1]]), character(1)),
+        description = vapply(body, function(r) cell_text(r[[2]]), character(1))
+      )
+    }
+  }
+  out
+}
+
+tg_rules_template <- function() {
+  cols <- list(
+    list(id = "AA", type = "SAS Num", format = "SAS 8."),
+    list(id = "BB", type = "SAS Char", format = "SAS $5."),
+    list(id = "CC", type = "SAS Char", format = "SAS $5.")
+  )
+  rules1 <- list(
+    list(id = "r_range", description = "Keep AA small", type = "col_range", columns = "AA", min = 0, max = 10),
+    list(id = "r_unique", type = "col_unique", columns = list("BB", "CC")),
+    list(
+      id = "r_cond", description = "If BB is x then AA is at least 3", type = "col_condition",
+      condition = list(BB = list(equals = "x")), then = list(AA = list(min = 3))
+    )
+  )
+  ds <- function(id, rules) {
+    list(
+      id = id, name = id, type = "tabular",
+      files = list(filename = paste0(id, ".csv"), type = "csv"), columns = cols, rules = rules
+    )
+  }
+  tpl <- list(
+    kind = "dta_creation_template", id = "rules_tpl", version = "1.0", label = "Rules",
+    base = list(metadata = list(title = "T")),
+    datasets = list(ds("first_ds", rules1), ds("second_ds", rules1[1]))
+  )
+  list(tpl = tpl, cols = cols, rules = rules1)
+}
+
+test_that("the rules table reads Rule ID | Description and shows the full wording of each rule", {
+  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  x <- tg_rules_template()
+  dir <- tg_scratch()
+  writeLines(yaml::as.yaml(x$tpl), tg_path(dir, "templates", "rules_tpl.dta-template.yaml"))
+  out <- withr::local_tempdir()
+  got <- write_template_guide(dir, out, templates = "rules_tpl", quiet = TRUE)
+  tbls <- tg_rule_tables(got[[1]])
+  expect_length(tbls, 2L)
+  expect_identical(tbls[[1]]$id, c("r_range", "r_unique", "r_cond"))
+  expect_identical(tbls[[2]]$id, "r_range")
+
+  # Wording from the specification (R/rulePhrasing.R), written by hand: the
+  # author's text is its own "Purpose" line, the statement follows.
+  d <- strsplit(tbls[[1]]$description, "\n", fixed = TRUE)
+  expect_identical(d[[1]][1:2], c(
+    "Purpose: Keep AA small",
+    "Every value in column AA must be a number from 0 to 10, inclusive."
+  ))
+  expect_identical(
+    d[[2]][[1]],
+    "No two rows may have the same combination of values in columns BB and CC."
+  )
+  expect_identical(d[[3]][1:2], c(
+    "Purpose: If BB is x then AA is at least 3",
+    "When BB is equal to \u201cx\u201d, AA must be at least 3."
+  ))
+
+  # The cell carries exactly the shared rule text, for every rule.
+  specs <- specs_from_list(x$cols, x$rules)
+  for (i in seq_along(specs@rules)) {
+    expect_identical(tbls[[1]]$description[[i]], .rule_text(specs@rules[[i]]))
+  }
+})
+
+test_that("rule labels are bold, lists are bullets, and no rule is set in monospace", {
+  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  x <- tg_rules_template()
+  dir <- tg_scratch()
+  writeLines(yaml::as.yaml(x$tpl), tg_path(dir, "templates", "rules_tpl.dta-template.yaml"))
+  out <- withr::local_tempdir()
+  got <- write_template_guide(dir, out, templates = "rules_tpl", quiet = TRUE)
+  t1 <- tg_rule_tables(got[[1]])[[1]]
+  run_text <- t1$run_text
+  is_bold <- t1$run_bold
+  expect_true(any(run_text == "Purpose:"))
+  expect_true(all(is_bold[run_text %in% c("Purpose:", "Missing values:")]))
+  expect_false(any(is_bold[startsWith(run_text, "Every value in column")]))
+  expect_true(any(startsWith(run_text, "\u2022 ")))
+  fonts <- t1$fonts
+  expect_false(FONTS$monospace %in% fonts)
+})
+
+test_that("the reading guide for rules appears once, before the first rules table", {
+  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  x <- tg_rules_template()
+  dir <- tg_scratch()
+  writeLines(yaml::as.yaml(x$tpl), tg_path(dir, "templates", "rules_tpl.dta-template.yaml"))
+  out <- withr::local_tempdir()
+  got <- write_template_guide(dir, out, templates = "rules_tpl", quiet = TRUE)
+  lines <- strsplit(tg_text(got[[1]]), "\n", fixed = TRUE)[[1]]
+  # One sentence of the reading guide, as written in the specification.
+  first <- "Each rule is checked separately for every file of the dataset."
+  hits <- which(grepl(first, lines, fixed = TRUE))
+  expect_length(hits, 1L)
+  header <- which(lines == "Rule ID")
+  expect_length(header, 2L)
+  expect_lt(hits, header[[1]])
+  # Every paragraph of the guide is there once.
+  for (s in .rule_reading_guide()) expect_equal(sum(grepl(s, lines, fixed = TRUE)), 1L)
 })

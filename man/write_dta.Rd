@@ -27,19 +27,24 @@ write_dta(
 
 \item{file}{Character. Output file path (with .docx, .pdf, or .md extension)}
 
-\item{format}{Character. Output format: "docx" (default), "pdf", or "md".
-If NULL, inferred from file extension.}
+\item{format}{Character. Output format: "docx" (default), "pdf", or "md"
+(GitHub-flavoured Markdown, see Details). If NULL, inferred from file
+extension.}
 
 \item{overwrite}{Logical. Whether to overwrite existing files. Default: FALSE.}
 
-\item{include_signatures}{Logical. Whether to include signature approval
-section. Default: TRUE. Ignored for \code{format = "md"} (no signature section
-is written) and when a \code{template} is supplied.}
+\item{include_signatures}{Logical. Whether to include the "Approval &
+Signatures" section (DOCX, PDF and Markdown). It lists every contact
+flagged \code{signature: yes} and the entries of \code{signature_list}, and is left
+out when there is nobody to sign. Default: TRUE. Ignored when a
+\code{template} is supplied.}
 
-\item{signature_list}{List of signatories, each a list with \code{name}, \code{role}
-and optionally \code{organization} (or \code{org}) fields; or a data.frame with
-columns \code{Organization}, \code{Name}, \code{Role}. Used only by the built-in
-DOCX/PDF layout; ignored for \code{format = "md"} and with a \code{template}.}
+\item{signature_list}{List of additional signatories, each a list with
+\code{name}, \code{role} and optionally \code{organization} (or \code{org}) fields; or a
+data.frame with columns \code{Organization}, \code{Name}, \code{Role}. They are added to
+the signatories taken from the contacts (duplicates by name and
+organization are skipped) in the built-in DOCX/PDF layout and in
+Markdown; ignored with a \code{template}.}
 
 \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
 
@@ -89,6 +94,19 @@ Creates a professionally formatted DOCX, PDF, or Markdown document from a DTA ob
 including study identity, ordered agreement sections, version history,
 transmission details, and approval signatures. Study and agreement sections
 are omitted when absent. Agreement text is rendered as plain narrative.
+
+The Markdown output (\code{format = "md"}) is a complete GitHub-flavoured
+Markdown document with the chapters of the Word layout in the same order
+(Approval and Signatures, Document Information, Study, Parties, Process
+Information, Agreement Sections, Datasets), numbered 1, 1.1, 1.1.1 and,
+with at least two chapters, listed in a linked table of contents. Chapters
+without content are left out and the numbers close up; what the head of
+the document shows (title, version, date) is not repeated in Document
+Information. Web and e-mail addresses become links. Validation rules are described in plain
+English, never as code. All text from the DTA is escaped, so it cannot
+change the structure of the document. The file is deterministic: UTF-8
+with LF line endings and no time stamp, so the same DTA always gives the
+same bytes.
 }
 \examples{
 dta <- create_example_DTA()

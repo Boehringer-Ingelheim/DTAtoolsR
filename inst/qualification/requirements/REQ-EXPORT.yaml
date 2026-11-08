@@ -58,10 +58,13 @@ requirements:
 
   - id: REQ-EXPORT-005
     text: >
-      write_dta(include_signatures = TRUE) shall add an "Approval &
-      Signatures" section naming every contact flagged as a signatory on the
-      transfer's supplier or receiver, and include_signatures = FALSE shall
-      omit the section entirely.
+      write_dta(include_signatures = TRUE) shall add, as the first chapter
+      of the Word document and of the Markdown document alike, an approval
+      section -- headed "Approval & Signatures" in the Word document and
+      "Approval and Signatures" in the Markdown document -- naming every
+      contact flagged as a signatory on the transfer's supplier or receiver,
+      and include_signatures = FALSE shall omit the section entirely from
+      both.
     risk: medium
     category: functional
     covers: [write_dta]
@@ -79,13 +82,50 @@ requirements:
 
   - id: REQ-EXPORT-007
     text: >
-      write_dta(format = "md") shall write a plain-text Markdown file whose
-      content names the same title, version and dataset facts as the DOCX
-      layout.
+      write_dta(format = "md") shall write a GitHub-flavoured Markdown file,
+      encoded as UTF-8 with LF line endings and ending in one line ending,
+      that has the chapters of the Word document in the same order and at
+      the same levels (Approval & Signatures, headed "Approval and
+      Signatures" in Markdown, Document Information, Study, Parties with
+      Supplier then Receiver, Process Information, Agreement Sections,
+      Datasets with Files, Column Specifications and Validation Rules per
+      dataset; a chapter with nothing to show is left out of both), with
+      one exception: the Markdown Document Information chapter shall not
+      repeat the rows the head of the file already shows (title, version
+      and date), so that it holds the document header, the template rows
+      and the Version History, and is left out when none of them is set,
+      while the Word document keeps it. The document name shall be the
+      only level-1 heading; every chapter heading shall carry its number
+      (1, 1.1, 1.1.1), the numbers running without gaps; and, when the
+      document has at least two chapters of the first level, a "Contents"
+      list before the first chapter shall link every chapter of the first
+      two levels to its heading by the anchor GitHub computes for that
+      heading. The file shall state the same facts as the Word document:
+      the transfer's title, header, version and date, the study and
+      protocol identifiers, each party's organisation with every contact's
+      name, role, department, e-mail address and phone number, every
+      transmission detail under the label Word gives it, every declared
+      file, and every declared column with its label, type, nullability
+      and the complete list of its permitted values, never shortened. A
+      column of the contact, version history, file or column table that no
+      row fills (such as Description when nothing has a description) shall
+      be left out of that table. Under a dataset's heading, the dataset's
+      facts shall not repeat its id, which the heading names; when its type
+      is then the only fact, it shall be stated as the sentence
+      "Type: <Type>." (the declared type with an initial capital). The
+      validation rules shall be laid out as REQ-EXPORT-042 states, with
+      the rule headings at level 5.
     risk: medium
     category: functional
     covers: [write_dta]
-    source: R/exportDocuments.R
+    source: R/exportDocuments.R; R/exportMarkdown.R
+    notes: >
+      The Markdown approval heading avoids "&", which GitHub drops from the
+      anchor ("1-approval--signatures"). The Word cover is a page of its own,
+      so the Word Document Information table repeats title, version and date
+      as a reference; the Markdown head stands directly above that chapter,
+      so it does not. A Contents list with a single entry guides nobody and
+      is left out.
 
   - id: REQ-EXPORT-008
     text: >
@@ -114,9 +154,25 @@ requirements:
 
   - id: REQ-EXPORT-010
     text: >
-      write_dataset_metadata() shall produce a document naming the dataset by
-      its id and, where one is set, its name, together with its declared file
-      specifications and its declared column specifications;
+      write_dataset_metadata() shall produce, as a Word document and as a
+      Markdown document alike, a document titled "Dataset Specification:"
+      followed by the dataset's heading (its name with the id in
+      parentheses, or the id alone). In the Word document the title block
+      shall hold a two-column fact table with the rows Dataset ID, Name and
+      Type (the declared type with an initial capital; a row whose value is
+      not set left out), then the template the dataset was taken from, when
+      it records one. The Markdown head shall leave out Dataset ID and
+      Name, which the title already names, and, when the type is then the
+      only fact, state it as the sentence "Type: <Type>." instead of a
+      table. Both shall have the numbered chapters Approval & Signatures
+      (headed "Approval and Signatures" in Markdown, as REQ-EXPORT-041
+      states), Description (the dataset's description in full, only when it
+      has one), Files (its declared file specifications), Column
+      Specifications (its declared column specifications) and Validation
+      Rules, the last two for a tabular dataset, in that order; in the
+      Markdown document the tables leave out an unfilled column as
+      REQ-EXPORT-007 states, and the validation rules are laid out as
+      REQ-EXPORT-042 states, with the rule headings at level 3;
       write_file_specification() shall produce the identical document, being
       an alias that forwards every argument unchanged.
     risk: high
@@ -486,16 +542,71 @@ requirements:
 
   - id: REQ-EXPORT-036
     text: >
-      write_dta() (docx and md) and write_dataset_metadata() shall render, for
-      every declared validation rule, a YAML definition that, parsed, equals
-      the rule's type and every declared parameter - columns, bounds,
-      operators and values, grouping columns, named conditions, and each
-      constraint's id, condition names, scopes and message - independently of
-      its description.
+      For every declared validation rule, write_dta() (docx and md),
+      write_dataset_metadata() (docx and md) and the {VALIDATION_RULES} and
+      {DATASETS} template blocks of export_with_template() shall show the
+      rule's id and a description in plain English that states the rule type
+      and every declared parameter: the columns, each bound together with
+      whether it is inclusive, each test of a condition (When ...) and of a
+      requirement (... must ...) with its values, text values in typographic
+      double quotes, patterns, the grouping columns, every named condition,
+      and for every group constraint its id, the scope of each side (at least
+      one row or every row), the conditions it relates and its message. The
+      description shall contain no YAML or other code: the rules table of a
+      Word document shall have exactly the columns Rule ID and Description
+      (no Definition column), no rule text shall be set in a monospace font,
+      and a Markdown document shall contain no code block and no code span.
+      A rule's author-written description shall appear as its own line
+      labelled Purpose, in addition to and never in place of the mechanical
+      description. Spellings the evaluator treats as the same test, and
+      bounds stored as integer or as double, shall produce identical wording.
     risk: medium
     category: functional
-    covers: [write_dta, write_dataset_metadata]
-    source: R/formattingHelpers.R; R/documentBuilders.R
+    covers: [write_dta, write_dataset_metadata, export_with_template]
+    source: >
+      R/rulePhrasing.R (the wording specification in its leading comment
+      block); R/documentBuilders.R; R/formattingHelpers.R;
+      R/exportTemplateBlocks.R
+    notes: >
+      Replaces the former requirement that each rule be rendered as a YAML
+      definition next to its description; a quality reviewer reading a signed
+      agreement must not have to read code to know what a rule checks.
+      Literal sentence forms, from the specification in R/rulePhrasing.R, with
+      C a column, a and b numbers and v a value. Range: "Every value in column
+      C must be a number from a to b, inclusive." (an infinite bound: "... a
+      number that is at most b." / "... at least a."), with "Missing values:
+      Not checked." and "Non-numeric values: A value that is present but is
+      not a number violates the rule." Unique: "No two rows may have the same
+      value in column C." or "No two rows may have the same combination of
+      values in columns A and B.", with "Missing values: Two missing values
+      are equal; so are two "not a number" (NaN) values, which are not
+      missing."
+      Condition: "When <C is ...>,
+      <C must ...>." with the operator phrases is/must be equal to v, not
+      equal to v, one of a, b or c, not one of ..., greater than v, less than
+      v, at least v, at most v, from a to b, inclusive, matches/match the
+      pattern "p", empty, not empty; notes "If C is missing, the condition is
+      not met and the row is not checked." (IF side) and "If C is missing in a
+      row that meets the condition, the rule is violated." (THEN side; left
+      out when the IF tests C and a missing value there never reaches the
+      THEN), and
+      for a numeric test on the THEN side "A value in C that is not a number,
+      in a row that meets the condition, violates the rule." Group condition: "Rows are grouped by the value in
+      column G; within each group, the requirements below must hold.", a
+      Conditions list "<name>: a row in which <C is ...>", and a Requirements
+      list "<id>: If S of a group meets condition I, then S of that group must
+      meet condition T." or "<id>: Within a group, it must not happen that S
+      meets condition L and also S meets condition R.", S being "at least one
+      row" (scope any, the default) or "every row" (scope all), each followed
+      by "A violation is reported with the message "<message>"." or, without
+      a message, "A violation is reported with a message naming the group and
+      its rows."; an omitted
+      constraint id reads constraint_<i>. Text values are set in typographic
+      double quotes (U+201C, U+201D). Equivalent spellings with identical
+      wording, by design: equals/equal, not_equals/not_equal,
+      greater_equal/min, less_equal/max, range/min with max; integer and
+      double storage of the same number read the same (18L and 18 are both
+      "18").
 
   - id: REQ-EXPORT-037
     text: >
@@ -536,3 +647,135 @@ requirements:
     category: interface
     covers: [write_dta, export_with_template, dta_template_placeholders]
     source: R/exportTemplateDocx.R; R/exportDocuments.R
+
+  - id: REQ-EXPORT-039
+    text: >
+      No human-readable output shall show a validation rule as code, and the
+      same rule shall read in the same words in every one of them. For a
+      given rule, the Word and Markdown documents of write_dta() and
+      write_dataset_metadata(), the {VALIDATION_RULES} and {DATASETS} blocks
+      of export_with_template(), the rules tables of the documents of
+      write_template_guide() (columns Rule ID and Description, the
+      Description cell holding the same lines as the Word cell of
+      write_dataset_metadata() for the same rule), the rule explanation of a
+      violated rule in the HTML report of write_validation_report() and the
+      output of explain_messages() shall state the rule with the identical
+      sentences of REQ-EXPORT-036 (the HTML report and explain_messages()
+      giving the rule statement as the expected value and the Purpose and
+      missing-value lines beside it), and none of them shall contain a YAML
+      key of the rule definition (type:, columns:, condition:, then:,
+      group_by:, constraints:), a code block, a code span, an HTML code or
+      pre element or a monospace font in the rule description.
+    risk: medium
+    category: functional
+    covers: [write_dta, write_dataset_metadata, export_with_template, write_template_guide, write_validation_report, explain_messages]
+    source: >
+      R/rulePhrasing.R; R/documentBuilders.R; R/formattingHelpers.R;
+      R/exportTemplateBlocks.R; R/templateGuide.R; R/reportRendering.R;
+      R/validationReporting.R
+    notes: >
+      The template guide was first left out until its own wording was final;
+      it now sets the same lines in its Description column (labels in bold,
+      list items as bullets, no monospace) and is verified by OQ-TMPL-114.
+
+  - id: REQ-EXPORT-040
+    text: >
+      The Markdown documents of write_dta() and write_dataset_metadata() and
+      the Word document of write_dataset_metadata() shall be deterministic:
+      none shall contain the date or time at which it was written, and
+      writing the same input twice, also under a different LC_TIME or
+      LC_CTYPE locale, shall give byte-identical Markdown files and Word documents whose document
+      body, running header and running footer parts are identical; in
+      particular the anchors of the Markdown Contents list shall not depend
+      on the locale, so that each link reaches its heading also when the
+      heading holds letters outside ASCII. A Markdown document shall end
+      with a horizontal rule and a footer: for write_dta() one line naming
+      the transfer's title, "Version <version>" and the date of the
+      current version, joined by " · ", and a second line naming the
+      template only when the transfer was created from a template; for
+      write_dataset_metadata() one line naming the document's title
+      ("Dataset Specification: <heading>") and the template the dataset was
+      taken from, when it records one. A Markdown document shall name
+      neither the package that wrote it nor the package's version, also when
+      no template is recorded. No text an author supplies (titles,
+      header, names, contact details, labels, descriptions, patterns,
+      permitted values, rule values, agreement clauses) shall change the
+      structure of a Markdown document: characters with a meaning in
+      Markdown or HTML (such as *, _, `, |, <, $, # and a leading list
+      marker) shall be shown as the characters they are, so the document
+      has the same headings, tables, table cells, lists and paragraphs as
+      one whose author text has none, and contains no code block, code
+      span, math or raw HTML other than the line breaks inside table
+      cells. A web address (starting http://, https:// or ftp://) or an
+      e-mail address in author text shall be a link to that address whose
+      shown text is the address as written, no character of it escaped,
+      lost or added, and punctuation that ends the sentence after it
+      outside the link.
+    risk: medium
+    category: integrity
+    covers: [write_dta, write_dataset_metadata]
+    source: R/exportMarkdown.R; R/exportDocuments.R
+    notes: >
+      Replaces the former Markdown and dataset-document footers, which
+      carried a "Generated:" time stamp, so two exports of the same agreement
+      never compared equal and a reviewer could not tell a changed document
+      from a re-exported one. The Markdown footer formerly named the built-in
+      layout and the package version when no template was recorded; it no
+      longer does, so the same agreement exported by two package versions
+      compares equal. (The Word footers are unchanged: REQ-EXPORT-035.) An
+      address starting "www." is linked to "http://www..." and shown so, the
+      target GitHub gives it too. Anchors were once lower-cased by the
+      session's locale, so under LC_CTYPE=C a heading with U+00DC got an anchor
+      no reader computes. An anchor is computed from the heading as shown
+      (so a heading with "www.x" gets the anchor of "http://www.x"); an
+      address in a Contents entry is shown but not linked, a link cannot hold
+      another one. Known limitation: for an emoji in a heading, pandoc 3.13
+      writes the emoji's name into the anchor, while GitHub and pandoc 3.1.3
+      leave the emoji out; the Contents link follows GitHub and so misses
+      such a heading in a document rendered by pandoc 3.13 or later.
+
+  - id: REQ-EXPORT-041
+    text: >
+      include_file_specs, include_rules and include_signatures of
+      write_dataset_metadata() shall have the same effect in every output
+      format, Markdown included: include_file_specs = FALSE shall leave out
+      the Files chapter, include_rules = FALSE the Validation Rules chapter,
+      and include_signatures = FALSE the approval chapter ("Approval &
+      Signatures" in Word, "Approval and Signatures" in Markdown), the
+      remaining chapters closing up their numbers. With
+      include_signatures = TRUE the approval chapter shall come first and
+      name every entry of signature_list, and shall be left out when
+      signature_list names nobody.
+    risk: medium
+    category: functional
+    covers: [write_dataset_metadata]
+    source: R/exportDocuments.R
+
+  - id: REQ-EXPORT-042
+    text: >
+      In the Markdown documents of write_dta() and write_dataset_metadata(),
+      every validation rule shall have a heading of its own, one level
+      below its Validation Rules chapter (level 5 in write_dta(), level 3 in
+      write_dataset_metadata()), whose text is the rule id; directly beneath
+      it the rule type in italics (Range, Unique, Conditional (IF/THEN) or
+      Grouped condition), then the lines of the rule's description
+      (REQ-EXPORT-036): a labelled line as the label in bold with a colon,
+      followed by its text, list items as a "-" bullet list, any other line
+      as a paragraph. Each rule heading shall have its own anchor, and the
+      anchors of the Contents list shall still reach the chapter headings
+      they name when a rule heading has the same text as a later chapter
+      heading. The reading guide, "How to read the rules" in bold followed
+      by its points as a bullet list, shall appear exactly once per
+      document, before the first rule heading, and not at all in a document
+      without rules. The table stating how each delimited file is read
+      shall follow an unnumbered heading "File format" at the level of the
+      rule headings.
+    risk: low
+    category: functional
+    covers: [write_dta, write_dataset_metadata]
+    source: R/exportDocuments.R; R/exportMarkdown.R
+    notes: >
+      The rule type labels are those of the wording specification in the
+      leading comment block of R/rulePhrasing.R. A heading per rule lets a
+      reader of a long agreement find and link to one rule; the Word
+      documents keep the two-column rules table (REQ-EXPORT-036).

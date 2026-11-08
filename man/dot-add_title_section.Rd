@@ -2,17 +2,16 @@
 % Please edit documentation in R/documentBuilders.R
 \name{.add_title_section}
 \alias{.add_title_section}
-\title{Create and add a title page section to a Word document}
+\title{Title page of the dataset document (write_dataset_metadata())}
 \usage{
-.add_title_section(
-  doc,
-  title,
-  subtitle = NULL,
-  date = Sys.Date(),
-  version = NULL
-)
+.add_title_section(doc, title, subtitle = NULL, facts = NULL)
+}
+\arguments{
+\item{facts}{A key/value data.frame (see .pairs_df()); zero rows for none.}
 }
 \description{
-Create and add a title page section to a Word document
+Title, subtitle, organisation line and the fact table, closed as a section
+of its own without running header or footer, as the cover of write_dta().
+Nothing on it depends on the day the document is written.
 }
 \keyword{internal}

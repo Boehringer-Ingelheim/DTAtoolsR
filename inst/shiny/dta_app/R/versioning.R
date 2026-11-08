@@ -82,10 +82,10 @@ dta_version_is_ignored_key <- function(keys) {
 # Make a value safe to put in a Markdown table cell.
 #
 # The Markdown builder in R/exportDocuments.R writes a version_history entry's
-# `changes` straight into its "Version History" table, a `|`-delimited row,
-# via .df_to_md_table(); an embedded newline or `|` would break the table
-# structure, so both are replaced before the value goes anywhere near an
-# export.
+# `changes` into its "Version History" table, a `|`-delimited row, via
+# .md_table() (R/exportMarkdown.R). .md_table() escapes `|` and turns line
+# breaks into <br> itself; replacing both here as well keeps the value a single
+# plain line in every other place it is shown (Word table, app widgets).
 dta_version_sanitise <- function(x) {
   x <- as.character(x)[1]
   if (is.null(x) || length(x) == 0 || is.na(x)) {
@@ -339,9 +339,9 @@ dta_set_version_entry_changes <- function(dta, index, changes, version = NULL) {
 # old values can say.
 #
 # Every interpolated value goes through dta_version_sanitise() first: this
-# string lands straight in a Markdown table cell on export
-# (exportDocuments.R's .df_to_md_table()), and an untouched title containing
-# a `|` would split the cell.
+# string lands in a Markdown table cell on export (via .md_table() in
+# R/exportMarkdown.R, which escapes `|` and line breaks as well) and in the
+# Word table, where it should stay one plain line.
 dta_new_document_seed <- function(title, version) {
   title <- dta_version_sanitise(title)
   version <- dta_version_sanitise(version)

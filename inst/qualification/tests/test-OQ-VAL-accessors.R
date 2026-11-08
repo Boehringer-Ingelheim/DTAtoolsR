@@ -285,11 +285,13 @@ test_that("OQ-VAL-037 | explain_messages states the constraint and the offending
     list(should_be = sex$should_be[[1]], actual = sex$actual[[1]])
   )
 
-  # age_range is declared as 18 to 70, inclusive.
+  # age_range is declared as 18 to 70, inclusive. The sentence is the range
+  # form of the rule wording specification (R/rulePhrasing.R, REQ-EXPORT-036):
+  # "Every value in column C must be a number from a to b, inclusive."
   rule <- explained[explained$source == "rule", ]
   qa_step(
-    "a rule violation states the declared range",
-    "Values in AGE must be between 18 and 70 (inclusive).",
+    "a rule violation states the declared range in the shared rule wording",
+    "Every value in column AGE must be a number from 18 to 70, inclusive.",
     rule$should_be[[1]]
   )
   qa_step(

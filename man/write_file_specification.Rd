@@ -13,7 +13,10 @@ write_file_specification(x, file, ...)
 
 \item{...}{Additional arguments passed on to \code{write_dataset_metadata()}
 (\code{format}, \code{overwrite}, \code{include_signatures},
-\code{include_file_specs}, \code{include_rules}, \code{signature_list}).}
+\code{include_file_specs}, \code{include_rules}, \code{signature_list},
+\code{quiet}, \code{document_name}, \code{organisation},
+\code{organisation_unit}). The \verb{include_*} switches apply to every
+format, Markdown included.}
 }
 \value{
 Invisibly \code{NULL}, as \code{\link[=write_dataset_metadata]{write_dataset_metadata()}}.
