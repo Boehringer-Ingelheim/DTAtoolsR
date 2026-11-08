@@ -34,7 +34,8 @@ DTAMetaData(
 \item \code{version}: version string (e.g. "1.0")
 \item \code{date}: Date object for this version; a character string
 \code{"YYYY-MM-DD"}, as loaded from YAML, is also read as a date
-\item \code{changes}: character description of what was changed in this version
+\item \code{changes}: one or more non-empty character descriptions (a
+character vector or list of strings) of what was changed in this version
 }}
 
 \item{receiver}{list with affiliation and contacts (authorized to request corrections)}

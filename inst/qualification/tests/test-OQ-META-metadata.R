@@ -107,7 +107,32 @@ test_that("OQ-META-002 | version_history rejects a record that is not a list, or
   qa_step("a complete record is accepted and kept as supplied", "1.0", md@version_history[[1]]$version)
 })
 
-test_that("OQ-META-003 | version_history rejects an empty changes string | REQ-META-003", {
+test_that("OQ-META-003 | version_history changes are one or more non-empty descriptions | REQ-META-003", {
+  rec <- function(changes) {
+    list(list(version = "1.0", date = as.Date("2026-01-01"), changes = changes))
+  }
+  # Two descriptions are valid, whether given as a vector or a list; both are
+  # kept exactly as supplied.
+  md_vec <- DTAMetaData(version_history = rec(c("Added files", "Added rules")))
+  qa_step("a character vector of two descriptions is kept", c("Added files", "Added rules"), md_vec@version_history[[1]]$changes)
+  md_lst <- DTAMetaData(version_history = rec(list("Added files", "Added rules")))
+  qa_step("a list of two descriptions is kept", 2L, length(md_lst@version_history[[1]]$changes))
+
+  # An empty collection, an empty entry and an NA entry are each rejected
+  # with the package's own message, never a raw R coercion error.
+  for (case in list(
+    list(label = "an empty character vector", value = character(0)),
+    list(label = "a vector holding an empty string", value = c("Added files", "")),
+    list(label = "a vector holding NA", value = c("Added files", NA))
+  )) {
+    e <- tryCatch(DTAMetaData(version_history = rec(case$value)), error = function(e) e)
+    qa_check(
+      paste(case$label, "is rejected with the package message"),
+      inherits(e, "error") &&
+        grepl("version_history[[1]]$changes", conditionMessage(e), fixed = TRUE)
+    )
+  }
+
   e <- tryCatch(
     DTAMetaData(version_history = list(
       list(version = "1.0", date = as.Date("2026-01-01"), changes = "")
