@@ -1,0 +1,7 @@
+kind: dta_vocabulary
+id: statuses
+version: "1.0"
+label: Statuses
+terms:
+  - code: RECEIVED
+  - code: ANALYSED

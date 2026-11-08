@@ -2104,3 +2104,167 @@ test_that("an id that merely contains 'cycle detected' is still classified by co
   expect_code_row(result, "mixin_conflict", "error")
   expect_no_code_row(result, "extends_cycle")
 })
+
+# ---- Slots and options a child writes: verb form, partial entries --------------
+#
+# A child may write a keyed section as a verb mapping, or as a bare entry that
+# changes one field of an inherited slot. Neither is a complete slot until it
+# is merged, so the structural checks read the merged slot -- and only for the
+# ids this file writes, so an inherited problem is reported where it was made.
+
+# An abstract parent with one dataset (column STATUS), one optional supplier
+# slot and one vocabulary slot; `supplier_extra` lines are added to the
+# supplier slot.
+write_slot_parent <- function(dir, supplier_extra = character(0)) {
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: slot_parent", "version: \"1.0\"",
+      "abstract: true",
+      "base:", "  metadata:", "    title: Slot parent",
+      "datasets:",
+      "  - id: ds1",
+      "    type: tabular",
+      "    files: {filename: x.csv, type: csv}",
+      "    columns:",
+      "      - {id: STATUS, type: SAS Char}",
+      "party_slots:",
+      "  - id: supplier",
+      "    target: metadata.supplier",
+      if (length(supplier_extra) > 0) paste0("    ", supplier_extra),
+      "vocabulary_slots:",
+      "  - id: status_codes",
+      "    target: datasets.ds1.columns.STATUS.values",
+      "    vocabulary: visit@latest",
+      "    mode: closed"
+    ),
+    lib_file(dir, "slot_parent.dta-template.yaml")
+  )
+}
+
+# A concrete child of slot_parent whose body is `lines`.
+write_slot_child <- function(dir, lines = character(0)) {
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: slot_child", "version: \"1.0\"",
+      "extends: slot_parent@latest",
+      lines
+    ),
+    lib_file(dir, "slot_child.dta-template.yaml")
+  )
+}
+
+# The library every test below starts from: the parent, the vocabulary its
+# slot names (codes SCR, EOT) and one supplier profile, p_one.
+slot_library <- function(supplier_extra = character(0)) {
+  dir <- withr::local_tempdir(.local_envir = parent.frame())
+  write_slot_parent(dir, supplier_extra)
+  write_vocab_file(dir)
+  write_party_file(dir, "p_one")
+  dir
+}
+
+test_that("the dry run fills a required party slot, so a buildable template is not instantiate_failed", {
+  dir <- slot_library("required: true")
+  write_slot_child(dir)
+
+  expect_no_warning(result <- validate_template(dir))
+  expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
+})
+
+test_that("a required party slot that no profile in the directory can fill is still instantiate_failed", {
+  dir <- slot_library(c("required: true", "role: receiver"))
+  write_slot_child(dir)
+
+  rows <- expect_code_row(validate_template(dir), "instantiate_failed", "error")
+  expect_identical(rows$id, "slot_child")
+  expect_match(rows$message, "is required", fixed = TRUE)
+})
+
+test_that("a verb-form party_slots modify is checked as merged, and warns about nothing", {
+  dir <- slot_library()
+  write_slot_child(dir, c("party_slots:", "  modify:", "    - id: supplier", "      profiles: [p_nope]"))
+
+  expect_no_warning(result <- validate_template(dir))
+  rows <- expect_code_row(result, "party_slot_invalid", "warning")
+  expect_identical(basename(rows$file), "slot_child.dta-template.yaml")
+  expect_match(rows$message, "p_nope", fixed = TRUE)
+})
+
+test_that("a verb-form party_slots modify naming a real profile is clean", {
+  dir <- slot_library()
+  write_slot_child(dir, c("party_slots:", "  modify:", "    - id: supplier", "      profiles: [p_one]"))
+
+  expect_no_warning(result <- validate_template(dir))
+  expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
+})
+
+test_that("a bare entry changing one field of an inherited party slot is not reported as missing its target", {
+  dir <- slot_library()
+  write_slot_child(dir, c("party_slots:", "  - id: supplier", "    profiles: [p_one]"))
+
+  result <- validate_template(dir)
+  expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
+})
+
+test_that("a party slot problem is reported on the file that wrote it, not on every descendant", {
+  dir <- slot_library("profiles: [p_nope]")
+  write_slot_child(dir)
+
+  rows <- expect_code_row(validate_template(dir), "party_slot_invalid", "warning")
+  expect_identical(basename(rows$file), "slot_parent.dta-template.yaml")
+})
+
+test_that("a verb-form vocabulary_slots modify is checked as merged, and warns about nothing", {
+  dir <- slot_library()
+  write_slot_child(dir, c("vocabulary_slots:", "  modify:", "    - id: status_codes", "      default: [NOPE]"))
+
+  expect_no_warning(result <- validate_template(dir))
+  rows <- expect_code_row(result, "vocab_slot_invalid", "error")
+  expect_identical(basename(rows$file), "slot_child.dta-template.yaml")
+  expect_match(rows$message, "NOPE", fixed = TRUE)
+})
+
+test_that("a bare entry changing one field of an inherited vocabulary slot is not reported as missing its target", {
+  dir <- slot_library()
+  write_slot_child(dir, c("vocabulary_slots:", "  - id: status_codes", "    default: [SCR]"))
+
+  result <- validate_template(dir)
+  expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
+})
+
+test_that("an option added in the verb form has its target checked", {
+  dir <- slot_library()
+  write_slot_child(dir, c(
+    "options:", "  add:", "    - id: bogus", "      type: text", "      target: metadata.not_a_field"
+  ))
+
+  rows <- expect_code_row(validate_template(dir), "target_invalid", "warning")
+  expect_match(rows$message, "metadata.not_a_field", fixed = TRUE)
+})
+
+test_that("when the parent cannot be resolved, slots added in the verb form are still checked, modify fragments are not", {
+  dir <- withr::local_tempdir()
+  write_party_file(dir, "p_one")
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: orphan", "version: \"1.0\"",
+      "abstract: true",
+      "extends: parent_elsewhere@latest",
+      "party_slots:",
+      "  add:",
+      "    - id: second",
+      "      target: metadata.receiver",
+      "      profiles: [p_added_typo]",
+      "  modify:",
+      "    - id: supplier",
+      "      profiles: [p_modified_typo]"
+    ),
+    lib_file(dir, "orphan.dta-template.yaml")
+  )
+
+  expect_no_warning(result <- validate_template(dir))
+  expect_code_row(result, "extends_unresolved", "warning")
+  rows <- expect_code_row(result, "party_slot_invalid", "warning")
+  expect_match(rows$message, "p_added_typo", fixed = TRUE)
+  expect_false(any(grepl("p_modified_typo", result$message, fixed = TRUE)))
+})

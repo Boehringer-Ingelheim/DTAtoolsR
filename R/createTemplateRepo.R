@@ -61,6 +61,27 @@
   file
 }
 
+# The agent skill (instructions a coding agent loads when a task touches the
+# library) is written beneath `.claude/skills/` of the new repository. It is
+# shipped outside template-repo-skeleton/ for the reason `.gitignore` is
+# generated below: a dot-prefixed directory does not survive `R CMD build`
+# from `inst/`. Its files are discovered from disk, like the example files, so
+# a new reference file in the skill needs no change here.
+.dta_create_repo_skill_name <- "dta-template-authoring"
+
+.dta_create_repo_skill_dir <- function() {
+  dir <- system.file("extdata", "agent-skills", .dta_create_repo_skill_name, package = "DTAtools")
+  if (!nzchar(dir) || !file.exists(file.path(dir, "SKILL.md"))) {
+    bundled <- file.path("inst", "extdata", "agent-skills", .dta_create_repo_skill_name)
+    cli::cli_abort(c(
+      "Could not locate the bundled agent skill ({.file {bundled}}).",
+      "i" = "This usually means a development checkout is missing {.file inst/},
+        or DTAtools was installed from a broken build."
+    ))
+  }
+  dir
+}
+
 # `.gitignore` is generated here, not shipped as a skeleton file, because a
 # dotfile (and, for the same reason, a dot-prefixed directory like `.github/`)
 # is not reliably carried through `R CMD build` from `inst/` -- the packaged
@@ -136,7 +157,7 @@
 # contract requires is visible as one small function with one job, rather
 # than interleaved with the writing loop where it would be easy to grow a
 # target that only the check OR only the write loop knows about.
-.dta_create_repo_targets <- function(skeleton_dir, examples, ci_providers) {
+.dta_create_repo_targets <- function(skeleton_dir, examples, ci_providers, agent_skill) {
   targets <- c(
     ".gitignore" = NA_character_,
     "README.md" = file.path(skeleton_dir, "README.md")
@@ -150,6 +171,15 @@
   for (provider in ci_providers) {
     spec <- .dta_create_repo_ci_asset_targets[[provider]]
     targets <- c(targets, stats::setNames(.dta_create_repo_ci_asset_file(spec[["asset"]]), spec[["dest"]]))
+  }
+
+  if (isTRUE(agent_skill)) {
+    skill_dir <- .dta_create_repo_skill_dir()
+    skill_files <- list.files(skill_dir, recursive = TRUE)
+    targets <- c(targets, stats::setNames(
+      file.path(skill_dir, skill_files),
+      file.path(".claude", "skills", .dta_create_repo_skill_name, skill_files)
+    ))
   }
 
   targets
@@ -166,7 +196,9 @@
 #' `README.md` with the full authoring guide, a
 #' `.gitignore`, and -- by default -- a GitHub Actions workflow that runs
 #' [lint_template_repo()] against the repository on every push and pull
-#' request. With the default `examples = TRUE`, the result already passes
+#' request, and -- by default -- an agent skill that tells coding agents how
+#' to author, release and lint the library's templates. With the default
+#' `examples = TRUE`, the result already passes
 #' `validate_template(path, strict = TRUE)` unmodified, so it is a starting
 #' point to edit rather than a stub to fill in from nothing. See `vignette("private-templates", package =
 #' "DTAtools")` for how to point the bundled Shiny app at the directory this
@@ -187,6 +219,8 @@
 #' <path>/.github/workflows/validate-templates.yml  (ci = "github", default)
 #' <path>/bitbucket-pipelines.yml                 (ci = "bitbucket")
 #' <path>/Jenkinsfile                             (ci = "jenkins")
+#' <path>/.claude/skills/dta-template-authoring/SKILL.md      (agent_skill = TRUE, default)
+#' <path>/.claude/skills/dta-template-authoring/references/   (its three reference files)
 #' ```
 #'
 #' Only the selected CI files are written. [validate_template()] detects the
@@ -225,6 +259,16 @@
 #'   `path` -- a partially-written repository would leave a caller unable to
 #'   tell which half of a family of cross-referencing templates they were
 #'   looking at. When `TRUE`, those files are replaced.
+#' @param agent_skill A single `TRUE`/`FALSE` (default `TRUE`). When `TRUE`,
+#'   copies the agent skill bundled with DTAtools
+#'   (`inst/extdata/agent-skills/dta-template-authoring/`) to
+#'   `.claude/skills/dta-template-authoring/`, the folder from which coding
+#'   agents that support the Agent Skills format load it. The skill covers
+#'   designing a template family (extends, mixins, sealing), releasing changes
+#'   without altering released versions, and running and acting on
+#'   [validate_template()]'s findings. It is written whatever `examples` says.
+#'   To add it to, or refresh it in, an existing repository, copy that folder
+#'   from `system.file("extdata", "agent-skills", package = "DTAtools")`.
 #' @return Invisibly, the normalised absolute path to `path` (see
 #'   [base::normalizePath()]).
 #' @export
@@ -232,12 +276,16 @@
 #' dir <- file.path(tempdir(), "my-templates")
 #' create_template_repo(dir)
 #' list.files(dir, recursive = TRUE, all.files = TRUE, no.. = TRUE)
-create_template_repo <- function(path, examples = TRUE, ci = TRUE, overwrite = FALSE) {
+create_template_repo <- function(path, examples = TRUE, ci = TRUE, overwrite = FALSE,
+                                 agent_skill = TRUE) {
   if (!is.character(path) || length(path) != 1 || is.na(path) || !nzchar(path)) {
     cli::cli_abort("{.arg path} must be a single non-empty directory path.")
   }
   if (!is.logical(examples) || length(examples) != 1 || is.na(examples)) {
     cli::cli_abort("{.arg examples} must be a single {.code TRUE}/{.code FALSE}.")
+  }
+  if (!is.logical(agent_skill) || length(agent_skill) != 1 || is.na(agent_skill)) {
+    cli::cli_abort("{.arg agent_skill} must be a single {.code TRUE}/{.code FALSE}.")
   }
   ci_providers <- .dta_create_repo_validate_ci(ci)
   if (!is.logical(overwrite) || length(overwrite) != 1 || is.na(overwrite)) {
@@ -253,7 +301,7 @@ create_template_repo <- function(path, examples = TRUE, ci = TRUE, overwrite = F
   }
 
   skeleton_dir <- .dta_create_repo_skeleton_dir()
-  targets <- .dta_create_repo_targets(skeleton_dir, examples, ci_providers)
+  targets <- .dta_create_repo_targets(skeleton_dir, examples, ci_providers, agent_skill)
 
   # Computed and checked BEFORE anything is written -- see `overwrite`'s
   # @param above for why a half-written repository is worse than the

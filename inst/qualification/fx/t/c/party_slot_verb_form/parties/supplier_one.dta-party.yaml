@@ -1,0 +1,7 @@
+kind: dta_party_profile
+id: supplier_one
+version: "1.0"
+role: supplier
+label: Supplier One
+affiliation:
+  name: Supplier One Ltd.

@@ -1,0 +1,10 @@
+kind: dta_creation_template
+id: spe_child
+version: "1.0"
+extends: spe_parent@latest
+party_slots:
+  - id: supplier
+    profiles: [supplier_one]
+vocabulary_slots:
+  - id: status_codes
+    default: [RECEIVED]

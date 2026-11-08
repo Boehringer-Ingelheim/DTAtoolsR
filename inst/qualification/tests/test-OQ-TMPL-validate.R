@@ -1,5 +1,6 @@
 # validate_template(): the codes it emits, and its strict/kinds/path arguments.
-# REQ-TMPL-001 .. REQ-TMPL-018, REQ-TMPL-031, REQ-TMPL-033 and REQ-TMPL-034.
+# REQ-TMPL-001 .. REQ-TMPL-018, REQ-TMPL-031, REQ-TMPL-033, REQ-TMPL-034,
+# REQ-TMPL-049 and REQ-TMPL-050.
 #
 # Every fixture below lives under fx/t/ and is built to trigger
 # EXACTLY the one code its test names -- verified by running validate_template()
@@ -376,6 +377,87 @@ test_that("OQ-TMPL-024 | a vocabulary slot naming an unresolved vocabulary is a 
   qa_check(
     "naming the unresolved reference",
     grepl("nonexistent_vocab@1.0", tmpl_message(result, "vocab_slot_unresolved"), fixed = TRUE)
+  )
+})
+
+# ---- REQ-TMPL-049: required party slots in the dry run ----------------------
+
+# validate_template() over `dir`, with every R warning it raises collected
+# rather than printed: REQ-TMPL-050 says there are none.
+tmpl_validate_quietly <- function(dir) {
+  warned <- character(0)
+  result <- withCallingHandlers(
+    validate_template(dir),
+    warning = function(w) {
+      warned <<- c(warned, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
+  )
+  list(result = result, warned = warned)
+}
+
+test_that("OQ-TMPL-118 | an inherited required party slot that a profile can fill builds in the dry run | REQ-TMPL-049", {
+  # Fixture: abstract psr_parent with a required supplier slot, concrete
+  # psr_child extending it, one supplier profile.
+  result <- validate_template(tmpl_fixture("c", "party_slot_required"))
+  qa_step("no instantiate_failed row is reported", 0L, sum(result$code == "instantiate_failed"))
+})
+
+test_that("OQ-TMPL-119 | a required party slot that no profile can fill is still instantiate_failed | REQ-TMPL-049", {
+  # The same family with no parties/ folder at all.
+  result <- validate_template(tmpl_fixture("c", "party_slot_unfillable"))
+  qa_step("exactly one row", 1L, nrow(result))
+  qa_step("severity is error", "error", tmpl_severity(result, "instantiate_failed"))
+  qa_step("reported on the concrete child", "psu_child", result$id[[1]])
+  qa_check("saying the slot is required", grepl("required", tmpl_message(result, "instantiate_failed"), fixed = TRUE))
+})
+
+# ---- REQ-TMPL-050: entries a child writes, in either form ------------------
+
+test_that("OQ-TMPL-120 | a party slot modified in the verb form is checked, without an R warning | REQ-TMPL-050", {
+  # psv_child: party_slots: {modify: [{id: supplier, profiles: [nonexistent_profile]}]}
+  run <- tmpl_validate_quietly(tmpl_fixture("c", "party_slot_verb_form"))
+  qa_step("no R warning is raised", character(0), run$warned)
+  qa_step("exactly one row", 1L, nrow(run$result))
+  qa_step("severity is warning", "warning", tmpl_severity(run$result, "party_slot_invalid"))
+  qa_step("reported on the child that wrote it", "psv_child", run$result$id[[1]])
+  qa_check(
+    "naming the unknown id",
+    grepl("nonexistent_profile", tmpl_message(run$result, "party_slot_invalid"), fixed = TRUE)
+  )
+})
+
+test_that("OQ-TMPL-121 | entries that change one field of an inherited party or vocabulary slot are not findings | REQ-TMPL-050", {
+  # spe_child, plain sequences: the supplier slot with only profiles:, the
+  # vocabulary slot with only default:. Neither writes the target it inherits.
+  run <- tmpl_validate_quietly(tmpl_fixture("c", "slot_partial_entries"))
+  qa_step("no R warning is raised", character(0), run$warned)
+  qa_step("no row is reported", 0L, nrow(run$result))
+})
+
+test_that("OQ-TMPL-122 | an option added in the verb form has its target checked | REQ-TMPL-050", {
+  # tiv_child (abstract): options: {add: [{target: metadata.not_a_field}]}
+  result <- validate_template(tmpl_fixture("c", "target_invalid_verb_form"))
+  qa_step("exactly one row", 1L, nrow(result))
+  qa_step("severity is warning", "warning", tmpl_severity(result, "target_invalid"))
+  qa_check("naming the target", grepl("metadata.not_a_field", tmpl_message(result, "target_invalid"), fixed = TRUE))
+})
+
+test_that("OQ-TMPL-123 | with the parent unresolved, slots added in the verb form are checked and modify fragments are not | REQ-TMPL-050", {
+  # svu1 (abstract) extends parent_elsewhere@latest, which is not in the
+  # directory. add: [{id: second, profiles: [nonexistent_profile]}],
+  # modify: [{id: supplier, profiles: [other_missing_profile]}].
+  run <- tmpl_validate_quietly(tmpl_fixture("c", "slot_verb_form_unresolved"))
+  qa_step("no R warning is raised", character(0), run$warned)
+  qa_step("the unresolved parent is a warning", "warning", tmpl_severity(run$result, "extends_unresolved"))
+  qa_step("the added slot is party_slot_invalid", "warning", tmpl_severity(run$result, "party_slot_invalid"))
+  qa_check(
+    "naming the added slot's unknown id",
+    grepl("nonexistent_profile", tmpl_message(run$result, "party_slot_invalid"), fixed = TRUE)
+  )
+  qa_check(
+    "and no row names the modify fragment's id",
+    !any(grepl("other_missing_profile", run$result$message, fixed = TRUE))
   )
 })
 

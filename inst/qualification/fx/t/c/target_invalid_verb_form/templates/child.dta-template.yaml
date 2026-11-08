@@ -1,0 +1,11 @@
+kind: dta_creation_template
+id: tiv_child
+version: "1.0"
+abstract: true
+extends: tiv_parent@latest
+options:
+  add:
+    - id: bogus
+      label: Bogus
+      type: text
+      target: metadata.not_a_field

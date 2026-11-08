@@ -14,6 +14,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   error (class `dta_template_lint_error`) when a finding reaches `fail_on`.
   The CI assets written by `create_template_repo()` (GitHub Actions,
   Bitbucket Pipelines, Jenkins) now call it.
+- `create_template_repo()` writes an agent skill to
+  `.claude/skills/dta-template-authoring/` (new argument `agent_skill`,
+  default `TRUE`). It gives coding agents the working method for a template
+  library: a layered layout (vocabularies, dataset templates, an abstract
+  standard, mixins, thin deviations), releasing a change by freezing the
+  released version beside the edited one, when a reference follows `@latest`
+  and when it pins, when to use `extends:` and when `mixins:`, and how to
+  triage and fix every validator finding. The package's tests rebuild its
+  worked example library from the text and validate it, and check that it
+  covers every validator code the README documents. Existing repositories
+  copy it from
+  `system.file("extdata", "agent-skills", package = "DTAtools")`.
 
 ### Changed
 
@@ -96,6 +108,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - `validate_template()` now reports `kind_suffix_mismatch`,
   `party_profile_invalid` and `export_template_no_placeholders`, which the app
   silently skipped while validation passed.
+- `validate_template()` reported a concrete template with a required party
+  slot (`required: true`) as `instantiate_failed`, though the app builds it:
+  the dry run selected no party profile. It now selects, for each required
+  slot, the first profile the app would offer; a slot no profile in the
+  directory being validated can fill is still reported.
+- `validate_template()` checked the party slots, vocabulary slots and option
+  targets a child template writes only in the plain-list form, and only as
+  complete entries. Written with collection verbs (`modify:`, `add:`), they
+  went unchecked, so a misspelt profile id passed, and the run printed
+  "Dropping 1 party slot with a missing or empty id."; a plain-list entry
+  that changed one field of an inherited slot was reported as having an
+  invalid target, a false error for a vocabulary slot. Slots are now checked
+  as merged with what they inherit, once, on the file that wrote them; when
+  a parent cannot be found, the entries complete as written still are.
 
 ## [0.26.0] - 2026-11-07
 
