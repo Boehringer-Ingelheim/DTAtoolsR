@@ -711,10 +711,12 @@ test_that("a rule block is a heading with an anchor, its kind, and its text with
     metadata = DTAMetaData(title = "Rules", version = "1")
   )
   path <- .mdd_write(dta)
-  ast <- jsonlite::fromJSON(
-    paste(system2(Sys.which("pandoc"), c("-f", "gfm", "-t", "json", shQuote(path)), stdout = TRUE), collapse = "\n"),
-    simplifyVector = FALSE
-  )$blocks
+  # Through a file: stdout = TRUE re-encodes pandoc's UTF-8 in the native
+  # encoding on Windows and breaks the JSON.
+  json_file <- tempfile(fileext = ".json")
+  on.exit(unlink(json_file, force = TRUE), add = TRUE)
+  system2(Sys.which("pandoc"), c("-f", "gfm", "-t", "json", "-o", shQuote(json_file), shQuote(path)))
+  ast <- jsonlite::fromJSON(json_file, simplifyVector = FALSE)$blocks
   types <- vapply(ast, function(b) b$t, character(1))
   expect_false("OrderedList" %in% types)
   heads <- Filter(function(b) b$t == "Header" && b$c[[1]] == 5L, ast)
