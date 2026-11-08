@@ -188,8 +188,10 @@ requirements:
       R/validateTemplate.R:311-316 documents the same local-directory-only scope
       for its own extends resolver.
     notes: >
-      A private repository's CI job runs `validate_template(".", strict =
-      TRUE)` against exactly the checkout it is given -- none of these seven
+      A private repository's CI job runs `lint_template_repo(".")` (every
+      validate_template() check plus the repository-format checks of
+      REQ-TMPL-046, which read nothing but the checkout either) against
+      exactly the checkout it is given -- none of these seven
       variables are read anywhere on that call path (verified: every one of
       them is read by template_sources.R, which validate_template() never
       sources; the engine files it does source -- template_core.R,
@@ -915,3 +917,87 @@ requirements:
       its reason, where it does not (an unprivileged Windows account). It is
       the only test of this requirement so that the skip leaves REQ-TMPL-041
       verified.
+
+  # ---- validate_template(): findings the app would otherwise skip silently --
+
+  - id: REQ-TMPL-045
+    text: >
+      validate_template() shall report three further findings, each of which
+      the app answers by silently skipping the file. (1) A file whose declared
+      kind is one of the four known kinds, while its file name matches exactly
+      one other kind's suffix (in any letter case), shall be reported as
+      kind_suffix_mismatch at severity "error"; the file's remaining checks
+      shall continue as its declared kind, and a file whose declared kind is
+      not a known kind shall still be reported as kind_unknown only. (2) A
+      file of declared kind dta_party_profile that the party-profile reader
+      rejects, for instance a role that is not an allowed role, shall be
+      reported as party_profile_invalid at severity "error", with a message
+      that names the reason; a valid party profile in the same folder shall add
+      no row, and the row may appear together with id_missing or
+      version_missing for the same file. (3) A .docx file directly in
+      export-templates/ (any letter case of the extension, not a Word lock
+      file whose name starts with a tilde and a dollar sign) that is not a
+      readable Word document containing a {PLACEHOLDER} marker shall be
+      reported as export_template_no_placeholders at severity "warning", while
+      one that contains a marker, or that exports.word_templates in the
+      repository's dta-app.yaml lists (the app offers a listed file whatever it
+      contains), shall add no row. strict = TRUE shall abort
+      on the two errors and shall not abort on the warning alone.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R (.dta_template_check_party,
+      .dta_template_check_export_templates);
+      inst/shiny/dta_app/R/template_index.R (build_template_index, which takes
+      the kind from the file name);
+      inst/shiny/dta_app/R/template_create.R (template_party_profiles, which
+      drops a profile the reader rejects);
+      inst/shiny/dta_app/R/app_config.R (dta_app_config_discover_word_templates,
+      which skips a Word file without a marker)
+    notes: >
+      Each of the three is a case in which validate_template() passed before
+      while the app skipped the file.
+
+  - id: REQ-TMPL-046
+    text: >
+      lint_template_repo() given the root of a template repository shall
+      return, invisibly, a data frame with the columns of validate_template()
+      holding every row validate_template() reports for that root plus the
+      rows of three repository checks, sorted by file and code. (1)
+      folder_name_case, at severity "error": a folder directly in the root
+      whose name differs from templates, parties, vocabulary or
+      export-templates only by letter case. (2) id_filename_mismatch, at
+      severity "warning": a template file whose name, without its kind suffix,
+      is neither its id nor its id followed by an underscore, hyphen, dot or
+      at sign and a qualifier; a file named starter_supplier_old for id
+      starter_supplier shall not be reported. (3) file_ignored, at severity
+      "warning": a YAML file in the root or in a kind folder whose name
+      carries none of the four kind suffixes but whose content declares a known
+      kind; a YAML file that declares no known kind, such as dta-app.yaml, a
+      pipeline definition or a dataset specification referenced by source:,
+      shall not be reported. A freshly scaffolded create_template_repo() and
+      the packaged library under inst/extdata/library shall each produce zero
+      rows.
+    risk: medium
+    category: functional
+    covers: [lint_template_repo]
+    source: R/lintTemplateRepo.R
+
+  - id: REQ-TMPL-047
+    text: >
+      lint_template_repo() shall print one line per finding, naming the file,
+      the code and the message, and a message saying that no findings were
+      made when there are none. With fail_on = "error" (the default) it shall
+      abort when at least one row has severity "error", with fail_on =
+      "warning" when there is any row, and with fail_on = "none" never; the
+      condition shall have class dta_template_lint_error. When it does not
+      abort it shall return the rows invisibly. A path that is not an existing
+      directory, and a fail_on that is not exactly one of "error", "warning" or
+      "none", shall be refused with an error before any file is read. Run
+      through Rscript -e, a call that aborts shall end the process with a
+      non-zero exit status and a call on a clean repository with status zero.
+    risk: medium
+    category: interface
+    covers: [lint_template_repo]
+    source: R/lintTemplateRepo.R

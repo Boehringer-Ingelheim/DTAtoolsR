@@ -24,10 +24,10 @@ validation rules.
 
 1. Clone this repository.
 2. Edit or add template files directly in the folder for their kind: `templates/`, `parties/` or `vocabulary/`.
-3. Validate from the repository root:
+3. Lint from the repository root:
 
    ```sh
-   Rscript -e "DTAtools::validate_template('.', strict = TRUE)"
+   Rscript -e "DTAtools::lint_template_repo('.')"
    ```
 
 4. Open a pull request and ask another author to review the change.
@@ -1227,7 +1227,7 @@ exports:
       label: Our DTA template
 ```
 
-The `exports.word_templates` list is optional. Without it, every `.docx` in `export-templates/` is offered in the export dialog anyway.
+The `exports.word_templates` list is optional. Without it, every `.docx` in `export-templates/` that contains a `{PLACEHOLDER}` marker is offered in the export dialog anyway.
 
 The value of `kind:` must be `dta_app_config` when present. Each section is a mapping of `key: value` pairs.
 
@@ -1307,7 +1307,7 @@ Each link is an `http://`, `https://` or `mailto:` URL without spaces or quotes.
 | --- | --- | --- |
 | `document` | `[markdown, markdown_pdf, word, word_template]` | Formats offered by "Export DTA". `[]` hides the button. |
 | `default_document` | `word` | Format preselected in the export dialog. It must be offered; otherwise the first listed format is used (with a warning if you set it explicitly). |
-| `word_templates` | none | Optional override for the label and order of the Word templates. A list of `{file, label}` entries whose `file` is a path relative to `dta-app.yaml`'s folder (the library root), for example `export-templates/report.docx`. `label` defaults to the file name without extension. Every `.docx` in `export-templates/` is offered even without an entry. |
+| `word_templates` | none | Optional override for the label and order of the Word templates. A list of `{file, label}` entries whose `file` is a path relative to `dta-app.yaml`'s folder (the library root), for example `export-templates/report.docx`. `label` defaults to the file name without extension. Every `.docx` in `export-templates/` that contains a `{PLACEHOLDER}` marker is offered even without an entry; one without a marker is offered only when listed here. |
 | `bundled_word_templates` | `true` | Keep the Word templates shipped with DTAtools in the list next to yours. |
 | `validation_messages` | `[csv, tsv, xlsx, html]` | Download buttons for the validation messages. `[]` removes them. |
 | `validation_summary` | `true` | The "Validation summary" HTML download. |
@@ -1335,10 +1335,10 @@ or a path that resolves (for example through a symbolic link) outside the librar
 served over HTTP.
 
 - **Logo:** `png`, `jpg`, `jpeg`, `gif`, `svg` or `webp`, at most 1 MB. It is embedded into the page.
-- **Word template:** a `.docx` file in `export-templates/`. Every `.docx` there is offered automatically in the app's export dialog, from every
+- **Word template:** a `.docx` file in `export-templates/`. Every `.docx` there that contains a `{PLACEHOLDER}` marker is offered automatically in the app's export dialog, from every
   configured source, labelled with the file name without its extension; non-`.docx` files, dotfiles and Word lock files (`~$x.docx`) are ignored.
-  The app does not check library files for markers (it does check the ones shipped with DTAtools): markers are
-  replaced wherever they appear, and a file without any is exported with nothing substituted. A marker is
+  A `.docx` without any marker would export with nothing substituted, so the app does not offer it unless `dta-app.yaml` lists it, and the
+  validator warns `export_template_no_placeholders`. Markers are replaced wherever they appear. A marker is
   an upper-case name in single braces, for example `{DTA_TITLE}` or `{SUPPLIER_NAME}`, and `{#DATASETS}` ... `{/DATASETS}` repeats a span once
   per dataset. In R, `?DTAtools::export_with_template` documents the full set and `DTAtools::dta_template_placeholders()` lists it. The
   `.docx` files are not template-library files and do not appear in the creation-template picker.
@@ -1393,15 +1393,34 @@ issues were found. `kinds` can limit which file kinds are included in per-kind c
 validation.
 
 Strict mode aborts when one or more rows have severity `error`. Warnings remain visible in the report but do not alone make strict validation
-fail. The CI examples shipped with DTAtools use strict validation so a structurally broken library cannot merge unnoticed.
+fail.
+
+### Linting the repository
+
+`lint_template_repo()` is the check to run by hand and in CI. It returns every row `validate_template()` would, plus three repository-format
+checks that need no template content to go wrong, only a file or folder in the wrong place:
+
+```sh
+Rscript -e "DTAtools::lint_template_repo('.')"
+```
+
+It prints one line per finding, then a count, and aborts (exit status 1 from `Rscript`) when any finding has severity `error`. To make warnings
+fail as well, pass `fail_on = "warning"`; `fail_on = "none"` only reports. The findings are also returned invisibly, with the same columns as
+`validate_template()`, for use in R.
+
+| Code | Severity | Meaning | Typical fix |
+| --- | --- | --- | --- |
+| `folder_name_case` | error | A folder is spelled with different capitals than `templates`, `parties`, `vocabulary` or `export-templates`. A Linux server does not read it. | Rename it to the lowercase spelling (on a case-insensitive file system, rename it in two steps through a temporary name). |
+| `id_filename_mismatch` | warning | A file's `id` is not the start of its file name, for example `acme.dta-party.yaml` holding `id: other_party`. A version or tag after the `id` (`biomarker_gf_2`, `id@1.0`) is fine. | Rename the file to `<id>.<suffix>`, or correct the `id`. |
+| `file_ignored` | warning | A `.yaml`/`.yml` file in the repository root or in a kind folder declares a template `kind` but its file name lacks that kind's suffix, so the app never loads it. | Rename it to `<id>.<suffix>` (see "File naming conventions"). |
 
 ### CI
 
-Use the GitHub Actions, Bitbucket Pipelines, or Jenkins validation file that matches the repository host. Each runs the same DTAtools validator;
-keep its working directory at the repository root so `validate_template('.')` sees the library folders.
+Use the GitHub Actions, Bitbucket Pipelines, or Jenkins file that matches the repository host. Each runs `lint_template_repo('.')`; keep its
+working directory at the repository root so the linter sees the library folders.
 
-`create_template_repo()` can scaffold validation CI for supported providers. If the repository uses more than one CI system, keep each
-configuration focused on the same validation command and avoid maintaining different validation rules per provider.
+`create_template_repo()` can scaffold this CI for supported providers. If the repository uses more than one CI system, keep each
+configuration focused on the same command and avoid maintaining different rules per provider.
 
 ### Validator codes
 
@@ -1412,6 +1431,7 @@ literal severity reported in the result. A concrete template can receive `instan
 | --- | --- | --- | --- |
 | `parse_failed` | error | The template file cannot be parsed or read as YAML. | Fix indentation, quoting, or invalid YAML syntax. |
 | `kind_unknown` | warning | The `kind` is not one of the four recognized kinds. | Use the correct kind value and matching filename suffix. |
+| `kind_suffix_mismatch` | error | The declared `kind` differs from the kind the file name's suffix says, so the app reads the file as the suffix says, or skips it. | Make `kind` and the suffix agree, renaming the file or correcting `kind`. |
 | `id_missing` | warning | The file has no non-empty `id`. | Add a stable identifier. |
 | `version_missing` | warning | The file has no non-empty `version`. | Add a quoted version string. |
 | `version_unquoted` | error | A numeric-looking version was not quoted and may have lost precision. | Quote it, for example `version: "1.10"`. |
@@ -1425,6 +1445,7 @@ literal severity reported in the result. A concrete template can receive `instan
 | `target_machine_owned` | error | An option targets `metadata.template` or `metadata.import_issues`. | Remove the option/effect; these fields are written by DTAtools. |
 | `prior_versions_invalid` | error | A `prior_versions:` entry lacks a version or changes text, has a bad date or unknown key, repeats a version, or is not older than the template's first version in the library. | Fix the entry; see "Versions from before the library: `prior_versions:`". |
 | `party_slot_invalid` | warning | A party slot is malformed or names a profile ID not found in the library. | Check target, slot fields, role, and profile IDs. |
+| `party_profile_invalid` | error | A party profile cannot be read the way the app reads it, for example because of an unknown `role`; the app skips it. The message is the reader's own. | Correct the field the message names. May appear next to `id_missing` or `version_missing`. |
 | `vocab_slot_invalid` | error | A vocabulary slot is malformed, has a bad target, or has invalid selections. | Correct its target, vocabulary, mode, field, or term selections. |
 | `vocab_slot_unresolved` | warning | The slot's vocabulary reference is not found in the validated directory. | Add the vocabulary file or correct the reference. |
 | `dataset_template_unresolved` | warning | A `datasets[].template` reference does not resolve to a dataset template. | Correct the ID/version or add the referenced file. |
@@ -1455,6 +1476,7 @@ literal severity reported in the result. A concrete template can receive `instan
 | `app_config_duplicate` | error | Both `dta-app.yaml` and `dta-app.yml` exist in the library. | Delete one of them. |
 | `app_config_misplaced` | error | A `dta-app.yaml` sits anywhere but the library root, for example inside `templates/`. | Move it to the repository root. |
 | `export_template_invalid` | warning | A file in `export-templates/` is not a `.docx` and is ignored. | Remove it, or convert it to a `.docx`. |
+| `export_template_no_placeholders` | warning | A `.docx` in `export-templates/` contains no `{PLACEHOLDER}` marker or is not a readable Word document, so the app does not offer it unless `dta-app.yaml` lists it (a listed file is not reported), and exporting through it inserts no DTA content. | Add the markers (see "Files the configuration refers to"), or remove the file. |
 
 A validator code names a detected issue; the message column adds the actual file, path, or reference involved. For warnings on unresolved
 references, remember that validation is scoped to the directory passed to the validator. A reference available only in a separate app source may
@@ -1486,7 +1508,7 @@ shell history or repository files.
 
 ### Pull-request review checklist
 
-- Does each file's `kind` match its filename suffix?
+- Does each file's `kind` match its filename suffix (the linter checks this)?
 - Is every `version` quoted?
 - Is the file directly inside the folder for its kind (`templates/`, `parties/`, `vocabulary/`)?
 - Are IDs stable, unique within kind, and consistently referenced?
@@ -1590,9 +1612,9 @@ writable cache if cold-start availability is required.
 
 Word `.docx` export templates are not template kinds: the library's four indexed kinds are creation templates, dataset templates, party
 profiles, and vocabularies. A `.docx` is picked up only from `export-templates/`, directly in it; one anywhere else is not offered. Every `.docx`
-there is offered automatically (non-`.docx` files, dotfiles and Word lock files such as `~$x.docx` are ignored, and the validator warns
-`export_template_invalid` about a non-`.docx` file). Keep `word_template` in `exports.document`. List a file under `exports.word_templates` in
-`dta-app.yaml` (see "App configuration") only to override its label or order, with a path relative to the root such as
+there that contains a `{PLACEHOLDER}` marker is offered automatically (non-`.docx` files, dotfiles and Word lock files such as `~$x.docx` are ignored, and the validator warns
+`export_template_invalid` about a non-`.docx` file and `export_template_no_placeholders` about one without a marker). Keep `word_template` in `exports.document`. List a file under `exports.word_templates` in
+`dta-app.yaml` (see "App configuration") to override its label or order, or to offer a file without markers, with a path relative to the root such as
 `export-templates/report.docx`; a missing or misplaced file named there is reported as `app_config_invalid`.
 
 ## Reorganising an older repository

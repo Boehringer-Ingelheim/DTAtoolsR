@@ -29,7 +29,7 @@ vector naming one or more of \code{"github"}, \code{"bitbucket"}, \code{"jenkins
 only, matching this argument's original, still-default behaviour;
 \code{FALSE} writes no CI file at all, and no \code{.github} directory. Each
 provider writes one ready-to-run file that lints the repository with
-\code{validate_template(".", strict = TRUE)}: \code{"github"} writes
+\code{lint_template_repo(".")}: \code{"github"} writes
 \code{.github/workflows/validate-templates.yml} (GitHub Actions, triggered on
 push and pull request); \code{"bitbucket"} writes \code{bitbucket-pipelines.yml}
 (Bitbucket \strong{Cloud} Pipelines only -- Bitbucket Server / Data Center has
@@ -57,7 +57,7 @@ four template kinds (a creation template and a dataset template in
 \verb{export-templates/} folder for Word templates, a root-level
 \code{README.md} with the full authoring guide, a
 \code{.gitignore}, and -- by default -- a GitHub Actions workflow that runs
-\code{\link[=validate_template]{validate_template()}} against the repository on every push and pull
+\code{\link[=lint_template_repo]{lint_template_repo()}} against the repository on every push and pull
 request. With the default \code{examples = TRUE}, the result already passes
 \code{validate_template(path, strict = TRUE)} unmodified, so it is a starting
 point to edit rather than a stub to fill in from nothing. See \code{vignette("private-templates", package = "DTAtools")} for how to point the bundled Shiny app at the directory this

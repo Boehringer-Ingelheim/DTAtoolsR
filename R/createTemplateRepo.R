@@ -165,7 +165,7 @@
 #' `export-templates/` folder for Word templates, a root-level
 #' `README.md` with the full authoring guide, a
 #' `.gitignore`, and -- by default -- a GitHub Actions workflow that runs
-#' [validate_template()] against the repository on every push and pull
+#' [lint_template_repo()] against the repository on every push and pull
 #' request. With the default `examples = TRUE`, the result already passes
 #' `validate_template(path, strict = TRUE)` unmodified, so it is a starting
 #' point to edit rather than a stub to fill in from nothing. See `vignette("private-templates", package =
@@ -212,7 +212,7 @@
 #'   only, matching this argument's original, still-default behaviour;
 #'   `FALSE` writes no CI file at all, and no `.github` directory. Each
 #'   provider writes one ready-to-run file that lints the repository with
-#'   `validate_template(".", strict = TRUE)`: `"github"` writes
+#'   `lint_template_repo(".")`: `"github"` writes
 #'   `.github/workflows/validate-templates.yml` (GitHub Actions, triggered on
 #'   push and pull request); `"bitbucket"` writes `bitbucket-pipelines.yml`
 #'   (Bitbucket **Cloud** Pipelines only -- Bitbucket Server / Data Center has
@@ -295,7 +295,7 @@ create_template_repo <- function(path, examples = TRUE, ci = TRUE, overwrite = F
   # command would only fail with `no_templates`, and so would any CI just
   # written, until the first template is added.
   next_step <- if (isTRUE(examples)) {
-    "Next: {.code validate_template(\"{path_out}\", strict = TRUE)}"
+    "Next: {.code DTAtools::lint_template_repo(\"{path_out}\")}"
   } else {
     "Next: add your template files to {.file templates/}, {.file parties/} and {.file vocabulary/}; until then {.fn validate_template} (and any CI written) fails with {.code no_templates}."
   }
