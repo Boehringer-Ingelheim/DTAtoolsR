@@ -5,6 +5,17 @@
 #' transmission details, and approval signatures. Study and agreement sections
 #' are omitted when absent. Agreement text is rendered as plain narrative.
 #'
+#' The Markdown output (`format = "md"`) is a complete GitHub-flavoured
+#' Markdown document with the chapters of the Word layout in the same order
+#' (Approval & Signatures, Document Information, Study, Parties, Process
+#' Information, Agreement Sections, Datasets), numbered 1, 1.1, 1.1.1 and
+#' listed in a linked table of contents. Chapters without content are left
+#' out and the numbers close up. Validation rules are described in plain
+#' English, never as code. All text from the DTA is escaped, so it cannot
+#' change the structure of the document. The file is deterministic: UTF-8
+#' with LF line endings and no time stamp, so the same DTA always gives the
+#' same bytes.
+#'
 #' @import S7
 #' @importFrom officer read_docx body_add_par body_add_break
 #' @importFrom flextable flextable body_add_flextable
@@ -13,16 +24,21 @@
 #'
 #' @param x A DTA object to export
 #' @param file Character. Output file path (with .docx, .pdf, or .md extension)
-#' @param format Character. Output format: "docx" (default), "pdf", or "md".
-#'   If NULL, inferred from file extension.
+#' @param format Character. Output format: "docx" (default), "pdf", or "md"
+#'   (GitHub-flavoured Markdown, see Details). If NULL, inferred from file
+#'   extension.
 #' @param overwrite Logical. Whether to overwrite existing files. Default: FALSE.
-#' @param include_signatures Logical. Whether to include signature approval
-#'   section. Default: TRUE. Ignored for `format = "md"` (no signature section
-#'   is written) and when a `template` is supplied.
-#' @param signature_list List of signatories, each a list with `name`, `role`
-#'   and optionally `organization` (or `org`) fields; or a data.frame with
-#'   columns `Organization`, `Name`, `Role`. Used only by the built-in
-#'   DOCX/PDF layout; ignored for `format = "md"` and with a `template`.
+#' @param include_signatures Logical. Whether to include the "Approval &
+#'   Signatures" section (DOCX, PDF and Markdown). It lists every contact
+#'   flagged `signature: yes` and the entries of `signature_list`, and is left
+#'   out when there is nobody to sign. Default: TRUE. Ignored when a
+#'   `template` is supplied.
+#' @param signature_list List of additional signatories, each a list with
+#'   `name`, `role` and optionally `organization` (or `org`) fields; or a
+#'   data.frame with columns `Organization`, `Name`, `Role`. They are added to
+#'   the signatories taken from the contacts (duplicates by name and
+#'   organization are skipped) in the built-in DOCX/PDF layout and in
+#'   Markdown; ignored with a `template`.
 #' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
 #' @param include_yaml Logical. If `TRUE`, append the machine-readable YAML
 #'   specification as a final, small-font section of the built-in DOCX/PDF
@@ -359,136 +375,322 @@ write_dta <- function(
   officer::body_set_default_section(doc, .section_props(doc, "portrait", meta, type = "nextPage"))
 }
 
+# The Markdown document of write_dta(): a complete, numbered GitHub-flavoured
+# Markdown file with the chapters of the Word layout in the same order --
+# Approval & Signatures, Document Information (+ Version History), Study,
+# Parties, Process Information, Agreement Sections, Datasets -- a linked
+# "Contents" list, and a footer without any time stamp. Empty chapters are left
+# out and the numbers close up (.md_render()). Every piece of author text goes
+# through .md_escape() / .md_table(), so it cannot change the structure. The
+# facts come from the shared builders in R/documentData.R, which also feed the
+# Word layout.
 #' @keywords internal
 .write_dta_markdown <- function(dta, file, include_signatures = TRUE, signature_list = NULL) {
   meta <- dta@metadata
 
-  # The document name is the main heading; the DTA's own title follows it.
-  lines <- c(
-    paste("#", .plain_text_to_md(.export_document_name())),
-    "",
-    if (nzchar(.dta_display_title(meta@title, fallback = ""))) paste("**Title:**", meta@title),
-    if (nzchar(.export_org_line())) paste("**Organisation:**", .plain_text_to_md(.export_org_line())),
-    if (!is.null(meta@version)) paste("**Version:**", meta@version) else "",
-    if (!is.null(meta@date)) paste("**Date:**", format(meta@date, "%Y-%m-%d")) else "",
-    if (!is.null(meta@header)) paste("**Header:**", meta@header) else "",
-    ""
-  )
-
-  # Document Information (mirrors the DOCX "Document Information" table)
-  doc_info <- list()
-  if (!is.null(meta@header)) doc_info[["Header"]] <- meta@header
-  if (!is.null(meta@version)) doc_info[["Version"]] <- meta@version
-  if (!is.null(meta@date)) doc_info[["Date"]] <- meta@date
-  if (length(doc_info) > 0) {
-    lines <- c(lines, "## Document Information", "")
-    doc_info_df <- .format_metadata_pairs(doc_info)
-    names(doc_info_df) <- c("Item", "Details")
-    lines <- c(lines, .df_to_md_table(doc_info_df), "")
-  }
-
-  if (length(meta@study) > 0) {
-    study_df <- .study_to_df(meta@study)
-    study_df$Details <- .plain_text_to_md(study_df$Details, table = TRUE)
-    lines <- c(lines, "## Study", "", .df_to_md_table(study_df), "")
-  }
-
-  if (length(meta@version_history) > 0) {
-    lines <- c(lines, "## Version History", "")
-    vh_df <- get_version_history_df(meta)
-    vh_df$date <- format(vh_df$date, "%Y-%m-%d")
-    names(vh_df) <- c("Version", "Date", "Changes")
-    lines <- c(lines, .df_to_md_table(vh_df), "")
-  }
-
-  if (length(meta@transmission) > 0) {
-    lines <- c(lines, "## Transmission Details", "")
-    trans_pairs <- as.list(meta@transmission)
-    lines <- c(lines, .kv_bullets_md(trans_pairs, truncate = FALSE), "")
-  }
-
-  if (!is.null(meta@error_handling)) {
-    lines <- c(lines, "## Error Handling", "", meta@error_handling, "")
-  }
-
-  # Supplier and Receiver information, in data-flow order (see the docx export).
-  lines <- c(lines, .organization_to_md_lines("Supplier Information", meta@supplier))
-  lines <- c(lines, .organization_to_md_lines("Receiver Information", meta@receiver))
-
-  # Authorized for corrections
-  auth_names <- .format_authorized_for_corrections_lines(meta@authorized_for_corrections)
-  if (length(auth_names) > 0) {
-    lines <- c(
-      lines, "## Authorized for Corrections", "",
-      paste0("- ", auth_names), ""
-    )
-  }
-
-  # Approval & Signatures section is intentionally omitted from write_dta():
-  # individual contacts already carry inline signature lines in the
-  # Receiver / Supplier sections above. Datasets section follows.
-
-  if (length(meta@sections) > 0) {
-    lines <- c(lines, "## Agreement Sections", "")
-    for (section in meta@sections) {
-      lines <- c(
-        lines, paste("###", .plain_text_to_md(section$title)), "",
-        .plain_text_to_md(section$text), ""
+  sections <- .md_children(
+    if (isTRUE(include_signatures)) {
+      .md_section(
+        "Approval & Signatures",
+        .md_signature_table(.extract_signatories(meta, signature_list = signature_list))
       )
-    }
-  }
-
-  # Datasets: file specifications, column specifications, and validation rules per dataset
-  if (length(dta@datasets) > 0) {
-    lines <- c(lines, "## Datasets", "")
-
-    for (ds_name in names(dta@datasets)) {
-      dataset <- dta@datasets[[ds_name]]
-
-      # Escaped like the section text above: name and description are author
-      # text, and a `#` or `*` in them must not restructure the document.
-      lines <- c(lines, paste("###", .plain_text_to_md(dta_dataset_heading(dataset))), "")
-      if (!is.null(dataset@description) && nzchar(dataset@description)) {
-        lines <- c(lines, .plain_text_to_md(dataset@description), "")
-      }
-
-      lines <- c(lines, .file_specs_to_md_lines(dataset@files, heading = "#### File Specifications"))
-      lines <- c(lines, .dataset_specs_to_md_lines(dataset, include_rules = TRUE, base_level = 4))
-    }
-  }
-
-  lines <- c(
-    lines,
-    "",
-    "---",
-    paste("*Generated on:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "*")
+    },
+    .md_section(
+      "Document Information",
+      .md_kv_table(.document_info_pairs(meta)),
+      children = .md_children(
+        .md_section("Version History", .md_table(.version_history_df(meta@version_history)))
+      )
+    ),
+    if (length(meta@study) > 0) {
+      .md_section("Study", .md_kv_table(.study_to_df(meta@study)))
+    },
+    .md_parties_section(meta),
+    .md_process_section(meta),
+    .md_agreement_section(meta@sections),
+    .md_datasets_section(dta@datasets)
   )
 
-  .dta_write_staged(file, function(stage) writeLines(lines, con = stage))
+  lines <- .md_render(.md_dta_head(meta), sections, .md_dta_footer(meta))
+  .md_write(lines, file)
 }
 
-#' Render an organization block (affiliation + individual contact blocks) as Markdown lines.
-#' Signatories come first with a signature underline; backup-only contacts are grouped last.
-#' @keywords internal
-.organization_to_md_lines <- function(title, org_list) {
-  if (is.null(org_list) || length(org_list) == 0) {
+# Drop NULL entries, so optional chapters can be written inline as `if (...)`.
+.md_children <- function(...) {
+  Filter(Negate(is.null), list(...))
+}
+
+# One line of author text, escaped: runs of white space (line breaks included)
+# become a single space. "" when there is nothing to show.
+.md_inline <- function(x) {
+  if (is.null(x) || length(x) == 0) {
+    return("")
+  }
+  x <- as.character(x)
+  x <- .md_clean_title(paste(x[!is.na(x)], collapse = " "))
+  if (!nzchar(x)) "" else .md_escape(x)
+}
+
+# Author text as escaped paragraphs: a blank line separates two paragraphs, a
+# single line break inside a paragraph stays a line break (a hard break, as in
+# the Word layout). character(0) when there is no text.
+.md_paragraphs <- function(text) {
+  if (is.null(text) || length(text) == 0) {
     return(character(0))
   }
-
-  lines <- c(paste0("## ", title), "")
-
-  pairs <- .affiliation_pairs(org_list$affiliation)
-  if (length(pairs) > 0) {
-    lines <- c(lines, .kv_bullets_md(pairs), "")
+  text <- as.character(text)
+  lines <- .md_lines(paste(text[!is.na(text)], collapse = "\n\n"))
+  lines <- .md_trim_blank(sub("[ \t]+$", "", lines))
+  if (length(lines) == 0L) {
+    return(character(0))
   }
+  paragraph <- cumsum(!nzchar(lines))
+  blocks <- lapply(unique(paragraph[nzchar(lines)]), function(p) {
+    escaped <- .md_lines(.md_escape(paste(lines[paragraph == p & nzchar(lines)], collapse = "\n")))
+    n <- length(escaped)
+    if (n > 1L) {
+      escaped[-n] <- paste0(escaped[-n], "\\")
+    }
+    escaped
+  })
+  do.call(.md_compose, blocks)
+}
 
-  contacts <- org_list$contacts
-  if (!is.null(contacts) && length(contacts) > 0) {
-    lines <- c(lines, "### Contacts", "")
-    lines <- c(lines, .contacts_to_md_lines(contacts, heading_level = 4))
+# Head of the DTA document: document name as the only level-1 heading, the
+# DTA title in bold, the organisation line, the document header and the cover
+# facts (version, date, study, parties, template) as a table.
+.md_dta_head <- function(meta) {
+  title <- .dta_display_title(meta@title, fallback = "")
+  .md_compose(
+    paste("#", .md_inline(.export_document_name())),
+    if (nzchar(.md_inline(title))) paste0("**", .md_inline(title), "**"),
+    .md_inline(.export_org_line()),
+    .md_paragraphs(meta@header),
+    .md_kv_table(.cover_facts(meta))
+  )
+}
+
+# Footer of the DTA document, as in the Word footer: title, version and version
+# date, then the template the document was generated from. Nothing in it
+# depends on the time or the locale of the run.
+.md_dta_footer <- function(meta) {
+  bits <- c(
+    .dta_display_title(meta@title),
+    if (!is.null(meta@version) && nzchar(meta@version)) paste("Version", meta@version),
+    .format_document_date(.current_version_date(meta))
+  )
+  .md_footer(bits, .template_provenance_text(meta@template))
+}
+
+# A horizontal rule, then one line of facts joined by a middle dot and one
+# provenance line.
+.md_footer <- function(bits, provenance) {
+  bits <- bits[nzchar(bits)]
+  .md_compose(
+    "---",
+    .md_inline(paste(bits, collapse = " \u00b7 ")),
+    .md_inline(provenance)
+  )
+}
+
+# The approval table: Organization | Name | Role | Signature | Date, one row
+# per signatory. The Signature and Date cells are left empty, with two line
+# breaks so a printed page has room to sign. character(0) without signatories.
+.md_signature_table <- function(signatories) {
+  sig <- .normalize_signatories(signatories)
+  if (is.null(sig) || nrow(sig) == 0) {
+    return(character(0))
   }
+  table <- .md_table(data.frame(
+    Organization = .md_cell_chr(sig$Organization),
+    Name = .md_cell_chr(sig$Name),
+    Role = .md_cell_chr(sig$Role),
+    stringsAsFactors = FALSE
+  ))
+  space <- "<br><br>"
+  c(
+    sub("\\|$", "| Signature | Date |", table[1L]),
+    sub("\\|$", "| --- | --- |", table[2L]),
+    sub("\\|$", paste0("| ", space, " | ", space, " |"), table[-(1:2)])
+  )
+}
 
-  lines
+# "Parties": Supplier, then Receiver (the direction the data flows), each with
+# its affiliation table and its contact table (backups last).
+.md_parties_section <- function(meta) {
+  party <- function(title, org) {
+    if (length(org) == 0) {
+      return(NULL)
+    }
+    body <- .md_compose(
+      .md_kv_table(.party_facts(org)),
+      .md_table(.party_contacts_df(org$contacts))
+    )
+    .md_section(title, if (length(body) > 0) body else "No contacts specified.")
+  }
+  children <- .md_children(party("Supplier", meta@supplier), party("Receiver", meta@receiver))
+  if (length(children) == 0) {
+    return(NULL)
+  }
+  .md_section("Parties", children = children)
+}
+
+# "Process Information": transmission details, error handling and who is
+# authorised to make corrections.
+.md_process_section <- function(meta) {
+  children <- .md_children(
+    if (length(meta@transmission) > 0) {
+      .md_section("Transmission Details", .md_kv_table(.transmission_pairs(meta@transmission)))
+    },
+    if (!is.null(meta@error_handling)) {
+      .md_section("Error Handling", .md_paragraphs(meta@error_handling))
+    },
+    .md_section(
+      "Authorized for Corrections",
+      .md_list(.format_authorized_for_corrections_lines(meta@authorized_for_corrections))
+    )
+  )
+  .md_section("Process Information", children = children)
+}
+
+# "Agreement Sections": one sub-chapter per clause, its text as paragraphs.
+.md_agreement_section <- function(sections) {
+  if (length(sections) == 0) {
+    return(NULL)
+  }
+  children <- lapply(sections, function(section) {
+    title <- .md_clean_title(paste(as.character(section$title %||% ""), collapse = " "))
+    # A clause without text keeps its heading, as in Word: the missing text
+    # is shown like every other missing value.
+    text <- .md_paragraphs(section$text)
+    .md_section(
+      if (nzchar(title)) title else "Untitled section",
+      if (length(text) > 0) text else .md_escape(MISSING_VALUE_DISPLAY)
+    )
+  })
+  .md_section("Agreement Sections", children = children)
+}
+
+# "Datasets": per dataset its description, its fact table and the Files,
+# Column Specifications and Validation Rules sub-chapters. The rule reading
+# guide is shown once, before the first list of rules in the document.
+.md_datasets_section <- function(datasets) {
+  if (length(datasets) == 0) {
+    return(NULL)
+  }
+  guide <- TRUE
+  children <- list()
+  for (ds_name in names(datasets)) {
+    dataset <- datasets[[ds_name]]
+    parts <- .md_dataset_parts(dataset, guide = guide)
+    guide <- guide && !parts$guide_shown
+    children[[length(children) + 1L]] <- .md_section(
+      dta_dataset_heading(dataset),
+      .md_compose(.md_paragraphs(dataset@description), .md_kv_table(.dataset_facts(dataset))),
+      children = parts$sections
+    )
+  }
+  .md_section("Datasets", children = children)
+}
+
+# The Files, Column Specifications and Validation Rules chapters of one dataset
+# (the latter two only for a tabular dataset). `guide = TRUE` puts the rule
+# reading guide before the rules, if the dataset has any. Returns
+# list(sections =, guide_shown =).
+.md_dataset_parts <- function(dataset, include_file_specs = TRUE, include_rules = TRUE, guide = TRUE) {
+  tabular <- inherits(dataset, "DTAtools::DTADataSetTabular")
+  rules <- if (tabular) dataset@specs@rules %||% list() else list()
+  guide_shown <- isTRUE(guide) && isTRUE(include_rules) && length(rules) > 0
+
+  columns <- if (tabular) .md_table(.column_specs_df(dataset@specs)) else character(0)
+  sections <- .md_children(
+    if (isTRUE(include_file_specs)) .md_section("Files", .md_files_body(dataset@files)),
+    if (tabular) {
+      .md_section(
+        "Column Specifications",
+        if (length(columns) > 0) columns else "No column specifications available."
+      )
+    },
+    if (tabular && isTRUE(include_rules)) {
+      .md_section("Validation Rules", .md_rules_body(rules, guide = guide_shown))
+    }
+  )
+  list(sections = sections, guide_shown = guide_shown)
+}
+
+# Body of a "Files" chapter: how many files are expected, the file table and,
+# for tabular files, how each file is to be parsed.
+.md_files_body <- function(files) {
+  if (is.null(files) || length(files) == 0) {
+    return("No files specified.")
+  }
+  format_table <- .md_table(.file_format_df(files))
+  .md_compose(
+    .md_escape(.file_count_sentence(files)),
+    .md_table(.md_file_specs_df(files)),
+    if (length(format_table) > 0) "**File format**",
+    format_table
+  )
+}
+
+# .file_specs_df() for Markdown: the Description cell lists the pattern
+# description and then every `info` entry on a line of its own ("Data:
+# smrnaseq"), instead of the nested bullet text the Word table shows.
+.md_file_specs_df <- function(files) {
+  df <- .file_specs_df(files)
+  df$Description <- vapply(files, function(f) {
+    desc <- f@pattern_description
+    desc <- if (length(desc) == 0 || is.na(desc[[1]])) "" else as.character(desc[[1]])
+    info <- tryCatch(f@info, error = function(e) NULL)
+    lines <- c(if (nzchar(desc)) desc, .md_info_lines(info))
+    paste(lines, collapse = "\n")
+  }, character(1))
+  df
+}
+
+# Flatten a (possibly nested) `info` value to display lines: a named element
+# reads "Name: value", a nested name "Outer / Inner: value", an unnamed one
+# just its value. Scalars are shown like every other metadata value.
+.md_info_lines <- function(x, label = "") {
+  if (is.null(x) || length(x) == 0) {
+    return(character(0))
+  }
+  if (!is.list(x)) {
+    values <- vapply(seq_along(x), function(i) .format_scalar_value(x[i], truncate = FALSE), character(1))
+    if (nzchar(label)) {
+      return(paste0(label, ": ", paste(values, collapse = ", ")))
+    }
+    return(values)
+  }
+  nms <- names(x) %||% rep("", length(x))
+  nms[is.na(nms)] <- ""
+  unlist(lapply(seq_along(x), function(i) {
+    own <- if (nzchar(nms[[i]])) .title_case_field(nms[[i]]) else ""
+    sub_label <- paste(c(label, own)[nzchar(c(label, own))], collapse = " / ")
+    .md_info_lines(x[[i]], sub_label)
+  }), use.names = FALSE)
+}
+
+# Body of a "Validation Rules" chapter: optionally the reading guide, then one
+# block per rule in the shared plain-English wording -- never as code.
+.md_rules_body <- function(rules, guide = FALSE) {
+  if (length(rules) == 0) {
+    return("No validation rules specified.")
+  }
+  blocks <- c(
+    if (isTRUE(guide)) as.list(.md_escape(.rule_reading_guide())),
+    lapply(rules, .md_rule_block)
+  )
+  do.call(.md_compose, blocks)
+}
+
+# One rule as Markdown: .rule_md() plus the two escapes .md_escape() adds to
+# the plain-text escaping .rule_md() applies ("$" and emoji short codes), so a
+# value in a rule is as literal as any other author text.
+.md_rule_block <- function(rule) {
+  text <- .rule_md(rule, heading = TRUE)
+  text <- gsub("$", "\\$", text, fixed = TRUE)
+  gsub(":(?=[A-Za-z0-9_+-]+:)", "\\\\:", text, perl = TRUE)
 }
 
 #' Locate Microsoft Word (`WINWORD.EXE`)
@@ -1100,6 +1302,12 @@ dta_pdf_backend <- function() {
 #' including metadata, file specifications, column specifications with allowed values,
 #' and validation rules in human-readable format.
 #'
+#' The Markdown output (`format = "md"`) is a complete GitHub-flavoured
+#' Markdown document: a fact table, a linked table of contents and numbered
+#' chapters (Approval & Signatures, Description, Files, Column
+#' Specifications, Validation Rules; chapters without content are left out).
+#' It is deterministic: UTF-8 with LF line endings and no time stamp.
+#'
 #' @import S7
 #' @importFrom officer read_docx
 #' @importFrom cli cli_abort cli_alert_success
@@ -1111,15 +1319,15 @@ dta_pdf_backend <- function() {
 #'   when the file has none.
 #' @param overwrite Logical. Whether to overwrite existing files. Default: FALSE.
 #' @param include_signatures Logical. Whether to include the signature section.
-#'   Default: TRUE. In DOCX/PDF the section appears only when `signature_list`
-#'   is non-empty.
+#'   Default: TRUE. In every format the section appears only when
+#'   `signature_list` is non-empty.
 #' @param include_file_specs Logical. Whether to include file specifications.
-#'   Default: TRUE. Ignored for `format = "md"`, which always includes them.
+#'   Default: TRUE. Applies to every format.
 #' @param include_rules Logical. Whether to include validation rules
-#'   (DTADataSetTabular only). Default: TRUE. Ignored for `format = "md"`,
-#'   which always includes them.
+#'   (DTADataSetTabular only). Default: TRUE. Applies to every format.
 #' @param signature_list List of signatories, each a list with `name`, `role`
-#'   and optionally `organization` (or `org`) fields.
+#'   and optionally `organization` (or `org`) fields, or a data.frame with
+#'   columns `Organization`, `Name`, `Role`.
 #' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
 #' @param document_name Optional character: what this kind of document is
 #'   called, shown as the main title of the export; the dataset specification
@@ -1184,7 +1392,10 @@ write_dataset_metadata <- function(
     print(doc, target = temp_docx)
     .convert_docx_to_pdf(temp_docx, file)
   } else if (format == "md") {
-    .write_dataset_markdown(x, file, include_signatures, signature_list)
+    .write_dataset_markdown(
+      x, file, include_signatures, signature_list,
+      include_file_specs = include_file_specs, include_rules = include_rules
+    )
   }
 
   if (!isTRUE(quiet)) {
@@ -1242,54 +1453,72 @@ write_dataset_metadata <- function(
   doc
 }
 
+# The Markdown document of write_dataset_metadata(): the same frame as the DTA
+# document -- head with a fact table, a linked "Contents" list, numbered
+# chapters and a footer without any time stamp. The chapters are Approval &
+# Signatures (only with signatories), Description, Files, Column
+# Specifications and Validation Rules; `include_*` switch them as in Word.
 #' @keywords internal
-.write_dataset_markdown <- function(dataset, file, include_signatures = TRUE, signature_list = NULL) {
-  lines <- c(
-    paste("#", .plain_text_to_md(.export_document_name())),
-    "",
-    paste0("**", .plain_text_to_md("Dataset Specification"), "**"),
-    if (nzchar(.export_org_line())) c("", paste("**Organisation:**", .plain_text_to_md(.export_org_line()))),
-    "",
-    paste("## ", .plain_text_to_md(dta_dataset_heading(dataset))),
-    "",
-    "### Overview",
-    paste("**ID:**", .plain_text_to_md(dataset@id)),
-    if (!is.null(dataset@name)) paste("**Name:**", .plain_text_to_md(dataset@name)) else "",
-    if (!is.null(dataset@description)) paste("**Description:**", .plain_text_to_md(dataset@description)) else "",
-    if (!is.null(dataset@template_source)) paste("**Template Source:**", .plain_text_to_md(dataset@template_source)) else "",
-    if (!is.null(dataset@template_version)) paste("**Template Version:**", .plain_text_to_md(dataset@template_version)) else "",
-    ""
+.write_dataset_markdown <- function(dataset, file, include_signatures = TRUE, signature_list = NULL,
+                                    include_file_specs = TRUE, include_rules = TRUE) {
+  heading <- dta_dataset_heading(dataset)
+  parts <- .md_dataset_parts(
+    dataset,
+    include_file_specs = include_file_specs, include_rules = include_rules, guide = TRUE
+  )
+  sections <- c(
+    .md_children(
+      if (isTRUE(include_signatures)) {
+        .md_section("Approval & Signatures", .md_signature_table(signature_list))
+      },
+      .md_section("Description", .md_paragraphs(dataset@description))
+    ),
+    parts$sections
   )
 
-  lines <- c(lines, .file_specs_to_md_lines(dataset@files))
+  head <- .md_compose(
+    paste("#", .md_inline(.export_document_name())),
+    paste0("**", .md_inline(paste0("Dataset Specification: ", heading)), "**"),
+    .md_inline(.export_org_line()),
+    .md_kv_table(.dataset_document_facts(dataset))
+  )
 
-  # Column specs + validation rules for tabular datasets
-  lines <- c(lines, .dataset_specs_to_md_lines(dataset, include_rules = TRUE, base_level = 3))
-
-  # Approval & Signatures
-  if (include_signatures) {
-    sig_df <- .normalize_signatories(signature_list)
-    lines <- c(lines, "### Approval & Signatures", "")
-    if (!is.null(sig_df) && nrow(sig_df) > 0) {
-      sig_df$Signature <- "_________________"
-      sig_df$Date <- "____________"
-      lines <- c(lines, .df_to_md_table(sig_df), "")
-    } else {
-      lines <- c(
-        lines,
-        "Approved by: _____________________________     Date: ______________", "",
-        "Signature:   _____________________________", ""
-      )
-    }
+  template <- if (!is.null(dataset@template_source) && nzchar(dataset@template_source)) {
+    list(
+      id = dataset@template_source,
+      version = dataset@template_version %||% "",
+      date = dataset@template_date
+    )
+  } else {
+    list()
   }
-
-  lines <- c(
-    lines,
-    "---",
-    paste("*Generated on:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "*")
+  footer <- .md_footer(
+    c(
+      paste0("Dataset Specification: ", heading),
+      if (!is.null(dataset@template_version) && nzchar(dataset@template_version)) {
+        paste("Template version", dataset@template_version)
+      },
+      .format_document_date(dataset@template_date)
+    ),
+    .template_provenance_text(template)
   )
 
-  .dta_write_staged(file, function(stage) writeLines(lines, con = stage))
+  .md_write(.md_render(head, sections, footer), file)
+}
+
+# Fact table of the dataset document: id, name, type and the template the
+# dataset was taken from. Empty values are dropped.
+.dataset_document_facts <- function(dataset) {
+  text <- function(x) if (is.null(x) || length(x) == 0 || is.na(x[[1]])) "" else as.character(x[[1]])
+  facts <- c(
+    `Dataset ID` = text(dataset@id),
+    Name = text(dataset@name),
+    Type = .title_case_field(text(dataset@type)),
+    `Template source` = text(dataset@template_source),
+    `Template version` = text(dataset@template_version),
+    `Template date` = .format_document_date(dataset@template_date)
+  )
+  .pairs_df(facts[nzchar(facts)])
 }
 
 #' @title Alias: Export File Dataset Specifications
@@ -1298,7 +1527,10 @@ write_dataset_metadata <- function(
 #' @param file Character. Output file path
 #' @param ... Additional arguments passed on to \code{write_dataset_metadata()}
 #'   (\code{format}, \code{overwrite}, \code{include_signatures},
-#'   \code{include_file_specs}, \code{include_rules}, \code{signature_list}).
+#'   \code{include_file_specs}, \code{include_rules}, \code{signature_list},
+#'   \code{quiet}, \code{document_name}, \code{organisation},
+#'   \code{organisation_unit}). The `include_*` switches apply to every
+#'   format, Markdown included.
 #' @return Invisibly `NULL`, as [write_dataset_metadata()].
 #' @export
 #' @examples

@@ -16,8 +16,9 @@ test_that("write_dta validates inputs and exports markdown/docx", {
   md_lines <- readLines(out_md, warn = FALSE)
   # The document name is the top heading; the DTA title follows it.
   expect_equal(md_lines[1], "# Data Transfer Agreement")
-  expect_true("**Title:** Example DTA" %in% md_lines)
-  expect_true(any(grepl("^## Datasets", md_lines)))
+  expect_identical(md_lines[3], "**Example DTA**")
+  expect_false(any(grepl("**Title:**", md_lines, fixed = TRUE)))
+  expect_true(any(grepl("^## [0-9]+ Datasets$", md_lines)))
 
   out_docx <- tempfile(fileext = ".docx")
   on.exit(unlink(out_docx, force = TRUE), add = TRUE)
@@ -103,8 +104,11 @@ test_that("write_dataset_metadata and alias export metadata documents", {
   expect_true(file.exists(out_md))
   md_lines <- readLines(out_md, warn = FALSE)
   expect_equal(md_lines[1], "# Data Transfer Agreement")
-  expect_true(any(grepl("^## +Demographics", md_lines)))
-  expect_true(any(grepl("^### Approval & Signatures", md_lines)))
+  expect_identical(md_lines[3], "**Dataset Specification: Demographics (demographics)**")
+  # Without signatories there is no approval chapter (and no blank
+  # "Approved by" line to fill in instead).
+  expect_false(any(grepl("Approval", md_lines, fixed = TRUE)))
+  expect_false(any(grepl("____", md_lines, fixed = TRUE)))
 
   out_docx <- tempfile(fileext = ".docx")
   on.exit(unlink(out_docx, force = TRUE), add = TRUE)
@@ -180,17 +184,17 @@ test_that("write_dta markdown heads a dataset by name and id, an unnamed one by 
   write_dta(.export_naming_dta(), file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
   md <- readLines(out_md, warn = FALSE)
 
-  named_at <- match("### Demographics (demographics)", md)
+  named_at <- match("### 2.1 Demographics (demographics)", md)
   # Escaped Markdown: the `_` would otherwise start emphasis.
-  unnamed_at <- match("### audit\\_trail", md)
+  unnamed_at <- match("### 2.2 audit\\_trail", md)
   expect_false(is.na(named_at))
   expect_false(is.na(unnamed_at))
   # The long description is the paragraph under its heading.
   expect_identical(md[named_at + 2], "One row per subject, as delivered by the CRO.")
   expect_identical(md[unnamed_at + 2], "Every change made to the records.")
   # Neither the bare id of a named dataset nor a name-only heading appears.
-  expect_false("### demographics" %in% md)
-  expect_false("### Demographics" %in% md)
+  expect_false(any(grepl("^### [0-9.]+ demographics$", md)))
+  expect_false(any(grepl("^### [0-9.]+ Demographics$", md)))
 })
 
 test_that("the Markdown exports escape a dataset's name and description", {
@@ -203,7 +207,7 @@ test_that("the Markdown exports escape a dataset's name and description", {
   on.exit(unlink(out_md, force = TRUE), add = TRUE)
   write_dta(dta, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
   md <- readLines(out_md, warn = FALSE)
-  expect_true("### \\*Draft\\* \\#2 (demographics)" %in% md)
+  expect_true(any(grepl("^### [0-9.]+ \\\\\\*Draft\\\\\\* \\\\#2 \\(demographics\\)$", md)))
   expect_true("\\# not a heading" %in% md)
   expect_false("# not a heading" %in% md)
 
@@ -211,8 +215,9 @@ test_that("the Markdown exports escape a dataset's name and description", {
   on.exit(unlink(out_ds, force = TRUE), add = TRUE)
   write_dataset_metadata(ds, file = out_ds, format = "md", overwrite = TRUE, quiet = TRUE)
   ds_md <- readLines(out_ds, warn = FALSE)
-  expect_true(any(grepl("**Name:** \\*Draft\\* \\#2", ds_md, fixed = TRUE)))
-  expect_true(any(grepl("**Description:** \\# not a heading", ds_md, fixed = TRUE)))
+  expect_true("| Name | \\*Draft\\* \\#2 |" %in% ds_md)
+  expect_true("\\# not a heading" %in% ds_md)
+  expect_false("# not a heading" %in% ds_md)
 })
 
 test_that("write_dta docx heads a dataset by name and id, with its description as body text", {
@@ -241,19 +246,18 @@ test_that("write_dataset_metadata markdown lists the id, name and description of
   write_dataset_metadata(ds, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
   md <- readLines(out_md, warn = FALSE)
 
-  expect_true(any(grepl("^## +Demographics \\(demographics\\)$", md)))
-  overview <- match("### Overview", md)
-  expect_false(is.na(overview))
-  expect_identical(
-    md[overview + 1:3],
-    c(
-      "**ID:** demographics",
-      "**Name:** Demographics",
-      "**Description:** One row per subject, as delivered by the CRO."
-    )
-  )
+  # The dataset is named in the bold subtitle and listed in the fact table;
+  # the description is a chapter of its own.
+  expect_identical(md[3], "**Dataset Specification: Demographics (demographics)**")
+  expect_true(all(c(
+    "| Item | Details |", "| Dataset ID | demographics |", "| Name | Demographics |", "| Type | Tabular |"
+  ) %in% md))
+  description_at <- match("## 1 Description", md)
+  expect_false(is.na(description_at))
+  expect_identical(md[description_at + 2], "One row per subject, as delivered by the CRO.")
+  expect_false(any(grepl("^\\*\\*[A-Za-z ]+:\\*\\*", md)))
 
-  # Without a name there is no Name line and the heading is the bare id.
+  # Without a name there is no Name row and the subtitle names the bare id.
   bare <- create_example_DTADataSetTabular(1)
   out_bare <- tempfile(fileext = ".md")
   on.exit(unlink(out_bare, force = TRUE), add = TRUE)
@@ -261,9 +265,12 @@ test_that("write_dataset_metadata markdown lists the id, name and description of
   md_bare <- readLines(out_bare, warn = FALSE)
 
   # Escaped Markdown, so the underscores cannot start emphasis.
-  expect_true(any(grepl("^## +example\\\\_container\\\\_specs\\\\_without\\\\_data$", md_bare)))
-  expect_true("**ID:** example\\_container\\_specs\\_without\\_data" %in% md_bare)
-  expect_false(any(grepl("^\\*\\*Name:\\*\\*", md_bare)))
+  expect_identical(
+    md_bare[3],
+    "**Dataset Specification: example\\_container\\_specs\\_without\\_data**"
+  )
+  expect_true("| Dataset ID | example\\_container\\_specs\\_without\\_data |" %in% md_bare)
+  expect_false(any(grepl("^\\| Name \\|", md_bare)))
 })
 
 test_that("write_dataset_metadata docx titles a dataset by name and id and tables ID, Name, Description", {
@@ -1187,8 +1194,8 @@ test_that("write_dta docx introduces the supplier before the receiver", {
   write_dta(dta, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
   md <- readLines(out_md, warn = FALSE)
   expect_lt(
-    grep("Supplier Information", md)[1],
-    grep("Receiver Information", md)[1]
+    grep("^### [0-9]+\\.1 Supplier$", md)[1],
+    grep("^### [0-9]+\\.2 Receiver$", md)[1]
   )
 })
 
@@ -1536,9 +1543,9 @@ test_that("the Markdown exports describe each rule in prose, with no code", {
     expect_false(any(grepl("Exact rule definitions", md, fixed = TRUE)), info = path)
     # One block per rule, and the reading guide once, before the first block.
     for (rule in rules) {
-      expect_true(grepl(.rule_md(rule), text, fixed = TRUE), info = paste(path, rule@id))
+      expect_true(grepl(.md_rule_block(rule), text, fixed = TRUE), info = paste(path, rule@id))
     }
-    guide_at <- which(md == .plain_text_to_md(.rule_reading_guide()[[1]]))
+    guide_at <- which(md == .md_escape(.rule_reading_guide()[[1]]))
     expect_length(guide_at, 1)
     first_rule <- which(startsWith(md, paste0("**", .plain_text_to_md(rules[[1]]@id), "**")))[[1]]
     expect_lt(guide_at, first_rule)
@@ -1585,7 +1592,7 @@ test_that("every rule of the bundled clinical example is described in prose in d
   md <- paste(readLines(out_md, warn = FALSE, encoding = "UTF-8"), collapse = "\n")
   .expect_no_rule_code(md)
   for (rule in rules) {
-    expect_true(grepl(.rule_md(rule), md, fixed = TRUE), info = rule@id)
+    expect_true(grepl(.md_rule_block(rule), md, fixed = TRUE), info = rule@id)
   }
 })
 
@@ -1717,12 +1724,11 @@ test_that("write_dta puts document_name first in Markdown, with the DTA title an
   )
   lines <- readLines(out, warn = FALSE)
   expect_equal(lines[1], "# Data Transmission Specification / Data Transfer Agreement")
-  title_at <- match("**Title:** Example DTA", lines)
-  org_at <- match("**Organisation:** Acme Pharma · Biometrics", lines)
-  expect_false(is.na(title_at))
-  expect_false(is.na(org_at))
-  # Both sit in the header block, before the first section.
-  expect_lt(max(title_at, org_at), match("## Document Information", lines))
+  # Title in bold, organisation as a plain line beneath it: no "Label:" lines.
+  expect_identical(lines[3], "**Example DTA**")
+  expect_identical(lines[5], "Acme Pharma \u00b7 Biometrics")
+  # Both sit in the header block, before the contents and the first chapter.
+  expect_lt(5L, match("## Contents", lines))
 })
 
 test_that("write_dta shows nothing for a NULL or empty organisation", {
@@ -1732,9 +1738,9 @@ test_that("write_dta shows nothing for a NULL or empty organisation", {
   on.exit(unlink(c(plain, blank), force = TRUE), add = TRUE)
   write_dta(dta, plain, format = "md", quiet = TRUE)
   write_dta(dta, blank, format = "md", quiet = TRUE, organisation = "", organisation_unit = "  ")
-  strip <- function(p) grep("^[*]Generated on:", readLines(p, warn = FALSE), invert = TRUE, value = TRUE)
-  expect_identical(strip(blank), strip(plain))
-  expect_false(any(grepl("Organisation", strip(plain), fixed = TRUE)))
+  # The document carries no time stamp, so the two files are byte-identical.
+  expect_identical(readBin(blank, "raw", 1e6), readBin(plain, "raw", 1e6))
+  expect_false(any(grepl("Organisation", readLines(plain, warn = FALSE), fixed = TRUE)))
 })
 
 test_that("the Word cover leads with the document name, then the DTA title, then the organisation", {
@@ -1817,7 +1823,7 @@ test_that("newlines in export text are collapsed, so they cannot inject Markdown
   lines <- readLines(md, warn = FALSE)
   expect_false(any(grepl("^#+ (Injected|Evil)", lines)))
   expect_equal(lines[1], "# Doc \\# Evil") # the inline # is escaped, not a heading
-  expect_true(any(grepl("^\\*\\*Organisation:\\*\\* Acme (\\\\)?#(\\\\)?# Injected$", lines)))
+  expect_true("Acme \\#\\# Injected" %in% lines)
 
   ds <- tempfile(fileext = ".md")
   on.exit(unlink(ds, force = TRUE), add = TRUE)
@@ -1827,7 +1833,8 @@ test_that("newlines in export text are collapsed, so they cannot inject Markdown
   )
   dlines <- readLines(ds, warn = FALSE)
   expect_false(any(grepl("^## Injected", dlines)))
-  expect_equal(dlines[3], "**Dataset Specification**")
+  expect_equal(dlines[3], "**Dataset Specification: example\\_container\\_specs\\_without\\_data**")
+  expect_true("Acme \\#\\# Injected" %in% dlines)
 })
 
 test_that("write_dataset_metadata leads with document_name and shows the organisation", {
@@ -1841,7 +1848,7 @@ test_that("write_dataset_metadata leads with document_name and shows the organis
   )
   lines <- readLines(md, warn = FALSE)
   expect_equal(lines[1], "# Data Transmission Specification")
-  expect_true("**Organisation:** Acme Pharma" %in% lines)
+  expect_identical(lines[5], "Acme Pharma")
 
   write_dataset_metadata(ds, docx,
     format = "docx", quiet = TRUE,

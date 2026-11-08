@@ -65,11 +65,8 @@ test_that(".format_scalar_value renders every flavour of NA as one display strin
   expect_equal(pairs$key, "x")
   expect_equal(pairs$value, MISSING_VALUE_DISPLAY)
 
-  expect_equal(.kv_bullets_md(list(x = NA_character_)), "- **x:** (not specified)")
-  expect_equal(.kv_bullets_md(list(x = NA)), "- **x:** (not specified)")
-
   # The bare text "NA" must never reach a rendered document.
-  expect_false(grepl("NA", .kv_bullets_md(list(x = NA)), fixed = TRUE))
+  expect_false(grepl("NA", .format_scalar_value(NA), fixed = TRUE))
 })
 
 test_that("an NA metadata field no longer breaks any export format", {
@@ -89,7 +86,8 @@ test_that("an NA metadata field no longer breaks any export format", {
   # Not merely "no error": the NA field must be rendered as the missing-value
   # placeholder, not as the literal "NA".
   md_lines <- readLines(out_md, warn = FALSE)
-  expect_true(any(grepl("- **type:** (not specified)", md_lines, fixed = TRUE)))
+  expect_true("| Transfer method | (not specified) |" %in% md_lines)
+  expect_false("| Transfer method | NA |" %in% md_lines)
 
   out_docx <- tempfile(fileext = ".docx")
   on.exit(unlink(out_docx, force = TRUE), add = TRUE)
@@ -97,32 +95,6 @@ test_that("an NA metadata field no longer breaks any export format", {
     write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
   )
   expect_true(grepl("(not specified)", .docx_text(out_docx), fixed = TRUE))
-})
-
-test_that(".format_value_list drops values beyond max_items", {
-  expect_equal(.format_value_list(NULL), "(not specified)")
-  expect_equal(.format_value_list(c("a", "b")), "a, b")
-
-  # Only a count survives; values 11..25 are gone from the rendered spec, so a
-  # column's allowed-value list is not fully documented by the export.
-  out <- .format_value_list(1:25, max_items = 10)
-  expect_equal(out, "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ... and 15 more")
-  expect_false(grepl("11", out, fixed = TRUE))
-  expect_true(grepl("... and 15 more", out, fixed = TRUE))
-
-  # The default cut-off is 5.
-  expect_equal(.format_value_list(1:25), "1, 2, 3, 4, 5, ... and 20 more")
-
-  # Lists are unlisted before truncation.
-  expect_equal(.format_value_list(list("a", "b", "c"), max_items = 2), "a, b, ... and 1 more")
-})
-
-test_that(".format_value_list switches to line breaks past max_width", {
-  wide <- c(strrep("x", 30), strrep("y", 40))
-  expect_equal(.format_value_list(wide), paste(wide, collapse = "\n"))
-
-  narrow <- c("x", "y")
-  expect_equal(.format_value_list(narrow), "x, y")
 })
 
 test_that(".format_document_date renders ISO 8601 regardless of LC_TIME", {
