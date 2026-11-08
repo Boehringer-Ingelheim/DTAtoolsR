@@ -238,8 +238,12 @@ write_dta <- function(
 #' @return Invisibly returns `path`.
 #' @keywords internal
 .dta_write_staged <- function(path, write, check = NULL) {
-  ext <- tools::file_ext(path)
-  stage <- tempfile(tmpdir = dirname(path), fileext = if (nzchar(ext)) paste0(".", ext) else "")
+  # Absolute, so a writer that changes directory (zip::zip(root = ) does)
+  # cannot resolve the staging path against somewhere else.
+  # `path` itself is returned as given.
+  target <- file.path(normalizePath(dirname(path), winslash = "/", mustWork = FALSE), basename(path))
+  ext <- tools::file_ext(target)
+  stage <- tempfile(tmpdir = dirname(target), fileext = if (nzchar(ext)) paste0(".", ext) else "")
   on.exit(unlink(stage, force = TRUE), add = TRUE)
 
   write(stage)
@@ -247,7 +251,7 @@ write_dta <- function(
     check(stage)
   }
 
-  if (!file.rename(stage, path)) {
+  if (!file.rename(stage, target)) {
     cli::cli_abort(c(
       "Could not move the finished export into place at {.path {path}}.",
       i = "The previous contents of {.path {path}}, if any, are unchanged."

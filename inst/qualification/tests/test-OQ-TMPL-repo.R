@@ -7,7 +7,7 @@
 # suppressMessages() because its cli_inform() progress note is not itself
 # under test; what it wrote and what it returned are.
 
-tmpl_fixture <- function(...) file.path(qa_suite_root(), "fixtures", "tpl", ...)
+tmpl_fixture <- function(...) file.path(qa_suite_root(), "fx", "t", ...)
 
 # Expected scaffold paths below are written from REQ-TMPL-026 and
 # REQ-TMPL-048, not discovered from the installed skeleton or the function

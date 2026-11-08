@@ -469,36 +469,37 @@ test_that("a missing entry in a plain in-vector reads as missing and matches one
 })
 
 # Regression (review finding W1): `in: [A, ~]` arrives from YAML as
-# list("A", NULL). The evaluator never matches a missing value with it; the
-# empty entry matches only the text "NULL".
-test_that("an empty YAML entry in an in-list is explained, not shown as missing", {
+# list("A", NULL). The empty entry is read as a missing value, so it matches
+# one and never the text "NULL".
+test_that("an empty YAML entry in an in-list is a missing value, in wording and evaluator", {
   y <- yaml::yaml.load("v: [A, ~]")$v
   expect_identical(y, list("A", NULL))
-  empty_note <- paste0(" (the list also holds an empty entry, which matches only the text ", q("NULL"), ")")
+  note <- " (the list also holds a missing entry, which matches a missing value)"
   if_in <- cond_rule(list(K = list(`in` = y)), list(V = list(empty = FALSE)))
   expect_identical(.rule_text(if_in), paste(
-    paste0("When K is one of ", q("A"), empty_note, ", V must not be empty."),
+    paste0("When K is one of ", q("A"), note, ", V must not be empty."),
     "Missing values:",
-    paste0(bul, "If K is missing, the condition is not met and the row is not checked."),
+    paste0(bul, "If K is missing, the condition counts as met."),
     paste0(bul, "If V is missing in a row that meets the condition, the rule is violated."),
     sep = "\n"
   ))
-  expect_false(grepl("or missing", .rule_text(if_in), fixed = TRUE))
   if_not_in <- cond_rule(list(K = list(not_in = y)), list(V = list(empty = FALSE)))
   expect_identical(
     first_line(if_not_in),
-    paste0("When K is not one of ", q("A"), empty_note, ", V must not be empty.")
+    paste0("When K is not one of ", q("A"), note, ", V must not be empty.")
   )
-  expect_true(grepl("If K is missing, the condition counts as met.", .rule_text(if_not_in), fixed = TRUE))
+  expect_true(grepl("If K is missing, the condition is not met", .rule_text(if_not_in), fixed = TRUE))
 
   # The evaluator: rows A, missing, B, "NULL"; V is always missing, so a row
   # is violated exactly when it meets the condition.
   df <- data.frame(K = c("A", NA, "B", "NULL"), V = NA_character_, stringsAsFactors = FALSE)
-  expect_identical(dta_condition_violated(if_in, df), c(TRUE, FALSE, FALSE, TRUE))
-  expect_identical(dta_condition_violated(if_not_in, df), c(FALSE, TRUE, TRUE, FALSE))
+  expect_identical(dta_condition_violated(if_in, df), c(TRUE, TRUE, FALSE, FALSE))
+  expect_identical(dta_condition_violated(if_not_in, df), c(FALSE, FALSE, TRUE, TRUE))
   num <- data.frame(K = c(1, NA, 2), V = NA_character_)
-  num_in <- cond_rule(list(K = list(`in` = list(1, NULL))), list(V = list(empty = FALSE)))
-  expect_identical(dta_condition_violated(num_in, num), c(TRUE, FALSE, FALSE))
+  num_in <- cond_rule(list(K = list(`in` = yaml::yaml.load("v: [1, ~]")$v)), list(V = list(empty = FALSE)))
+  expect_identical(dta_condition_violated(num_in, num), c(TRUE, TRUE, FALSE))
+  num_not_in <- cond_rule(list(K = list(not_in = yaml::yaml.load("v: [1, ~]")$v)), list(V = list(empty = FALSE)))
+  expect_identical(dta_condition_violated(num_not_in, num), c(FALSE, FALSE, TRUE))
 })
 
 # Regression (review round 2, W3): whether a missing entry of a list matches
@@ -629,17 +630,18 @@ test_that("a missing entry in an in-list depends on the column, and says so", {
     c(TRUE, FALSE)
   )
 
-  # An empty and a missing entry together, each explained.
+  # An empty and a missing entry together, each explained; the empty one reads
+  # as a missing value, the other as before.
   both <- cond_rule(list(A = list(equals = "a")), list(K = list(`in` = list(1, NULL, NA))))
   expect_identical(first_line(both), paste0(
-    "When A is equal to ", q("a"), ", K must be one of 1 (the list also holds an empty entry, ",
-    "which matches only the text ", q("NULL"), ", and a missing entry, which matches a missing ",
+    "When A is equal to ", q("a"), ", K must be one of 1 (the list also holds a missing entry, ",
+    "which matches a missing value, and another missing entry, which matches a missing ",
     "value if K holds numbers and otherwise only the text ", q("NA"), ")."
   ))
   expect_identical(dta_condition_violated(both, num), c(FALSE, FALSE, TRUE, TRUE))
   expect_identical(
     dta_condition_violated(both, data.frame(A = "a", K = c("NULL", NA, "NA"))),
-    c(FALSE, TRUE, FALSE)
+    c(TRUE, FALSE, FALSE)
   )
 })
 
@@ -706,8 +708,7 @@ test_that("a missing text entry in an in-list matches a missing value on every c
   # Only a missing text entry.
   only <- cond_rule(list(C = list(`in` = list(NA_character_, NULL))), list(V = list(empty = FALSE)))
   expect_identical(first_line(only), paste0(
-    "When C is one of the entries of a list that holds only an empty entry, which matches only ",
-    "the text ", q("NULL"), ", and ", na_text, ", V must not be empty."
+    "When C is one of the entries of a list that holds only ", na_text, ", V must not be empty."
   ))
 
   # Next to another missing entry, that one is named apart; the text entry

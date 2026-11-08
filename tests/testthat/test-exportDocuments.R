@@ -1967,3 +1967,19 @@ test_that("write_dataset_metadata leads with document_name and shows the organis
   expect_match(paras[2], "^Dataset Specification: ")
   expect_equal(paras[3], "Acme Pharma")
 })
+
+test_that("a template export to a path relative to the working directory lands there (DEV-017)", {
+  dir <- withr::local_tempdir()
+  template <- .make_template("Title: {DTA_TITLE}")
+  withr::defer(unlink(template, force = TRUE))
+  withr::local_dir(dir)
+  dta <- create_example_DTA()
+  # The fixture's own title (R/DTAMetaData-class.R), not exporter output.
+  expected <- "Title: Example DTA"
+
+  export_with_template(dta, template, "relative.docx", quiet = TRUE, fallback = FALSE)
+  expect_identical(.docx_paragraphs(file.path(dir, "relative.docx")), expected)
+
+  write_dta(dta, file = "viawrite.docx", template = template, quiet = TRUE)
+  expect_identical(.docx_paragraphs(file.path(dir, "viawrite.docx")), expected)
+})

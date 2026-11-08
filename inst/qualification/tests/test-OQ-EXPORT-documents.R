@@ -1818,8 +1818,12 @@ et_pandoc_json <- function(path) {
   if (!isTRUE(tryCatch(rmarkdown::pandoc_available(), error = function(e) FALSE))) {
     testthat::skip("pandoc absent: the Markdown structure cannot be read independently")
   }
-  out <- system2(rmarkdown::pandoc_exec(), c("-f", "gfm", "-t", "json", shQuote(path)), stdout = TRUE)
-  jsonlite::fromJSON(paste(out, collapse = "\n"), simplifyVector = FALSE)
+  # Through a file: stdout = TRUE re-encodes pandoc's UTF-8 in the native
+  # encoding on Windows and breaks the JSON.
+  json_file <- tempfile(fileext = ".json")
+  on.exit(unlink(json_file, force = TRUE), add = TRUE)
+  system2(rmarkdown::pandoc_exec(), c("-f", "gfm", "-t", "json", "-o", shQuote(json_file), shQuote(path)))
+  jsonlite::fromJSON(json_file, simplifyVector = FALSE)
 }
 
 et_is_node <- function(x) is.list(x) && !is.null(names(x)) && "t" %in% names(x)
@@ -2041,7 +2045,7 @@ test_that("OQ-EXPORT-061 | include_file_specs, include_rules and include_signatu
   }
 })
 
-test_that("OQ-EXPORT-062 | a template export to a path relative to the working directory writes nothing and aborts (DEV-017); the absolute form writes the document | REQ-EXPORT-016 REQ-EXPORT-014", {
+test_that("OQ-EXPORT-062 | a template export to a path relative to the working directory writes the same document as the absolute form | REQ-EXPORT-016 REQ-EXPORT-014", {
   dir <- normalizePath(qa_tempdir())
   template <- et_write_template("Title: {DTA_TITLE}", dir)
 
@@ -2051,17 +2055,15 @@ test_that("OQ-EXPORT-062 | a template export to a path relative to the working d
   export_with_template(et_dta(), template = template, output = absolute, quiet = TRUE, fallback = FALSE)
   qa_step("with an absolute path the filled document is written", "Title: Clinical Data Specification", qa_docx_text(absolute))
 
-  # KNOWN DEFECT, pinned rather than endorsed (DEV-017): the same call with
-  # the path relative to the working directory aborts and writes nothing.
-  # When it is fixed, assert instead that qa_docx_text(file.path(dir,
-  # "relative.docx")) is "Title: Clinical Data Specification".
-  relative <- withr::with_dir(dir, tryCatch(
-    export_with_template(et_dta(), template = template, output = "relative.docx", quiet = TRUE, fallback = FALSE),
-    error = function(e) e
+  # The same call with a path relative to the working directory names the
+  # same file as its absolute form.
+  withr::with_dir(dir, export_with_template(
+    et_dta(),
+    template = template, output = "relative.docx", quiet = TRUE, fallback = FALSE
   ))
-  qa_known_deviation(
-    "DEV-017",
-    inherits(relative, "error") && !file.exists(file.path(dir, "relative.docx"))
+  qa_step(
+    "with a path relative to the working directory the filled document is written there",
+    "Title: Clinical Data Specification", qa_docx_text(file.path(dir, "relative.docx"))
   )
 })
 

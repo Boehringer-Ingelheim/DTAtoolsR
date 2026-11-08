@@ -87,6 +87,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   operator) is described as such instead of as a valid rule; `equals: true` is
   no longer worded as "is present"; a list of values is worded as "one of", not
   as all of them; large numbers are written in full instead of as `1e+08`.
+- An empty YAML entry in an `in` or `not_in` list (`in: [A, ~]`) now matches a
+  missing value, as documented. It used to be dropped on numeric columns and,
+  on text columns, to match the literal text `"NULL"` instead of a missing
+  value, so such a rule passed or failed the wrong rows.
+- `export_with_template()` and `write_dta(template = )` write to a relative
+  output path. They used to fail with "not a valid DOCX" (or, with the default
+  `fallback = TRUE`, fall back to the built-in layout with a warning), because
+  the document was zipped relative to a temporary folder. Closes DEV-017.
+- The `{PROCESS_INFORMATION}` and contact blocks of a Word template no longer
+  abort when a transmission, error-handling or contact field holds several
+  values (a YAML list); the values are joined with ", " as the single
+  placeholders already did. Transfer dates in the block use the same date
+  format as the single placeholders.
+- A version-history entry may list several `changes`. A YAML list or character
+  vector used to fail with an internal R error, and `get_version_history_df()`
+  kept only the first change; the change descriptions are now joined with
+  "; " in every export. An empty list, an empty string or a missing entry is
+  rejected with a clear message.
 - `validate_template()` now reports `kind_suffix_mismatch`,
   `party_profile_invalid` and `export_template_no_placeholders`, which the app
   silently skipped while validation passed.

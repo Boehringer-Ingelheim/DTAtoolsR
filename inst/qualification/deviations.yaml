@@ -402,7 +402,7 @@ deviations:
 
   - id: DEV-017
     title: A Word template export to a relative output path fails
-    status: open
+    status: closed
     severity: minor
     affects: [REQ-EXPORT-014, REQ-EXPORT-016]
     observed: >
@@ -426,12 +426,17 @@ deviations:
     workaround: >
       Pass an absolute output path, for example normalizePath(dirname(file))
       joined with basename(file), or file.path(getwd(), file).
+    resolution: >
+      Closed by making the destination absolute at the top of
+      .dta_write_staged(), so every staged writer packs its staging file at a
+      path that does not depend on the working directory. OQ-EXPORT-062
+      asserts the corrected behaviour.
     reference: >
       R/exportTemplateDocx.R (.replace_docx_placeholders -> .dta_write_staged,
       .zip_docx_dir); inst/qualification/tests/test-OQ-EXPORT-documents.R
       (OQ-EXPORT-062)
     opened: 2026-11-08
-    closed: null
+    closed: 2026-11-08
 
 limitations:
   - id: LIM-001

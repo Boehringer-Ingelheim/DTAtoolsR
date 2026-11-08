@@ -971,6 +971,29 @@ test_that("{SUPPLIER_CONTACTS_TABLE} is the contact table of the built-in layout
   expect_false(any(c("Signature Required", "Reviewer", "Email") %in% cells[1:4]))
 })
 
+test_that("{PROCESS_INFORMATION} joins a vector-valued transmission field instead of aborting", {
+  meta <- DTAMetaData(
+    title = "T",
+    transmission = list(
+      type = "Full",
+      notification = c("Email", "Phone"),
+      frequency = c("Weekly", "Monthly")
+    )
+  )
+  dta <- DTA(datasets = list(create_example_DTADataSetTabular(2)), metadata = meta)
+  template <- .make_template("{PROCESS_INFORMATION}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  export_with_template(dta, template, out, quiet = TRUE)
+  txt <- .docx_text(out)
+
+  expect_match(txt, "Email, Phone", fixed = TRUE)
+  expect_match(txt, "Weekly, Monthly", fixed = TRUE)
+  expect_match(txt, "Full", fixed = TRUE) # a scalar renders as before
+})
+
 test_that("{DATASETS} shows the dataset facts of the built-in layout instead of a raw type line", {
   ds <- create_example_DTADataSetTabular(2)
   ds@description <- "Demographics, one row per subject."
