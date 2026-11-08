@@ -1429,6 +1429,135 @@ dta_markdown_to_pdf <- function(lines, file) {
   invisible(file)
 }
 
+# ---- Inline Markdown for the built-in PDF renderer ------------------------
+#
+# The Markdown the package writes (write_dta(format = "md")) carries more than
+# plain text: a linked table of contents "[1 Title](#1-title)", entities such
+# as "&amp;" in headings and cells, backslash escapes ("clinical\_data",
+# "a\|b"), and "<br>" for a line break inside a table cell. The renderer below
+# draws text with R graphics and understands none of that on its own, so every
+# piece of text goes through these three steps first:
+#   dta_md_inline()      links -> their text, images -> alt text, <br> -> "\n",
+#                        any other HTML tag dropped; escape pairs are skipped
+#                        so an escaped "\<" is never mistaken for a tag.
+#   dta_md_decode()      backslash escapes and entities -> the characters.
+#   dta_md_split_cells() one table row -> cells, splitting on unescaped "|".
+# Decoding comes last, so "&lt;br&gt;" in the text is shown as the literal
+# characters "<br>" and is not turned into a line break.
+
+# Replace every match of `pattern` in `x` by fn(match); text between matches is
+# kept. `x` is a single string.
+.dta_md_replace <- function(x, pattern, fn) {
+  m <- gregexpr(pattern, x, perl = TRUE)[[1]]
+  if (m[[1]] == -1L) {
+    return(x)
+  }
+  hits <- regmatches(x, list(m))[[1]]
+  regmatches(x, list(m)) <- list(vapply(hits, fn, character(1), USE.NAMES = FALSE))
+  x
+}
+
+dta_md_inline <- function(x) {
+  x <- as.character(x)[1]
+  if (is.na(x) || !nzchar(x)) {
+    return("")
+  }
+  link_text <- "((?:[^\\]\\\\]|\\\\.)*)"
+  pattern <- paste0(
+    "\\\\[[:punct:]]", # an escape pair: kept, decoded later
+    "|!\\[", link_text, "\\]\\([^)]*\\)", # image
+    "|\\[", link_text, "\\]\\([^)]*\\)", # link
+    "|<(?:https?://|mailto:)[^>\\s]+>", # autolink
+    "|<br\\s*/?>", # line break
+    "|<!--.*?-->", # comment
+    "|</?[A-Za-z][^>]*>" # any other tag
+  )
+  .dta_md_replace(x, pattern, function(h) {
+    if (startsWith(h, "\\")) {
+      return(h)
+    }
+    if (grepl("^<br", h, ignore.case = TRUE)) {
+      return("\n")
+    }
+    if (grepl("^<(https?://|mailto:)", h)) {
+      return(sub("^<(?:mailto:)?(.*)>$", "\\1", h, perl = TRUE))
+    }
+    if (startsWith(h, "<")) {
+      return("")
+    }
+    # image or link: keep the text between the brackets
+    sub("^!?\\[((?:[^\\]\\\\]|\\\\.)*)\\]\\([^)]*\\)$", "\\1", h, perl = TRUE)
+  })
+}
+
+dta_md_decode <- function(x) {
+  x <- as.character(x)[1]
+  if (is.na(x) || !nzchar(x)) {
+    return("")
+  }
+  named <- c(
+    amp = "&", lt = "<", gt = ">", quot = "\"", apos = "'", nbsp = " "
+  )
+  .dta_md_replace(
+    x,
+    "\\\\[[:punct:]]|&(?:#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6}|[A-Za-z][A-Za-z0-9]*);",
+    function(h) {
+      if (startsWith(h, "\\")) {
+        return(substr(h, 2L, 2L))
+      }
+      body <- substr(h, 2L, nchar(h) - 1L)
+      if (startsWith(body, "#")) {
+        code <- if (grepl("^#[xX]", body)) {
+          strtoi(substr(body, 3L, nchar(body)), 16L)
+        } else {
+          strtoi(substr(body, 2L, nchar(body)), 10L)
+        }
+        if (is.na(code) || code < 1L || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)) {
+          return(h)
+        }
+        return(intToUtf8(code))
+      }
+      if (body %in% names(named)) named[[body]] else h
+    }
+  )
+}
+
+dta_md_split_cells <- function(row) {
+  s <- trimws(as.character(row)[1])
+  chars <- strsplit(s, "")[[1]]
+  cells <- character(0)
+  cur <- character(0)
+  ended_on_pipe <- FALSE
+  i <- 1L
+  n <- length(chars)
+  while (i <= n) {
+    ch <- chars[[i]]
+    ended_on_pipe <- FALSE
+    if (ch == "\\" && i < n) {
+      cur <- c(cur, ch, chars[[i + 1L]])
+      i <- i + 2L
+      next
+    }
+    if (ch == "|") {
+      cells <- c(cells, paste(cur, collapse = ""))
+      cur <- character(0)
+      ended_on_pipe <- TRUE
+    } else {
+      cur <- c(cur, ch)
+    }
+    i <- i + 1L
+  }
+  # The outer pipes of "| a | b |" leave an empty first and an empty last
+  # piece; only a pipe that really is the last character closes the row.
+  if (!ended_on_pipe) {
+    cells <- c(cells, paste(cur, collapse = ""))
+  }
+  if (startsWith(s, "|") && length(cells) > 0) {
+    cells <- cells[-1L]
+  }
+  trimws(cells)
+}
+
 # Draw "compiled" Markdown onto the CURRENT graphics device, managing its own
 # A4 pages via plot.new(). Headings, inline **bold** labels, bullet lists,
 # `| pipe |` tables and `---` rules are rendered as formatted content -- never
@@ -1493,6 +1622,14 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
     x <- startX
     started <- FALSE
     for (w in words) {
+      if (isTRUE(w$br)) {
+        # A <br> in the source: end the line, even when nothing follows.
+        y <<- y - step
+        ensure(step)
+        x <- startX
+        started <- FALSE
+        next
+      }
       font <- if (italic) 3 else if (isTRUE(w$bold)) 2 else 1
       pieces <- break_token(ascii(w$text), cex, font, maxX - startX)
       for (pi in seq_along(pieces)) {
@@ -1516,12 +1653,16 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
     y <<- y - step
   }
 
-  # Split a line into **bold** / normal word tokens.
+  # Split a line into **bold** / normal word tokens. Links, <br>, escapes and
+  # entities are resolved here (see dta_md_inline()/dta_md_decode()); a <br>
+  # becomes a list(br = TRUE) entry that draw_words() turns into a new line.
   parse_rich <- function(text) {
+    text <- dta_md_inline(text)
     segs <- list()
     rest <- text
+    bold_re <- "(?<!\\\\)\\*\\*(.+?)(?<!\\\\)\\*\\*"
     while (nzchar(rest)) {
-      m <- regexpr("\\*\\*(.+?)\\*\\*", rest, perl = TRUE)
+      m <- regexpr(bold_re, rest, perl = TRUE)
       if (m[1] == -1L) {
         segs[[length(segs) + 1L]] <- list(text = rest, bold = FALSE)
         break
@@ -1534,9 +1675,16 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
     }
     words <- list()
     for (s in segs) {
-      toks <- strsplit(s$text, "[ \t]+")[[1]]
-      toks <- toks[nzchar(toks)]
-      for (t in toks) words[[length(words) + 1L]] <- list(text = t, bold = s$bold)
+      parts <- strsplit(s$text, "\n", fixed = TRUE)[[1]]
+      if (grepl("\n$", s$text)) parts <- c(parts, "")
+      for (k in seq_along(parts)) {
+        if (k > 1L) words[[length(words) + 1L]] <- list(br = TRUE)
+        toks <- strsplit(parts[[k]], "[ \t]+")[[1]]
+        toks <- toks[nzchar(toks)]
+        for (t in toks) {
+          words[[length(words) + 1L]] <- list(text = dta_md_decode(t), bold = s$bold)
+        }
+      }
     }
     words
   }
@@ -1571,7 +1719,8 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
   draw_heading <- function(level, text) {
     cex <- c(1.7, 1.4, 1.22, 1.08, 1.0, 0.95)[min(level, 6)]
     y <<- y - lh(cex) * c(0.35, 0.85, 0.65, 0.5, 0.4, 0.3)[min(level, 6)]
-    text <- gsub("\\*\\*", "", text)
+    text <- dta_md_decode(gsub("(?<!\\\\)\\*\\*", "", dta_md_inline(text), perl = TRUE))
+    text <- gsub("\n", " ", text, fixed = TRUE)
     words <- lapply(strsplit(text, "[ \t]+")[[1]], function(t) list(text = t, bold = TRUE))
     draw_words(words, cex = cex, color = "#1b3a5b")
     if (level <= 2) {
@@ -1589,17 +1738,18 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
     y <<- y - lh(1) * 0.45
   }
 
-  draw_bullet <- function(text) {
+  draw_bullet <- function(text, level = 0L) {
     ensure(lh(1))
-    graphics::text(mL + 0.08, y, ascii("\u2022"), adj = c(0, 1), cex = 1, font = 1, col = "#1b3a5b")
-    draw_words(parse_rich(text), cex = 1, indent = 0.26)
+    off <- 0.25 * level
+    graphics::text(mL + 0.08 + off, y, ascii("\u2022"), adj = c(0, 1), cex = 1, font = 1, col = "#1b3a5b")
+    draw_words(parse_rich(text), cex = 1, indent = 0.26 + off)
   }
 
-  parse_cells <- function(s) {
-    s <- trimws(s)
-    s <- sub("^\\|", "", s)
-    s <- sub("\\|$", "", s)
-    trimws(strsplit(s, "\\|")[[1]])
+  # One cell of a pipe table -> its lines of text: links, escapes and entities
+  # resolved, and a <br> starting a new line.
+  cell_lines <- function(cell) {
+    txt <- dta_md_decode(gsub("(?<!\\\\)\\*\\*", "", dta_md_inline(cell), perl = TRUE))
+    strsplit(paste0(txt, "\n"), "\n", fixed = TRUE)[[1]]
   }
 
   draw_table <- function(header, rows) {
@@ -1610,10 +1760,14 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
       return(invisible())
     }
     fit <- function(v, k) if (length(v) >= k) v[[k]] else ""
+    # Cells -> lines of text once, so widths and drawing agree.
+    prep <- function(r) lapply(seq_len(ncol), function(j) cell_lines(fit(r, j)))
+    header <- prep(header)
+    rows <- lapply(rows, prep)
     natural <- numeric(ncol)
     for (r in c(list(header), rows)) {
       for (j in seq_len(ncol)) {
-        natural[j] <- max(natural[j], sw(ascii(fit(r, j)), cex, 2))
+        natural[j] <- max(natural[j], vapply(r[[j]], function(l) sw(ascii(l), cex, 2), numeric(1)))
       }
     }
     natural <- natural + 2 * pad
@@ -1622,7 +1776,9 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
     xl <- mL + c(0, cumsum(colw)[-ncol])
     draw_row <- function(cells, header = FALSE) {
       font <- if (header) 2L else 1L
-      wr <- lapply(seq_len(ncol), function(j) wrap_text(fit(cells, j), colw[j] - 2 * pad, cex, font))
+      wr <- lapply(seq_len(ncol), function(j) {
+        unlist(lapply(cells[[j]], wrap_text, colw[j] - 2 * pad, cex, font))
+      })
       nlin <- max(1L, vapply(wr, length, 1L))
       rowH <- nlin * lh(cex) + pad
       ensure(rowH)
@@ -1657,11 +1813,11 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
       next
     }
     if (grepl("^\\s*\\|", ln) && i < n && is_sep(lines[[i + 1L]])) {
-      header <- parse_cells(ln)
+      header <- dta_md_split_cells(ln)
       j <- i + 2L
       rows <- list()
       while (j <= n && grepl("^\\s*\\|", lines[[j]])) {
-        rows[[length(rows) + 1L]] <- parse_cells(lines[[j]])
+        rows[[length(rows) + 1L]] <- dta_md_split_cells(lines[[j]])
         j <- j + 1L
       }
       draw_table(header, rows)
@@ -1680,12 +1836,14 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
       next
     }
     if (grepl("^\\s*[-*]\\s+\\S", ln)) {
-      draw_bullet(sub("^\\s*[-*]\\s+", "", ln))
+      level <- nchar(sub("^(\\s*).*$", "\\1", ln)) %/% 2L
+      draw_bullet(sub("^\\s*[-*]\\s+", "", ln), level)
       i <- i + 1L
       next
     }
     if (grepl("^\\*[^*].*\\*$", ln) && !grepl("\\*\\*", ln)) {
-      txt <- sub("^\\*(.*)\\*$", "\\1", ln)
+      txt <- dta_md_decode(dta_md_inline(sub("^\\*(.*)\\*$", "\\1", ln)))
+      txt <- gsub("\n", " ", txt, fixed = TRUE)
       words <- lapply(strsplit(trimws(txt), "[ \t]+")[[1]], function(t) list(text = t, bold = FALSE))
       draw_words(words, cex = 0.9, italic = TRUE, color = "#555555")
       i <- i + 1L
@@ -2901,25 +3059,26 @@ dta_move_column <- function(dta, dataset, id, direction) {
 
 # ---- Rule editing --------------------------------------------------------
 
-# Render a nested condition/then list to a short, human-readable string.
-.dta_cond_to_text <- function(cond) {
-  if (is.null(cond) || length(cond) == 0) {
+# The one-sentence plain-English wording of a rule. It comes from the package
+# (R/rulePhrasing.R), the single source every export, report and console
+# printout describes rules with, so the editor and the Inspect panel say the
+# same thing as a Word or HTML report. Rules are never shown as code. An
+# internal, so it is looked up in the namespace rather than exported; "" when
+# the installed package has no such function or the rule cannot be described.
+dta_rule_summary <- function(rule) {
+  fn <- tryCatch(
+    get(".rule_summary", envir = asNamespace("DTAtools")),
+    error = function(e) NULL
+  )
+  if (is.null(fn)) {
     return("")
   }
-  parts <- vapply(names(cond), function(col) {
-    spec <- cond[[col]]
-    if (is.list(spec) && length(spec) > 0) {
-      op <- names(spec)[1]
-      val <- spec[[1]]
-      sprintf("%s %s %s", col, op, paste(unlist(val), collapse = ", "))
-    } else {
-      col
-    }
-  }, character(1))
-  paste(parts, collapse = "; ")
+  out <- tryCatch(fn(rule), error = function(e) "")
+  if (length(out) != 1L || is.na(out)) "" else as.character(out)
 }
 
 # A compact data.frame overview of a dataset's rules (for the editor table).
+# `detail` is the rule's wording as dta_rule_summary() gives it.
 dta_rules_overview <- function(dta, dataset) {
   ds <- dta_get_dataset(dta, dataset)
   rules <- tryCatch(ds@specs@rules, error = function(e) NULL) %||% list()
@@ -2928,28 +3087,9 @@ dta_rules_overview <- function(dta, dataset) {
   }
   do.call(rbind, lapply(seq_along(rules), function(i) {
     l <- dta_rule_to_list(rules[[i]])
-    detail <- if (identical(l$type, "col_condition")) {
-      sprintf("IF %s THEN %s", .dta_cond_to_text(l$condition), .dta_cond_to_text(l$then))
-    } else if (identical(l$type, "col_range")) {
-      sprintf(
-        "%s in [%s, %s]", paste(l$columns, collapse = ", "),
-        l$min %||% "", l$max %||% ""
-      )
-    } else if (identical(l$type, "col_unique")) {
-      sprintf("unique(%s)", paste(l$columns, collapse = ", "))
-    } else if (identical(l$type, "group_condition")) {
-      sprintf(
-        "group(%s): %s condition(s), %s constraint(s)",
-        paste(l$group_by %||% character(0), collapse = ", "),
-        length(l$conditions %||% list()),
-        length(l$constraints %||% list())
-      )
-    } else {
-      ""
-    }
     data.frame(
       index = i, id = l$id %||% "", type = l$type %||% "",
-      detail = detail, description = l$description %||% "",
+      detail = dta_rule_summary(rules[[i]]), description = l$description %||% "",
       stringsAsFactors = FALSE
     )
   }))

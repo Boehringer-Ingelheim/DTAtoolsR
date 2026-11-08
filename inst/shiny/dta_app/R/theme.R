@@ -1019,8 +1019,9 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
       font-size: .72rem; background: var(--bi-grey-light); color: var(--bi-grey);
       border-radius: 999px; padding: 1px 8px;
     }
+    /* A rule is shown as a plain-English sentence, never as code: this takes
+       the UI's own face, not the monospace stack. */
     .inspect-desc-detail {
-      font-family: var(--bs-font-monospace);
       font-size: .82rem; color: #333; margin-top: 4px; word-break: break-word;
     }
     .inspect-desc-note { font-size: .78rem; color: var(--bi-grey); margin-top: 3px; }
