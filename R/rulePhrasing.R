@@ -189,14 +189,16 @@
 #   "is one of "A" or missing". It matches a missing value.
 #   A list (YAML sequence) is listed without its empty (YAML ~) and missing
 #   entries, which are explained in parentheses instead, because the
-#   evaluator does not read them as "missing". The evaluator
+#   evaluator mostly does not read them as "missing". The evaluator
 #   (dta_equality_bound()) compares a list as numbers only when the column
 #   holds numbers and the flattened list is numeric, or is text of which
 #   every entry that is not missing reads as a number (a text "2" counts; a
-#   logical true does not, nor does an empty entry, which flattening drops);
-#   otherwise it compares text, and a missing entry is the text "NA", an
-#   empty one the text "NULL". Since the list is known, the wording names
-#   only what depends on the column:
+#   list of logical values only does not, since flattening keeps it logical,
+#   while true next to a number flattens to 1; an empty entry is dropped);
+#   otherwise it compares text, and a missing entry is the text "NA" (unless
+#   it is a missing text entry, see below), an empty one the text "NULL".
+#   Since the list is known, the wording names only what depends on the
+#   column:
 #     empty entry:   "an empty entry, which matches only the text "NULL""
 #     missing entry, list compares as numbers: "a missing entry, which
 #                    matches a missing value if C holds numbers and
@@ -205,8 +207,15 @@
 #                    text "NA", never a missing value"
 #   as "one of a or b (the list also holds <entry>[, and <entry>])" or, with
 #   no other entry, "one of the entries of a list that holds only <entry>".
-#   (1) in: yes for a plain vector with a missing entry; "depends" for a
-#       list with a missing entry that compares as numbers; otherwise no.
+#     missing text entry (YAML .na.character, NA_character_): "a missing
+#                    entry, which matches a missing value" in a column of any
+#                    type (match() keeps it missing while the other entries
+#                    become text); next to it, any other missing entry reads
+#                    "another missing entry, which ..." as above, without
+#                    ", never a missing value".
+#   (1) in: yes for a plain vector with a missing entry or a list with a
+#       missing text entry; "depends" for a list with another missing entry
+#       that compares as numbers; otherwise no.
 #   (2) not_in: the opposite of (1).
 # "missing" says what the test gives for a missing value: yes, no, or
 # undecided (no for a group condition and the THEN; see the IF notes).
@@ -516,8 +525,9 @@
 
 # The values of an in/not_in test. A plain vector lists every entry, a
 # missing one as "missing". A list (YAML sequence) is listed without its empty
-# (NULL) and missing entries, which the evaluator does not read as "missing"
-# (see the comment block at the top); they are explained in parentheses.
+# (NULL) and missing entries, which the evaluator mostly does not read as
+# "missing" (see the comment block at the top); they are explained in
+# parentheses.
 # `missing` is "yes", "no" or "depends": whether `in` holds for a missing
 # value.
 .rule_set_values <- function(value, col) {
@@ -532,6 +542,11 @@
   is_na <- vapply(value, function(el) {
     !is.list(el) && length(el) == 1L && is.na(el) && !(is.double(el) && is.nan(el))
   }, logical(1))
+  # A missing text entry (YAML .na.character) stays a true missing value when
+  # match() turns the list into text, so it matches a missing value in a
+  # column of any type; any other missing entry becomes the text "NA".
+  is_na_text <- is_na & vapply(value, is.character, logical(1))
+  is_na_other <- is_na & !is_na_text
   shown <- .rule_values(value[!is_null & !is_na])
   bodies <- character(0)
   if (any(is_null)) {
@@ -540,17 +555,24 @@
     ))
   }
   missing <- "no"
-  if (any(is_na)) {
+  if (any(is_na_text)) {
+    missing <- "yes"
+    bodies <- c(bodies, "a missing entry, which matches a missing value")
+  }
+  if (any(is_na_other)) {
+    entry <- if (any(is_na_text)) "another missing entry" else "a missing entry"
     if (.rule_list_reads_numeric(value)) {
-      missing <- "depends"
+      if (missing == "no") {
+        missing <- "depends"
+      }
       bodies <- c(bodies, paste0(
-        "a missing entry, which matches a missing value if ", col,
+        entry, ", which matches a missing value if ", col,
         " holds numbers and otherwise only the text ", .rule_value("NA")
       ))
     } else {
       bodies <- c(bodies, paste0(
-        "a missing entry, which matches only the text ", .rule_value("NA"),
-        ", never a missing value"
+        entry, ", which matches only the text ", .rule_value("NA"),
+        if (!any(is_na_text)) ", never a missing value"
       ))
     }
   }
@@ -1412,11 +1434,15 @@
       i <- j + 1L
       next
     }
-    if (nzchar(lines$text[[i]])) {
-      # A line break of a multi-line Purpose stays a line break, as in Word
-      # and Markdown; it is inserted after escaping, so it cannot be markup.
+    # Trailing white space (a final line break of a Purpose) would only add
+    # an empty line.
+    text <- sub("[[:space:]]+$", "", lines$text[[i]])
+    if (nzchar(text)) {
+      # A line break of a multi-line Purpose (line feed, carriage return or
+      # both) stays a line break, as in Word and Markdown; it is inserted
+      # after escaping, so it cannot be markup.
       bodies[[k]] <- c(bodies[[k]], paste0(
-        "<p>", gsub("\r?\n", "<br>", esc(lines$text[[i]])), "</p>"
+        "<p>", gsub("\r\n?|\n", "<br>", esc(text)), "</p>"
       ))
     }
     i <- i + 1L
@@ -1484,7 +1510,9 @@
       " a bound written as a number counts the days since 1 January 1970 (in a",
       " column of dates with a time, the seconds since the start of 1 January",
       " 1970 in UTC), and a bound written as text is read as a date written like",
-      " 2024-01-31; any other text stops the validation with an error, even",
+      " 2024-01-31 (in a column of dates with a time, as midnight in the time",
+      " zone of the computer that runs the validation); any other text stops the",
+      " validation with an error, even",
       " text that reads as a number, such as ", .RULE_LQ, "5", .RULE_RQ, "."
     ),
     paste(
