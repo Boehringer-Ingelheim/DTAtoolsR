@@ -522,12 +522,12 @@ dta_template_placeholders <- function(dta = NULL) {
     if (!is.list(ct)) {
       next
     }
-    nm <- if (!is.null(ct$name) && nzchar(ct$name)) as.character(ct$name)[[1]] else "(Unnamed)"
+    nm <- .tv_scalar(ct$name, default = "(Unnamed)")
     lines <- c(lines, paste0("- ", nm))
-    if (!is.null(ct$role) && nzchar(ct$role)) lines <- c(lines, paste0("  - Role: ", ct$role))
-    if (!is.null(ct$department) && nzchar(ct$department)) lines <- c(lines, paste0("  - Department: ", ct$department))
-    if (!is.null(ct$email) && nzchar(ct$email)) lines <- c(lines, paste0("  - Email: ", ct$email))
-    if (!is.null(ct$phone) && nzchar(ct$phone)) lines <- c(lines, paste0("  - Phone: ", ct$phone))
+    for (label in c("Role", "Department", "Email", "Phone")) {
+      v <- .tv_scalar(ct[[tolower(label)]])
+      if (nzchar(v)) lines <- c(lines, paste0("  - ", label, ": ", v))
+    }
     address <- .tv_scalar(ct$address)
     if (nzchar(address)) lines <- c(lines, paste0("  - Address: ", address))
     if (isTRUE(ct$signature)) lines <- c(lines, "  - Signatory: Yes")
@@ -583,38 +583,19 @@ dta_template_placeholders <- function(dta = NULL) {
   trans <- meta@transmission
   if (!is.null(trans) && length(trans) > 0) {
     lines <- c(lines, "- Transmission")
-    if (!is.null(trans$type) && nzchar(as.character(trans$type))) {
-      lines <- c(lines, paste0("  - ", .transmission_label("type"), ": ", as.character(trans$type)))
-    }
-    if (!is.null(trans$frequency) && nzchar(as.character(trans$frequency))) {
-      lines <- c(lines, paste0("  - ", .transmission_label("frequency"), ": ", as.character(trans$frequency)))
-    }
-    if (!is.null(trans$notification) && nzchar(as.character(trans$notification))) {
-      lines <- c(lines, paste0("  - ", .transmission_label("notification"), ": ", as.character(trans$notification)))
-    }
-    if (!is.null(trans$date_first_transfer) && nzchar(as.character(trans$date_first_transfer))) {
-      lines <- c(lines, paste0(
-        "  - ", .transmission_label("date_first_transfer"), ": ", as.character(trans$date_first_transfer)
-      ))
-    }
-    if (!is.null(trans$date_last_transfer) && nzchar(as.character(trans$date_last_transfer))) {
-      lines <- c(lines, paste0(
-        "  - ", .transmission_label("date_last_transfer"), ": ", as.character(trans$date_last_transfer)
-      ))
-    }
-    extra_fields <- setdiff(
-      names(trans),
-      c("type", "frequency", "notification", "date_first_transfer", "date_last_transfer")
-    )
-    for (key in extra_fields) {
+    lead_fields <- c("type", "frequency", "notification", "date_first_transfer", "date_last_transfer")
+    # .tv_scalar() joins a YAML sequence with ", " and treats empty as absent,
+    # so a vector-valued field never reaches a length-1-only `&&`.
+    for (key in c(lead_fields, setdiff(names(trans), lead_fields))) {
       value <- .tv_scalar(trans[[key]])
       if (nzchar(value)) {
         lines <- c(lines, paste0("  - ", .transmission_label(key), ": ", value))
       }
     }
   }
-  if (!is.null(meta@error_handling) && nzchar(as.character(meta@error_handling))) {
-    lines <- c(lines, "- Error handling", paste0("  - ", as.character(meta@error_handling)))
+  error_handling <- .tv_scalar(meta@error_handling)
+  if (nzchar(error_handling)) {
+    lines <- c(lines, "- Error handling", paste0("  - ", error_handling))
   }
   auth <- .format_authorized_for_corrections_lines(meta@authorized_for_corrections)
   if (length(auth) > 0) {
