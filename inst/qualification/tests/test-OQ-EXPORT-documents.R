@@ -99,6 +99,115 @@ et_two_cols <- function() {
   ))
 }
 
+# ---- reading a Markdown document back ---------------------------------------
+#
+# These helpers only take the file apart along the syntax GitHub-flavoured
+# Markdown defines (ATX headings, pipe tables, list items, backslash escapes
+# and the three HTML entities); they know nothing of how the package builds
+# the file. Every expected value is written in the tests themselves.
+
+et_md_lines <- function(path) readLines(path, warn = FALSE, encoding = "UTF-8")
+
+# Escaped Markdown text as a reader sees it: a raw "<br>" is a line break, a
+# backslash escape is the character it escapes, the entities their character.
+et_md_unescape <- function(x) {
+  x <- gsub("<br>", "\n", x, fixed = TRUE)
+  x <- gsub("\\\\([[:punct:]])", "\\1", x)
+  x <- gsub("&lt;", "<", x, fixed = TRUE)
+  x <- gsub("&gt;", ">", x, fixed = TRUE)
+  gsub("&amp;", "&", x, fixed = TRUE)
+}
+
+# The ATX headings: level (number of #), chapter number ("" if none) and the
+# unescaped title.
+et_md_headings <- function(lines) {
+  hits <- regmatches(lines, regexec("^(#{1,6}) (.*)$", lines))
+  hits <- Filter(length, hits)
+  level <- vapply(hits, function(m) nchar(m[[2]]), integer(1))
+  text <- vapply(hits, function(m) m[[3]], character(1))
+  numbered <- grepl("^[0-9]+(\\.[0-9]+)* ", text)
+  number <- ifelse(numbered, sub(" .*$", "", text), "")
+  title <- ifelse(numbered, sub("^[^ ]+ ", "", text), text)
+  data.frame(level = level, number = number, title = et_md_unescape(title), stringsAsFactors = FALSE)
+}
+
+# Every pipe table: a list of tables, each a list of rows (header row first,
+# the delimiter row dropped), each row the unescaped cells. An escaped pipe
+# is written "\|", so a cell boundary is a pipe with a blank on both sides.
+et_md_tables <- function(lines) {
+  is_row <- grepl("^\\| .* \\|$", lines) | grepl("^\\|  ?\\|$", lines)
+  runs <- rle(is_row)
+  ends <- cumsum(runs$lengths)
+  starts <- ends - runs$lengths + 1L
+  out <- list()
+  for (k in which(runs$values)) {
+    rows <- lines[starts[[k]]:ends[[k]]]
+    rows <- rows[!grepl("^\\|( :?-{3,}:? \\|)+$", rows)]
+    out[[length(out) + 1L]] <- lapply(rows, function(r) {
+      inner <- substr(r, 3L, nchar(r) - 2L)
+      et_md_unescape(strsplit(inner, " | ", fixed = TRUE)[[1]])
+    })
+  }
+  out
+}
+
+# All two-cell rows of all tables, as "Item = Details" strings.
+et_md_pairs <- function(lines) {
+  rows <- unlist(et_md_tables(lines), recursive = FALSE)
+  rows <- Filter(function(r) length(r) == 2L, rows)
+  vapply(rows, function(r) paste(r[[1]], "=", r[[2]]), character(1))
+}
+
+# The table whose header row is exactly `header`, as a character matrix of its
+# data rows (NULL when there is none).
+et_md_table <- function(lines, header) {
+  hit <- Filter(function(t) identical(t[[1]], header), et_md_tables(lines))
+  if (length(hit) == 0) {
+    return(NULL)
+  }
+  do.call(rbind, hit[[1]][-1])
+}
+
+# The entries of the "## Contents" list: indentation depth, link text and
+# link target.
+et_md_toc <- function(lines) {
+  start <- match("## Contents", lines)
+  if (is.na(start)) {
+    return(NULL)
+  }
+  rest <- lines[-seq_len(start)]
+  stop_at <- match(TRUE, grepl("^#", rest))
+  block <- rest[seq_len(if (is.na(stop_at)) length(rest) else stop_at - 1L)]
+  hits <- Filter(length, regmatches(block, regexec("^( *)- \\[(.*)\\]\\(#([^)]*)\\)$", block)))
+  data.frame(
+    depth = vapply(hits, function(m) nchar(m[[2]]) %/% 2L + 1L, integer(1)),
+    text = et_md_unescape(vapply(hits, function(m) m[[3]], character(1))),
+    target = vapply(hits, function(m) m[[4]], character(1)),
+    stringsAsFactors = FALSE
+  )
+}
+
+# The headings of a Word document: level (from the "heading N" style) and text.
+et_word_headings <- function(path) {
+  s <- qa_docx_summary(path)
+  s <- s[!is.na(s$style_name) & grepl("^heading [0-9]$", s$style_name), , drop = FALSE]
+  data.frame(
+    level = as.integer(sub("heading ", "", s$style_name, fixed = TRUE)),
+    title = s$text, stringsAsFactors = FALSE
+  )
+}
+
+# The XML parts of a .docx that carry what a reader sees: the body and every
+# running header and footer, by part name.
+et_docx_parts <- function(path) {
+  dir <- tempfile("docx-parts-", tmpdir = qa_tempdir())
+  utils::unzip(path, exdir = dir)
+  files <- list.files(file.path(dir, "word"), pattern = "^(document|header[0-9]*|footer[0-9]*)[.]xml$")
+  stats::setNames(lapply(files, function(f) readBin(file.path(dir, "word", f), "raw", 1e7)), files)
+}
+
+et_raw <- function(path) readBin(path, "raw", file.size(path))
+
 # ---- export_column_value_table() input validation ---------------------------
 
 test_that("OQ-EXPORT-001 | export_column_value_table on a bad first argument raises a package error | REQ-EXPORT-001", {
@@ -220,6 +329,22 @@ test_that("OQ-EXPORT-006 | include_signatures adds an approval section naming th
   for (name in c("Alice Smith", "Bob Johnson", "Emily Turner")) {
     qa_step(sprintf("signatory '%s' is named", name), TRUE, grepl(name, text, fixed = TRUE))
   }
+  qa_step("the approval chapter is the first chapter", "Approval & Signatures", et_word_headings(out)$title[[1]])
+
+  md <- file.path(dir, "signed.md")
+  write_dta(et_dta(), file = md, format = "md", quiet = TRUE, include_signatures = TRUE)
+  lines <- et_md_lines(md)
+  heads <- et_md_headings(lines)
+  chapters <- heads[nzchar(heads$number), , drop = FALSE]
+  qa_step(
+    "Markdown: the first chapter is 1 Approval & Signatures",
+    c("1", "Approval & Signatures"), c(chapters$number[[1]], chapters$title[[1]])
+  )
+  sig <- et_md_table(lines, c("Organization", "Name", "Role", "Signature", "Date"))
+  qa_step(
+    "Markdown: the approval table names exactly the three flagged signatories",
+    c("Alice Smith", "Bob Johnson", "Emily Turner"), sort(sig[, 2])
+  )
 })
 
 test_that("OQ-EXPORT-007 | include_signatures = FALSE omits the approval section | REQ-EXPORT-005", {
@@ -231,6 +356,15 @@ test_that("OQ-EXPORT-007 | include_signatures = FALSE omits the approval section
     "no approval heading is present",
     FALSE, grepl("Approval & Signatures", qa_docx_text(out), fixed = TRUE)
   )
+
+  md <- file.path(dir, "unsigned.md")
+  write_dta(et_dta(), file = md, format = "md", quiet = TRUE, include_signatures = FALSE)
+  lines <- et_md_lines(md)
+  qa_step("Markdown: no approval text is present", FALSE, any(grepl("Approval", lines, fixed = TRUE)))
+  qa_step("Markdown: chapter 1 is then Document Information", "1 Document Information", {
+    heads <- et_md_headings(lines)
+    paste(heads$number[nzchar(heads$number)][[1]], heads$title[nzchar(heads$number)][[1]])
+  })
 })
 
 test_that("OQ-EXPORT-008 | include_yaml embeds the given specification text | REQ-EXPORT-006", {
@@ -266,21 +400,148 @@ test_that("OQ-EXPORT-009 | include_yaml with no yaml_text warns and embeds nothi
   )
 })
 
-test_that("OQ-EXPORT-010 | format = \"md\" writes a markdown file with the same key facts | REQ-EXPORT-007", {
+test_that("OQ-EXPORT-010 | format = \"md\" writes a numbered GFM file with the Word chapters, a linked contents list and the same facts | REQ-EXPORT-007", {
   dir <- qa_tempdir()
   out <- file.path(dir, "transfer.md")
   write_dta(et_dta(), file = out, format = "md", quiet = TRUE)
+  docx <- file.path(dir, "transfer.docx")
+  write_dta(et_dta(), file = docx, quiet = TRUE)
 
-  text <- paste(readLines(out, warn = FALSE), collapse = "\n")
-  qa_step("the title line is present", TRUE, grepl("**Title:** Clinical Data Specification", text, fixed = TRUE))
-  qa_step("the version line is present", TRUE, grepl("**Version:** 0.1", text, fixed = TRUE))
-  # The fixture gives the dataset the label "Clinical data table", so its
-  # heading carries the label with the id kept visible beside it -- escaped
-  # Markdown, so the id's `_` cannot start emphasis.
-  qa_step(
-    "the dataset heading is present, naming the dataset by its label and its id",
-    TRUE, grepl("### Clinical data table (clinical\\_data)", text, fixed = TRUE)
+  # Encoding and line endings, on the bytes.
+  bytes <- et_raw(out)
+  n <- length(bytes)
+  qa_check("the file is valid UTF-8", validUTF8(rawToChar(bytes)))
+  qa_step("no carriage return anywhere (LF line endings)", 0L, sum(bytes == as.raw(13L)))
+  qa_check(
+    "the file ends with exactly one line ending",
+    n >= 2L && bytes[[n]] == as.raw(10L) && bytes[[n - 1L]] != as.raw(10L)
   )
+
+  lines <- et_md_lines(out)
+  heads <- et_md_headings(lines)
+  qa_step("the document name is the only level-1 heading", "Data Transfer Agreement", heads$title[heads$level == 1L])
+
+  # The chapters the fixture gives content to, in the order and at the
+  # levels REQ-EXPORT-007 lists: it has signatories (include_signatures
+  # defaults to TRUE), a supplier and a receiver, transmission details and
+  # one dataset, and no version history, study, error handling, correction
+  # list or agreement clause.
+  expected <- data.frame(
+    level = c(2L, 2L, 2L, 3L, 3L, 2L, 3L, 2L, 3L, 4L, 4L, 4L),
+    number = c("1", "2", "3", "3.1", "3.2", "4", "4.1", "5", "5.1", "5.1.1", "5.1.2", "5.1.3"),
+    title = c(
+      "Approval & Signatures", "Document Information", "Parties", "Supplier", "Receiver",
+      "Process Information", "Transmission Details", "Datasets",
+      "Clinical data table (clinical_data)", "Files", "Column Specifications", "Validation Rules"
+    ),
+    stringsAsFactors = FALSE
+  )
+  chapters <- heads[nzchar(heads$number), , drop = FALSE]
+  rownames(chapters) <- NULL
+  qa_step("the numbered chapters, their numbers and levels", expected, chapters)
+  qa_step(
+    "and they are the Word document's chapters, in the same order and one level deeper",
+    et_word_headings(docx),
+    data.frame(level = chapters$level - 1L, title = chapters$title, stringsAsFactors = FALSE)
+  )
+
+  # The contents list: chapters of the first two levels, each linked to the
+  # anchor GitHub derives from the heading text (lower case, punctuation other
+  # than "-" and "_" removed, each space a "-").
+  toc <- et_md_toc(lines)
+  qa_check("a Contents list comes before the first chapter", match("## Contents", lines) < match("## 1 Approval &amp; Signatures", lines))
+  qa_step(
+    "the Contents list links the chapters of the first two levels",
+    c(
+      "1 Approval & Signatures", "2 Document Information", "3 Parties", "3.1 Supplier", "3.2 Receiver",
+      "4 Process Information", "4.1 Transmission Details", "5 Datasets",
+      "5.1 Clinical data table (clinical_data)"
+    ),
+    toc$text
+  )
+  qa_step("each at its own depth", c(1L, 1L, 1L, 2L, 2L, 1L, 2L, 1L, 2L), toc$depth)
+  qa_step(
+    "to the anchor GitHub computes for the heading",
+    c(
+      "1-approval--signatures", "2-document-information", "3-parties", "31-supplier", "32-receiver",
+      "4-process-information", "41-transmission-details", "5-datasets", "51-clinical-data-table-clinical_data"
+    ),
+    toc$target
+  )
+
+  # Facts, each from inst/extdata/clinical_dta.yaml.
+  qa_check("the transfer's title follows the document name in bold", "**Clinical Data Specification**" %in% lines)
+  qa_check("the document header is shown", "Company" %in% lines)
+  pairs <- et_md_pairs(lines)
+  for (pair in c("Version = 0.1", "Date = 2024-06-19", "Organization = Test Company 2", "Organization = Test Company")) {
+    qa_check(paste0("the fact '", pair, "' is in a fact table"), pair %in% pairs)
+  }
+
+  contacts <- rbind(
+    et_md_table(lines, c("Name", "Role", "Department", "Contact", "Responsibilities"))
+  )
+  all_contacts <- do.call(rbind, lapply(
+    Filter(function(t) identical(t[[1]], c("Name", "Role", "Department", "Contact", "Responsibilities")), et_md_tables(lines)),
+    function(t) do.call(rbind, t[-1])
+  ))
+  qa_step(
+    "both contact tables together list all six contacts",
+    sort(c("Alice Smith", "Bob Johnson", "Carol Lee", "David Kim", "Emily Turner", "Michael Brown")),
+    sort(all_contacts[, 1])
+  )
+  emily <- all_contacts[all_contacts[, 1] == "Emily Turner", ]
+  qa_step(
+    "a contact row carries role, department, e-mail address and phone number",
+    c("Senior Data Manager", "Data Management", "emily.turner@testcompany2.com\n321-654-0987"),
+    unname(emily[2:4])
+  )
+  qa_check("the supplier's contact table is the first one", identical(contacts[1, 1], "Emily Turner"))
+
+  # The transmission details under the labels the Word document gives them;
+  # the same pairs are checked in the Word document's cells.
+  transmission <- c(
+    "Transfer method" = "secure S3 bucket", "Frequency" = "one-time", "Notification" = "email",
+    "Test upload" = "No", "Blinded transfer" = "No",
+    "First transfer" = "2025-11-25", "Last transfer" = "2026-01-15"
+  )
+  cells <- qa_docx_summary(docx)
+  cells <- cells$text[cells$content_type %in% "table cell"]
+  for (label in names(transmission)) {
+    qa_check(
+      paste0("Markdown states '", label, "' as ", transmission[[label]]),
+      paste(label, "=", transmission[[label]]) %in% pairs
+    )
+    qa_step(paste0("and so does the Word document"), transmission[[label]], cells[match(label, cells) + 1L])
+  }
+
+  files <- et_md_table(lines, c("File Name / Pattern", "Match Type", "Format", "Expected Count", "Description"))
+  qa_step("the declared file pattern is listed", "clinical_data.*.csv$", files[1, 1])
+
+  cols <- et_md_table(lines, c("Variable Name", "Label", "Type", "Nullable", "Allowed Values / Pattern", "Description"))
+  qa_step("the column table has one row per declared column", 14L, nrow(cols))
+  qa_step(
+    "the STUDYID row carries label, type, nullability, permitted value and description",
+    c("STUDYID", "Study Identifier", "SAS Char (10)", "No", "1234-5678", "Unique study ID"),
+    unname(cols[cols[, 1] == "STUDYID", ])
+  )
+  qa_step("the VISIT row lists its codelist", "V01, V02, V03, EOT", unname(cols[cols[, 1] == "VISIT", 5]))
+
+  # A codelist far longer than a table cell comfortably holds is still listed
+  # in full.
+  codes <- sprintf("CODE%02d", 1:40)
+  long <- DTA(
+    datasets = list(DTADataSetTabular(
+      id = "long_list",
+      specs = DTAColumnSpecCollection(columns = list(
+        CODE = DTAColumnSpec(id = "CODE", type = "SAS Char", length = 6, nullable = FALSE, values = codes)
+      ))
+    )),
+    metadata = DTAMetaData(title = "Long list", version = "1.0")
+  )
+  long_md <- file.path(dir, "long.md")
+  write_dta(long, file = long_md, format = "md", quiet = TRUE)
+  long_cols <- et_md_table(et_md_lines(long_md), c("Variable Name", "Label", "Type", "Nullable", "Allowed Values / Pattern", "Description"))
+  qa_step("all 40 permitted values are listed, none cut off", paste(codes, collapse = ", "), unname(long_cols[1, 5]))
 })
 
 test_that("OQ-EXPORT-011 | format = \"pdf\" produces a genuine PDF when a backend is available | REQ-EXPORT-008", {
@@ -333,29 +594,65 @@ test_that("OQ-EXPORT-014 | write_dataset_metadata names the dataset, its files a
   out <- file.path(dir, "dataset.docx")
   write_dataset_metadata(ds, file = out, quiet = TRUE)
 
-  text <- qa_docx_text(out)
-  qa_step("the dataset id is named", TRUE, grepl("clinical_data", text, fixed = TRUE))
-  qa_step(
-    "the title names the dataset by its label with its id beside it",
-    TRUE, grepl("Dataset Specification: Clinical data table (clinical_data)", text, fixed = TRUE)
+  # Expected values from inst/extdata/clinical_dta.yaml: id clinical_data,
+  # name "Clinical data table", type tabular, the folded description below.
+  description <- paste(
+    "Subject-level clinical observations for the study, one row per subject and",
+    "visit, exported from the EDC system as CSV. The transfer is checked",
+    "against the column specification and validation rules below."
   )
+  chapters <- c("Description", "Files", "Column Specifications", "Validation Rules")
 
-  # The information table leads with the identifier, then the label, then the
-  # long description, each in its own row.
-  info <- et_docx_tables(out)[[1]]
+  paras <- qa_docx_summary(out)$text
+  qa_check(
+    "the title names the dataset by its label with its id beside it",
+    "Dataset Specification: Clinical data table (clinical_data)" %in% paras
+  )
+  # The title block's fact table has no header row: its first row is the
+  # Dataset ID row.
+  facts <- et_docx_tables(out)[[1]]
   qa_step(
-    "the information table lists the id, name and description rows in that order",
-    c("ID", "Name", "Description"), info$col1[2:4]
+    "the fact table lists Dataset ID, Name and Type, in that order",
+    c("Dataset ID", "Name", "Type"), facts$col1
   )
   qa_step(
-    "with the id and the name as the fixture declares them",
-    c("clinical_data", "Clinical data table"), info$col2[2:3]
+    "with the id, the name and the type as the fixture declares them",
+    c("clinical_data", "Clinical data table", "Tabular"), facts$col2
   )
-  qa_step("the declared file pattern is named", TRUE, grepl("clinical_data.*.csv$", text, fixed = TRUE))
-  qa_step("a declared column id is named", TRUE, grepl("SUBJECT_ID", text, fixed = TRUE))
+  heads <- et_word_headings(out)
+  qa_step("the chapters, in order (no signatories, so no approval chapter)", chapters, heads$title)
+  qa_step("all of them top-level chapters", rep(1L, 4), heads$level)
+  qa_check("the Description chapter gives the description in full", description %in% paras)
+  file_tab <- et_docx_table(out, "File Name / Pattern")
+  qa_step("the declared file pattern is listed", "clinical_data.*.csv$", file_tab$col1[[2]])
+  col_tab <- et_docx_table(out, "Variable Name")
+  qa_step("the column table has one row per declared column", 15L, nrow(col_tab))
+
+  md <- file.path(dir, "dataset.md")
+  write_dataset_metadata(ds, file = md, format = "md", quiet = TRUE)
+  lines <- et_md_lines(md)
+  qa_check(
+    "Markdown: the title names the dataset by its label with its id beside it",
+    "**Dataset Specification: Clinical data table (clinical\\_data)**" %in% lines
+  )
+  head_tab <- et_md_tables(lines)[[1]]
+  qa_step(
+    "Markdown: the first table is the fact table Dataset ID, Name, Type",
+    list(c("Item", "Details"), c("Dataset ID", "clinical_data"), c("Name", "Clinical data table"), c("Type", "Tabular")),
+    head_tab
+  )
+  qa_check("Markdown: the fact table comes before the contents list", match("| Dataset ID | clinical\\_data |", lines) < match("## Contents", lines))
+  md_heads <- et_md_headings(lines)
+  md_heads <- md_heads[nzchar(md_heads$number), , drop = FALSE]
+  qa_step("Markdown: the same chapters, numbered 1 to 4", paste(1:4, chapters), paste(md_heads$number, md_heads$title))
+  qa_check("Markdown: the Description chapter gives the description in full", description %in% lines)
+  md_files <- et_md_table(lines, c("File Name / Pattern", "Match Type", "Format", "Expected Count", "Description"))
+  qa_step("Markdown: the declared file pattern is listed", "clinical_data.*.csv$", md_files[1, 1])
+  md_cols <- et_md_table(lines, c("Variable Name", "Label", "Type", "Nullable", "Allowed Values / Pattern", "Description"))
+  qa_step("Markdown: the column table has one row per declared column", 14L, nrow(md_cols))
 })
 
-test_that("OQ-EXPORT-015 | write_file_specification is the write_dataset_metadata alias | REQ-EXPORT-010", {
+test_that("OQ-EXPORT-015 | write_file_specification is the write_dataset_metadata alias | REQ-EXPORT-010 REQ-EXPORT-040", {
   ds <- et_dta()[["clinical_data"]]
   dir <- qa_tempdir()
   out_a <- file.path(dir, "a.docx")
@@ -363,19 +660,25 @@ test_that("OQ-EXPORT-015 | write_file_specification is the write_dataset_metadat
   write_dataset_metadata(ds, file = out_a, quiet = TRUE)
   write_file_specification(ds, file = out_b, quiet = TRUE)
 
-  # Content, not raw bytes: a DOCX is a zip archive that may stamp each entry
-  # with the current time, so two calls made a second apart can differ in
-  # bytes while saying exactly the same thing. The footer's own "Generated:"
-  # line is minute-stamped (see .add_footer_section()) and is dropped for the
-  # same reason -- two calls a minute apart are still the same document.
-  drop_generated <- function(text) {
-    lines <- strsplit(text, "\n", fixed = TRUE)[[1]]
-    paste(lines[!startsWith(lines, "Generated:")], collapse = "\n")
-  }
-  qa_step(
-    "the alias produces the same document content as the function it wraps",
-    drop_generated(qa_docx_text(out_a)), drop_generated(qa_docx_text(out_b))
+  # The parts a reader sees, not the archive's bytes: a DOCX is a zip archive
+  # whose entries carry the time they were packed, so two calls made a second
+  # apart differ in bytes while saying exactly the same thing. The document
+  # itself carries no time (REQ-EXPORT-040), so the parts must be identical.
+  parts_a <- et_docx_parts(out_a)
+  parts_b <- et_docx_parts(out_b)
+  qa_check("the document has a body, a running header and a running footer", all(c("document.xml") %in% names(parts_a)) &&
+    any(startsWith(names(parts_a), "header")) && any(startsWith(names(parts_a), "footer")))
+  qa_step("the alias writes the same parts", names(parts_a), names(parts_b))
+  qa_check(
+    "and every body, header and footer part is identical",
+    identical(parts_a, parts_b)
   )
+
+  md_a <- file.path(dir, "a.md")
+  md_b <- file.path(dir, "b.md")
+  write_dataset_metadata(ds, file = md_a, format = "md", quiet = TRUE)
+  write_file_specification(ds, file = md_b, format = "md", quiet = TRUE)
+  qa_check("the Markdown documents are byte-identical", identical(et_raw(md_a), et_raw(md_b)))
 })
 
 # ---- export_specs_table() ---------------------------------------------------
@@ -1143,10 +1446,15 @@ test_that("OQ-EXPORT-052 | the Markdown file leads with the document name, then 
     "the first line is the joined document name as a top-level heading",
     "# Data Transmission Specification / Data Transfer Agreement", lines[[1]]
   )
-  qa_check("the transfer's own title is in the header block", "**Title:** Clinical Data Specification" %in% lines)
+  # The header block is everything before the "## Contents" list.
+  head_block <- lines[seq_len(match("## Contents", lines) - 1L)]
+  qa_step(
+    "the transfer's own title follows directly, in bold",
+    "**Clinical Data Specification**", head_block[nzchar(head_block)][[2]]
+  )
   qa_check(
-    "the organisation and unit are in the header block",
-    "**Organisation:** Example Institute · Data Management" %in% lines
+    "the organisation and unit are a line of the header block",
+    paste0("Example Institute ", intToUtf8(0xb7), " Data Management") %in% head_block
   )
 
   plain <- file.path(dir, "plain.md")
@@ -1235,4 +1543,416 @@ test_that("OQ-EXPORT-054 | the document and organisation placeholders are filled
   tokens <- c("{DOCUMENT_NAME}", "{DOCUMENT_ABBREVIATION}", "{ORGANISATION_NAME}", "{ORGANISATION_UNIT}")
   qa_check("all four are reported", all(tokens %in% names(described)))
   qa_step("as inline placeholders", rep("inline", 4), unname(attr(described, "kind")[tokens]))
+})
+
+# ---- deterministic documents, author text cannot change structure ------------
+# (REQ-EXPORT-040), include_* in every format (REQ-EXPORT-041)
+
+# The first locale besides "C" this machine can set LC_TIME to, one whose
+# month names differ from the C locale's; NULL when none is installed.
+et_other_time_locale <- function() {
+  old <- Sys.getlocale("LC_TIME")
+  on.exit(suppressWarnings(Sys.setlocale("LC_TIME", old)), add = TRUE)
+  for (loc in c("de_DE.UTF-8", "de_DE.utf8", "fr_FR.UTF-8", "fr_FR.utf8", "German_Germany.1252", "de_DE")) {
+    if (nzchar(suppressWarnings(Sys.setlocale("LC_TIME", loc)))) {
+      return(loc)
+    }
+  }
+  NULL
+}
+
+# Run `code` with LC_TIME set to `loc` (NULL leaves it as it is).
+et_with_time_locale <- function(loc, code) {
+  if (is.null(loc)) {
+    return(force(code))
+  }
+  old <- Sys.getlocale("LC_TIME")
+  on.exit(suppressWarnings(Sys.setlocale("LC_TIME", old)), add = TRUE)
+  suppressWarnings(Sys.setlocale("LC_TIME", loc))
+  force(code)
+}
+
+# Any rendering of today's date or of a clock time.
+et_time_stamp_rx <- function() {
+  today <- Sys.Date()
+  forms <- unique(c(
+    format(today, "%Y-%m-%d"), format(today, "%d.%m.%Y"), format(today, "%m/%d/%Y"),
+    withr::with_locale(c(LC_TIME = "C"), c(format(today, "%d %B %Y"), format(today, "%B %d, %Y")))
+  ))
+  paste0("(", paste(gsub(".", "[.]", forms, fixed = TRUE), collapse = "|"), ")|[0-9]{1,2}:[0-9]{2}|Generated")
+}
+
+test_that("OQ-EXPORT-059 | Markdown and dataset Word documents carry no time stamp and are identical when written again, under another LC_TIME | REQ-EXPORT-040", {
+  dir <- qa_tempdir()
+  dta <- et_dta()
+  ds <- dta[["clinical_data"]]
+  other <- et_other_time_locale()
+  # Evidence only: which locale the repeat runs under is a fact of the machine.
+  qa_check(
+    "the LC_TIME locale of the repeat is recorded",
+    TRUE,
+    detail = if (is.null(other)) "no second locale installed: the repeat is written under the current LC_TIME" else other
+  )
+  stamp <- et_time_stamp_rx()
+
+  writers <- list(
+    write_dta = function(file) write_dta(dta, file = file, format = "md", quiet = TRUE),
+    write_dataset_metadata = function(file) write_dataset_metadata(ds, file = file, format = "md", quiet = TRUE)
+  )
+  for (what in names(writers)) {
+    first <- file.path(dir, paste0(what, "-1.md"))
+    second <- file.path(dir, paste0(what, "-2.md"))
+    et_with_time_locale("C", writers[[what]](first))
+    et_with_time_locale(other, writers[[what]](second))
+    qa_check(paste0(what, " (md): the repeat is byte-identical"), identical(et_raw(first), et_raw(second)))
+    lines <- et_md_lines(first)
+    qa_step(paste0(what, " (md): no line holds today's date, a clock time or 'Generated'"), character(0), grep(stamp, lines, value = TRUE))
+  }
+
+  first <- file.path(dir, "dataset-1.docx")
+  second <- file.path(dir, "dataset-2.docx")
+  et_with_time_locale("C", write_dataset_metadata(ds, file = first, quiet = TRUE))
+  et_with_time_locale(other, write_dataset_metadata(ds, file = second, quiet = TRUE))
+  parts_1 <- et_docx_parts(first)
+  parts_2 <- et_docx_parts(second)
+  qa_step("write_dataset_metadata (docx): the repeat writes the same parts", names(parts_1), names(parts_2))
+  qa_check("write_dataset_metadata (docx): body, header and footer parts are identical", identical(parts_1, parts_2))
+  texts <- vapply(parts_1, function(p) {
+    paste(xml2::xml_text(xml2::xml_find_all(xml2::read_xml(p), ".//*[local-name()='t']")), collapse = " ")
+  }, character(1))
+  qa_step(
+    "write_dataset_metadata (docx): no part holds today's date, a clock time or 'Generated'",
+    character(0), names(texts)[grepl(stamp, texts)]
+  )
+})
+
+# ---- REQ-EXPORT-040: author text cannot change the structure ------------------
+#
+# Two transfers that differ only in their author text: one written with the
+# characters that mean something in Markdown or HTML, one with plain words in
+# the same places, with the same number of lines and paragraphs. The
+# requirement says the first must have exactly the structure of the second,
+# and must show its text as written.
+
+et_hostile_text <- list(
+  title = "Q*1* _x_ `c` | <b>t</b> $5 # no heading",
+  header = "# Header line\n- not a list\n> not a quote",
+  contact = "Ann *Bold* | Pipe",
+  role = "<i>role</i> & `lead`",
+  org = "Org_*name* <x>",
+  label = "Label `code` | $x$",
+  col_description = "*desc* _x_ <br> # h",
+  pattern = "^[A-Z]{2}_[0-9]+$|^`x`[*]$",
+  value = "A*1|`b`<c>$",
+  purpose = "Purpose `x` | *y* # z",
+  rule_value = "R*|`$<q>",
+  ds_name = "Set *x* | `y` #1",
+  ds_description = "1. not a list\n\n---\n\n```\nnot code\n```",
+  clause_title = "Clause # <x> *y*",
+  clause_text = "text with | pipe and $math$ and `tick` and <tag>",
+  method = "SFTP <host> | `port` *22*"
+)
+
+et_plain_text <- list(
+  title = "Q1 x c t 5 no heading",
+  header = "Header line\nnot a list\nnot a quote",
+  contact = "Ann Bold Pipe",
+  role = "role lead",
+  org = "Org name x",
+  label = "Label code x",
+  col_description = "desc x br h",
+  pattern = "patternone",
+  value = "Avalue",
+  purpose = "Purpose x y z",
+  rule_value = "Rvalue",
+  ds_name = "Set x y 1",
+  ds_description = "one not a list\n\ndash\n\nfence\nnot code\nfence",
+  clause_title = "Clause x y",
+  clause_text = "text with pipe and math and tick and tag",
+  method = "SFTP host port 22"
+)
+
+et_text_dta <- function(t) {
+  DTA(
+    metadata = DTAMetaData(
+      title = t$title, version = "1.0", header = t$header,
+      study = list(id = "S-1", protocol_id = "P-1"),
+      supplier = list(
+        affiliation = list(name = t$org),
+        contacts = list(list(
+          name = t$contact, role = t$role, email = "ann@example.org",
+          department = t$org, signature = TRUE
+        ))
+      ),
+      transmission = list(type = t$method),
+      sections = list(clause = list(title = t$clause_title, text = t$clause_text))
+    ),
+    datasets = list(DTADataSetTabular(
+      id = "text_set", name = t$ds_name, description = t$ds_description,
+      files = list(DTAFileCSV(filename = "text_set.csv")),
+      specs = DTAColumnSpecCollection(
+        columns = list(
+          CODE = DTAColumnSpec(
+            id = "CODE", label = t$label, type = "SAS Char", nullable = TRUE,
+            description = t$col_description, values = c(t$value, "B")
+          ),
+          REF = DTAColumnSpec(id = "REF", label = t$label, type = "SAS Char", nullable = TRUE, pattern = t$pattern),
+          NOTE = DTAColumnSpec(id = "NOTE", type = "SAS Char", nullable = TRUE)
+        ),
+        # The tested column declares neither values nor a pattern, so any
+        # rule value is consistent with the specification.
+        rules = list(DTARuleColCondition(
+          id = "text_rule", description = t$purpose,
+          condition = list(NOTE = list(equals = t$rule_value)),
+          then = list(REF = list(empty = FALSE))
+        ))
+      )
+    ))
+  )
+}
+
+# pandoc's reading of a GFM file, as a parsed JSON tree.
+et_pandoc_json <- function(path) {
+  qa_requires("rmarkdown", "jsonlite")
+  if (!isTRUE(tryCatch(rmarkdown::pandoc_available(), error = function(e) FALSE))) {
+    testthat::skip("pandoc absent: the Markdown structure cannot be read independently")
+  }
+  out <- system2(rmarkdown::pandoc_exec(), c("-f", "gfm", "-t", "json", shQuote(path)), stdout = TRUE)
+  jsonlite::fromJSON(paste(out, collapse = "\n"), simplifyVector = FALSE)
+}
+
+et_is_node <- function(x) is.list(x) && !is.null(names(x)) && "t" %in% names(x)
+
+# The text of a list of inline nodes: a soft break or a space is a blank, a
+# hard break or a raw "<br>" a line break; formatting is dropped.
+et_inline_text <- function(inlines) {
+  paste(vapply(inlines, function(n) {
+    if (!et_is_node(n)) {
+      return(et_inline_text(n))
+    }
+    switch(n$t,
+      Str = n$c,
+      Space = " ",
+      SoftBreak = " ",
+      LineBreak = "\n",
+      RawInline = if (identical(n$c[[2]], "<br>")) "\n" else n$c[[2]],
+      Code = n$c[[2]],
+      Math = n$c[[2]],
+      Link = et_inline_text(n$c[[2]]),
+      Image = et_inline_text(n$c[[2]]),
+      Quoted = et_inline_text(n$c[[2]]),
+      Span = et_inline_text(n$c[[2]]),
+      if (is.list(n$c)) et_inline_text(n$c) else ""
+    )
+  }, character(1)), collapse = "")
+}
+
+# The structure of the tree: every node type in document order except the
+# text tokens (Str, Space, SoftBreak), a heading with its level, a table with
+# its column count and its rows' cell counts, a raw node with its content.
+et_structure <- function(x) {
+  out <- character(0)
+  walk <- function(n) {
+    if (et_is_node(n)) {
+      out <<- c(out, switch(n$t,
+        Str = NULL,
+        Space = NULL,
+        SoftBreak = NULL,
+        Header = paste0("Header", n$c[[1]]),
+        RawInline = paste0("RawInline:", n$c[[2]]),
+        RawBlock = paste0("RawBlock:", n$c[[2]]),
+        Table = {
+          head_rows <- n$c[[4]][[2]]
+          body_rows <- unlist(lapply(n$c[[5]], function(b) b[[4]]), recursive = FALSE)
+          cells <- vapply(c(head_rows, body_rows), function(r) length(r[[2]]), integer(1))
+          paste0("Table:", length(n$c[[3]]), " cols:", paste(cells, collapse = ","))
+        },
+        n$t
+      ))
+      if (is.list(n$c)) walk(n$c)
+    } else if (is.list(n)) {
+      for (m in n) walk(m)
+    }
+  }
+  walk(x$blocks)
+  out
+}
+
+# The text of every paragraph, plain block (table cell, list item) and heading.
+et_block_texts <- function(x) {
+  out <- character(0)
+  walk <- function(n) {
+    if (et_is_node(n)) {
+      if (n$t %in% c("Para", "Plain")) out <<- c(out, et_inline_text(n$c))
+      if (n$t == "Header") out <<- c(out, et_inline_text(n$c[[3]]))
+      if (is.list(n$c)) walk(n$c)
+    } else if (is.list(n)) {
+      for (m in n) walk(m)
+    }
+  }
+  walk(x$blocks)
+  out
+}
+
+test_that("OQ-EXPORT-060 | author text with Markdown and HTML characters is shown as written and cannot change the document's structure | REQ-EXPORT-040", {
+  dir <- qa_tempdir()
+  hostile <- file.path(dir, "hostile.md")
+  plain <- file.path(dir, "plain.md")
+  write_dta(et_text_dta(et_hostile_text), file = hostile, format = "md", quiet = TRUE)
+  write_dta(et_text_dta(et_plain_text), file = plain, format = "md", quiet = TRUE)
+  h <- et_pandoc_json(hostile)
+  p <- et_pandoc_json(plain)
+  hs <- et_structure(h)
+
+  qa_step(
+    "the document has the structure of the one with plain author text, node for node",
+    et_structure(p), hs
+  )
+  # Headings, from REQ-EXPORT-007's chapter list and this fixture: the
+  # document name; Contents and the chapters 1 Approval & Signatures,
+  # 2 Document Information, 3 Study, 4 Parties, 5 Process Information,
+  # 6 Agreement Sections, 7 Datasets; 4.1 Supplier, 5.1 Transmission
+  # Details, 6.1 the clause, 7.1 the dataset; 7.1.1 Files, 7.1.2 Column
+  # Specifications, 7.1.3 Validation Rules.
+  levels <- sub("^Header", "", hs[startsWith(hs, "Header")])
+  qa_step(
+    "headings per level",
+    c(`1` = 1L, `2` = 8L, `3` = 4L, `4` = 3L),
+    c(`1` = sum(levels == "1"), `2` = sum(levels == "2"), `3` = sum(levels == "3"), `4` = sum(levels == "4"))
+  )
+  for (kind in c("CodeBlock", "Code", "Math", "BlockQuote", "OrderedList", "RawBlock", "Emph")) {
+    qa_step(paste0("no ", kind, " anywhere"), 0L, sum(hs == kind))
+  }
+  qa_step(
+    "no raw HTML other than the line breaks inside table cells",
+    character(0), unique(setdiff(hs[startsWith(hs, "RawInline:")], "RawInline:<br>"))
+  )
+  qa_step("one horizontal rule, the footer's", 1L, sum(hs == "HorizontalRule"))
+  qa_check(
+    "every table row has as many cells as its table has columns",
+    all(vapply(hs[startsWith(hs, "Table:")], function(s) {
+      n <- as.integer(sub("^Table:([0-9]+) .*$", "\\1", s))
+      all(as.integer(strsplit(sub("^.* cols:", "", s), ",", fixed = TRUE)[[1]]) == n)
+    }, logical(1)))
+  )
+
+  texts <- et_block_texts(h)
+  single <- et_hostile_text[c(
+    "title", "contact", "role", "org", "label", "col_description", "clause_title",
+    "clause_text", "method", "purpose", "ds_name"
+  )]
+  for (nm in names(single)) {
+    qa_check(
+      paste0("the ", nm, " text is shown as written"),
+      any(grepl(single[[nm]], texts, fixed = TRUE)), single[[nm]]
+    )
+  }
+  qa_check("the pattern is shown as written", any(grepl(et_hostile_text$pattern, texts, fixed = TRUE)))
+  qa_check("the permitted value is shown as written", any(grepl(et_hostile_text$value, texts, fixed = TRUE)))
+  qa_check(
+    "the rule's text value is shown as written, in typographic quotes",
+    any(grepl(et_q(et_hostile_text$rule_value), texts, fixed = TRUE))
+  )
+  qa_check("the header's lines are shown as written", "# Header line\n- not a list\n> not a quote" %in% texts)
+  qa_check(
+    "the dataset description's paragraphs are shown as written",
+    all(c("1. not a list", "---", "```\nnot code\n```") %in% texts)
+  )
+
+  # The links of the Contents list reach the heading whose text they show.
+  heads <- list()
+  for (b in h$blocks) {
+    if (identical(b$t, "Header")) heads[[b$c[[2]][[1]]]] <- et_inline_text(b$c[[3]])
+  }
+  contents <- match("Contents", vapply(h$blocks, function(b) if (identical(b$t, "Header")) et_inline_text(b$c[[3]]) else "", ""))
+  links <- list()
+  walk <- function(n) {
+    if (et_is_node(n) && identical(n$t, "Link")) {
+      links[[length(links) + 1L]] <<- list(text = et_inline_text(n$c[[2]]), target = n$c[[3]][[1]])
+    } else if (is.list(n)) {
+      for (m in n) walk(m)
+    }
+  }
+  walk(h$blocks[[contents + 1L]])
+  qa_step("the Contents list has a link per chapter of the first two levels", 11L, length(links))
+  qa_step(
+    "each link's target is the id pandoc gives the heading it names",
+    vapply(links, function(l) l$text, ""),
+    vapply(links, function(l) heads[[sub("^#", "", l$target)]] %||% NA_character_, "")
+  )
+  qa_check(
+    "the dataset heading keeps its characters in the Contents list",
+    any(vapply(links, function(l) grepl(et_hostile_text$ds_name, l$text, fixed = TRUE), logical(1)))
+  )
+})
+
+test_that("OQ-EXPORT-061 | include_file_specs, include_rules and include_signatures act alike in Word and Markdown | REQ-EXPORT-041 REQ-EXPORT-010", {
+  ds <- et_dta()[["clinical_data"]]
+  dir <- qa_tempdir()
+  signers <- list(list(name = "Ann Example", role = "Reviewer", organization = "Example Org"))
+
+  # Expected chapter lists, from REQ-EXPORT-010 and REQ-EXPORT-041.
+  cases <- list(
+    all = list(
+      args = list(include_signatures = TRUE, include_file_specs = TRUE, include_rules = TRUE, signature_list = signers),
+      chapters = c("Approval & Signatures", "Description", "Files", "Column Specifications", "Validation Rules")
+    ),
+    none = list(
+      args = list(include_signatures = FALSE, include_file_specs = FALSE, include_rules = FALSE, signature_list = signers),
+      chapters = c("Description", "Column Specifications")
+    ),
+    no_files = list(
+      args = list(include_file_specs = FALSE, signature_list = signers),
+      chapters = c("Approval & Signatures", "Description", "Column Specifications", "Validation Rules")
+    ),
+    no_rules = list(
+      args = list(include_rules = FALSE),
+      chapters = c("Description", "Files", "Column Specifications")
+    )
+  )
+  for (case in names(cases)) {
+    cfg <- cases[[case]]
+    docx <- file.path(dir, paste0(case, ".docx"))
+    md <- file.path(dir, paste0(case, ".md"))
+    do.call(write_dataset_metadata, c(list(ds, file = docx, quiet = TRUE), cfg$args))
+    do.call(write_dataset_metadata, c(list(ds, file = md, format = "md", quiet = TRUE), cfg$args))
+
+    qa_step(paste0(case, ": Word chapters"), cfg$chapters, et_word_headings(docx)$title)
+    heads <- et_md_headings(et_md_lines(md))
+    heads <- heads[nzchar(heads$number), , drop = FALSE]
+    qa_step(
+      paste0(case, ": Markdown chapters, numbered without gaps"),
+      paste(seq_along(cfg$chapters), cfg$chapters), paste(heads$number, heads$title)
+    )
+    if ("Approval & Signatures" %in% cfg$chapters) {
+      sig <- et_md_table(et_md_lines(md), c("Organization", "Name", "Role", "Signature", "Date"))
+      qa_step(paste0(case, ": the Markdown approval table names the signature_list entry"), c("Example Org", "Ann Example", "Reviewer"), unname(sig[1, 1:3]))
+      word_sig <- et_docx_table(docx, "Organization")
+      qa_step(paste0(case, ": and so does the Word one"), c("Example Org", "Ann Example", "Reviewer"), unname(unlist(word_sig[2, 1:3])))
+    }
+  }
+})
+
+test_that("OQ-EXPORT-062 | a template export to a path relative to the working directory | REQ-EXPORT-016 REQ-EXPORT-014", {
+  dir <- normalizePath(qa_tempdir())
+  template <- et_write_template("Title: {DTA_TITLE}", dir)
+
+  # The absolute form of the path works, and is the behaviour the relative
+  # form should match.
+  absolute <- file.path(dir, "absolute.docx")
+  export_with_template(et_dta(), template = template, output = absolute, quiet = TRUE, fallback = FALSE)
+  qa_step("with an absolute path the filled document is written", "Title: Clinical Data Specification", qa_docx_text(absolute))
+
+  # KNOWN DEFECT, pinned rather than endorsed (DEV-017): the same call with
+  # the path relative to the working directory aborts and writes nothing.
+  # When it is fixed, assert instead that qa_docx_text(file.path(dir,
+  # "relative.docx")) is "Title: Clinical Data Specification".
+  relative <- withr::with_dir(dir, tryCatch(
+    export_with_template(et_dta(), template = template, output = "relative.docx", quiet = TRUE, fallback = FALSE),
+    error = function(e) e
+  ))
+  qa_known_deviation(
+    "DEV-017",
+    inherits(relative, "error") && !file.exists(file.path(dir, "relative.docx"))
+  )
 })
