@@ -878,6 +878,65 @@ test_that("pandoc links every address to exactly the author's text (every pandoc
   }
 })
 
+test_that("anchors and contents entries follow the heading as shown, addresses included", {
+  sections <- list(
+    .md_section("See www.ex.com/path_x, then", "a"),
+    .md_section("Mail john_doe@ex.org or https://ex.com/a_b", "b")
+  )
+  out <- .md_render("# D", sections)
+  # Hand-written: "www." is shown (and so slugged) as "http://www.", and the
+  # contents entry shows the address through entities, without a link.
+  expect_true("## 1 See <http://www.ex.com/path_x>, then" %in% out)
+  expect_true("- [1 See http&#58;//www&#46;ex.com/path\\_x, then](#1-see-httpwwwexcompath_x-then)" %in% out)
+  expect_true(
+    "- [2 Mail john\\_doe&#64;ex.org or https&#58;//ex.com/a\\_b](#2-mail-john_doeexorg-or-httpsexcoma_b)" %in% out
+  )
+  pandocs <- mdt_pandocs()
+  skip_if(length(pandocs) == 0L, "pandoc is not installed")
+  for (pandoc in pandocs) {
+    blocks <- mdt_ast_with(pandoc, out)
+    headers <- mdt_headers(blocks)
+    ids <- vapply(headers, function(h) h$c[[2]][[1]], character(1))
+    shown <- stats::setNames(vapply(headers, function(h) mdt_visible(h$c[[3]]), character(1)), ids)
+    toc <- Filter(function(b) b$t == "BulletList", blocks)[[1]]
+    links <- mdt_links(toc$c)
+    expect_length(links, 2L)
+    for (link in links) {
+      target <- sub("^#", "", link$target)
+      expect_true(target %in% ids, info = paste(pandoc, target))
+      expect_identical(mdt_visible(link$inlines), unname(shown[target]), info = paste(pandoc, target))
+      # The entry is one link: no address inside it became a link of its own.
+      expect_length(mdt_links(link$inlines), 0L)
+    }
+    expect_identical(unname(shown[["1-see-httpwwwexcompath_x-then"]]), "1 See http://www.ex.com/path_x, then")
+  }
+})
+
+test_that(".md_unescape reads escapes and entities in one pass, left to right", {
+  # Hand-written: an escaped backslash before an entity, an escaped "&".
+  expect_identical(.md_unescape("a\\\\&lt;b"), "a\\<b")
+  expect_identical(.md_unescape("\\&lt; and \\&gt;"), "&lt; and &gt;")
+  expect_identical(.md_unescape("&lt;x&gt; \\* \\\\ <https://a.org/p_q> <j_d@x.org>"), "<x> * \\ https://a.org/p_q j_d@x.org")
+  texts <- c("a\\<b", "x\\&gt;y", "&lt;tag&gt;", "\\\\", "R&D &amp;", "*a* _b_ [c] `d` #e", "back\\slash\\")
+  for (t in texts) expect_identical(.md_unescape(.md_escape(t)), t, info = t)
+})
+
+test_that("a chapter after a heading with an escaped '<' gets the next free anchor", {
+  sections <- list(
+    .md_section("Rules", c(paste("#####", .md_escape("2 a\\<b")), "", "text")),
+    .md_section("a\\<b", "y")
+  )
+  out <- .md_render("# D", sections)
+  # "2 a\<b" and the chapter "2 a\<b" share the anchor base "2-ab".
+  expect_true("- [2 a\\\\&lt;b](#2-ab-1)" %in% out)
+  pandocs <- mdt_pandocs()
+  skip_if(length(pandocs) == 0L, "pandoc is not installed")
+  for (pandoc in pandocs) {
+    ids <- vapply(mdt_headers(mdt_ast_with(pandoc, out)), function(h) h$c[[2]][[1]], character(1))
+    expect_true(all(c("2-ab", "2-ab-1") %in% ids), info = pandoc)
+  }
+})
+
 # ---- escaping: minimal and readable ---------------------------------------------
 
 test_that("entities, times and '=' lines are escaped only where they mean something", {

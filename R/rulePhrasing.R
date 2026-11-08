@@ -41,7 +41,9 @@
 # labelled line "Label: text", a label alone "Label:" that introduces a list,
 # or a list item, shown as "<U+2022> text" in plain text and Word, "- text"
 # in Markdown and <li> in HTML. Labels, in this order:
-#   Purpose            the author's description, verbatim (first line)
+#   Purpose            the author's description, verbatim (first line); a
+#                      line break in it stays a line break in every format
+#                      (<br> in HTML)
 #   (statement)        the rule itself, no label
 #   Conditions         group rules: one item per named condition
 #   Requirements       group rules: one item per constraint
@@ -78,8 +80,9 @@
 # Unique (col_unique):
 #   "No two rows may have the same value in column C."
 #   "No two rows may have the same combination of values in columns A and B."
-#   Missing values: "Two missing values count as the same value; so do two
-#   NaN values, which are not missing."
+#   Missing values: "Two missing values are equal; so are two "not a
+#   number" (NaN) values, which are not missing." (kept short: one line of
+#   the template guide's rules table)
 #   (Values are compared exactly, 0 and minus 0 alike: the reading guide.)
 #
 # Condition (col_condition):
@@ -163,30 +166,47 @@
 # min with an infinite max reads "at least", max with an infinite min "at
 # most", and both infinite "a number".
 # The numeric tests (greater, less, greater_equal, less_equal, min, max,
-# range) read a bound given as text as a number: min: "5" reads "at least 5".
-# A text bound that does not read as a number is shown as text ("at least
-# "abc"") with the Problem "The test 'min' on column C is given "abc", which
-# is not a number: no value passes this test, unless C holds dates." (the
-# comparison is undecided for every row: the IF is never met by a number,
-# the THEN is violated by every row).
+# range) read a bound given as text as a number: min: "5" reads "at least 5"
+# (in a column of dates such a bound stops the validation with an error; the
+# reading guide says so). A text bound that does not read as a number is
+# shown as text ("at least "abc"") with a Problem; the comparison is then
+# undecided for every row that holds a number: the IF is never met by a
+# number, the THEN is violated by every row. In a column of dates, the bound
+# is read as a date (as.Date()), and text that is not a date stops the
+# validation with an error. So the Problem reads
+#   a date such as "2024-01-31": "The test 'min' on column C is given
+#     "2024-01-31", which is not a number: no value passes this test, unless
+#     C holds dates."
+#   any other text: "The test 'min' on column C is given "abc", which is not
+#     a number: no value passes this test, and if C holds dates, the
+#     validation stops with an error."
+#   bounds given as a list (a YAML sequence of mixed types, range: [0, x]):
+#     a date column reads them as numbers (days), so text never passes:
+#     "...: no value passes this test, in a column of dates as well."
 #
 # in / not_in values:
 #   A plain vector lists every entry; a missing entry reads "missing":
 #   "is one of "A" or missing". It matches a missing value.
 #   A list (YAML sequence) is listed without its empty (YAML ~) and missing
 #   entries, which are explained in parentheses instead, because the
-#   evaluator does not read them as "missing":
-#     empty entry:   "(the list also holds an empty entry, which never matches
-#                    a missing value and in a column of text matches the
-#                    text "NULL")"
-#     missing entry: "(the list also holds a missing entry, which matches a
-#                    missing value only in a column of numbers whose list
-#                    otherwise holds only numbers, and otherwise matches the
-#                    text "NA")"; with no other entry: "(the list holds only
-#                    a missing entry, which never matches a missing value and
-#                    in a column of text matches the text "NA")".
+#   evaluator does not read them as "missing". The evaluator
+#   (dta_equality_bound()) compares a list as numbers only when the column
+#   holds numbers and the flattened list is numeric, or is text of which
+#   every entry that is not missing reads as a number (a text "2" counts; a
+#   logical true does not, nor does an empty entry, which flattening drops);
+#   otherwise it compares text, and a missing entry is the text "NA", an
+#   empty one the text "NULL". Since the list is known, the wording names
+#   only what depends on the column:
+#     empty entry:   "an empty entry, which matches only the text "NULL""
+#     missing entry, list compares as numbers: "a missing entry, which
+#                    matches a missing value if C holds numbers and
+#                    otherwise only the text "NA""
+#     missing entry, otherwise: "a missing entry, which matches only the
+#                    text "NA", never a missing value"
+#   as "one of a or b (the list also holds <entry>[, and <entry>])" or, with
+#   no other entry, "one of the entries of a list that holds only <entry>".
 #   (1) in: yes for a plain vector with a missing entry; "depends" for a
-#       list with a missing entry and other entries; otherwise no.
+#       list with a missing entry that compares as numbers; otherwise no.
 #   (2) not_in: the opposite of (1).
 # "missing" says what the test gives for a missing value: yes, no, or
 # undecided (no for a group condition and the THEN; see the IF notes).
@@ -202,18 +222,24 @@
 #                    condition holds a value that is not a number and no other
 #                    test of the condition fails." (dta_condition_in_scope()).
 #   IF, depends:    "If C is missing, the condition is not met and the row is
-#                    not checked, unless C holds numbers and its list
-#                    otherwise holds only numbers; then [this part of] the
-#                    condition counts as met." (not_in: the two outcomes
-#                    swapped).
+#                    not checked, unless C holds numbers; then [this part
+#                    of] the condition counts as met." (not_in: the two
+#                    outcomes swapped).
 #   THEN, yes:      "If C is missing, [this part of] the requirement counts
 #                    as met."
 #   THEN, no/undecided: "If C is missing in a row that meets the condition,
 #                    the rule is violated."
-#   THEN, depends:  "..., the rule is violated, unless C holds numbers and its
-#                    list otherwise holds only numbers; then [this part of]
-#                    the requirement counts as met." (not_in: swapped).
-# A column whose tests cannot be evaluated gets no note.
+#   THEN, depends:  "..., the rule is violated, unless C holds numbers; then
+#                    [this part of] the requirement counts as met." (not_in:
+#                    swapped).
+#   (Group conditions: "..., unless C holds numbers; then ...", the same.)
+# A column whose tests cannot be evaluated gets no note. A THEN column that
+# the IF also tests gets no missing-value note when a missing value there
+# never reaches the THEN: one of its IF tests gives no, or they are
+# undecided (and yes) and no other IF column has a numeric test
+# (dta_condition_in_scope() keeps an undecided row only for a value of
+# another numeric column that is not a number). Example: "When VISIT is equal
+# to "V03", VISIT must ..." has no note on VISIT in the THEN.
 # Columns with a numeric test also get a note on values that are present
 # but not numbers:
 #   IF:   "A value in C that is not a number does not by itself exempt the
@@ -224,8 +250,12 @@
 # The reading guide (.rule_reading_guide) is shown once per document and
 # states what holds for every rule: per-file checking, exact text
 # comparison, what reads as a number, when equality compares numbers, how
-# a number is written when compared as text, dates, missing and empty
-# values, patterns, and absent columns.
+# a number is written when compared as text, dates (a number bound counts
+# days, or seconds in a column of dates with a time; a text bound must be a
+# date), missing and empty values, patterns, and absent columns (a grouped
+# condition passes a file with no rows as long as its grouping columns are
+# present: rule_check_group_condition() checks only the grouping columns
+# before it returns for an empty table).
 
 # ---------------------------------------------------------------------------
 # Notation helpers
@@ -459,13 +489,38 @@
   list(value = x, bad = FALSE)
 }
 
+# Whether dta_equality_bound() turns the entries of a list into numbers when
+# the column holds numbers: the list is flattened (empty entries vanish), and
+# it compares as numbers when the result is numeric, or is text of which every
+# entry that is not missing reads as a number. A list of logical values (with
+# no number among them) stays a comparison of text.
+.rule_list_reads_numeric <- function(value) {
+  values <- unlist(value, use.names = FALSE)
+  if (is.numeric(values)) {
+    return(TRUE)
+  }
+  if (!is.character(values) && !is.factor(values)) {
+    return(FALSE)
+  }
+  parsed <- suppressWarnings(as.numeric(as.character(values)))
+  !any(is.na(parsed) & !is.na(values))
+}
+
+# Whether a text bound reads as a date the way a date column compares it
+# (as.Date() on the text, which a date-time column accepts as well); other
+# text makes that comparison stop with an error.
+.rule_reads_as_date <- function(x) {
+  parsed <- tryCatch(as.Date(as.character(x)), error = function(e) NA)
+  length(parsed) == 1L && !is.na(parsed)
+}
+
 # The values of an in/not_in test. A plain vector lists every entry, a
 # missing one as "missing". A list (YAML sequence) is listed without its empty
 # (NULL) and missing entries, which the evaluator does not read as "missing"
 # (see the comment block at the top); they are explained in parentheses.
 # `missing` is "yes", "no" or "depends": whether `in` holds for a missing
 # value.
-.rule_set_values <- function(value) {
+.rule_set_values <- function(value, col) {
   if (!is.list(value)) {
     return(list(
       text = paste0("one of ", .rule_or(.rule_values(value))),
@@ -481,32 +536,30 @@
   bodies <- character(0)
   if (any(is_null)) {
     bodies <- c(bodies, paste0(
-      "an empty entry, which never matches a missing value and in a column",
-      " of text matches the text ", .rule_value("NULL")
+      "an empty entry, which matches only the text ", .rule_value("NULL")
     ))
   }
   missing <- "no"
   if (any(is_na)) {
-    if (length(shown) > 0L) {
+    if (.rule_list_reads_numeric(value)) {
       missing <- "depends"
       bodies <- c(bodies, paste0(
-        "a missing entry, which matches a missing value only in a column of",
-        " numbers whose list otherwise holds only numbers, and otherwise",
-        " matches the text ", .rule_value("NA")
+        "a missing entry, which matches a missing value if ", col,
+        " holds numbers and otherwise only the text ", .rule_value("NA")
       ))
     } else {
       bodies <- c(bodies, paste0(
-        "a missing entry, which never matches a missing value and in a column",
-        " of text matches the text ", .rule_value("NA")
+        "a missing entry, which matches only the text ", .rule_value("NA"),
+        ", never a missing value"
       ))
     }
   }
   text <- if (length(shown) == 0L) {
-    paste0("one of the entries of a list that holds only ", paste(bodies, collapse = " and "))
+    paste0("one of the entries of a list that holds only ", paste(bodies, collapse = ", and "))
   } else if (length(bodies) > 0L) {
     paste0(
       "one of ", .rule_or(shown), " (the list also holds ",
-      paste(bodies, collapse = "; it also holds "), ")"
+      paste(bodies, collapse = ", and "), ")"
     )
   } else {
     paste0("one of ", .rule_or(shown))
@@ -563,7 +616,18 @@
       "The test ", .RULE_LSQ, operator, .RULE_RSQ, " on column ", col,
       " is given ", .rule_and(vapply(bad, function(b) .rule_value(b$value), character(1))),
       ", which ", if (length(bad) == 1L) "is not a number" else "are not numbers",
-      ": no value passes this test, unless ", col, " holds dates."
+      if (is.list(value)) {
+        # Given as a list (a YAML sequence of mixed types), a date column
+        # reads every bound as a number too, so text never passes there either.
+        ": no value passes this test, in a column of dates as well."
+      } else if (all(vapply(bad, function(b) .rule_reads_as_date(b$value), logical(1)))) {
+        paste0(": no value passes this test, unless ", col, " holds dates.")
+      } else {
+        paste0(
+          ": no value passes this test, and if ", col,
+          " holds dates, the validation stops with an error."
+        )
+      }
     )
   }
 
@@ -589,14 +653,14 @@
       if (n < 1L) {
         return(invalid("one or more values"))
       }
-      set <- .rule_set_values(value)
+      set <- .rule_set_values(value, col)
       be(set$text, set$missing)
     },
     not_in = {
       if (n < 1L) {
         return(invalid("one or more values"))
       }
-      set <- .rule_set_values(value)
+      set <- .rule_set_values(value, col)
       be_not(set$text, switch(set$missing,
         yes = "no",
         no = "yes",
@@ -722,6 +786,7 @@
   list(
     text = paste0(col, " ", .rule_and(forms)),
     missing = .rule_missing_outcome(vapply(preds, function(p) p$missing, character(1))),
+    kinds = vapply(preds, function(p) p$missing, character(1)),
     numeric = any(vapply(preds, function(p) isTRUE(p$numeric), logical(1))),
     problems = unlist(lapply(preds, function(p) p$problem), use.names = FALSE),
     defects = unlist(lapply(preds, function(p) p$defect), use.names = FALSE)
@@ -749,15 +814,43 @@
   })
 }
 
-# Missing-value and non-number notes for one clause.
-.rule_clause_notes <- function(parts, form, condition_name = NULL) {
+# Whether a missing value in `column` can never reach the THEN clause,
+# because the IF clause `if_parts` tests the same column and a missing value
+# there takes the row out of scope: a test that gives "no" decides the
+# conjunction, and an undecided one keeps the row only when another column of
+# the IF compares numbers and holds a value that is not one
+# (dta_condition_in_scope()).
+.rule_then_missing_unreachable <- function(column, if_parts) {
+  for (k in seq_along(if_parts)) {
+    p <- if_parts[[k]]
+    if (!identical(p$column, column) || length(p$problems) > 0L) {
+      next
+    }
+    kinds <- p$kinds %||% p$missing
+    if ("no" %in% kinds) {
+      return(TRUE)
+    }
+    others_numeric <- any(vapply(if_parts[-k], function(o) {
+      isTRUE(o$numeric) && length(o$problems) == 0L
+    }, logical(1)))
+    if ("undecided" %in% kinds && all(kinds %in% c("undecided", "yes")) && !others_numeric) {
+      return(TRUE)
+    }
+  }
+  FALSE
+}
+
+# Missing-value and non-number notes for one clause. For the THEN clause,
+# `if_parts` is the IF clause: a THEN column whose missing value can never
+# reach the THEN gets no missing-value note.
+.rule_clause_notes <- function(parts, form, condition_name = NULL, if_parts = list()) {
   missing <- character(0)
   nonnum <- character(0)
   several <- length(parts) > 1L
   usable <- vapply(parts, function(p) !is.na(p$column) && length(p$problems) == 0L, logical(1))
   numeric_cols <- vapply(parts, function(p) isTRUE(p$numeric), logical(1)) & usable
   unless_list <- function(col) {
-    paste0(", unless ", col, " holds numbers and its list otherwise holds only numbers; then ")
+    paste0(", unless ", col, " holds numbers; then ")
   }
   for (k in seq_along(parts)) {
     p <- parts[[k]]
@@ -796,15 +889,17 @@
       part <- if (several) "this part of the requirement" else "the requirement"
       met <- paste0(part, " counts as met")
       violated <- "the rule is violated"
-      missing <- c(missing, switch(p$missing,
-        yes = paste0("If ", col, " is missing, ", met, "."),
-        depends = paste0(
-          "If ", col, " is missing in a row that meets the condition, ", violated,
-          unless_list(col), met, "."
-        ),
-        depends_not = paste0("If ", col, " is missing, ", met, unless_list(col), violated, "."),
-        paste0("If ", col, " is missing in a row that meets the condition, ", violated, ".")
-      ))
+      missing <- c(missing, if (!.rule_then_missing_unreachable(p$column, if_parts)) {
+        switch(p$missing,
+          yes = paste0("If ", col, " is missing, ", met, "."),
+          depends = paste0(
+            "If ", col, " is missing in a row that meets the condition, ", violated,
+            unless_list(col), met, "."
+          ),
+          depends_not = paste0("If ", col, " is missing, ", met, unless_list(col), violated, "."),
+          paste0("If ", col, " is missing in a row that meets the condition, ", violated, ".")
+        )
+      })
       if (p$numeric) {
         nonnum <- c(nonnum, paste0(
           "A value in ", col, " that is not a number, in a row that meets the condition, violates the rule."
@@ -940,7 +1035,10 @@
     .rule_section("statement", text),
     .rule_section(
       "missing",
-      "Two missing values count as the same value; so do two NaN values, which are not missing.",
+      paste0(
+        "Two missing values are equal; so are two ",
+        .RULE_LQ, "not a number", .RULE_RQ, " (NaN) values, which are not missing."
+      ),
       "Missing values"
     )
   )
@@ -993,7 +1091,7 @@
   }
 
   if_notes <- .rule_clause_notes(if_parts, "if")
-  then_notes <- .rule_clause_notes(then_parts, "then")
+  then_notes <- .rule_clause_notes(then_parts, "then", if_parts = if_parts)
   c(
     sections,
     list(
@@ -1284,43 +1382,6 @@
   paste(out, collapse = " ")
 }
 
-# Markdown block: optional bold id and kind, then paragraphs and real "-"
-# lists. All text is escaped, so a value can never become markup.
-.rule_md <- function(rule, heading = TRUE) {
-  lines <- .rule_lines(rule)
-  esc <- function(x) .plain_text_to_md(x)
-  blocks <- character(0)
-  if (isTRUE(heading)) {
-    id <- tryCatch(rule@id, error = function(e) NULL)
-    kind <- esc(.rule_kind_label(rule))
-    blocks <- c(blocks, if (is.character(id) && length(id) == 1L && nzchar(id)) {
-      paste0("**", esc(id), "** \u00b7 ", kind)
-    } else {
-      paste0("**", kind, "**")
-    })
-  }
-  i <- 1L
-  n <- nrow(lines)
-  while (i <= n) {
-    if (lines$bullet[[i]]) {
-      j <- i
-      while (j < n && lines$bullet[[j + 1L]]) j <- j + 1L
-      blocks <- c(blocks, paste0("- ", esc(lines$text[i:j]), collapse = "\n"))
-      i <- j + 1L
-      next
-    }
-    label <- lines$label[[i]]
-    text <- lines$text[[i]]
-    blocks <- c(blocks, if (nzchar(label)) {
-      if (nzchar(text)) paste0("**", esc(label), ":** ", esc(text)) else paste0("**", esc(label), ":**")
-    } else {
-      esc(text)
-    })
-    i <- i + 1L
-  }
-  paste(blocks, collapse = "\n\n")
-}
-
 # HTML <dt>/<dd> pairs for a definition list: each label starts a term,
 # unlabelled statements go under "Rule"; paragraphs are <p>, lists <ul>.
 .rule_html_dl <- function(rule) {
@@ -1352,7 +1413,11 @@
       next
     }
     if (nzchar(lines$text[[i]])) {
-      bodies[[k]] <- c(bodies[[k]], paste0("<p>", esc(lines$text[[i]]), "</p>"))
+      # A line break of a multi-line Purpose stays a line break, as in Word
+      # and Markdown; it is inserted after escaping, so it cannot be markup.
+      bodies[[k]] <- c(bodies[[k]], paste0(
+        "<p>", gsub("\r?\n", "<br>", esc(lines$text[[i]])), "</p>"
+      ))
     }
     i <- i + 1L
   }
@@ -1414,11 +1479,13 @@
       "0.0001 becomes 1e-04 and 100000 can become 1e+05, so it matches only",
       "text written the same way."
     ),
-    paste(
+    paste0(
       "In a column of dates, the tests that read numbers compare dates instead:",
-      "a number counts the days since 1 January 1970, and a text value is read",
-      "as a date written like 2024-01-31; other text stops the validation with",
-      "an error."
+      " a bound written as a number counts the days since 1 January 1970 (in a",
+      " column of dates with a time, the seconds since the start of 1 January",
+      " 1970 in UTC), and a bound written as text is read as a date written like",
+      " 2024-01-31; any other text stops the validation with an error, even",
+      " text that reads as a number, such as ", .RULE_LQ, "5", .RULE_RQ, "."
     ),
     paste(
       "A value is missing when the cell holds no value; for tests that read",
@@ -1435,7 +1502,9 @@
     ),
     paste(
       "If a column that a rule needs is not present in a file, the rule cannot",
-      "be evaluated and fails for that file."
+      "be evaluated and fails for that file, except that a grouped condition",
+      "passes for a file with no rows as long as its grouping columns are",
+      "present."
     )
   )
 }

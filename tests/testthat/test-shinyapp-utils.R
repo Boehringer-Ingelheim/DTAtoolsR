@@ -135,10 +135,6 @@ test_that("dta_rule_summary gives the plain-English sentence of the package, not
   expect_identical(app_fn("dta_rule_summary")("not a rule"), "")
 })
 
-test_that("the old pseudo-code renderer is gone", {
-  expect_false(exists(".dta_cond_to_text", envir = app_env(), inherits = FALSE))
-})
-
 # ---- supported types / backends --------------------------------------------
 
 test_that("dta_supported_types / dta_supported_backends / dta_sas_types return the real package sets", {

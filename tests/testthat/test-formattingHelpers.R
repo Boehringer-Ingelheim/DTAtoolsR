@@ -130,8 +130,8 @@ test_that(".title_case_field capitalises non-ASCII letters in any locale", {
   expect_equal(.title_case_field("\u00e9tape"), "\u00c9tape")
 })
 
-# ---- translate_rule_to_human() ----------------------------------------------
-# A thin wrapper around the shared wording in R/rulePhrasing.R. The expected
+# ---- .rule_text(): the plain-text rule wording -------------------------------
+# The shared wording in R/rulePhrasing.R, as the Word exports show it. The expected
 # strings below are written out by hand from the wording specification at the
 # top of that file (sentence forms, operator table, notes), never copied from
 # the function's output. U+201C/U+201D quote text values, U+2022 starts a list
@@ -142,30 +142,10 @@ test_that(".title_case_field capitalises non-ASCII letters in any locale", {
   do.call(DTAtools::DTARuleGroupCondition, args)
 }
 
-test_that("translate_rule_to_human is the shared plain-text wording for every rule type", {
-  rules <- list(
-    DTARuleColRange(id = "age_range", columns = "AGE", min = 18, max = 65),
-    DTARuleColUnique(id = "unique_keys", columns = c("A", "B")),
-    DTARuleColCondition(
-      id = "adult_status",
-      condition = list(AGE = list(greater = 17)),
-      then = list(STATUS = list(equal = "adult"))
-    ),
-    .gc_rule(
-      id = "g", group_by = "G",
-      conditions = list(a = list(A = list(empty = FALSE)), b = list(B = list(empty = FALSE))),
-      constraints = list(list(type = "requires", `if` = "a", `then` = "b", id = "a_needs_b"))
-    )
-  )
-  for (rule in rules) {
-    expect_identical(translate_rule_to_human(rule), .rule_text(rule), info = rule@type)
-  }
-})
-
 test_that("a range rule reads as a sentence with its bounds and notes", {
   rule <- DTARuleColRange(id = "age_range", columns = "AGE", min = 18, max = 65)
   expect_identical(
-    translate_rule_to_human(rule),
+    .rule_text(rule),
     paste(
       "Every value in column AGE must be a number from 18 to 65, inclusive.",
       "Missing values: Not checked.",
@@ -178,12 +158,12 @@ test_that("a range rule reads as a sentence with its bounds and notes", {
 test_that("a unique rule over two columns reads as a combination", {
   rule <- DTARuleColUnique(id = "unique_keys", columns = c("A", "B"))
   expect_identical(
-    translate_rule_to_human(rule),
+    .rule_text(rule),
     paste(
       "No two rows may have the same combination of values in columns A and B.",
       paste(
-        "Missing values: Two missing values count as the same value; so do two NaN values,",
-        "which are not missing."
+        "Missing values: Two missing values are equal; so are two",
+        "\u201cnot a number\u201d (NaN) values, which are not missing."
       ),
       sep = "\n"
     )
@@ -204,7 +184,7 @@ test_that("a column-condition rule reads its operators, not their key names", {
     "Non-numeric values: A value in AGE that is not a number does not by itself exempt the row from the check.",
     sep = "\n"
   )
-  expect_identical(translate_rule_to_human(rule), expected)
+  expect_identical(.rule_text(rule), expected)
 
   # The author's description is its own Purpose line on top; it never
   # replaces the condition. An empty description counts as none.
@@ -215,7 +195,7 @@ test_that("a column-condition rule reads its operators, not their key names", {
     then = list(STATUS = list(equal = "adult"))
   )
   expect_identical(
-    translate_rule_to_human(described),
+    .rule_text(described),
     paste("Purpose: Adults are marked as such", expected, sep = "\n")
   )
   blank <- DTARuleColCondition(
@@ -224,10 +204,10 @@ test_that("a column-condition rule reads its operators, not their key names", {
     condition = list(AGE = list(greater = 17)),
     then = list(STATUS = list(equal = "adult"))
   )
-  expect_identical(translate_rule_to_human(blank), expected)
+  expect_identical(.rule_text(blank), expected)
 })
 
-test_that("translate_rule_to_human expands a group_condition into its parts", {
+test_that(".rule_text expands a group_condition into its parts", {
   rule <- .gc_rule(
     id = "visit_logic",
     group_by = c("SUBJECT_ID", "VISIT"),
@@ -244,7 +224,7 @@ test_that("translate_rule_to_human expands a group_condition into its parts", {
   )
 
   expect_identical(
-    translate_rule_to_human(rule),
+    .rule_text(rule),
     paste(
       paste(
         "Rows are grouped by the combination of values in columns SUBJECT_ID and VISIT;",
@@ -276,7 +256,7 @@ test_that("group_condition descriptions distinguish the any and all scopes", {
   # dta_group_scope_truth() reads "any" as at-least-one-row and "all" as
   # every-row; the prose must not blur the two.
   mk <- function(if_scope, then_scope) {
-    translate_rule_to_human(.gc_rule(
+    .rule_text(.gc_rule(
       id = "scoped",
       group_by = "G",
       conditions = list(a = list(A = list(empty = FALSE)), b = list(B = list(empty = FALSE))),
@@ -300,7 +280,7 @@ test_that("group_condition descriptions distinguish the any and all scopes", {
 
 test_that("group_condition descriptions state mutual exclusivity, also under its alias", {
   mk <- function(type) {
-    translate_rule_to_human(.gc_rule(
+    .rule_text(.gc_rule(
       id = "excl",
       group_by = "G",
       conditions = list(a = list(A = list(equals = "X")), b = list(B = list(equals = "Y"))),
@@ -317,7 +297,7 @@ test_that("group_condition descriptions state mutual exclusivity, also under its
   expect_identical(mk("not_both"), mk("mutually_exclusive"))
 })
 
-test_that("translate_rule_to_human never renders a rule as code", {
+test_that(".rule_text never renders a rule as code", {
   rules <- list(
     DTARuleColRange(id = "r", columns = "AGE", min = 0.123456789, max = 99999.999),
     DTARuleColCondition(
@@ -332,15 +312,15 @@ test_that("translate_rule_to_human never renders a rule as code", {
     )
   )
   for (rule in rules) {
-    txt <- translate_rule_to_human(rule)
+    txt <- .rule_text(rule)
     lines <- strsplit(txt, "\n", fixed = TRUE)[[1]]
     expect_false(any(grepl("^\\s*(type|condition|then|columns|constraints):", lines)), info = rule@id)
     expect_false(grepl("```", gsub("\u201ca```b\u201d", "", txt, fixed = TRUE), fixed = TRUE), info = rule@id)
   }
   # Full precision, plain decimals.
-  expect_match(translate_rule_to_human(rules[[1]]), "from 0.123456789 to 99999.999, inclusive.", fixed = TRUE)
+  expect_match(.rule_text(rules[[1]]), "from 0.123456789 to 99999.999, inclusive.", fixed = TRUE)
 })
 
-test_that("translate_rule_to_human rejects something that is not a rule", {
-  expect_error(translate_rule_to_human("not a rule"), class = "dta_rule_phrasing_error")
+test_that(".rule_text rejects something that is not a rule", {
+  expect_error(.rule_text("not a rule"), class = "dta_rule_phrasing_error")
 })

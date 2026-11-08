@@ -47,7 +47,7 @@ test_that(".rule_number gives the shortest exact decimal form", {
 })
 
 test_that(".rule_number reads back exactly and never uses e-notation", {
-  set.seed(20261108)
+  withr::local_seed(20261108)
   x <- c(
     runif(200, -1e6, 1e6), exp(runif(200, log(1e-7), log(1e20))),
     -exp(runif(100, log(1e-7), log(1e20)))
@@ -286,7 +286,10 @@ test_that("a unique rule distinguishes one column from a combination", {
   one <- DTARuleColUnique(id = "u", columns = "SUBJID")
   expect_identical(.rule_text(one), paste(
     "No two rows may have the same value in column SUBJID.",
-    "Missing values: Two missing values count as the same value; so do two NaN values, which are not missing.",
+    paste0(
+      "Missing values: Two missing values are equal; so are two ",
+      q("not a number"), " (NaN) values, which are not missing."
+    ),
     sep = "\n"
   ))
   two <- DTARuleColUnique(id = "u", columns = c("SUBJID", "VISIT"))
@@ -466,15 +469,12 @@ test_that("a missing entry in a plain in-vector reads as missing and matches one
 })
 
 # Regression (review finding W1): `in: [A, ~]` arrives from YAML as
-# list("A", NULL). The evaluator never matches a missing value with it, and
-# on a column of text the empty entry matches the text "NULL".
+# list("A", NULL). The evaluator never matches a missing value with it; the
+# empty entry matches only the text "NULL".
 test_that("an empty YAML entry in an in-list is explained, not shown as missing", {
   y <- yaml::yaml.load("v: [A, ~]")$v
   expect_identical(y, list("A", NULL))
-  empty_note <- paste0(
-    " (the list also holds an empty entry, which never matches a missing value ",
-    "and in a column of text matches the text ", q("NULL"), ")"
-  )
+  empty_note <- paste0(" (the list also holds an empty entry, which matches only the text ", q("NULL"), ")")
   if_in <- cond_rule(list(K = list(`in` = y)), list(V = list(empty = FALSE)))
   expect_identical(.rule_text(if_in), paste(
     paste0("When K is one of ", q("A"), empty_note, ", V must not be empty."),
@@ -501,19 +501,26 @@ test_that("an empty YAML entry in an in-list is explained, not shown as missing"
   expect_identical(dta_condition_violated(num_in, num), c(TRUE, FALSE, FALSE))
 })
 
+# Regression (review round 2, W3): whether a missing entry of a list matches
+# a missing value depends on the column (numbers or not) and on whether the
+# rest of the list reads as numbers (dta_equality_bound()); the list is known,
+# so the wording names only the column condition.
 test_that("a missing entry in an in-list depends on the column, and says so", {
-  na_note <- paste0(
-    " (the list also holds a missing entry, which matches a missing value only in a ",
-    "column of numbers whose list otherwise holds only numbers, and otherwise ",
-    "matches the text ", q("NA"), ")"
+  na_depends <- paste0(
+    " (the list also holds a missing entry, which matches a missing value if K ",
+    "holds numbers and otherwise only the text ", q("NA"), ")"
+  )
+  na_never <- paste0(
+    " (the list also holds a missing entry, which matches only the text ", q("NA"),
+    ", never a missing value)"
   )
   rule <- cond_rule(list(K = list(`in` = list(1, NA))), list(V = list(empty = FALSE)))
   expect_identical(.rule_text(rule), paste(
-    paste0("When K is one of 1", na_note, ", V must not be empty."),
+    paste0("When K is one of 1", na_depends, ", V must not be empty."),
     "Missing values:",
     paste0(
       bul, "If K is missing, the condition is not met and the row is not checked, unless ",
-      "K holds numbers and its list otherwise holds only numbers; then the condition counts as met."
+      "K holds numbers; then the condition counts as met."
     ),
     paste0(bul, "If V is missing in a row that meets the condition, the rule is violated."),
     sep = "\n"
@@ -528,16 +535,111 @@ test_that("a missing entry in an in-list depends on the column, and says so", {
     dta_condition_violated(rule, data.frame(K = c("1", NA, "NA"), V = NA_character_)),
     c(TRUE, FALSE, TRUE)
   )
+
+  # A text that reads as a number counts as a number (the counterexample of
+  # the review): list(1, "2", NA) on numbers matches a missing value.
+  mixed <- cond_rule(list(A = list(equals = "a")), list(K = list(`in` = list(1, "2", NA))))
+  expect_identical(
+    first_line(mixed),
+    paste0("When A is equal to ", q("a"), ", K must be one of 1 or ", q("2"), na_depends, ".")
+  )
+  expect_true(grepl(paste0(
+    "If K is missing in a row that meets the condition, the rule is violated, unless K holds ",
+    "numbers; then the requirement counts as met."
+  ), .rule_text(mixed), fixed = TRUE))
+  num <- data.frame(A = "a", K = c(1, NA, 2, 3))
+  expect_identical(dta_condition_violated(mixed, num), c(FALSE, FALSE, FALSE, TRUE))
+  int <- data.frame(A = "a", K = c(1L, NA, 2L, 3L))
+  expect_identical(dta_condition_violated(mixed, int), c(FALSE, FALSE, FALSE, TRUE))
+  txt <- data.frame(A = "a", K = c("1", NA, "NA", "3"))
+  expect_identical(dta_condition_violated(mixed, txt), c(FALSE, TRUE, FALSE, TRUE))
+  dates <- data.frame(A = "a", K = as.Date(c("2020-01-01", NA)))
+  expect_identical(dta_condition_violated(mixed, dates), c(TRUE, TRUE))
+
+  # A list whose other entries do not all read as numbers never matches a
+  # missing value, on any column: a text, a logical value.
+  for (lst in list(list("A", NA), list(1, "A", NA), list(TRUE, NA))) {
+    never <- cond_rule(list(A = list(equals = "a")), list(K = list(`in` = lst)))
+    expect_true(grepl(na_never, first_line(never), fixed = TRUE), info = deparse(lst))
+    expect_true(grepl(
+      "If K is missing in a row that meets the condition, the rule is violated.",
+      .rule_text(never),
+      fixed = TRUE
+    ), info = deparse(lst))
+    for (df in list(num, int, txt, data.frame(A = "a", K = c(TRUE, NA)), dates)) {
+      expect_true(dta_condition_violated(never, df)[[2]], info = deparse(lst))
+    }
+    # ... and on text it matches the text "NA".
+    expect_false(dta_condition_violated(never, txt)[[3]], info = deparse(lst))
+  }
+
+  # not_in: the two outcomes swapped, on the THEN and on the IF.
+  not_then <- cond_rule(list(A = list(equals = "a")), list(K = list(not_in = list(1, "2", NA))))
+  expect_true(grepl(
+    "If K is missing, the requirement counts as met, unless K holds numbers; then the rule is violated.",
+    .rule_text(not_then),
+    fixed = TRUE
+  ))
+  expect_identical(dta_condition_violated(not_then, num), c(TRUE, TRUE, TRUE, FALSE))
+  expect_identical(dta_condition_violated(not_then, txt), c(TRUE, FALSE, TRUE, FALSE))
+  not_if <- cond_rule(list(K = list(not_in = list(1, NA))), list(V = list(empty = FALSE)))
+  expect_true(grepl(
+    paste0(
+      "If K is missing, the condition counts as met, unless K holds numbers; then the ",
+      "condition is not met and the row is not checked."
+    ),
+    .rule_text(not_if),
+    fixed = TRUE
+  ))
+  expect_identical(
+    dta_condition_violated(not_if, data.frame(K = c(1, NA, 2), V = NA_character_)),
+    c(FALSE, FALSE, TRUE)
+  )
+  expect_identical(
+    dta_condition_violated(not_if, data.frame(K = c("1", NA, "NA"), V = NA_character_)),
+    c(FALSE, TRUE, FALSE)
+  )
+
+  # A group condition says the same.
+  g <- DTARuleGroupCondition(
+    id = "g", group_by = "S",
+    conditions = list(c1 = list(K = list(`in` = list(1, "2", NA))), c2 = list(V = list(empty = TRUE))),
+    constraints = list(list(id = "k", type = "requires", `if` = "c2", then = "c1", then_scope = "all"))
+  )
+  expect_true(grepl(
+    "A row in which K is missing does not meet condition c1, unless K holds numbers; then the row meets condition c1.",
+    .rule_text(g),
+    fixed = TRUE
+  ))
+  expect_true(rule_check_group_condition(g, data.frame(S = "s", K = NA_real_, V = NA))$valid)
+  expect_false(rule_check_group_condition(g, data.frame(S = "s", K = NA_character_, V = NA))$valid)
+
   # A list holding nothing else never matches a missing value.
   only <- cond_rule(list(K = list(`in` = list(NA))), list(V = list(empty = FALSE)))
   expect_identical(first_line(only), paste0(
-    "When K is one of the entries of a list that holds only a missing entry, which never ",
-    "matches a missing value and in a column of text matches the text ", q("NA"),
-    ", V must not be empty."
+    "When K is one of the entries of a list that holds only a missing entry, which matches ",
+    "only the text ", q("NA"), ", never a missing value, V must not be empty."
   ))
   expect_identical(
     dta_condition_violated(only, data.frame(K = c(1, NA), V = NA_character_)),
     c(FALSE, FALSE)
+  )
+  expect_identical(
+    dta_condition_violated(only, data.frame(K = c("NA", NA), V = NA_character_)),
+    c(TRUE, FALSE)
+  )
+
+  # An empty and a missing entry together, each explained.
+  both <- cond_rule(list(A = list(equals = "a")), list(K = list(`in` = list(1, NULL, NA))))
+  expect_identical(first_line(both), paste0(
+    "When A is equal to ", q("a"), ", K must be one of 1 (the list also holds an empty entry, ",
+    "which matches only the text ", q("NULL"), ", and a missing entry, which matches a missing ",
+    "value if K holds numbers and otherwise only the text ", q("NA"), ")."
+  ))
+  expect_identical(dta_condition_violated(both, num), c(FALSE, FALSE, TRUE, TRUE))
+  expect_identical(
+    dta_condition_violated(both, data.frame(A = "a", K = c("NULL", NA, "NA"))),
+    c(FALSE, TRUE, FALSE)
   )
 })
 
@@ -676,7 +778,8 @@ test_that("a text bound of a numeric test reads as the number it is, or as a pro
     paste0("When V is empty, K must be at least ", q("abc"), "."),
     paste0(
       "Problem: The test ", sq("min"), " on column K is given ", q("abc"),
-      ", which is not a number: no value passes this test, unless K holds dates."
+      ", which is not a number: no value passes this test, and if K holds dates, ",
+      "the validation stops with an error."
     ),
     "Missing values:",
     paste0(bul, "If V is missing, the condition counts as met."),
@@ -698,6 +801,57 @@ test_that("a text bound of a numeric test reads as the number it is, or as a pro
     "The test ", sq("range"), " on column L is given ", q("x"), ", which is not a number"
   ), .rule_text(two), fixed = TRUE))
   expect_true(all(suppressWarnings(dta_condition_violated(two, data.frame(L = c(1, 5), V = NA_character_)))))
+})
+
+# Regression (review round 2, K1): on dates a number bound counts days (seconds
+# with a time), a text bound must be a date, and any other text -- even one
+# that reads as a number -- stops the validation.
+test_that("dates: number bounds count days or seconds, text bounds must be dates", {
+  then_min <- function(bound) cond_rule(list(V = list(empty = TRUE)), list(K = list(min = bound)))
+  days <- data.frame(K = as.Date(c("1970-01-01", "1970-01-02")), V = NA)
+  secs <- data.frame(K = as.POSIXct(c(0.5, 2), origin = "1970-01-01", tz = "UTC"), V = NA)
+  # a number: days in a date column, seconds in a date-time column.
+  expect_identical(dta_condition_violated(then_min(1), days), c(TRUE, FALSE))
+  expect_identical(dta_condition_violated(then_min(1), secs), c(TRUE, FALSE))
+  guide <- paste(.rule_reading_guide(), collapse = " ")
+  expect_true(grepl(paste0(
+    "a bound written as a number counts the days since 1 January 1970 (in a column of dates ",
+    "with a time, the seconds since the start of 1 January 1970 in UTC), and a bound written as text ",
+    "is read as a date written like 2024-01-31; any other text stops the validation with an ",
+    "error, even text that reads as a number, such as ", q("5"), "."
+  ), guide, fixed = TRUE))
+  # a text that reads as a number reads "at least 5", and stops on dates.
+  expect_identical(first_line(then_min("5")), "When V is empty, K must be at least 5.")
+  expect_error(dta_condition_violated(then_min("5"), days), class = "simpleError")
+  expect_error(dta_condition_violated(then_min("5"), secs), class = "simpleError")
+  # a date: works on dates, no number passes it.
+  date_bound <- then_min("1970-01-02")
+  expect_true(grepl(paste0(
+    "Problem: The test ", sq("min"), " on column K is given ", q("1970-01-02"),
+    ", which is not a number: no value passes this test, unless K holds dates."
+  ), .rule_text(date_bound), fixed = TRUE))
+  expect_identical(dta_condition_violated(date_bound, days), c(TRUE, FALSE))
+  expect_identical(dta_condition_violated(date_bound, data.frame(K = c(1, 1e9), V = NA)), c(TRUE, TRUE))
+  # other text: stops on dates and date-times.
+  expect_error(dta_condition_violated(then_min("abc"), days), class = "simpleError")
+  expect_error(dta_condition_violated(then_min("abc"), secs), class = "simpleError")
+  # a date and a text that is no date: the text decides.
+  mixed <- cond_rule(list(V = list(empty = TRUE)), list(K = list(range = c("1970-01-01", "abc"))))
+  expect_true(grepl(paste0(
+    "Problem: The test ", sq("range"), " on column K is given ", q("1970-01-01"), " and ", q("abc"),
+    ", which are not numbers: no value passes this test, and if K holds dates, the validation ",
+    "stops with an error."
+  ), .rule_text(mixed), fixed = TRUE))
+  expect_error(dta_condition_violated(mixed, days), class = "simpleError")
+  # bounds given as a list of mixed types: a date column reads them as
+  # numbers, so a text bound lets no date pass either (no error).
+  listed <- cond_rule(list(V = list(empty = TRUE)), list(K = list(range = list(0, "1970-01-02"))))
+  expect_true(grepl(paste0(
+    "Problem: The test ", sq("range"), " on column K is given ", q("1970-01-02"),
+    ", which is not a number: no value passes this test, in a column of dates as well."
+  ), .rule_text(listed), fixed = TRUE))
+  expect_true(all(suppressWarnings(dta_condition_violated(listed, days))))
+  expect_true(all(suppressWarnings(dta_condition_violated(listed, data.frame(K = c(0, 1), V = NA)))))
 })
 
 # Regression (review finding W5): a message that is not a single text is
@@ -786,7 +940,8 @@ test_that("the evaluator behaves as the reading guide and the unique rule say", 
   ab <- data.frame(K = c("a", "A"), V = NA_character_, stringsAsFactors = FALSE)
   expect_identical(cv(list(K = list(pattern = "a")), ab), c(TRUE, FALSE))
   expect_identical(cv(list(K = list(pattern = "(?i)a")), ab), c(TRUE, TRUE))
-  # W7: on dates, a number counts days since 1 January 1970, text is a date.
+  # W7: on dates, a number counts days since 1 January 1970, text is a date
+  # (seconds and text that is not a date: see the test of K1 above).
   dates <- data.frame(K = as.Date(c("1970-01-11", "1970-01-09")), V = NA)
   expect_identical(cv(list(K = list(min = 10)), dates), c(TRUE, FALSE))
   expect_identical(cv(list(K = list(min = "1970-01-10")), dates), c(TRUE, FALSE))
@@ -942,8 +1097,7 @@ leaves <- function(x, path = character(0)) {
   lapply(seq_along(x), function(i) list(path = c(path, as.character(i)), value = x[[i]]))
 }
 
-set.seed(42)
-random_rules <- lapply(seq_len(300), rand_rule)
+random_rules <- withr::with_seed(42, lapply(seq_len(300), rand_rule))
 
 test_that("every random rule names every leaf in its plain text", {
   for (r in random_rules) {
@@ -1087,21 +1241,30 @@ test_that(".rule_lines is the layout: role, label, text, bullet", {
   expect_identical(lines$label[!lines$bullet & !nzchar(lines$text)], c("Conditions", "Requirements", "Missing values"))
 })
 
-test_that("Markdown carries the plain text, escaped, with real lists", {
+# The plain text and the lines are the source every format is built from
+# (Markdown through .md_rule_block() in R/exportDocuments.R): the lines joined
+# as the layout says are the plain text, and neither shows code.
+test_that("the lines carry the plain text, with real lists and no code", {
   for (rule in sample_rules()) {
-    md <- .rule_md(rule, heading = FALSE)
-    lines <- strsplit(md, "\n", fixed = TRUE)[[1]]
-    lines <- lines[nzchar(lines)]
-    lines <- sub("^- ", bul, lines)
-    lines <- gsub("**", "", lines, fixed = TRUE)
-    lines <- gsub("\\\\([[:punct:]])", "\\1", lines)
-    lines <- html_unescape(lines)
-    expect_identical(lines, strsplit(.rule_text(rule), "\n", fixed = TRUE)[[1]], info = rule@id)
-    expect_false(grepl("`", gsub("\\\\`", "", md)), info = rule@id)
+    lines <- .rule_lines(rule)
+    joined <- ifelse(
+      lines$bullet, paste0(bul, lines$text),
+      ifelse(nzchar(lines$label) & nzchar(lines$text), paste0(lines$label, ": ", lines$text),
+        ifelse(nzchar(lines$label), paste0(lines$label, ":"), lines$text)
+      )
+    )
+    expect_identical(paste(joined, collapse = "\n"), .rule_text(rule), info = rule@id)
+    # No YAML: no operator key followed by a colon.
+    expect_false(any(grepl(
+      "\\b(equals?|not_equals?|in|not_in|greater(_equal)?|less(_equal)?|min|max|range|pattern|empty)\\s*:",
+      lines$text
+    )), info = rule@id)
   }
-  md <- .rule_md(group_rule())
-  expect_true(startsWith(md, "**g1** \u00b7 Grouped condition\n\n"))
-  expect_true(grepl("\n\n- c\\_failed: a row in which", md, fixed = TRUE))
+  lines <- .rule_lines(group_rule())
+  expect_identical(
+    lines$text[lines$bullet][[1]],
+    paste0("c_failed: a row in which STATUS is equal to ", q("FAILED"))
+  )
 })
 
 test_that("HTML carries the plain text, escaped, without code markup", {
@@ -1131,7 +1294,8 @@ test_that("the Word paragraph carries the plain text with bold labels", {
 
 test_that("no format shows a rule as code", {
   for (rule in sample_rules()) {
-    for (out in c(.rule_text(rule), .rule_summary(rule), .rule_md(rule))) {
+    lines <- .rule_lines(rule)
+    for (out in c(.rule_text(rule), .rule_summary(rule), lines$text, lines$label)) {
       expect_false(grepl("type:", out, fixed = TRUE), info = rule@id)
       expect_false(grepl("col_condition|col_range|group_condition", out), info = rule@id)
     }
@@ -1169,6 +1333,94 @@ test_that("the summary joins sentence items without doubled punctuation", {
   ))
 })
 
+# Regression (review round 2, K2): a THEN note on a missing value is left out
+# when the IF tests the same column and a missing value there never reaches
+# the THEN; it stays when the evaluator can reach it.
+test_that("a THEN note on a missing value that cannot occur is left out", {
+  visit_note <- "If VISIT is missing in a row that meets the condition, the rule is violated."
+  eq <- cond_rule(list(VISIT = list(equals = "V03")), list(VISIT = list(pattern = "^V")))
+  expect_identical(.rule_text(eq), paste(
+    paste0("When VISIT is equal to ", q("V03"), ", VISIT must match the pattern ", q("^V"), "."),
+    "Missing values: If VISIT is missing, the condition is not met and the row is not checked.",
+    sep = "\n"
+  ))
+  expect_false(any(dta_condition_violated(eq, data.frame(VISIT = c(NA, "V03", "X")))))
+  # A test that gives no (not empty) on the IF: left out as well; another
+  # THEN column keeps its note.
+  ne <- cond_rule(list(VISIT = list(empty = FALSE)), list(VISIT = list(equals = "V03"), DOSE = list(greater = 0)))
+  text <- .rule_text(ne)
+  expect_false(grepl("If VISIT is missing in a row", text, fixed = TRUE))
+  expect_true(grepl("If DOSE is missing in a row that meets the condition, this part of the requirement", text, fixed = TRUE) ||
+    grepl("If DOSE is missing in a row that meets the condition, the rule is violated.", text, fixed = TRUE))
+  expect_identical(
+    dta_condition_violated(ne, data.frame(VISIT = c(NA, "V03"), DOSE = c(1, NA))),
+    c(FALSE, TRUE)
+  )
+  # A numeric test on the IF alone: a missing value is undecided and leaves
+  # the row out.
+  num <- cond_rule(list(AGE = list(greater = 17)), list(AGE = list(less = 120)))
+  expect_false(grepl("If AGE is missing in a row", .rule_text(num), fixed = TRUE))
+  expect_false(any(dta_condition_violated(num, data.frame(AGE = c(NA, ""), stringsAsFactors = FALSE))))
+  # Undecided, but another column of the IF compares numbers: a value there
+  # that is not a number keeps the row, so the note stays and is true.
+  kept <- cond_rule(
+    list(VISIT = list(equals = "V03"), Z = list(greater = 1)),
+    list(VISIT = list(pattern = "^V"))
+  )
+  expect_true(grepl(visit_note, .rule_text(kept), fixed = TRUE))
+  expect_identical(
+    dta_condition_violated(kept, data.frame(VISIT = c(NA, NA), Z = c("abc", "5"))),
+    c(TRUE, FALSE)
+  )
+  # A list that depends on the column can let a missing value through: kept.
+  dep <- cond_rule(list(K = list(`in` = list(1, NA))), list(K = list(less = 5)))
+  expect_true(grepl("If K is missing in a row that meets the condition, the rule is violated.", .rule_text(dep), fixed = TRUE))
+  expect_identical(dta_condition_violated(dep, data.frame(K = c(NA, 1))), c(TRUE, FALSE))
+  # A column the IF does not test keeps its note.
+  other <- cond_rule(list(A = list(equals = "a")), list(VISIT = list(pattern = "^V")))
+  expect_true(grepl(visit_note, .rule_text(other), fixed = TRUE))
+  # The example from the review: clinical_dta's rule on VISIT.
+  dta <- read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
+  rules <- unlist(lapply(dta@datasets, function(ds) ds@specs@rules), recursive = FALSE)
+  rule <- Filter(function(r) identical(r@id, "check_col_condition_example"), rules)[[1]]
+  lines <- .rule_lines(rule)
+  expect_true("If VISIT is missing, the condition is not met and the row is not checked." %in% lines$text)
+  expect_false(any(startsWith(lines$text, "If VISIT is missing in a row")))
+})
+
+# Regression (review round 2, K8): a grouped condition on a file without rows
+# checks only its grouping columns; the reading guide says so.
+test_that("a grouped condition passes a file without rows when a condition column is absent", {
+  g <- DTARuleGroupCondition(
+    id = "g", group_by = "S",
+    conditions = list(c1 = list(A = list(equals = "x")), c2 = list(B = list(empty = FALSE))),
+    constraints = list(list(id = "k", type = "requires", `if` = "c1", then = "c2"))
+  )
+  expect_true(rule_check_group_condition(g, data.frame(S = character(0)))$valid)
+  expect_true(apply_rules(list(g), data.frame(S = character(0)), verbose = FALSE)[[1]]$valid)
+  expect_error(rule_check_group_condition(g, data.frame(S = "a")), class = "dta_rule_not_applicable")
+  expect_error(rule_check_group_condition(g, data.frame(A = character(0))), class = "dta_rule_not_applicable")
+  cond <- cond_rule(list(A = list(equals = "x")), list(B = list(empty = FALSE)))
+  expect_error(rule_check_col_condition(cond, data.frame(S = character(0))), class = "dta_rule_not_applicable")
+  expect_true(grepl(
+    "except that a grouped condition passes for a file with no rows as long as its grouping columns are present.",
+    paste(.rule_reading_guide(), collapse = " "),
+    fixed = TRUE
+  ))
+})
+
+# Regression (review round 2, K7): a multi-line Purpose keeps its line breaks
+# in HTML, escaped.
+test_that("HTML keeps the line breaks of a multi-line Purpose", {
+  rule <- DTARuleColUnique(id = "u", columns = "X", description = "first <b>\nsecond\r\nthird")
+  html <- .rule_html_dl(rule)
+  expect_true(grepl(
+    "<dt>Purpose</dt><dd><p>first &lt;b&gt;<br>second<br>third</p></dd>",
+    html,
+    fixed = TRUE
+  ))
+})
+
 test_that("the reading guide states the evaluation conventions once", {
   guide <- .rule_reading_guide()
   text <- paste(guide, collapse = " ")
@@ -1176,7 +1428,11 @@ test_that("the reading guide states the evaluation conventions once", {
   expect_true(grepl("compared exactly", text, fixed = TRUE))
   expect_true(grepl("Perl-compatible", text, fixed = TRUE))
   expect_true(grepl("case-sensitive", text, fixed = TRUE))
-  expect_true(grepl("fails for that file", text, fixed = TRUE))
+  expect_true(grepl(paste(
+    "If a column that a rule needs is not present in a file, the rule cannot be evaluated",
+    "and fails for that file, except that a grouped condition passes for a file with no",
+    "rows as long as its grouping columns are present."
+  ), text, fixed = TRUE))
   expect_true(grepl("ordinary spaces, tabs, carriage returns or line breaks", text, fixed = TRUE))
   expect_true(grepl("a non-breaking space is not empty", text, fixed = TRUE))
   expect_true(grepl("with a point as the decimal separator", text, fixed = TRUE))
@@ -1185,14 +1441,14 @@ test_that("the reading guide states the evaluation conventions once", {
   expect_true(grepl("Equal to, not equal to, one of and not one of compare numbers as numbers", text, fixed = TRUE))
   expect_true(grepl("checked against the value as text", text, fixed = TRUE))
   expect_true(grepl("case-sensitive unless the pattern itself says otherwise", text, fixed = TRUE))
-  expect_true(grepl("a number counts the days since 1 January 1970", text, fixed = TRUE))
+  expect_true(grepl("a bound written as a number counts the days since 1 January 1970", text, fixed = TRUE))
   expect_true(grepl("Numbers are compared exactly; 0 and minus 0 count as the same.", text, fixed = TRUE))
   expect_false(grepl("`", text, fixed = TRUE))
 })
 
 test_that("the source of the wording is ASCII", {
   path <- test_path("..", "..", "R", "rulePhrasing.R")
-  skip_if_not(file.exists(path))
+  skip_if_not(file.exists(path), "R sources not available (installed package)")
   bytes <- readBin(path, "raw", file.info(path)$size)
   expect_false(any(as.integer(bytes) > 127L))
 })

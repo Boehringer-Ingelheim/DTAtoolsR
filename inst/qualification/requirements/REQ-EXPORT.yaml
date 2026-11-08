@@ -579,14 +579,17 @@ requirements:
       not a number violates the rule." Unique: "No two rows may have the same
       value in column C." or "No two rows may have the same combination of
       values in columns A and B.", with "Missing values: Two missing values
-      count as the same value; so do two NaN values, which are not missing."
+      are equal; so are two "not a number" (NaN) values, which are not
+      missing."
       Condition: "When <C is ...>,
       <C must ...>." with the operator phrases is/must be equal to v, not
       equal to v, one of a, b or c, not one of ..., greater than v, less than
       v, at least v, at most v, from a to b, inclusive, matches/match the
       pattern "p", empty, not empty; notes "If C is missing, the condition is
       not met and the row is not checked." (IF side) and "If C is missing in a
-      row that meets the condition, the rule is violated." (THEN side), and
+      row that meets the condition, the rule is violated." (THEN side; left
+      out when the IF tests C and a missing value there never reaches the
+      THEN), and
       for a numeric test on the THEN side "A value in C that is not a number,
       in a row that meets the condition, violates the rule." Group condition: "Rows are grouped by the value in
       column G; within each group, the requirements below must hold.", a
@@ -723,7 +726,13 @@ requirements:
       address starting "www." is linked to "http://www..." and shown so, the
       target GitHub gives it too. Anchors were once lower-cased by the
       session's locale, so under LC_CTYPE=C a heading with U+00DC got an anchor
-      no reader computes.
+      no reader computes. An anchor is computed from the heading as shown
+      (so a heading with "www.x" gets the anchor of "http://www.x"); an
+      address in a Contents entry is shown but not linked, a link cannot hold
+      another one. Known limitation: for an emoji in a heading, pandoc 3.13
+      writes the emoji's name into the anchor, while GitHub and pandoc 3.1.3
+      leave the emoji out; the Contents link follows GitHub and so misses
+      such a heading in a document rendered by pandoc 3.13 or later.
 
   - id: REQ-EXPORT-041
     text: >

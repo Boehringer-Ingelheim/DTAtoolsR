@@ -271,10 +271,10 @@ test_that("the footer states title, version and date and the template, with no t
   expect_identical(lines[n - 5], "")
 })
 
-test_that("the Markdown is deterministic: same bytes on every run and in every locale, LF only", {
+test_that("the Markdown is deterministic: same bytes on every run, LF only", {
   dta <- .mdd_fixture()
   first <- .mdd_write(dta)
-  second <- withr::with_locale(c(LC_TIME = "C"), .mdd_write(dta))
+  second <- .mdd_write(dta)
   bytes <- readBin(first, "raw", file.size(first))
   expect_identical(bytes, readBin(second, "raw", file.size(second)))
 
@@ -298,9 +298,38 @@ test_that("the Markdown is deterministic: same bytes on every run and in every l
   b <- tempfile(fileext = ".md")
   on.exit(unlink(c(a, b), force = TRUE), add = TRUE)
   write_dataset_metadata(ds, a, format = "md", quiet = TRUE)
-  withr::with_locale(c(LC_TIME = "C"), write_dataset_metadata(ds, b, format = "md", quiet = TRUE))
+  write_dataset_metadata(ds, b, format = "md", quiet = TRUE)
   expect_identical(readBin(a, "raw", file.size(a)), readBin(b, "raw", file.size(b)))
   expect_false(grepl("Generated", paste(readLines(a, warn = FALSE), collapse = "\n"), fixed = TRUE))
+})
+
+# An installed LC_TIME locale whose month names are not the English ones of
+# "C", or NULL when the machine has none (CI on Linux often has only C).
+.mdd_other_time_locale <- function() {
+  old <- Sys.getlocale("LC_TIME")
+  on.exit(suppressWarnings(Sys.setlocale("LC_TIME", old)), add = TRUE)
+  for (loc in c("de_DE.UTF-8", "de_DE.utf8", "fr_FR.UTF-8", "fr_FR.utf8", "German_Germany.1252", "de_DE")) {
+    if (nzchar(suppressWarnings(Sys.setlocale("LC_TIME", loc)))) {
+      return(loc)
+    }
+  }
+  NULL
+}
+
+test_that("the Markdown is the same under C and under another LC_TIME locale", {
+  other <- .mdd_other_time_locale()
+  skip_if(is.null(other), "no LC_TIME locale other than C is installed: nothing to compare C with")
+  dta <- .mdd_fixture()
+  ds <- dta@datasets[[1]]
+  in_c <- withr::with_locale(c(LC_TIME = "C"), .mdd_write(dta))
+  in_other <- withr::with_locale(c(LC_TIME = other), .mdd_write(dta))
+  expect_identical(readBin(in_c, "raw", file.size(in_c)), readBin(in_other, "raw", file.size(in_other)))
+  a <- tempfile(fileext = ".md")
+  b <- tempfile(fileext = ".md")
+  on.exit(unlink(c(a, b), force = TRUE), add = TRUE)
+  withr::with_locale(c(LC_TIME = "C"), write_dataset_metadata(ds, a, format = "md", quiet = TRUE))
+  withr::with_locale(c(LC_TIME = other), write_dataset_metadata(ds, b, format = "md", quiet = TRUE))
+  expect_identical(readBin(a, "raw", file.size(a)), readBin(b, "raw", file.size(b)))
 })
 
 test_that("every contents link points at the id pandoc gives the heading", {
@@ -317,6 +346,50 @@ test_that("every contents link points at the id pandoc gives the heading", {
     # Contents covers chapter levels 1 and 2, i.e. every h2 and h3 but itself.
     numbered <- xml2::xml_find_all(html, "//h2[not(@id='contents')]|//h3")
     expect_identical(sort(links), sort(xml2::xml_attr(numbered, "id")))
+  }
+})
+
+test_that("contents links reach headings that hold web and e-mail addresses (every pandoc found)", {
+  pandocs <- unique(normalizePath(
+    Filter(nzchar, c(Sys.which("pandoc"), "/usr/bin/pandoc", "/opt/r45/bin/pandoc", "/usr/local/bin/pandoc")),
+    mustWork = FALSE
+  ))
+  pandocs <- pandocs[file.exists(pandocs)]
+  skip_if(length(pandocs) == 0L, "pandoc is not installed")
+  skip_if_not_installed("xml2")
+  # Chapter, dataset and rule titles with a "www." address (shown as
+  # "http://www..."), a URL and an e-mail address.
+  addresses <- function(tag) paste(tag, "www.ex.com/path_x, https://ex.com/a_b and john_doe+x@ex.org.")
+  path <- .mdd_write(.mdd_fixture(addresses))
+  lines <- readLines(path, warn = FALSE, encoding = "UTF-8")
+  # Written by hand: the anchor of the heading as shown, the link text as
+  # shown without a link of its own.
+  expect_true(paste0(
+    "  - [6.1 section one title http&#58;//www&#46;ex.com/path\\_x, https&#58;//ex.com/a\\_b and ",
+    "john\\_doe+x&#64;ex.org.](#61-section-one-title-httpwwwexcompath_x-httpsexcoma_b-and-john_doexexorg)"
+  ) %in% lines)
+  for (pandoc in pandocs) {
+    html_file <- tempfile(fileext = ".html")
+    status <- system2(pandoc, c("-f", "gfm", "-t", "html", "--wrap=none", "-o", html_file, shQuote(path)))
+    expect_identical(status, 0L, info = pandoc)
+    html <- xml2::read_html(html_file, encoding = "UTF-8")
+    unlink(html_file)
+    heads <- xml2::xml_find_all(html, "//h1|//h2|//h3|//h4|//h5")
+    head_text <- stats::setNames(xml2::xml_text(heads), xml2::xml_attr(heads, "id"))
+    toc <- xml2::xml_find_all(html, "//li/a[starts-with(@href, '#')]")
+    expect_gt(length(toc), 10)
+    for (a in toc) {
+      target <- utils::URLdecode(sub("^#", "", xml2::xml_attr(a, "href")))
+      expect_true(target %in% names(head_text), info = paste(pandoc, target))
+      # The entry shows the heading's text, and is one link, not several.
+      expect_identical(xml2::xml_text(a), unname(head_text[target]), info = paste(pandoc, target))
+      expect_length(xml2::xml_find_all(a, ".//a"), 0L)
+    }
+    addressed <- grep("www", xml2::xml_text(toc), value = TRUE, fixed = TRUE)
+    expect_true(
+      "6.1 section one title http://www.ex.com/path_x, https://ex.com/a_b and john_doe+x@ex.org." %in% addressed,
+      info = pandoc
+    )
   }
 })
 

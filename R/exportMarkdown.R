@@ -218,14 +218,30 @@
 
 # Reverse of .md_escape() for what it produces (links, ASCII punctuation
 # escapes and the HTML entities). Used to recover the heading text that a
-# renderer sees, e.g. to compute an anchor.
+# renderer sees, e.g. to compute an anchor. One pass from left to right, as a
+# reader does: the Markdown "\\&lt;" (an escaped backslash, then an entity)
+# reads "\<", while "\&lt;" (an escaped "&") reads "&lt;".
 .md_unescape <- function(x) {
-  x <- gsub("<((?:(?:https?|ftp)://|[A-Za-z0-9._%+-]+@)[^<>]*)>", "\\1", x, perl = TRUE)
-  # Entities first, and only those .md_escape() wrote ("\\&lt;" is the
-  # author's literal text "&lt;").
-  x <- gsub("(?<!\\\\)&lt;", "<", x, perl = TRUE)
-  x <- gsub("(?<!\\\\)&gt;", ">", x, perl = TRUE)
-  gsub("\\\\([!-/:-@\\[-`{-~])", "\\1", x, perl = TRUE)
+  token <- paste0(
+    "<(?:(?:https?|ftp)://|[A-Za-z0-9._%+-]+@)[^<>]*>",
+    "|\\\\[!-/:-@\\[-`{-~]",
+    "|&lt;|&gt;"
+  )
+  hits <- gregexpr(token, x, perl = TRUE)
+  regmatches(x, hits) <- lapply(regmatches(x, hits), function(m) {
+    vapply(m, function(t) {
+      if (t == "&lt;") {
+        "<"
+      } else if (t == "&gt;") {
+        ">"
+      } else if (startsWith(t, "<")) {
+        substr(t, 2L, nchar(t) - 1L)
+      } else {
+        substr(t, 2L, 2L)
+      }
+    }, character(1), USE.NAMES = FALSE)
+  })
+  x
 }
 
 # One table cell value as a string (NA -> "", factors and list cells flattened).
@@ -374,6 +390,9 @@
 # punctuation), "-" and the space is removed; each space becomes "-". A slug
 # already in `used` gets "-1", "-2", ... appended. Returns the slug and the
 # updated `used` as list(slug =, used =).
+# Known limitation: an emoji is removed, as GitHub and pandoc 3.1.3 do;
+# pandoc 3.13 writes the emoji's name into the anchor instead, so a contents
+# link to a heading with an emoji misses it there. No anchor suits both.
 .md_slug <- function(text, used = character()) {
   if (!is.character(text) || length(text) != 1L || is.na(text)) {
     cli::cli_abort("{.arg text} must be a single string.")
@@ -451,6 +470,19 @@
   vapply(Filter(length, hits), function(m) .md_clean_title(.md_unescape(m[2L])), character(1))
 }
 
+# The text of a link in the table of contents: the heading text as shown,
+# escaped as plain text. A link cannot hold another link, yet some readers
+# turn bare addresses into links themselves, even inside link text (pandoc
+# 3.13 then shows the escapes, pandoc 3.1.3 splits an e-mail address at an
+# escape). Writing the ":" of "://", "@" and the "." of "www." as numeric
+# entities shows the same characters but leaves no address to be found.
+.md_toc_text <- function(text) {
+  text <- .md_escape(text, links = FALSE)
+  text <- gsub("://", "&#58;//", text, fixed = TRUE)
+  text <- gsub("(?i)(www)\\.", "\\1&#46;", text, perl = TRUE)
+  gsub("@", "&#64;", text, fixed = TRUE)
+}
+
 # Assemble the document: `head` lines, a "## Contents" list linking chapters
 # of levels 1 and 2 (only when there are at least two chapters of level 1: a
 # list with one entry guides nobody), the numbered chapters (empty ones
@@ -471,7 +503,10 @@
     used <- .md_slug(title, used)$used
   }
   for (i in seq_along(entries)) {
-    slugged <- .md_slug(paste(entries[[i]]$number, entries[[i]]$title), used)
+    # The anchor comes from the heading as shown, which is not always the
+    # title as written ("www.x" is shown as the link "http://www.x").
+    entries[[i]]$shown <- .md_unescape(.md_escape(entries[[i]]$title))
+    slugged <- .md_slug(paste(entries[[i]]$number, entries[[i]]$shown), used)
     entries[[i]]$slug <- slugged$slug
     used <- slugged$used
     for (title in .md_head_titles(entries[[i]]$body)) {
@@ -483,7 +518,7 @@
   for (e in entries) {
     if (!with_toc || e$depth > 2L) next
     toc <- c(toc, paste0(
-      strrep("  ", e$depth - 1L), "- [", e$number, " ", .md_escape(e$title, links = FALSE), "](#", e$slug, ")"
+      strrep("  ", e$depth - 1L), "- [", e$number, " ", .md_toc_text(e$shown), "](#", e$slug, ")"
     ))
   }
 

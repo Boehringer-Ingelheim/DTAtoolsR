@@ -1183,7 +1183,10 @@ et_rule_wording <- list(
   r_unique = list(complete = TRUE, kind = "Unique", lines = list(
     et_line("No two rows may have the same combination of values in columns USUBJID and VISIT."),
     et_line(
-      "Two missing values count as the same value; so do two NaN values, which are not missing.",
+      paste0(
+        "Two missing values are equal; so are two ",
+        et_q("not a number"), " (NaN) values, which are not missing."
+      ),
       "Missing values"
     )
   )),
@@ -2038,7 +2041,7 @@ test_that("OQ-EXPORT-061 | include_file_specs, include_rules and include_signatu
   }
 })
 
-test_that("OQ-EXPORT-062 | a template export to a path relative to the working directory | REQ-EXPORT-016 REQ-EXPORT-014", {
+test_that("OQ-EXPORT-062 | a template export to a path relative to the working directory writes nothing and aborts (DEV-017); the absolute form writes the document | REQ-EXPORT-016 REQ-EXPORT-014", {
   dir <- normalizePath(qa_tempdir())
   template <- et_write_template("Title: {DTA_TITLE}", dir)
 

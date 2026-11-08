@@ -388,7 +388,7 @@ test_that("block tables follow the template's own margins", {
   expect_lt(widths[[1]], widths[[2]])
 })
 
-test_that("{VALIDATION_RULES} renders each rule's translate_rule_to_human() description", {
+test_that("{VALIDATION_RULES} renders each rule's plain-text description (.rule_text())", {
   ds <- create_example_DTADataSetTabular(2)
   range_rule <- DTARuleColRange(id = "age_range_check", columns = "AGE", min = 18, max = 65)
   unique_rule <- DTARuleColUnique(id = "unique_subj_visit", columns = c("SUBJID", "VISIT"))
@@ -408,10 +408,10 @@ test_that("{VALIDATION_RULES} renders each rule's translate_rule_to_human() desc
   expect_true("unique_subj_visit" %in% cell_text)
 
   descriptions <- .block_rule_table_descriptions(summary)
-  expect_identical(unname(descriptions[["age_range_check"]]), translate_rule_to_human(range_rule))
+  expect_identical(unname(descriptions[["age_range_check"]]), .rule_text(range_rule))
 })
 
-test_that("a DTARuleGroupCondition renders its grouping column and constraints via translate_rule_to_human()", {
+test_that("a DTARuleGroupCondition renders its grouping column and constraints in the plain-text wording (.rule_text())", {
   ds <- create_example_DTADataSetTabular(2)
   rule <- DTARuleGroupCondition(
     id = "block_group_condition_example",
@@ -440,7 +440,7 @@ test_that("a DTARuleGroupCondition renders its grouping column and constraints v
 
   expect_match(cell_text, "SUBJID", fixed = TRUE)
   expect_match(cell_text, "must hold", fixed = TRUE)
-  expect_identical(unname(cell_text), translate_rule_to_human(rule))
+  expect_identical(unname(cell_text), .rule_text(rule))
 })
 
 # Rules of every type for the prose tests below.

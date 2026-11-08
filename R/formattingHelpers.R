@@ -293,18 +293,6 @@ TEXT_WIDTH <- list(portrait = 6.3, landscape = 9.7)
   officer::fp_border(color = color, width = size, style = "single")
 }
 
-#' Translate a rule to human-readable format
-#'
-#' Thin wrapper around the shared rule wording in `R/rulePhrasing.R`: the
-#' complete plain-English description, one line per statement, list items
-#' starting with a bullet. Rules are never rendered as code.
-#' @param rule A `DTARule` object.
-#' @return A single string, lines separated by `"\n"`.
-#' @keywords internal
-translate_rule_to_human <- function(rule) {
-  .rule_text(rule)
-}
-
 # The single display string used for every missing/unset value. NULL, NA (of
 # any type) and the empty string all render as this text, so a missing field
 # looks the same in every export format.
@@ -389,34 +377,6 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
     Details = vapply(keys, function(key) study[[key]], character(1)),
     stringsAsFactors = FALSE
   )
-}
-
-#' Escape narrative text rather than interpreting it as Markdown or HTML
-#' @keywords internal
-.plain_text_to_md <- function(text, table = FALSE) {
-  text <- gsub("&", "&amp;", text, fixed = TRUE)
-  text <- gsub("<", "&lt;", text, fixed = TRUE)
-  text <- gsub(">", "&gt;", text, fixed = TRUE)
-  marks <- c("\\", "`", "*", "_", "{", "}", "[", "]", "#", "!", "~", "=")
-  if (!isTRUE(table)) marks <- c(marks, "|")
-  for (mark in marks) {
-    text <- gsub(mark, paste0("\\", mark), text, fixed = TRUE)
-  }
-  text <- gsub("(?m)^([ \t]*)([-+])", "\\1\\\\\\2", text, perl = TRUE)
-  text <- gsub("(?m)^([ \t]*[0-9]+)([.)])(?=[ \t])", "\\1\\\\\\2", text, perl = TRUE)
-
-  # Visible indentation must not activate Markdown's indented-code syntax.
-  indents <- gregexpr("(?m)^[ \t]+(?=\\S)", text, perl = TRUE)
-  regmatches(text, indents) <- lapply(regmatches(text, indents), function(matches) {
-    vapply(matches, function(indent) {
-      width <- 0L
-      for (char in strsplit(indent, "", fixed = TRUE)[[1]]) {
-        width <- if (char == "\t") (width %/% 4L + 1L) * 4L else width + 1L
-      }
-      strrep("\u00a0", width)
-    }, character(1))
-  })
-  text
 }
 
 #' Simple title-casing for arbitrary field names (e.g. "date_first_transfer")
