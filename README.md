@@ -749,10 +749,11 @@ my-templates/
   .github/workflows/validate-templates.yml
 ```
 
-`validate_template(".", strict = TRUE)` at the repository root validates the
+`lint_template_repo(".")` at the repository root validates the
 four folders and reports a template file in the wrong place (for example a
 party profile left in `templates/`, or any template file at the root) as an
-error. The app's `dir:`/`pkg:`/`git:` sources use the same layout; the older
+error, along with repository-format problems such as a mis-capitalised folder
+name; it aborts on any error, which is what the scaffolded CI relies on. The app's `dir:`/`pkg:`/`git:` sources use the same layout; the older
 flat and mixed-`templates/` layouts are no longer read, and the scaffolded
 `README.md` explains how to reorganise an existing repository.
 

@@ -36,7 +36,7 @@ pipeline {
     // site library in R_LIBS unless R_LIBS is already set, and R searches
     // R_LIBS first, so install.packages() would still pick the unwritable
     // site library. It sits outside the workspace because an installed
-    // DTAtools carries template files of its own, which validate_template(".")
+    // DTAtools carries template files of its own, which lint_template_repo(".")
     // would otherwise find below the repository root and report.
     environment {
         R_LIBS = '/tmp/R-library'
@@ -68,9 +68,9 @@ pipeline {
             }
         }
 
-        stage('Validate templates') {
+        stage('Lint template repository') {
             steps {
-                sh 'Rscript -e \'DTAtools::validate_template(".", strict = TRUE)\''
+                sh 'Rscript -e \'DTAtools::lint_template_repo(".")\''
             }
         }
     }

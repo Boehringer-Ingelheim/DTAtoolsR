@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `lint_template_repo()` checks a template repository: every
+  `validate_template()` finding plus `folder_name_case`,
+  `id_filename_mismatch` and `file_ignored`, printed one per line, and an
+  error (class `dta_template_lint_error`) when a finding reaches `fail_on`.
+  The CI assets written by `create_template_repo()` (GitHub Actions,
+  Bitbucket Pipelines, Jenkins) now call it.
+
+### Fixed
+
+- `validate_template()` now reports `kind_suffix_mismatch`,
+  `party_profile_invalid` and `export_template_no_placeholders`, which the app
+  silently skipped while validation passed.
+
 ## [0.26.0] - 2026-11-07
 
 ### Added
