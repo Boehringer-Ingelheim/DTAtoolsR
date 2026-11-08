@@ -265,23 +265,8 @@ write_dta <- function(
   }
 
   # Document information, including where the document came from.
-  info <- c(
-    Title = .dta_display_title(meta@title),
-    `Document header` = meta@header %||% "",
-    Version = meta@version %||% "",
-    Date = .format_document_date(.current_version_date(meta))
-  )
-  if (length(meta@template) > 0) {
-    tpl <- meta@template
-    info <- c(info,
-      Template = if (!is.null(tpl$label) && !identical(tpl$label, tpl$id)) paste0(tpl$label, " (", tpl$id, ")") else tpl$id,
-      `Template version` = tpl$version %||% "",
-      `Template date` = .format_document_date(tpl$date)
-    )
-  }
-  info <- info[nzchar(info)]
   doc <- .add_heading(doc, "Document Information", level = 1)
-  doc <- flextable::body_add_flextable(doc, .kv_table(data.frame(key = names(info), value = unname(info))), align = "left")
+  doc <- flextable::body_add_flextable(doc, .kv_table(.document_info_pairs(meta)), align = "left")
   doc <- .add_spacer(doc)
 
   ft_history <- .build_version_history_table(meta@version_history)
@@ -316,11 +301,7 @@ write_dta <- function(
 
     if (length(meta@transmission) > 0) {
       doc <- .add_heading(doc, "Transmission Details", level = 2)
-      trans <- as.list(meta@transmission)
-      ft <- .kv_table(data.frame(
-        key = .transmission_label(names(trans)),
-        value = vapply(trans, .format_any_value, character(1))
-      ))
+      ft <- .kv_table(.transmission_pairs(meta@transmission))
       doc <- flextable::body_add_flextable(doc, ft, align = "left")
       doc <- .add_spacer(doc)
     }
@@ -348,15 +329,7 @@ write_dta <- function(
         doc <- .add_body_par(doc, dataset@description)
         doc <- .add_spacer(doc)
       }
-      facts <- c(
-        ID = dataset@id,
-        Type = .title_case_field(dataset@type %||% ""),
-        `Template source` = dataset@template_source %||% "",
-        `Template version` = dataset@template_version %||% "",
-        `Template date` = dataset@template_date %||% ""
-      )
-      facts <- facts[nzchar(facts)]
-      doc <- flextable::body_add_flextable(doc, .kv_table(data.frame(key = names(facts), value = unname(facts))), align = "left")
+      doc <- flextable::body_add_flextable(doc, .kv_table(.dataset_facts(dataset)), align = "left")
       doc <- .add_spacer(doc)
 
       doc <- .add_file_specifications(doc, dataset@files, title = "Files", heading_level = 3)

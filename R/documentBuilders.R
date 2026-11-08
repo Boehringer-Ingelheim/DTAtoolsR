@@ -281,19 +281,9 @@ NULL
     doc <- .add_spacer(doc)
   }
 
-  party <- function(org) org$affiliation$name %||% ""
-  facts <- c(
-    Version = meta@version %||% "",
-    Date = .format_document_date(.current_version_date(meta)),
-    `Study ID` = meta@study$id %||% "",
-    `Protocol ID` = meta@study$protocol_id %||% "",
-    Supplier = party(meta@supplier),
-    Receiver = party(meta@receiver),
-    Template = if (length(meta@template) > 0) sub("^Template: ", "", .template_provenance_text(meta@template)) else ""
-  )
-  facts <- facts[nzchar(facts)]
-  if (length(facts) > 0) {
-    ft <- .kv_table(data.frame(key = names(facts), value = unname(facts)), width = 4.6, label_width = 1.3)
+  facts <- .cover_facts(meta)
+  if (nrow(facts) > 0) {
+    ft <- .kv_table(facts, width = 4.6, label_width = 1.3)
     doc <- flextable::body_add_flextable(doc, ft, align = "left")
   }
 
@@ -453,11 +443,7 @@ NULL
 #' Build the version-history table (flextable). Shared by the built-in layout and
 #' by the `{VERSION_HISTORY_TABLE}` template block.
 #'
-#' `changes` is flattened rather than passed straight into the data.frame: the
-#' class permits a character vector there, and a vector of length > 1 makes
-#' `data.frame()` abort with "arguments imply differing number of rows". The
-#' date goes through [.format_document_date()] so it reads the same whatever the
-#' machine's locale, and whether it arrives as a `Date` or as text.
+#' The rows come from [.version_history_df()].
 #'
 #' @param version_history A list of `list(version =, date =, changes =)` records,
 #'   as `DTAMetaData@version_history` holds them, or `NULL`.
@@ -468,22 +454,7 @@ NULL
     return(NULL)
   }
 
-  version_data <- data.frame(
-    Version = character(),
-    Date = character(),
-    Changes = character(),
-    stringsAsFactors = FALSE,
-    check.names = FALSE
-  )
-  for (vh in version_history) {
-    version_data <- rbind(version_data, data.frame(
-      Version = if (is.null(vh$version)) "" else as.character(vh$version)[[1]],
-      Date = .format_document_date(vh$date),
-      Changes = paste(unlist(vh$changes), collapse = "; "),
-      stringsAsFactors = FALSE,
-      check.names = FALSE
-    ))
-  }
+  version_data <- .version_history_df(version_history)
 
   ft <- flextable::flextable(version_data)
   ft <- flextable::width(ft, j = 1, width = 1.0)
@@ -507,12 +478,9 @@ NULL
   }
 
   # Affiliation details (name / country / address / any extension field)
-  pairs <- .affiliation_pairs(org_list$affiliation)
-  if (length(pairs) > 0) {
-    ft <- .kv_table(data.frame(
-      key = names(pairs),
-      value = vapply(pairs, .format_any_value, character(1))
-    ))
+  pairs <- .party_facts(org_list)
+  if (nrow(pairs) > 0) {
+    ft <- .kv_table(pairs)
     doc <- flextable::body_add_flextable(doc, ft, align = "left")
     doc <- .add_spacer(doc)
   }
@@ -521,7 +489,7 @@ NULL
   if (!is.null(ft)) {
     doc <- flextable::body_add_flextable(doc, ft, align = "left")
     doc <- .add_spacer(doc)
-  } else if (length(pairs) == 0) {
+  } else if (nrow(pairs) == 0) {
     doc <- .add_body_par(doc, "No contacts specified.", italic = TRUE, color = THEME_COLORS$gray_mid)
   }
 
@@ -533,37 +501,10 @@ NULL
 #' Responsibilities. Backup-only contacts are listed last.
 #' @keywords internal
 .build_party_contacts_table <- function(contacts) {
-  if (is.null(contacts) || length(contacts) == 0) {
+  df <- .party_contacts_df(contacts)
+  if (nrow(df) == 0) {
     return(NULL)
   }
-  contacts <- lapply(contacts, function(ct) if (is.list(ct)) ct else list(name = as.character(ct)))
-  is_backup <- vapply(contacts, function(ct) isTRUE(ct$backup) && !isTRUE(ct$signature), logical(1))
-  contacts <- c(contacts[!is_backup], contacts[is_backup])
-
-  text <- function(x) {
-    if (is.null(x) || length(x) == 0 || all(is.na(x))) "" else paste(as.character(x), collapse = ", ")
-  }
-  known <- c("name", "role", "department", "email", "phone", "address", "reviewer", "backup", "signature")
-  rows <- lapply(contacts, function(ct) {
-    contact <- c(text(ct$email), text(ct$phone), text(ct$address))
-    for (f in setdiff(names(ct), known)) {
-      contact <- c(contact, paste0(.title_case_field(f), ": ", .format_any_value(ct[[f]])))
-    }
-    flags <- c(
-      if (isTRUE(ct$signature)) "Signatory",
-      if (isTRUE(ct$reviewer)) "Reviewer",
-      if (isTRUE(ct$backup)) "Backup"
-    )
-    data.frame(
-      Name = if (nzchar(text(ct$name))) text(ct$name) else "(Unnamed)",
-      Role = text(ct$role),
-      Department = text(ct$department),
-      Contact = paste(contact[nzchar(contact)], collapse = "\n"),
-      Responsibilities = paste(flags, collapse = "\n"),
-      stringsAsFactors = FALSE
-    )
-  })
-  df <- do.call(rbind, rows)
 
   ft <- flextable::flextable(df, col_keys = c("Name", "Department", "Contact", "Responsibilities"))
   ft <- flextable::width(ft, j = 1:4, width = c(1.7, 1.25, 2.35, 1.0))
@@ -666,44 +607,7 @@ NULL
     return(NULL)
   }
 
-  file_data <- data.frame(
-    `File Name / Pattern` = character(),
-    `Match Type` = character(),
-    `Format` = character(),
-    `Expected Count` = character(),
-    `Description` = character(),
-    stringsAsFactors = FALSE,
-    check.names = FALSE
-  )
-
-  for (i in seq_along(files)) {
-    f <- files[[i]]
-    min_n <- f@min_number_of_files %||% 0
-    max_n <- f@max_number_of_files %||% 0
-    match_type <- if (isTRUE(f@pattern)) "Regex pattern" else "Exact name"
-
-    desc <- if (!is.null(f@pattern_description)) f@pattern_description else ""
-    info_txt <- tryCatch(f@info, error = function(e) NULL)
-    if (!is.null(info_txt) && length(info_txt) > 0) {
-      info_flat <- if (is.list(info_txt)) .format_any_value(info_txt) else paste(info_txt, collapse = "; ")
-      if (nzchar(info_flat)) {
-        desc <- if (nzchar(desc)) paste0(desc, " (", info_flat, ")") else info_flat
-      }
-    }
-
-    file_data <- rbind(file_data, data.frame(
-      `File Name / Pattern` = if (!is.null(f@filename)) paste(f@filename, collapse = ", ") else "pattern_not_specified",
-      `Match Type` = match_type,
-      `Format` = .file_format_label(f),
-      `Expected Count` = paste0(
-        min_n,
-        if (min_n != max_n) paste0(" to ", max_n) else ""
-      ),
-      `Description` = desc,
-      stringsAsFactors = FALSE,
-      check.names = FALSE
-    ))
-  }
+  file_data <- .file_specs_df(files)
 
   ft <- flextable::flextable(file_data)
   ft <- flextable::width(ft, j = 1, width = 1.8)
@@ -725,29 +629,7 @@ NULL
     doc <- .add_body_par(doc, "No files specified.", italic = TRUE, color = THEME_COLORS$gray_mid)
     return(doc)
   }
-  total_min <- sum(sapply(files, function(f) {
-    tryCatch(f@min_number_of_files %||% 0, error = function(e) 0)
-  }))
-
-  total_max <- sum(sapply(files, function(f) {
-    tryCatch(f@max_number_of_files %||% 0, error = function(e) 0)
-  }))
-
-  count_txt <- if (total_min != total_max) {
-    paste0(total_min, " to ", total_max, " files are")
-  } else if (total_min == 1) {
-    "1 file is"
-  } else {
-    paste(total_min, "files are")
-  }
-  doc <- .add_body_par(
-    doc,
-    paste0(
-      count_txt, " expected for this dataset in total. Each file name is given ",
-      "either as an exact name or as a regular-expression pattern that a ",
-      "delivered file must match; the expected count states how many files may match it."
-    )
-  )
+  doc <- .add_body_par(doc, .file_count_sentence(files))
   doc <- .add_spacer(doc)
 
   ft <- .build_file_specs_table(files)
@@ -769,40 +651,11 @@ NULL
 #' the specification a supplier must meet, so they belong in the document.
 #' @keywords internal
 .build_file_format_table <- function(files) {
-  tabular <- Filter(function(f) inherits(f, "DTAtools::DTAFileTabular"), files)
-  if (length(tabular) == 0) {
+  df <- .file_format_df(files)
+  if (nrow(df) == 0) {
     return(NULL)
   }
-  named_char <- function(x, empty = "(none)") {
-    if (is.null(x) || length(x) == 0) {
-      return(empty)
-    }
-    labels <- stats::setNames(
-      c(
-        "Comma ( , )", "Tab", "Semicolon ( ; )", "Pipe ( | )",
-        "Double quote ( \" )", "Single quote ( ' )", "Space", "(empty string)"
-      ),
-      c(",", "\t", ";", "|", "\"", "'", " ", "")
-    )
-    hit <- match(x, names(labels))
-    shown <- ifelse(is.na(hit), x, unname(labels)[hit])
-    shown[is.na(x)] <- MISSING_VALUE_DISPLAY
-    paste(shown, collapse = ", ")
-  }
-  yes_no <- function(x) if (isTRUE(x)) "Yes" else "No"
-  rows <- lapply(tabular, function(f) {
-    data.frame(
-      File = paste(f@filename, collapse = ", "),
-      Delimiter = named_char(f@sep),
-      `Header row` = yes_no(f@has_header),
-      Quote = named_char(f@quote),
-      `Missing values` = named_char(f@missing_values),
-      Encoding = if (length(f@encoding) > 0 && nzchar(f@encoding)) f@encoding else MISSING_VALUE_DISPLAY,
-      `Line breaks in values` = yes_no(f@newlines_in_values),
-      stringsAsFactors = FALSE, check.names = FALSE
-    )
-  })
-  ft <- flextable::flextable(do.call(rbind, rows))
+  ft <- flextable::flextable(df)
   ft <- flextable::width(ft, j = 1:7, width = c(1.5, 0.9, 0.6, 0.9, 1.1, 0.7, 0.7))
   .fit_table_width(.style_table(ft))
 }
@@ -1013,77 +866,7 @@ NULL
     return(NULL)
   }
 
-  specs <- specs_collection@columns
-
-  column_data <- data.frame(
-    `Variable Name` = character(),
-    `Label` = character(),
-    `Type` = character(),
-    `Nullable` = character(),
-    `Allowed Values / Pattern` = character(),
-    `Description` = character(),
-    stringsAsFactors = FALSE,
-    check.names = FALSE
-  )
-
-  for (spec in specs) {
-    # Get type
-    type_str <- "unspecified"
-    if (!is.null(spec@structure) && !is.null(spec@structure@type)) {
-      type_str <- spec@structure@type
-      if (!is.null(spec@structure@backend) && nzchar(spec@structure@backend)) {
-        type_str <- paste0(spec@structure@backend, " ", type_str)
-      }
-    }
-    # Length and format are part of the contract a supplier must meet (a SAS
-    # Char of length 10 is not a SAS Char of length 200), so they are shown.
-    if (!is.null(spec@structure)) {
-      len <- spec@structure@length
-      if (!is.null(len) && length(len) == 1 && !is.na(len)) type_str <- paste0(type_str, " (", len, ")")
-      fmt <- spec@structure@format
-      if (!is.null(fmt) && length(fmt) == 1 && !is.na(fmt) && nzchar(fmt)) {
-        type_str <- paste0(type_str, "\nFormat: ", fmt)
-      }
-    }
-    if (!is.null(spec@colclass) && nzchar(spec@colclass)) {
-      type_str <- paste0(type_str, "\nR class: ", spec@colclass)
-    }
-
-    # Get nullable
-    nullable_str <- if (!is.null(spec@nullable)) {
-      ifelse(spec@nullable, "Yes", "No")
-    } else {
-      "Not specified"
-    }
-
-    # Allowed values and pattern, both when both are given, never truncated:
-    # a specification that hides its eleventh permitted value is wrong.
-    all_values <- function(v) {
-      if (is.list(v)) .format_any_value(v) else paste(as.character(v), collapse = ", ")
-    }
-    values_str <- c(
-      if (!is.null(spec@values) && length(spec@values) > 0) all_values(spec@values),
-      if (!is.null(spec@pattern) && nzchar(spec@pattern)) paste0("Pattern: ", spec@pattern)
-    )
-    values_str <- paste(values_str, collapse = "\n")
-
-    # Get description
-    desc_str <- if (!is.null(spec@description)) spec@description else ""
-    if (!is.null(spec@examples) && length(spec@examples) > 0) {
-      desc_str <- paste0(desc_str, if (nzchar(desc_str)) "\n", "Examples: ", all_values(spec@examples))
-    }
-
-    column_data <- rbind(column_data, data.frame(
-      `Variable Name` = spec@id,
-      `Label` = if (!is.null(spec@label)) spec@label else "",
-      `Type` = type_str,
-      `Nullable` = nullable_str,
-      `Allowed Values / Pattern` = values_str,
-      `Description` = desc_str,
-      stringsAsFactors = FALSE,
-      check.names = FALSE
-    ))
-  }
+  column_data <- .column_specs_df(specs_collection)
 
   # Create flextable
   ft <- flextable::flextable(column_data)
