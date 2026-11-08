@@ -49,6 +49,17 @@ scaffold_example_files <- c(
   "export-templates/README.md"
 )
 
+# The agent skill a default (agent_skill = TRUE) scaffold also writes, whatever
+# `examples` and `ci` say. Written out rather than listed from the bundle, so a
+# file silently dropped from the bundle fails here.
+agent_skill_files <- file.path(
+  ".claude/skills/dta-template-authoring",
+  c(
+    "SKILL.md", "references/composition.md", "references/linting.md",
+    "references/repository-architecture.md"
+  )
+)
+
 # ---- The round trip -- the anchor test --------------------------------------
 
 test_that("create_template_repo() scaffolds a directory that validate_template() accepts outright", {
@@ -294,7 +305,10 @@ test_that("examples = FALSE writes no template files, and validate_template() re
   dir <- withr::local_tempdir()
   create_template_repo(dir, examples = FALSE)
 
-  expect_setequal(list_all_files(dir), c(".gitignore", "README.md", ".github/workflows/validate-templates.yml"))
+  expect_setequal(
+    list_all_files(dir),
+    c(".gitignore", "README.md", ".github/workflows/validate-templates.yml", agent_skill_files)
+  )
 
   result <- validate_template(dir)
   rows <- result[result$code == "no_templates", , drop = FALSE]
@@ -387,7 +401,7 @@ test_that("the bundled template-repo-skeleton directory is itself clean", {
 test_that("the scaffold puts README.md and dta-app.yaml at the root and one kind per folder", {
   dir <- withr::local_tempdir()
   create_template_repo(dir, ci = FALSE)
-  expect_setequal(list_all_files(dir), scaffold_example_files)
+  expect_setequal(list_all_files(dir), c(scaffold_example_files, agent_skill_files))
   # No template file sits in the root, and no folder holds another kind's file.
   expect_length(list.files(dir, pattern = "[.]dta-.*[.]ya?ml$"), 0)
   expect_setequal(
@@ -408,30 +422,137 @@ test_that("examples = TRUE and each ci provider write exactly the documented fil
   for (provider in names(ci_files)) {
     dir <- withr::local_tempdir()
     create_template_repo(dir, ci = provider)
-    expect_setequal(list_all_files(dir), c(scaffold_example_files, ci_files[[provider]]))
+    expect_setequal(list_all_files(dir), c(scaffold_example_files, agent_skill_files, ci_files[[provider]]))
   }
 
   none <- withr::local_tempdir()
   create_template_repo(none, ci = FALSE)
-  expect_setequal(list_all_files(none), scaffold_example_files)
+  expect_setequal(list_all_files(none), c(scaffold_example_files, agent_skill_files))
 
   all3 <- withr::local_tempdir()
   create_template_repo(all3, ci = names(ci_files))
-  expect_setequal(list_all_files(all3), c(scaffold_example_files, unlist(ci_files)))
+  expect_setequal(list_all_files(all3), c(scaffold_example_files, agent_skill_files, unlist(ci_files)))
 })
 
-test_that("examples = FALSE writes only README.md, .gitignore and the CI file(s), no kind folders", {
+test_that("examples = FALSE writes only README.md, .gitignore, the agent skill and the CI file(s), no kind folders", {
   bare <- withr::local_tempdir()
   create_template_repo(bare, ci = FALSE, examples = FALSE)
-  expect_setequal(list_all_files(bare), c("README.md", ".gitignore"))
+  expect_setequal(list_all_files(bare), c("README.md", ".gitignore", agent_skill_files))
   expect_false(any(dir.exists(file.path(bare, c("templates", "parties", "vocabulary", "export-templates")))))
 
   with_ci <- withr::local_tempdir()
   create_template_repo(with_ci, ci = c("github", "jenkins"), examples = FALSE)
   expect_setequal(
     list_all_files(with_ci),
-    c("README.md", ".gitignore", ".github/workflows/validate-templates.yml", "Jenkinsfile")
+    c("README.md", ".gitignore", ".github/workflows/validate-templates.yml", "Jenkinsfile", agent_skill_files)
   )
+})
+
+# ---- agent_skill ---------------------------------------------------------------
+
+test_that("agent_skill = TRUE copies the bundled skill byte-identically; FALSE writes no .claude directory", {
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, examples = FALSE, ci = FALSE)
+
+  bundled <- system.file("extdata", "agent-skills", "dta-template-authoring", package = "DTAtools")
+  rel <- sub("^[.]claude/skills/dta-template-authoring/", "", agent_skill_files)
+  expect_identical(
+    unname(tools::md5sum(file.path(dir, agent_skill_files))),
+    unname(tools::md5sum(file.path(bundled, rel)))
+  )
+
+  # The front matter is how an agent finds the skill: `name` must match the
+  # folder and `description` must say when to load it.
+  lines <- readLines(file.path(dir, agent_skill_files[[1]]), encoding = "UTF-8")
+  fences <- which(lines == "---")
+  expect_identical(fences[[1]], 1L)
+  front <- yaml::yaml.load(paste(lines[2:(fences[[2]] - 1L)], collapse = "\n"))
+  expect_identical(front$name, "dta-template-authoring")
+  expect_type(front$description, "character")
+  expect_length(front$description, 1)
+  expect_true(nzchar(front$description))
+
+  off <- withr::local_tempdir()
+  create_template_repo(off, agent_skill = FALSE)
+  expect_false(dir.exists(file.path(off, ".claude")))
+  expect_setequal(list_all_files(off), c(scaffold_example_files, ".github/workflows/validate-templates.yml"))
+})
+
+test_that("agent_skill must be a single TRUE/FALSE", {
+  dir <- withr::local_tempdir()
+  expect_error(create_template_repo(dir, agent_skill = "yes"), "agent_skill", class = "rlang_error")
+  expect_error(create_template_repo(dir, agent_skill = NA), "agent_skill", class = "rlang_error")
+  expect_error(create_template_repo(dir, agent_skill = c(TRUE, FALSE)), "agent_skill", class = "rlang_error")
+  expect_length(list_all_files(dir), 0)
+})
+
+test_that("a pre-existing SKILL.md is a conflict like any other file", {
+  dir <- withr::local_tempdir()
+  skill_md <- file.path(dir, agent_skill_files[[1]])
+  dir.create(dirname(skill_md), recursive = TRUE)
+  writeLines("team edit", skill_md)
+
+  expect_error(create_template_repo(dir), "SKILL.md", class = "rlang_error")
+  expect_identical(readLines(skill_md), "team edit")
+  expect_setequal(list_all_files(dir), agent_skill_files[[1]])
+})
+
+# The skill is only worth shipping if what it shows works. Its worked family
+# (references/composition.md) is one library spread over captioned ```yaml
+# blocks; rebuild it from the text and validate it, so an engine change that
+# breaks an example fails here instead of misleading an agent.
+skill_reference <- function(name) {
+  file.path(
+    system.file("extdata", "agent-skills", "dta-template-authoring", package = "DTAtools"),
+    "references", name
+  )
+}
+
+test_that("the skill's worked family, rebuilt from its own text, validates with zero rows", {
+  md <- readLines(skill_reference("composition.md"), encoding = "UTF-8")
+  lib <- withr::local_tempdir()
+  written <- character(0)
+  for (open in which(md == "```yaml")) {
+    close <- open + which(md[(open + 1):length(md)] == "```")[[1]]
+    before <- md[seq_len(open - 1)]
+    caption <- grep("^`[a-z-]+/[^`]+[.]yaml`", tail(before[nzchar(trimws(before))], 3), value = TRUE)
+    if (length(caption) == 0) next
+    rel <- sub("^`([^`]+)`.*$", "\\1", caption[[length(caption)]])
+    dir.create(dirname(file.path(lib, rel)), recursive = TRUE, showWarnings = FALSE)
+    writeLines(md[(open + 1):(close - 1)], file.path(lib, rel))
+    written <- c(written, rel)
+  }
+  expect_setequal(written, c(
+    "vocabulary/sample_status.dta-vocabulary.yaml",
+    "parties/supplier_acme.dta-party.yaml",
+    "parties/receiver_examplepharma.dta-party.yaml",
+    "templates/biomarker_samples.dta-dataset-template.yaml",
+    "templates/company_dta.dta-template.yaml",
+    "templates/mixin_privacy_eu.dta-template.yaml",
+    "templates/mixin_assay_biomarker.dta-template.yaml",
+    "templates/biomarker_study.dta-template.yaml",
+    "templates/biomarker_study_acme.dta-template.yaml"
+  ))
+
+  # No warning either: biomarker_study_acme writes its party slot in the verb
+  # form, which the validator once read as a slot without an id.
+  expect_no_warning(result <- validate_template(lib))
+  expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
+})
+
+test_that("the skill's linting reference covers every validator code the README documents", {
+  readme <- readLines(
+    system.file("extdata", "template-repo-skeleton", "README.md", package = "DTAtools"),
+    encoding = "UTF-8"
+  )
+  # Rows of the README's code tables: | `code` | error | ... or | warning |.
+  rows <- regmatches(readme, regexec("^[|] `([a-z_]+)` [|] (error|warning) [|]", readme))
+  codes <- unique(vapply(Filter(length, rows), `[[`, character(1), 2))
+  expect_gt(length(codes), 40)
+
+  linting <- paste(readLines(skill_reference("linting.md"), encoding = "UTF-8"), collapse = "\n")
+  missing <- codes[!vapply(codes, function(code) grepl(paste0("`", code, "`"), linting, fixed = TRUE), logical(1))]
+  expect_identical(missing, character(0))
 })
 
 test_that("dta-app.yaml is scaffolded in the root with the examples, is not a template, and parses with no problems", {
@@ -512,8 +633,10 @@ test_that("the scaffold README is byte-identical to the complete skeleton README
 
 test_that("every folder the scaffold writes is one the engine reads", {
   # The scaffold copies a directory tree; the engine owns the folder names.
+  # The tooling folders (.github/ for CI, .claude/ for the agent skill) are
+  # not library folders, so neither is written here.
   dir <- withr::local_tempdir()
-  create_template_repo(dir, ci = FALSE)
+  create_template_repo(dir, ci = FALSE, agent_skill = FALSE)
   engine <- function(f) DTAtools:::.dta_template_engine_get(f)
   folders <- list.dirs(dir, recursive = FALSE, full.names = FALSE)
   expect_setequal(folders, c(engine("dta_template_kind_subdirs")(), engine("dta_export_templates_subdir")()))

@@ -607,7 +607,7 @@
   machine_fields <- .dta_template_engine_get("dta_metadata_machine_fields")()
 
   # ---- target_invalid / target_machine_owned ------------------------------
-  opts <- def[["options"]] %||% list()
+  opts <- .dta_template_own_entries(def[["options"]])
   variant_choices <- def[["variants"]][["choices"]] %||% list()
   if (is.list(variant_choices)) {
     opts <- c(opts, unlist(lapply(variant_choices, function(choice) {
@@ -644,9 +644,48 @@
     add("error", "prior_versions_invalid", problem)
   }
 
+  # The definition as merged with everything it inherits. Read here, once,
+  # because the slot checks below need it as much as the dry run further down.
+  read_res <- .dta_template_engine_get("read_dta_creation_template")(path)
+  resolved <- if (isTRUE(read_res$ok)) {
+    tryCatch(
+      .dta_template_engine_get("resolve_template_inheritance")(read_res$value, resolve_extends),
+      error = function(e) e
+    )
+  }
+  # The slots this FILE writes, as they stand after the merge. Its own section
+  # cannot be checked as written: a child may use the verb form, or a bare
+  # entry that only changes one field of an inherited slot, and neither is a
+  # complete slot until merged. Slots it merely inherits are checked in the
+  # file that wrote them, not again in every descendant.
+  own_slots <- function(section) {
+    spec <- def[[section]]
+    if (is.null(resolved) || inherits(resolved, "error")) {
+      # Nothing merged to read (the failure is reported below), so check what
+      # is complete as written: a bare list's entries, or the verb form's
+      # add: entries. A modify: entry is only a fragment until merged.
+      if (.dta_template_engine_get("dta_template_is_mapping")(spec)) {
+        return(.dta_template_engine_get("dta_template_verb_entries")(spec[["add"]]))
+      }
+      return(spec %||% list())
+    }
+    own_ids <- vapply(
+      .dta_template_own_entries(spec),
+      .dta_template_engine_get("dta_template_option_key"),
+      character(1)
+    )
+    Filter(
+      function(s) {
+        key <- .dta_template_engine_get("dta_template_option_key")(s)
+        !is.na(key) && key %in% own_ids
+      },
+      resolved$def[[section]] %||% list()
+    )
+  }
+
   # ---- party_slot_invalid --------------------------------------------------
   norm_slots <- tryCatch(
-    .dta_template_engine_get("normalise_party_slots")(def[["party_slots"]] %||% list()),
+    .dta_template_engine_get("normalise_party_slots")(own_slots("party_slots")),
     error = function(e) e
   )
   if (inherits(norm_slots, "error")) {
@@ -665,18 +704,12 @@
   }
 
   # ---- vocab_slot_invalid / vocab_slot_unresolved -------------------------
-  rows <- c(rows, .dta_template_check_vocab_slots(path, id, version, def, index_df))
+  rows <- c(rows, .dta_template_check_vocab_slots(path, id, version, own_slots("vocabulary_slots"), index_df))
 
   # ---- dataset_template_unresolved / patch_incoherent ---------------------
-  ds_entries <- def[["datasets"]] %||% def[["base"]][["datasets"]] %||% list()
-  # A child may write the section in the verb form, a mapping of
-  # inherit/add/modify/remove/order (dta_template_parse_collection()). Only
-  # add: and modify: hold entries; the rest hold ids. Variant choices cannot
-  # use the verb form (dta_template_validate_variants() rejects it).
-  if (.dta_template_engine_get("dta_template_is_mapping")(ds_entries)) {
-    verb_entries <- .dta_template_engine_get("dta_template_verb_entries")
-    ds_entries <- c(verb_entries(ds_entries[["add"]]), verb_entries(ds_entries[["modify"]]))
-  }
+  # Variant choices cannot use the verb form (dta_template_validate_variants()
+  # rejects it), so their entries are taken as written.
+  ds_entries <- .dta_template_own_entries(def[["datasets"]] %||% def[["base"]][["datasets"]])
   if (is.list(variant_choices)) {
     ds_entries <- c(ds_entries, unlist(lapply(variant_choices, function(choice) {
       if (is.list(choice)) choice[["datasets"]] %||% list() else list()
@@ -762,16 +795,12 @@
   if (inherits(mixins_shape, "error")) {
     add("error", "mixin_invalid", conditionMessage(mixins_shape))
   }
-  read_res <- .dta_template_engine_get("read_dta_creation_template")(path)
+  # read_res and resolved were computed above, ahead of the slot checks.
   if (!isTRUE(read_res$ok)) {
     if (!abstract) {
       add("error", "instantiate_failed", read_res$error)
     }
   } else {
-    resolved <- tryCatch(
-      .dta_template_engine_get("resolve_template_inheritance")(read_res$value, resolve_extends),
-      error = function(e) e
-    )
     if (inherits(resolved, "error")) {
       msg <- conditionMessage(resolved)
       # Mixin conditions are told apart by CLASS, and first: a mixin message
@@ -861,7 +890,8 @@
         build_res <- .dta_template_engine_get("create_dta_from_template")(
           selected_def, path, selections = selection,
           index = index_df,
-          vocab_selections = .dta_template_vocab_dry_selections(selected_def, index_df)
+          vocab_selections = .dta_template_vocab_dry_selections(selected_def, index_df),
+          party_selections = .dta_template_party_dry_selections(selected_def, index_df)
         )
         prefix <- if (is.null(spec)) "" else paste0("[", selection[[spec[["id"]]]], "] ")
         if (!isTRUE(build_res$ok)) {
@@ -894,14 +924,26 @@
   paste0(prefix, where, ": ", row$message)
 }
 
-# Structural checks for a creation template's `vocabulary_slots:`.
-.dta_template_check_vocab_slots <- function(path, id, version, def, index_df) {
+# The entries a file itself writes in a keyed collection section (`options:`,
+# `datasets:`, `party_slots:`, `vocabulary_slots:`), in either form: the bare
+# sequence, or the verb mapping's add: and modify: (the other verbs hold ids,
+# not entries; see dta_template_parse_collection()).
+.dta_template_own_entries <- function(spec) {
+  if (.dta_template_engine_get("dta_template_is_mapping")(spec)) {
+    verb_entries <- .dta_template_engine_get("dta_template_verb_entries")
+    return(c(verb_entries(spec[["add"]]), verb_entries(spec[["modify"]])))
+  }
+  if (is.list(spec)) spec else list()
+}
+
+# Structural checks for the `vocabulary_slots:` entries `raw` (complete,
+# un-normalised slots) of a creation template.
+.dta_template_check_vocab_slots <- function(path, id, version, raw, index_df) {
   rows <- list()
   add <- function(severity, code, message) {
     rows[[length(rows) + 1L]] <<- .dta_template_row(path, "dta_creation_template", id, version, severity, code, message)
   }
 
-  raw <- def[["vocabulary_slots"]] %||% list()
   if (!is.list(raw) || length(raw) == 0) {
     return(rows)
   }
@@ -1001,6 +1043,36 @@
     }
     if (length(sel) > 0) {
       out[[slot[["id"]]]] <- sel
+    }
+  }
+  out
+}
+
+# The party-slot counterpart: every REQUIRED slot filled with the first
+# profile the app would offer for it (party_profiles_for_slot() orders them),
+# so a required supplier is not reported as a template that cannot be built.
+# Optional slots stay unselected, as a user who picked the minimum leaves them.
+# A required slot that no profile in the directory can fill stays empty, and
+# the build then fails on it -- correctly, since the app could not fill it
+# either from this directory alone.
+.dta_template_party_dry_selections <- function(def, index_df) {
+  slots <- tryCatch(
+    .dta_template_engine_get("normalise_party_slots")(def[["party_slots"]] %||% list()),
+    error = function(e) list()
+  )
+  slots <- Filter(function(slot) isTRUE(slot[["required"]]), slots)
+  if (length(slots) == 0) {
+    return(list())
+  }
+
+  # Quietly: the dry-run build reads the same profiles and warns about an
+  # unreadable one itself.
+  profiles <- suppressWarnings(.dta_template_engine_get("template_party_profiles")(index_df))
+  out <- list()
+  for (slot in slots) {
+    eligible <- .dta_template_engine_get("party_profiles_for_slot")(profiles, slot)
+    if (length(eligible) > 0) {
+      out[[slot[["id"]]]] <- eligible[[1]][["id"]]
     }
   }
   out

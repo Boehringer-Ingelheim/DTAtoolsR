@@ -57,7 +57,12 @@ repository/
 │   └── workflows/
 │       └── validate-templates.yml
 ├── bitbucket-pipelines.yml
-└── Jenkinsfile
+├── Jenkinsfile
+└── .claude/
+    └── skills/
+        └── dta-template-authoring/     (instructions for coding agents; see "Working with a coding agent")
+            ├── SKILL.md
+            └── references/
 ```
 
 Each kind of file lives in its own folder, directly inside it:
@@ -1505,6 +1510,28 @@ DTATOOLS_TEMPLATE_SOURCES=dev=dir:/path/to/your/clone
 
 On systems where the app process uses R environment configuration, set the variable before launching the app. Do not store deployment tokens in
 shell history or repository files.
+
+### Working with a coding agent
+
+`create_template_repo()` writes an agent skill to `.claude/skills/dta-template-authoring/`. Coding agents that support the Agent Skills format
+load it when a task touches this library. It is the working method that this README's reference sections leave to the author: how to lay out a
+family of templates (extends, mixins, sealing), how to release a change without altering a released version, when a reference should follow
+`@latest` and when it should pin a version, and how to run the validator and act on each of its findings. It points back to this README for field
+syntax.
+
+The skill is versioned with DTAtools. To add it to a repository created without it, or to refresh it after upgrading DTAtools, copy the installed
+one from the repository root:
+
+```r
+dir.create(".claude/skills", recursive = TRUE, showWarnings = FALSE)
+file.copy(
+  system.file("extdata", "agent-skills", "dta-template-authoring", package = "DTAtools"),
+  ".claude/skills", recursive = TRUE, overwrite = TRUE
+)
+```
+
+Keep team-specific rules in a skill or instruction file of your own rather than editing these files, so that a refresh does not overwrite them.
+Agents that read skills from a different folder use the same files.
 
 ### Pull-request review checklist
 

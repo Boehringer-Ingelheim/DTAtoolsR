@@ -4,7 +4,13 @@
 \alias{create_template_repo}
 \title{Scaffold a new private DTAtools template repository}
 \usage{
-create_template_repo(path, examples = TRUE, ci = TRUE, overwrite = FALSE)
+create_template_repo(
+  path,
+  examples = TRUE,
+  ci = TRUE,
+  overwrite = FALSE,
+  agent_skill = TRUE
+)
 }
 \arguments{
 \item{path}{A single non-empty character string: the directory to create
@@ -43,6 +49,17 @@ and writes nothing at all, if any file it would write already exists at
 \code{path} -- a partially-written repository would leave a caller unable to
 tell which half of a family of cross-referencing templates they were
 looking at. When \code{TRUE}, those files are replaced.}
+
+\item{agent_skill}{A single \code{TRUE}/\code{FALSE} (default \code{TRUE}). When \code{TRUE},
+copies the agent skill bundled with DTAtools
+(\verb{inst/extdata/agent-skills/dta-template-authoring/}) to
+\verb{.claude/skills/dta-template-authoring/}, the folder from which coding
+agents that support the Agent Skills format load it. The skill covers
+designing a template family (extends, mixins, sealing), releasing changes
+without altering released versions, and running and acting on
+\code{\link[=validate_template]{validate_template()}}'s findings. It is written whatever \code{examples} says.
+To add it to, or refresh it in, an existing repository, copy that folder
+from \code{system.file("extdata", "agent-skills", package = "DTAtools")}.}
 }
 \value{
 Invisibly, the normalised absolute path to \code{path} (see
@@ -58,7 +75,9 @@ four template kinds (a creation template and a dataset template in
 \code{README.md} with the full authoring guide, a
 \code{.gitignore}, and -- by default -- a GitHub Actions workflow that runs
 \code{\link[=lint_template_repo]{lint_template_repo()}} against the repository on every push and pull
-request. With the default \code{examples = TRUE}, the result already passes
+request, and -- by default -- an agent skill that tells coding agents how
+to author, release and lint the library's templates. With the default
+\code{examples = TRUE}, the result already passes
 \code{validate_template(path, strict = TRUE)} unmodified, so it is a starting
 point to edit rather than a stub to fill in from nothing. See \code{vignette("private-templates", package = "DTAtools")} for how to point the bundled Shiny app at the directory this
 creates.
@@ -78,6 +97,8 @@ at the root and one folder per kind of file:
 <path>/.github/workflows/validate-templates.yml  (ci = "github", default)
 <path>/bitbucket-pipelines.yml                 (ci = "bitbucket")
 <path>/Jenkinsfile                             (ci = "jenkins")
+<path>/.claude/skills/dta-template-authoring/SKILL.md      (agent_skill = TRUE, default)
+<path>/.claude/skills/dta-template-authoring/references/   (its three reference files)
 }\if{html}{\out{</div>}}
 
 Only the selected CI files are written. \code{\link[=validate_template]{validate_template()}} detects the

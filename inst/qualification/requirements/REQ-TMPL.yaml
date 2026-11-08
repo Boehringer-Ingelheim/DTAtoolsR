@@ -468,7 +468,8 @@ requirements:
   - id: REQ-TMPL-026
     text: >
       create_template_repo(path, examples = TRUE, ci = TRUE, overwrite =
-      FALSE) shall write .gitignore and README.md at the repository root,
+      FALSE, agent_skill = TRUE) shall write .gitignore and README.md at the
+      repository root, the agent skill of REQ-TMPL-048,
       and -- when examples is TRUE -- every file of the bundled skeleton
       inst/extdata/template-repo-skeleton/ at the same relative path,
       discovered from the skeleton rather than a hard-coded list: dta-app.yaml
@@ -477,8 +478,9 @@ requirements:
       starter_supplier.dta-party.yaml in parties/,
       starter_terms.dta-vocabulary.yaml in vocabulary/, and README.md in
       export-templates/. examples = FALSE shall write only the scaffolding
-      (.gitignore, README.md, and any CI file ci asks for), with no
-      dta-app.yaml and no folder of any template kind.
+      (.gitignore, README.md, any CI file ci asks for, and the agent skill
+      when agent_skill is TRUE), with no dta-app.yaml and no folder of any
+      template kind.
     risk: medium
     category: functional
     covers: [create_template_repo]
@@ -525,6 +527,67 @@ requirements:
     category: interface
     covers: [create_template_repo]
     source: R/createTemplateRepo.R (create_template_repo path_out and invisible return)
+
+  - id: REQ-TMPL-048
+    text: >
+      With agent_skill = TRUE (the default), create_template_repo() shall
+      write every file of the bundled agent skill
+      inst/extdata/agent-skills/dta-template-authoring/ beneath
+      .claude/skills/dta-template-authoring/ at the same relative path --
+      SKILL.md, references/composition.md, references/linting.md and
+      references/repository-architecture.md -- byte-identical to the bundled
+      files, whatever examples and ci say. The written SKILL.md shall open
+      with a YAML front matter block whose name is dta-template-authoring and
+      whose description is a non-empty string, the two fields by which a
+      coding agent finds and loads a skill. With agent_skill = FALSE no
+      .claude directory shall be written. Any value other than a single TRUE
+      or FALSE shall raise a condition naming agent_skill and write nothing.
+      The skill's destinations are subject to the overwrite guard of
+      REQ-TMPL-028.
+    risk: low
+    category: functional
+    covers: [create_template_repo]
+    source: R/createTemplateRepo.R (.dta_create_repo_skill_dir, .dta_create_repo_targets, create_template_repo); inst/extdata/agent-skills/dta-template-authoring/
+
+  - id: REQ-TMPL-049
+    text: >
+      The dry-run build of validate_template() shall fill every required
+      party slot (required: true, set on the template or inherited) with a
+      profile in the directory being validated that the slot accepts, so that
+      a template the app can build is not reported instantiate_failed. A
+      required party slot that no profile in that directory can fill shall
+      still be reported instantiate_failed at severity "error" for each
+      concrete template that has the slot, with a message saying the slot is
+      required. Optional party slots are left unselected.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R (.dta_template_party_dry_selections);
+      inst/shiny/dta_app/R/party_profiles.R (party_profiles_for_slot, apply_party_selections)
+
+  - id: REQ-TMPL-050
+    text: >
+      The checks of REQ-TMPL-012 (option targets), REQ-TMPL-013 (party slots)
+      and REQ-TMPL-014 (vocabulary slots) shall apply to the entries a
+      creation template writes in either collection form: a plain sequence,
+      or a mapping whose add: and modify: hold the entries. A party or
+      vocabulary slot shall be checked as merged with the slot of the same id
+      it inherits, so an entry that changes only some fields of an inherited
+      slot is reported only for a problem in the merged slot, never for a
+      field it leaves to its parent. A problem in an inherited slot shall be
+      reported on the file that wrote that slot, not on the files that
+      inherit it. When the template's inheritance does not resolve within the
+      directory being validated, only the entries complete as written are
+      checked: a plain sequence's, and add:'s. Validating a template whose
+      slot entries all carry an id, in either form, shall raise no R warning
+      about the shape of its slots.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R (.dta_template_own_entries, own_slots in .dta_template_check_creation);
+      inst/shiny/dta_app/R/template_inherit.R (dta_template_verb_entries)
 
   - id: REQ-TMPL-030
     text: >

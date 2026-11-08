@@ -1,0 +1,4 @@
+kind: dta_creation_template
+id: psu_child
+version: "1.0"
+extends: psu_parent@latest
