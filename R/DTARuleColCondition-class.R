@@ -116,14 +116,11 @@ method(print, DTARuleColCondition) <- function(x, ...) {
   cli_text("<{.emph DTARuleColCondition}> : {.field {x@id}}")
   if (!is.null(x@description)) cli_text("{x@description}")
 
-  # Both clauses map column -> constraint; .format_condition_map() names the
-  # column AND the operator ("'AGE' > '17'"). Assigned to a variable first so
-  # braces in a value are printed literally, not interpolated by cli.
-  if_text <- .format_condition_map(x@condition)
-  then_text <- .format_condition_map(x@then)
-  cli_alert_info("  {if_text}")
-  cli_alert("then:")
-  cli_text("  {then_text}")
+  # The shared one-line wording names every column, test and value of both
+  # clauses. Assigned to a variable first so braces in a value are printed
+  # literally, not interpolated by cli.
+  summary_text <- .rule_summary(x)
+  cli_alert_info("{summary_text}")
   invisible(x)
 }
 

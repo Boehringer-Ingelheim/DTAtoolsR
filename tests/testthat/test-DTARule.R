@@ -134,16 +134,28 @@ test_that("check() on a bare DTARule refuses to run", {
 test_that("print() of a column-condition rule names the columns and keeps the operators", {
   # The loop walked names(x@condition[[i]]) -- the OPERATORS ("equals") -- as
   # if they were column names, so the column was never printed and the value
-  # appeared under a heading that was really an operator.
+  # appeared under a heading that was really an operator. print() now shows
+  # the shared one-line wording; the expected sentence is written out from
+  # the specification in R/rulePhrasing.R.
   rule <- DTARuleColCondition(
     id = "adult_status",
     condition = list(AGE = list(greater = 17), SEX = list(equals = "F")),
     then = list(STATUS = list(equals = "adult"))
   )
 
-  out <- paste(cli::cli_fmt(print(rule)), collapse = "\n")
+  out <- paste(cli::cli_fmt(print(rule)), collapse = " ")
+  # cli wraps long lines; compare with the whitespace collapsed.
+  out <- gsub("\\s+", " ", out)
 
-  expect_match(out, "'AGE' > '17'", fixed = TRUE)
-  expect_match(out, "'SEX' = 'F'", fixed = TRUE)
-  expect_match(out, "'STATUS' = 'adult'", fixed = TRUE)
+  expect_match(out, "adult_status", fixed = TRUE)
+  expect_match(
+    out,
+    paste(
+      "When all of the following are true: AGE is greater than 17; SEX is equal to \u201cF\u201d.",
+      "Then STATUS must be equal to \u201cadult\u201d."
+    ),
+    fixed = TRUE
+  )
+  # Notes on missing values are left to the full description.
+  expect_false(grepl("Missing values", out, fixed = TRUE))
 })

@@ -689,6 +689,10 @@ NULL
 
 #' Build a validation rules table (flextable). Shared by write_dataset_metadata()
 #' and write_dta()'s per-dataset sections.
+#'
+#' Two columns, `Rule ID | Description`. The description is the complete
+#' plain-English wording from `R/rulePhrasing.R` (bold labels, bulleted
+#' lists); a rule is never shown as code, YAML or in a monospace font.
 #' @param rules_collection A list of DTARule objects (e.g. `specs@rules`) or `NULL`.
 #' @param width Total table width in inches, or `NULL` to keep the built widths.
 #' @keywords internal
@@ -698,41 +702,55 @@ NULL
     return(NULL)
   }
 
+  # The plain text fills the cell first so the data frame (and with it
+  # ft$body$dataset) carries the description; compose() then lays the same
+  # text out with bold labels.
   rule_data <- data.frame(
-    `Rule ID` = character(),
-    `Description` = character(),
-    `Definition` = character(),
+    `Rule ID` = vapply(rules, function(rule) rule@id, character(1)),
+    `Description` = vapply(rules, .rule_text, character(1)),
     stringsAsFactors = FALSE,
     check.names = FALSE
   )
 
-  for (rule in rules) {
-    rule_data <- rbind(rule_data, data.frame(
-      `Rule ID` = rule@id,
-      `Description` = translate_rule_to_human(rule),
-      # Leading spaces become non-breaking spaces: pandoc (the PDF path) strips
-      # ordinary leading whitespace, which would flatten the YAML nesting. Replace
-      # U+00A0 with a space before pasting the cell into a YAML file.
-      `Definition` = {
-        def_lines <- strsplit(.rule_definition_yaml(rule), "\n", fixed = TRUE)[[1]]
-        lead <- attr(regexpr("^ *", def_lines), "match.length")
-        paste(paste0(strrep("\u00a0", lead), substring(def_lines, lead + 1)), collapse = "\n")
-      },
-      stringsAsFactors = FALSE,
-      check.names = FALSE
-    ))
-  }
-
   ft <- flextable::flextable(rule_data)
+  for (i in seq_along(rules)) {
+    ft <- flextable::compose(
+      ft,
+      i = i, j = 2, part = "body",
+      value = .rule_docx_paragraph(rules[[i]])
+    )
+  }
   # Relative widths only: .fit_table_width() scales them to `width`.
   ft <- flextable::width(ft, j = 1, width = 1.4)
-  ft <- flextable::width(ft, j = 2, width = 3.3)
-  ft <- flextable::width(ft, j = 3, width = 3.7)
+  ft <- flextable::width(ft, j = 2, width = 6.0)
   ft <- .style_table(ft)
   ft <- flextable::bold(ft, j = 1, bold = TRUE, part = "body")
-  ft <- flextable::font(ft, j = 3, fontname = FONTS$monospace, part = "body")
-  ft <- flextable::fontsize(ft, j = 3, size = FONT_SIZES$table_body - 1, part = "body")
   .fit_table_width(ft, width)
+}
+
+#' Does the document already hold the rule reading guide?
+#'
+#' The guide is shown once per document, before the first rules table. Every
+#' caller that adds a rules table asks the document itself, so the guide
+#' appears once however many datasets or blocks the document repeats.
+#' @keywords internal
+.doc_has_rule_reading_guide <- function(doc) {
+  first <- .rule_reading_guide()[[1]]
+  body <- officer::docx_body_xml(doc)
+  texts <- xml2::xml_text(xml2::xml_find_all(body, ".//*[local-name()='p']"))
+  any(texts == first)
+}
+
+#' Add the rule reading guide, unless the document already holds it
+#' @keywords internal
+.add_rule_reading_guide <- function(doc) {
+  if (.doc_has_rule_reading_guide(doc)) {
+    return(doc)
+  }
+  for (text in .rule_reading_guide()) {
+    doc <- .add_body_par(doc, text)
+  }
+  .add_spacer(doc)
 }
 
 #' Close the current document section with the given page orientation.
@@ -847,6 +865,7 @@ NULL
     doc <- add_section_heading(doc, "Validation Rules")
     ft_rules <- .build_rules_table(dataset@specs@rules)
     if (!is.null(ft_rules)) {
+      doc <- .add_rule_reading_guide(doc)
       doc <- flextable::body_add_flextable(doc, ft_rules)
     } else {
       doc <- .add_body_par(doc, "No validation rules specified.", italic = TRUE, color = THEME_COLORS$gray_mid)

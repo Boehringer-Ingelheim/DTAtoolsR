@@ -1233,80 +1233,17 @@ test_that("the bundled template renders headings in the brand green", {
   }
 })
 
-test_that("group_condition rules reach the exported documents fully described", {
-  # The formatter is only useful if the rules table actually carries it: the
-  # clinical fixture's group rules previously showed a one-line summary with no
-  # grouping, condition or constraint detail at all.
-  dta <- read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
-
-  out_docx <- tempfile(fileext = ".docx")
-  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
-  write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
-
-  txt <- officer::docx_summary(officer::read_docx(out_docx))$text
-  txt <- paste(txt[!is.na(txt)], collapse = "\n")
-
-  expect_match(txt, "group_condition_pass_example", fixed = TRUE)
-  expect_match(txt, "Rows are grouped by 'SUBJECT_ID'", fixed = TRUE)
-  expect_match(txt, "\"c_has_visit\": a row where 'VISIT' is present", fixed = TRUE)
-  expect_match(txt, "must hold for every row in the group", fixed = TRUE)
-  expect_false(grepl("no description available", txt, fixed = TRUE))
-
-  # The multi-line description becomes real Word line breaks, not a lost newline.
-  xml <- .read_docx_body_xml(out_docx)
-  expect_true(grepl("<w:br/>", xml, fixed = TRUE))
-
-  # Markdown: newlines must not break the pipe table, so they become <br> and
-  # every rule still occupies exactly one table row.
-  out_md <- tempfile(fileext = ".md")
-  on.exit(unlink(out_md, force = TRUE), add = TRUE)
-  write_dta(dta, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
-  md <- readLines(out_md, warn = FALSE)
-
-  rule_rows <- grep("^\\| group_condition_pass_example ", md, value = TRUE)
-  expect_length(rule_rows, 1)
-  expect_match(rule_rows, "Rows are grouped by 'SUBJECT_ID'", fixed = TRUE)
-  expect_match(rule_rows, "<br>", fixed = TRUE)
-  # A well-formed pipe row: no stray newline split it into a headless fragment.
-  expect_match(rule_rows, "\\|$")
-})
-
-# ---- exact rule definitions in the exported documents -----------------------
+# ---- rules in the exported documents: prose only, never code ----------------
 #
-# A rules table that only paraphrases ("IF ... THEN ...") cannot be turned back
-# into the rule. These tests read the definition out of the written file,
-# rebuild the rule with DTARuleFactory() and compare it with the rule object
-# that went in. The expected value is always that object, never rendered output.
+# Rules appear in Word and Markdown as the complete plain-English wording from
+# R/rulePhrasing.R and in no other form: no YAML, no code fence, no code span,
+# no monospace font. The expected sentences below are written out by hand from
+# the wording specification at the top of R/rulePhrasing.R, never copied from
+# rendered output.
 
-.rule_from_definition <- function(id, description, definition) {
-  # Word/PDF cells indent with U+00A0 (pandoc strips ordinary leading spaces).
-  definition <- gsub("\u00a0", " ", definition, fixed = TRUE)
-  do.call(
-    DTARuleFactory,
-    c(list(id = id, description = description), yaml::yaml.load(definition))
-  )
-}
-
-test_that("Word rule definitions indent nested YAML with non-breaking spaces", {
-  rule <- DTARuleColCondition(
-    id = "nested",
-    condition = list(AGE = list(greater = 17)),
-    then = list(STATUS = list(equals = "adult"))
-  )
-  cell <- .build_rules_table(list(rule))$body$dataset[["Definition"]]
-  expected <- paste(
-    c(
-      "type: col_condition", "condition:", "\u00a0\u00a0AGE:", "\u00a0\u00a0\u00a0\u00a0greater: 17.0",
-      "then:", "\u00a0\u00a0STATUS:", "\u00a0\u00a0\u00a0\u00a0equals: adult"
-    ),
-    collapse = "\n"
-  )
-  expect_identical(cell, expected)
-})
-
-# One rule of every type plus the values that are hard to carry through YAML,
-# a table cell and a Markdown code fence.
-.definition_fixture_rules <- function() {
+# One rule of every type plus values that are awkward in a table cell, in
+# Markdown and in YAML (backticks, quotes, a line break, a long value list).
+.prose_fixture_rules <- function() {
   list(
     DTARuleColRange(id = "age_range", description = "Adult age", columns = "AGE", min = 18, max = 65),
     DTARuleColRange(id = "open_low", columns = "AGE", min = -Inf, max = 100),
@@ -1346,7 +1283,56 @@ test_that("Word rule definitions indent nested YAML with non-breaking spaces", {
   )
 }
 
-.definition_fixture_dta <- function(rules = .definition_fixture_rules()) {
+# Hand-written statements that name every property of the fixture rules
+# (other than type and id, which the table shows in its own column).
+.prose_fixture_expected <- function() {
+  sites <- paste0(
+    paste0("\u201cS", sprintf("%02d", 1:29), "\u201d", collapse = ", "),
+    " or \u201cS30\u201d"
+  )
+  list(
+    age_range = c(
+      "Purpose: Adult age",
+      "Every value in column AGE must be a number from 18 to 65, inclusive."
+    ),
+    open_low = "Every value in column AGE must be a number that is at most 100.",
+    unique_keys = "No two rows may have the same combination of values in columns SUBJID and VISIT.",
+    thirty_values = c(
+      "Purpose: Visit must be one of the planned visits",
+      "When all of the following are true:",
+      paste0("\u2022 SITE is one of ", sites),
+      "\u2022 AGE is at least 18 and is less than 65",
+      "Then all of the following must hold:",
+      "\u2022 FLAG must be equal to \u201cyes\u201d",
+      "\u2022 N must be equal to \u201cN\u201d"
+    ),
+    pattern_chars = paste0(
+      "When CODE matches the pattern \u201c^(a|b)\\d+'x\"y$\u201d, ",
+      "NOTE must be equal to \u201cline1[line break]line2\u201d."
+    ),
+    three_ticks = "When CODE matches the pattern \u201ca```b\u201d, NOTE must be empty.",
+    group_all_scopes = c(
+      "Purpose: Every row of a subject",
+      paste(
+        "Rows are grouped by the combination of values in columns SUBJID and VISIT;",
+        "within each group, the requirements below must hold."
+      ),
+      "\u2022 a: a row in which X is not empty",
+      "\u2022 b: a row in which Y is equal to \u201cyes\u201d",
+      paste(
+        "\u2022 needs_b: If every row of a group meets condition a, then every row of that",
+        "group must meet condition b. If not, the message is \u201ca needs b: always\u201d."
+      ),
+      paste(
+        "Within a group, it must not happen that at least one row meets condition a and",
+        "also at least one row meets condition b. If not, a message naming the group and",
+        "its rows is reported."
+      )
+    )
+  )
+}
+
+.prose_fixture_dta <- function(rules = .prose_fixture_rules(), n_datasets = 1L) {
   # The collection checks that rules only name declared columns, so declare
   # every column the fixture rules use (free text, no value lists).
   cols <- lapply(
@@ -1355,11 +1341,14 @@ test_that("Word rule definitions indent nested YAML with non-breaking spaces", {
   )
   cols <- c(list(DTAColumnSpec(id = "AGE", type = "SAS Int")), cols)
   names(cols) <- vapply(cols, function(col) col@id, character(1))
-  ds <- DTADataSetTabular(
-    id = "rules_fixture",
-    specs = DTAColumnSpecCollection(columns = cols, rules = rules)
-  )
-  DTA(datasets = list(ds), metadata = create_example_DTAMetaData())
+  sets <- lapply(seq_len(n_datasets), function(k) {
+    DTADataSetTabular(
+      id = paste0("rules_fixture_", k),
+      specs = DTAColumnSpecCollection(columns = cols, rules = rules)
+    )
+  })
+  names(sets) <- vapply(sets, function(ds) ds@id, character(1))
+  DTA(datasets = sets, metadata = create_example_DTAMetaData())
 }
 
 # Every rule of every tabular dataset, in document order.
@@ -1374,9 +1363,10 @@ test_that("Word rule definitions indent nested YAML with non-breaking spaces", {
 
 .rule_ids <- function(rules) vapply(rules, function(r) r@id, character(1), USE.NAMES = FALSE)
 
-# Each table of a docx whose first cell is "Rule ID": its header cells and its
-# body as a (rules x 3) character matrix. Cells are read positionally, three to
-# a row, so a rule id equal to a header label cannot confuse it.
+# Each table of a docx whose first cell is "Rule ID": all of its cells, its
+# header cells and its body as a (rules x 2) character matrix. Cells are read
+# positionally, two to a row, so a rule id equal to a header label cannot
+# confuse it.
 .docx_rules_tables <- function(path) {
   summary <- officer::docx_summary(officer::read_docx(path))
   cells <- summary[summary$content_type == "table cell", ]
@@ -1385,147 +1375,177 @@ test_that("Word rule definitions indent nested YAML with non-breaking spaces", {
     if (!identical(text[[1]], "Rule ID")) {
       return(NULL)
     }
-    list(header = text[1:3], body = matrix(text[-(1:3)], ncol = 3, byrow = TRUE))
+    list(
+      cells = text,
+      header = text[1:2],
+      body = matrix(text[-(1:2)], ncol = 2, byrow = TRUE),
+      first_index = min(cells$doc_index[cells$table_index == ti])
+    )
   })
   Filter(Negate(is.null), tables)
 }
 
-# The (id, yaml) pairs of the fenced blocks under "**Exact rule definitions**":
-# an id in backticks, a blank line, an opening fence "```yaml" (or a longer
-# one), the YAML, then the same fence again.
-.md_rule_blocks <- function(md) {
-  blocks <- list()
-  for (i in seq_along(md)) {
-    opens <- i + 2L <= length(md) &&
-      grepl("^`[^`]+`$", md[[i]]) && md[[i + 1L]] == "" && grepl("^`{3,}yaml$", md[[i + 2L]])
-    if (!opens) next
-    fence <- sub("yaml$", "", md[[i + 2L]])
-    close <- i + 2L + match(fence, md[(i + 3L):length(md)])
-    blocks[[length(blocks) + 1L]] <- list(
-      id = gsub("`", "", md[[i]], fixed = TRUE),
-      fence = fence,
-      yaml = paste(md[(i + 3L):(close - 1L)], collapse = "\n")
-    )
-  }
-  blocks
-}
-
-# Rebuild every rule from its definition and compare with the originals.
-.expect_rules_rebuilt <- function(ids, definitions, rules) {
-  expect_identical(ids, .rule_ids(rules))
-  for (i in seq_along(rules)) {
-    rebuilt <- .rule_from_definition(ids[[i]], rules[[i]]@description, definitions[[i]])
-    expect_identical(as.list(rebuilt), as.list(rules[[i]]), info = rules[[i]]@id)
-  }
-}
-
-test_that("the docx rules table has a Definition column that rebuilds every rule", {
-  rules <- .definition_fixture_rules()
-  out <- tempfile(fileext = ".docx")
-  on.exit(unlink(out, force = TRUE), add = TRUE)
-  write_dta(.definition_fixture_dta(rules), file = out, format = "docx", overwrite = TRUE, quiet = TRUE)
-
-  tables <- .docx_rules_tables(out)
-  expect_length(tables, 1)
-  expect_identical(tables[[1]]$header, c("Rule ID", "Description", "Definition"))
-  expect_identical(nrow(tables[[1]]$body), length(rules))
-
-  .expect_rules_rebuilt(tables[[1]]$body[, 1], tables[[1]]$body[, 3], rules)
-})
-
-test_that("the Definition column is set in Consolas and the others are not", {
-  out <- tempfile(fileext = ".docx")
-  on.exit(unlink(out, force = TRUE), add = TRUE)
-  write_dta(.definition_fixture_dta(), file = out, format = "docx", overwrite = TRUE, quiet = TRUE)
-
-  doc <- xml2::read_xml(.read_docx_body_xml(out))
+# Font (w:rFonts/@w:ascii) of every text run inside the rules tables of a docx;
+# NA for a run that names no font.
+.docx_rules_table_fonts <- function(path) {
+  doc <- xml2::read_xml(.read_docx_body_xml(path))
   tables <- xml2::xml_find_all(doc, "//*[local-name()='tbl']")
   is_rules <- vapply(tables, function(tbl) {
     first <- xml2::xml_find_first(tbl, ".//*[local-name()='tc']")
     identical(xml2::xml_text(first), "Rule ID")
   }, logical(1))
-  expect_identical(sum(is_rules), 1L)
+  runs <- unlist(lapply(tables[is_rules], function(tbl) {
+    xml2::xml_find_all(tbl, ".//*[local-name()='r'][*[local-name()='t']]")
+  }), recursive = FALSE)
+  vapply(runs, function(run) {
+    f <- xml2::xml_find_all(
+      run, "./*[local-name()='rPr']/*[local-name()='rFonts']/@*[local-name()='ascii']"
+    )
+    if (length(f) == 0) NA_character_ else xml2::xml_text(f[[1]])
+  }, character(1))
+}
 
-  rows <- xml2::xml_find_all(tables[[which(is_rules)]], "./*[local-name()='tr']")
-  expect_identical(length(rows), length(.definition_fixture_rules()) + 1L)
+# Assertions shared by every "no code" test: no YAML key line, no code fence,
+# no backtick outside a quoted value, no non-breaking-space indentation.
+.expect_no_rule_code <- function(text, info = NULL) {
+  lines <- unlist(strsplit(text, "\n", fixed = TRUE))
+  expect_false(
+    any(grepl("^\\s*(type|condition|conditions|then|columns|constraints|group_by|min|max):", lines)),
+    info = info
+  )
+  expect_false(any(grepl("^\\s*`{3,}", lines)), info = info)
+  expect_false(any(grepl("\u00a0", lines, fixed = TRUE)), info = info)
+}
 
-  # Font of every text run in a cell.
-  fonts <- function(cell) {
-    runs <- xml2::xml_find_all(cell, ".//*[local-name()='r'][*[local-name()='t']]")
-    vapply(runs, function(run) {
-      f <- xml2::xml_find_all(
-        run, "./*[local-name()='rPr']/*[local-name()='rFonts']/@*[local-name()='ascii']"
-      )
-      if (length(f) == 0) NA_character_ else xml2::xml_text(f[[1]])
-    }, character(1))
-  }
-
-  for (row in rows[-1]) {
-    cells <- xml2::xml_find_all(row, "./*[local-name()='tc']")
-    expect_length(cells, 3)
-    definition_fonts <- fonts(cells[[3]])
-    expect_gt(length(definition_fonts), 0)
-    expect_true(all(definition_fonts == "Consolas"))
-    expect_false(any(fonts(cells[[1]]) %in% "Consolas"))
-    expect_false(any(fonts(cells[[2]]) %in% "Consolas"))
-  }
-})
-
-test_that("the Markdown export keeps one pipe-table line per rule and adds a fenced definition each", {
-  rules <- .definition_fixture_rules()
-  out <- tempfile(fileext = ".md")
+test_that("the docx rules table has two columns, Rule ID and the shared description", {
+  rules <- .prose_fixture_rules()
+  out <- tempfile(fileext = ".docx")
   on.exit(unlink(out, force = TRUE), add = TRUE)
-  write_dta(.definition_fixture_dta(rules), file = out, format = "md", overwrite = TRUE, quiet = TRUE)
-  md <- readLines(out, warn = FALSE)
+  write_dta(.prose_fixture_dta(rules), file = out, format = "docx", overwrite = TRUE, quiet = TRUE)
 
-  # The pipe table: header, separator, one line per rule, then a blank line.
-  header_at <- which(md == "| Rule ID | Description |")
-  expect_length(header_at, 1)
-  table_lines <- md[header_at:(header_at + match("", md[header_at:length(md)]) - 2L)]
-  expect_length(table_lines, 2L + length(rules))
-  for (id in .rule_ids(rules)) {
-    expect_identical(sum(startsWith(table_lines, paste0("| ", id, " | "))), 1L, info = id)
+  tables <- .docx_rules_tables(out)
+  expect_length(tables, 1)
+  expect_identical(tables[[1]]$header, c("Rule ID", "Description"))
+  expect_false("Definition" %in% tables[[1]]$cells)
+  expect_identical(tables[[1]]$body[, 1], .rule_ids(rules))
+  # The Word cell is the shared wording, line for line.
+  for (i in seq_along(rules)) {
+    expect_identical(tables[[1]]$body[i, 2], .rule_text(rules[[i]]), info = rules[[i]]@id)
+  }
+})
+
+test_that("every property of a rule appears in its Word description", {
+  rules <- .prose_fixture_rules()
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dta(.prose_fixture_dta(rules), file = out, format = "docx", overwrite = TRUE, quiet = TRUE)
+
+  body <- .docx_rules_tables(out)[[1]]$body
+  cells <- stats::setNames(body[, 2], body[, 1])
+  expected <- .prose_fixture_expected()
+  for (id in names(expected)) {
+    for (fragment in expected[[id]]) {
+      expect_match(cells[[id]], fragment, fixed = TRUE, info = id)
+    }
+  }
+})
+
+test_that("no rule is written as code in the Word export", {
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dta(.prose_fixture_dta(), file = out, format = "docx", overwrite = TRUE, quiet = TRUE)
+
+  # No run of the rules table is set in a monospace font.
+  fonts <- .docx_rules_table_fonts(out)
+  expect_gt(length(fonts), 0)
+  expect_false(any(fonts %in% c(FONTS$monospace, "Consolas", "Courier", "Courier New")))
+  # Without include_yaml the document holds no monospace text at all.
+  xml <- .read_docx_body_xml(out)
+  expect_false(grepl("Consolas|Courier", xml))
+
+  cells <- .docx_rules_tables(out)[[1]]$body[, 2]
+  for (cell in cells) .expect_no_rule_code(cell)
+})
+
+test_that("the Word rule descriptions use bold labels, not separate code", {
+  rule <- DTARuleColRange(id = "age_range", description = "Adult age", columns = "AGE", min = 18, max = 65)
+  ft <- .build_rules_table(list(rule))
+  expect_identical(ft$col_keys, c("Rule ID", "Description"))
+  # The composed cell: the labels are bold runs, the statements are not.
+  chunks <- flextable::information_data_chunk(ft)
+  chunks <- chunks[chunks$.part == "body" & chunks$.col_id == "Description", ]
+  bold_text <- chunks$txt[chunks$bold %in% TRUE]
+  expect_true(all(c("Purpose:", "Missing values:", "Non-numeric values:") %in% bold_text))
+  expect_false(any(grepl("Every value", bold_text, fixed = TRUE)))
+  # flextable reports a line-break chunk as "<br>".
+  expect_identical(gsub("<br>", "\n", paste(chunks$txt, collapse = ""), fixed = TRUE), .rule_text(rule))
+})
+
+test_that("the reading guide appears once per Word document, before the first rules table", {
+  guide <- .rule_reading_guide()
+  check <- function(path) {
+    summary <- officer::docx_summary(officer::read_docx(path))
+    paras <- summary[summary$content_type == "paragraph", ]
+    at <- paras$doc_index[paras$text == guide[[1]]]
+    expect_length(at, 1)
+    for (sentence in guide) {
+      expect_identical(sum(paras$text == sentence), 1L, info = sentence)
+    }
+    tables <- .docx_rules_tables(path)
+    expect_gt(length(tables), 0)
+    expect_lt(at, min(vapply(tables, function(t) t$first_index, numeric(1))))
   }
 
-  blocks <- .md_rule_blocks(md)
-  .expect_rules_rebuilt(
-    vapply(blocks, function(b) b$id, character(1)),
-    vapply(blocks, function(b) b$yaml, character(1)),
-    rules
-  )
+  dta <- .prose_fixture_dta(n_datasets = 2L)
+  out_dta <- tempfile(fileext = ".docx")
+  out_ds <- tempfile(fileext = ".docx")
+  on.exit(unlink(c(out_dta, out_ds), force = TRUE), add = TRUE)
+  write_dta(dta, file = out_dta, format = "docx", overwrite = TRUE, quiet = TRUE)
+  expect_length(.docx_rules_tables(out_dta), 2)
+  check(out_dta)
 
-  # A pattern holding three backticks needs a longer fence, or the block would
-  # end early; every other block gets the plain three.
-  fences <- vapply(blocks, function(b) b$fence, character(1))
-  names(fences) <- vapply(blocks, function(b) b$id, character(1))
-  expect_identical(unname(fences[["three_ticks"]]), "````")
-  expect_true(all(fences[names(fences) != "three_ticks"] == "```"))
+  write_dataset_metadata(dta@datasets[[1]], file = out_ds, overwrite = TRUE, quiet = TRUE)
+  check(out_ds)
 })
 
-test_that("write_dataset_metadata carries the exact definitions in docx and md", {
-  rules <- .definition_fixture_rules()
-  ds <- .definition_fixture_dta(rules)@datasets[[1]]
-
-  out_docx <- tempfile(fileext = ".docx")
-  out_md <- tempfile(fileext = ".md")
-  on.exit(unlink(c(out_docx, out_md), force = TRUE), add = TRUE)
-  write_dataset_metadata(ds, file = out_docx, overwrite = TRUE, quiet = TRUE)
-  write_dataset_metadata(ds, file = out_md, overwrite = TRUE, quiet = TRUE)
-
-  tables <- .docx_rules_tables(out_docx)
-  expect_length(tables, 1)
-  expect_identical(tables[[1]]$header, c("Rule ID", "Description", "Definition"))
-  .expect_rules_rebuilt(tables[[1]]$body[, 1], tables[[1]]$body[, 3], rules)
-
-  blocks <- .md_rule_blocks(readLines(out_md, warn = FALSE))
-  .expect_rules_rebuilt(
-    vapply(blocks, function(b) b$id, character(1)),
-    vapply(blocks, function(b) b$yaml, character(1)),
-    rules
-  )
+test_that("a document without rules carries no reading guide", {
+  dta <- .prose_fixture_dta(rules = list())
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dta(dta, file = out, format = "docx", overwrite = TRUE, quiet = TRUE)
+  txt <- officer::docx_summary(officer::read_docx(out))$text
+  expect_false(.rule_reading_guide()[[1]] %in% txt)
+  expect_true("No validation rules specified." %in% txt)
 })
 
-test_that("every rule of the bundled clinical example rebuilds from its exported definition", {
+test_that("the Markdown exports describe each rule in prose, with no code", {
+  rules <- .prose_fixture_rules()
+  dta <- .prose_fixture_dta(rules)
+  out_dta <- tempfile(fileext = ".md")
+  out_ds <- tempfile(fileext = ".md")
+  on.exit(unlink(c(out_dta, out_ds), force = TRUE), add = TRUE)
+  write_dta(dta, file = out_dta, format = "md", overwrite = TRUE, quiet = TRUE)
+  write_dataset_metadata(dta@datasets[[1]], file = out_ds, format = "md", overwrite = TRUE, quiet = TRUE)
+
+  for (path in c(out_dta, out_ds)) {
+    md <- readLines(path, warn = FALSE, encoding = "UTF-8")
+    text <- paste(md, collapse = "\n")
+    .expect_no_rule_code(text, info = path)
+    # Backticks only as escaped characters of a value, never as a code span.
+    expect_false(any(grepl("(?<!\\\\)`", md, perl = TRUE)), info = path)
+    expect_false(any(grepl("Exact rule definitions", md, fixed = TRUE)), info = path)
+    # One block per rule, and the reading guide once, before the first block.
+    for (rule in rules) {
+      expect_true(grepl(.rule_md(rule), text, fixed = TRUE), info = paste(path, rule@id))
+    }
+    guide_at <- which(md == .plain_text_to_md(.rule_reading_guide()[[1]]))
+    expect_length(guide_at, 1)
+    first_rule <- which(startsWith(md, paste0("**", .plain_text_to_md(rules[[1]]@id), "**")))[[1]]
+    expect_lt(guide_at, first_rule)
+  }
+})
+
+test_that("every rule of the bundled clinical example is described in prose in docx and md", {
   yaml_path <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
   skip_if(!nzchar(yaml_path) || !file.exists(yaml_path), "clinical_dta.yaml fixture missing")
   dta <- read_dta_from_yaml(yaml_path)
@@ -1540,20 +1560,33 @@ test_that("every rule of the bundled clinical example rebuilds from its exported
 
   tables <- .docx_rules_tables(out_docx)
   for (tbl in tables) {
-    expect_identical(tbl$header, c("Rule ID", "Description", "Definition"))
+    expect_identical(tbl$header, c("Rule ID", "Description"))
   }
-  .expect_rules_rebuilt(
-    unlist(lapply(tables, function(t) t$body[, 1])),
-    unlist(lapply(tables, function(t) t$body[, 3])),
-    rules
-  )
+  ids <- unlist(lapply(tables, function(t) t$body[, 1]))
+  cells <- unlist(lapply(tables, function(t) t$body[, 2]))
+  expect_identical(ids, .rule_ids(rules))
+  expect_identical(unname(cells), unname(vapply(rules, .rule_text, character(1))))
 
-  blocks <- .md_rule_blocks(readLines(out_md, warn = FALSE))
-  .expect_rules_rebuilt(
-    vapply(blocks, function(b) b$id, character(1)),
-    vapply(blocks, function(b) b$yaml, character(1)),
-    rules
+  # The grouped rule is spelled out: grouping column, conditions, requirement.
+  grouped <- cells[[match("group_condition_pass_example", ids)]]
+  expect_match(grouped, "Rows are grouped by the value in column SUBJECT_ID;", fixed = TRUE)
+  expect_match(grouped, "\u2022 c_has_visit: a row in which VISIT is not empty", fixed = TRUE)
+  expect_match(
+    grouped,
+    paste(
+      "\u2022 visit_requires_status: If at least one row of a group meets condition c_has_visit,",
+      "then every row of that group must meet condition c_has_status."
+    ),
+    fixed = TRUE
   )
+  # Multi-line descriptions become real Word line breaks.
+  expect_true(grepl("<w:br/>", .read_docx_body_xml(out_docx), fixed = TRUE))
+
+  md <- paste(readLines(out_md, warn = FALSE, encoding = "UTF-8"), collapse = "\n")
+  .expect_no_rule_code(md)
+  for (rule in rules) {
+    expect_true(grepl(.rule_md(rule), md, fixed = TRUE), info = rule@id)
+  }
 })
 
 test_that("a generated version-history summary does not break the Markdown table (regression guard)", {
@@ -1652,43 +1685,23 @@ test_that(".new_numbered_docx refuses to fall back to a template that lacks head
   expect_error(.new_numbered_docx(), "reinstall", ignore.case = TRUE, class = "rlang_error")
 })
 
-test_that("the Markdown exports hold no non-breaking space, and nested YAML is indented with real spaces", {
-  rules <- .definition_fixture_rules()
-  dta <- .definition_fixture_dta(rules)
-  out_dta <- tempfile(fileext = ".md")
-  out_ds <- tempfile(fileext = ".md")
-  on.exit(unlink(c(out_dta, out_ds), force = TRUE), add = TRUE)
-  write_dta(dta, file = out_dta, format = "md", overwrite = TRUE, quiet = TRUE)
-  write_dataset_metadata(dta@datasets[[1]], file = out_ds, format = "md", overwrite = TRUE, quiet = TRUE)
-
-  for (path in c(out_dta, out_ds)) {
-    md <- readLines(path, warn = FALSE, encoding = "UTF-8")
-    expect_false(any(grepl("\u00a0", md, fixed = TRUE)), info = path)
-
-    # The thirty_values rule nests SITE under its condition: two real spaces.
-    yaml_lines <- unlist(lapply(.md_rule_blocks(md), function(b) strsplit(b$yaml, "\n", fixed = TRUE)[[1]]))
-    expect_true("  SITE:" %in% yaml_lines, info = path)
-    expect_true(any(grepl("^  [^ ]", yaml_lines)), info = path)
-  }
-})
-
-test_that("a rule id containing backticks keeps an intact Markdown label", {
-  ids <- c("a`b", "`lead", "trail`", "x``y")
+test_that("a rule id with backticks or markup stays plain text in Markdown", {
+  ids <- c("a`b", "`lead", "trail`", "x``y", "a|b*c")
   rules <- lapply(ids, function(id) DTARuleColUnique(id = id, columns = "SUBJID"))
   out <- tempfile(fileext = ".md")
   on.exit(unlink(out, force = TRUE), add = TRUE)
-  write_dta(.definition_fixture_dta(rules), file = out, format = "md", overwrite = TRUE, quiet = TRUE)
+  write_dta(.prose_fixture_dta(rules), file = out, format = "md", overwrite = TRUE, quiet = TRUE)
   md <- readLines(out, warn = FALSE)
-  # CommonMark: the span fence is a backtick run not found in the text, and a
-  # text that starts or ends with a backtick is padded with one space.
-  expected <- c("``a`b``", "`` `lead ``", "`` trail` ``", "`x``y`")
-  expect_true(all(expected %in% md))
-  # Each label is followed by a blank line and its fenced yaml block.
+  # Each id is escaped character by character inside the bold rule label;
+  # no code span, so no unescaped backtick anywhere.
+  expected <- c(
+    "**a\\`b** \u00b7 Unique", "**\\`lead** \u00b7 Unique", "**trail\\`** \u00b7 Unique",
+    "**x\\`\\`y** \u00b7 Unique", "**a\\|b\\*c** \u00b7 Unique"
+  )
   for (label in expected) {
-    i <- match(label, md)
-    expect_identical(md[[i + 1L]], "")
-    expect_match(md[[i + 2L]], "^`{3,}yaml$")
+    expect_identical(sum(md == label), 1L, info = label)
   }
+  expect_false(any(grepl("(?<!\\\\)`", md, perl = TRUE)))
 })
 
 # ---- document_name, document_abbreviation, organisation -----------------------

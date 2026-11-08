@@ -347,6 +347,17 @@
   .add_spacer(doc)
 }
 
+#' A validation-rules table for a block, preceded by the rule reading guide
+#' when the document does not hold it yet (once per document)
+#' @keywords internal
+.tv_block_rules_table <- function(doc, rules) {
+  ft <- .build_rules_table(rules, width = NULL)
+  if (!is.null(ft)) {
+    doc <- .add_rule_reading_guide(doc)
+  }
+  .tv_block_table(doc, ft, "No validation rules specified.")
+}
+
 #' Datasets a block should render, honouring its `:NAME` argument
 #'
 #' @param tabular_only Keep only `DTADataSetTabular` datasets (column specs and
@@ -400,10 +411,7 @@
     if (isTRUE(heading)) {
       doc <- .tv_block_heading(doc, paste0("Validation Rules \u2014 ", dta_dataset_heading(sets[[nm]])), level = 2)
     }
-    doc <- .tv_block_table(
-      doc, .build_rules_table(sets[[nm]]@specs@rules, width = NULL),
-      "No validation rules specified."
-    )
+    doc <- .tv_block_rules_table(doc, sets[[nm]]@specs@rules)
   }
   doc
 }
@@ -459,10 +467,7 @@
         "No column specifications available."
       )
       doc <- .tv_block_heading(doc, "Validation Rules", level = 3)
-      doc <- .tv_block_table(
-        doc, .build_rules_table(ds@specs@rules, width = NULL),
-        "No validation rules specified."
-      )
+      doc <- .tv_block_rules_table(doc, ds@specs@rules)
     }
 
     doc <- .add_spacer(doc)

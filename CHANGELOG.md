@@ -131,20 +131,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `organisation.name` (or `branding.footer_label`) in the library's
   `dta-app.yaml` to show an organisation.
 - Word, PDF and Markdown exports (including the `{VALIDATION_RULES}` and
-  `{DATASETS}` template blocks and `write_dataset_metadata()`) now give every
-  rule its exact definition, not only a description: a monospace YAML
-  `Definition` column in Word/PDF and a fenced YAML block per rule in
-  Markdown. The YAML carries every parameter of the rule and reads back into
-  the same rule. In Word and PDF the nesting is indented with non-breaking
-  spaces (pandoc drops ordinary leading spaces); replace them with spaces
-  before pasting a definition into a YAML file.
-- A column-condition rule that has a description now also shows its
-  `IF ... -> THEN ...` reading in the `Description` column, as group-condition
-  rules already did.
+  `{DATASETS}` template blocks and `write_dataset_metadata()`) now describe
+  every rule completely in plain English, never as code: no YAML, code block
+  or monospace font. The description names every parameter of the rule (each
+  column, test, value, grouping column, condition, requirement id, scope and
+  message) and says how missing and non-numeric values are treated, so
+  nothing of the rule is lost. Values are written in full, numbers at full
+  precision. A rule's own description is shown as its "Purpose" above the
+  mechanical wording and never replaces it. The Word rules table has two
+  columns, `Rule ID` and `Description`, with bold labels and bulleted lists;
+  a short guide to reading the rules precedes the first rules table of a
+  document. The console `print()` of a column-condition rule uses the same
+  wording.
 - Tables written into a user's Word template by block placeholders such as
   `{DATASETS}` and `{VALIDATION_RULES}` now have a fixed column grid scaled to
   the template's text width. Before, Word sized the columns from their
-  content, which squeezed the `Rule ID` column next to the long `Definition`
+  content, which squeezed the `Rule ID` column next to the long `Description`
   column in portrait templates. In a template with several sections, the grid
   is scaled to the section the table lands in (one column's width in a section
   of equal columns); a section whose width cannot be determined, such as one
