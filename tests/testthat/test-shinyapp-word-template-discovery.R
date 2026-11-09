@@ -13,12 +13,6 @@ skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
 
-app_server_dir <- function() .shiny_app_dir()
-
-ui_text <- function(out) {
-  if (is.null(out) || is.null(out$html)) "" else paste(as.character(out$html), collapse = "")
-}
-
 # A fresh library ROOT (normalised), optionally with an export-templates/
 # folder holding one placeholder-bearing .docx per name in `docx`.
 make_library <- function(docx = character(0), .local_envir = parent.frame()) {

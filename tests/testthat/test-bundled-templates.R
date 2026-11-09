@@ -12,34 +12,6 @@
 # call (DTAtools::validate_template(), datasets(), metadata()) is enough on its
 # own.
 
-# Local copy of the isolation helper defined in test-shinyapp-template-
-# sources.R / test-shinyapp-template-create.R -- deliberately duplicated
-# rather than shared, per those files' own guidance, so this file does not
-# depend on another test file's internals. Every DTATOOLS_TEMPLATE_* variable
-# is cleared for the duration of each test: a developer machine with
-# DTATOOLS_TEMPLATE_SOURCES exported would flip the app into private-only mode
-# (dta_template_source_roots()'s "private replaces public" contract) and
-# silently drop the packaged directory these tests are all about.
-local_clean_template_env <- function(..., .local_envir = parent.frame()) {
-  withr::local_envvar(
-    c(
-      DTATOOLS_TEMPLATE_SOURCES = NA,
-      DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = NA,
-      DTATOOLS_TEMPLATE_REFRESH_SECONDS = NA,
-      DTATOOLS_TEMPLATE_CACHE_DIR = NA,
-      DTATOOLS_TEMPLATE_GIT_TOKEN = NA,
-      DTATOOLS_TEMPLATE_GIT_USER = NA,
-      DTATOOLS_TEMPLATE_GIT_AUTH = NA,
-      ...
-    ),
-    .local_envir = .local_envir
-  )
-  withr::local_options(
-    list(DTAtools.template_dir = NULL),
-    .local_envir = .local_envir
-  )
-}
-
 # The real, installed/loaded package library ROOT -- never a temp
 # fixture -- because this whole file is about what actually ships.
 bundled_library_dir <- function() {

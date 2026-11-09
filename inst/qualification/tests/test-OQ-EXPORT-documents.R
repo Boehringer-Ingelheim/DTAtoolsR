@@ -938,3 +938,23 @@ test_that("OQ-EXPORT-054 | the document and organisation placeholders are filled
   qa_check("all four are reported", all(tokens %in% names(described)))
   qa_step("as inline placeholders", rep("inline", 4), unname(attr(described, "kind")[tokens]))
 })
+
+test_that("OQ-EXPORT-055 | export_with_template keeps an existing output unless overwrite = TRUE | REQ-EXPORT-039", {
+  dir <- qa_tempdir()
+  template <- et_write_template("Title: {DTA_TITLE}", dir)
+  out <- file.path(dir, "existing.docx")
+  writeLines("original", out)
+
+  refused <- tryCatch(
+    {
+      export_with_template(et_dta(), template, out, quiet = TRUE)
+      FALSE
+    },
+    error = function(e) grepl("already exists", conditionMessage(e), fixed = TRUE)
+  )
+  qa_check("a call without overwrite aborts naming the existing file", refused)
+  qa_step("the existing file is untouched", "original", readLines(out, warn = FALSE))
+
+  export_with_template(et_dta(), template, out, quiet = TRUE, overwrite = TRUE)
+  qa_step("overwrite = TRUE replaces it", "Title: Clinical Data Specification", qa_docx_text(out))
+})

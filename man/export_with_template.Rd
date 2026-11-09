@@ -10,7 +10,8 @@ export_with_template(
   output,
   variables = NULL,
   quiet = FALSE,
-  fallback = TRUE
+  fallback = TRUE,
+  overwrite = FALSE
 )
 }
 \arguments{
@@ -30,6 +31,9 @@ fall back to the standard programmatic document produced by \code{\link[=write_d
 The substitution is signalled as a \strong{warning} condition (unless \code{quiet = TRUE}), so it can be trapped programmatically with
 \code{withCallingHandlers(warning = )}. If \code{FALSE}, a failure is raised as an
 error.}
+
+\item{overwrite}{Logical. Whether to replace an existing \code{output} file.
+Default: \code{FALSE}, so a call against an existing path aborts.}
 }
 \value{
 Invisibly returns the \code{output} path.

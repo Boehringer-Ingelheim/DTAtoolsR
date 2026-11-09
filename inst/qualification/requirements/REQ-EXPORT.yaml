@@ -536,3 +536,13 @@ requirements:
     category: interface
     covers: [write_dta, export_with_template, dta_template_placeholders]
     source: R/exportTemplateDocx.R; R/exportDocuments.R
+
+  - id: REQ-EXPORT-039
+    text: >
+      export_with_template() shall refuse to replace an existing output file
+      unless overwrite = TRUE, leaving that file untouched, and shall replace
+      it when overwrite = TRUE.
+    risk: medium
+    category: functional
+    covers: [export_with_template]
+    source: R/exportTemplateDocx.R

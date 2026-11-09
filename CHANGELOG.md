@@ -26,6 +26,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- `export_with_template()` gains `overwrite` (default `FALSE`) and now aborts
+  when `output` already exists, consistent with `write_dta()` and
+  `export_column_value_table()`. Callers that relied on silent replacement must
+  pass `overwrite = TRUE`.
 - `export_column_value_table()` gained an `overwrite` argument, default
   `FALSE`: it now refuses to overwrite an existing file, as the other export
   functions do. Pass `overwrite = TRUE` for the old behaviour.
@@ -34,6 +38,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- A delimited-file handler accepts `quote = ""` to declare a file with no quote
+  character; the class validator used to reject it although the readers already
+  supported it.
 - The Shiny app no longer reports a DTA whose supplied file count is outside the
   declared bounds as passed: the dataset is marked failed, the reason is listed
   in the completion message, and the HTML summary report shows VALIDATION
@@ -4754,7 +4761,8 @@ All of the following belong to the manifest verification work above.
 
 - Initial internal release
 
-[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.20.1...v0.23.0
@@ -4773,3 +4781,4 @@ All of the following belong to the manifest verification work above.
 [0.11.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.8.1...v0.9.0
+[0.8.1]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/releases/tag/v0.8.1

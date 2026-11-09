@@ -489,19 +489,6 @@ test_that("saving the add-dataset dialog without an id is rejected, naming the I
 # both directions (workspace on load, landing on reset) -- the failure mode of
 # an over-eager isolate() is a layout frozen on the landing page.
 
-# Local copy of the autosave-slot cleanup in test-shinyapp-server.R /
-# test-shinyapp-create-empty.R / test-shinyapp-edit-mode.R -- deliberately
-# duplicated rather than shared (see the rationale in
-# test-shinyapp-create-empty.R). Only the test below sets a client id, so
-# only it needs this.
-clean_session_file <- function() {
-  f <- list.files(tempdir(),
-    pattern = "^dtatools_app_session.*\\.rds$", full.names = TRUE
-  )
-  unlink(f, force = TRUE)
-  invisible(f)
-}
-
 test_that("doc_token moves only on load, restore and reset -- not on mutations", {
   skip_if_not_installed("shiny")
   skip_if_not_installed("bslib")

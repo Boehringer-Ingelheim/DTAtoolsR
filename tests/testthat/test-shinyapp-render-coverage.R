@@ -16,21 +16,6 @@ skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
 
-app_server_dir <- function() .shiny_app_dir()
-
-# A shiny fileInput value for a bundled fixture (same shape as
-# test-shinyapp-server.R's app_file_input(); redefined here rather than
-# shared, because testthat sources test-*.R files in alphabetical order and
-# "export" precedes "server" -- relying on the other file's copy would work
-# only by accident of run order).
-app_file_input <- function(filename) {
-  path <- app_fixture_path(filename)
-  data.frame(
-    name = filename, size = file.size(path), type = "", datapath = path,
-    stringsAsFactors = FALSE
-  )
-}
-
 test_that("the Word export download produces a real .docx with the document's own content", {
   # output$dl_docx's whole content function is `dta_export(export_dta(), file,
   # "docx")`, gated only on `req(rv$dta)` -- no active dataset, no upload, no
