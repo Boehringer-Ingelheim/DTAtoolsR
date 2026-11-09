@@ -243,7 +243,7 @@ test_that("removing a non-existent dataset fails with a message, changing nothin
   r <- remove(dta, "no_such_dataset")
 
   expect_false(r$ok)
-  expect_match(r$error, "not found")
+  expect_match(r$error, "Dataset 'no_such_dataset' not found", fixed = TRUE)
   expect_equal(names_fn(dta), "clinical_data")
 })
 

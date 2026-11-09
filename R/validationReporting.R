@@ -408,7 +408,7 @@ dta_collect_messages_for_dataset <- function(x, tables = NULL, source = c("auto"
   }
 
   msgs$row_order <- ifelse(is.na(msgs$row), Inf, msgs$row)
-  msgs <- msgs[order(msgs$dataset, msgs$target, msgs$source, msgs$row_order), ]
+  msgs <- msgs[order(msgs$dataset, msgs$target, msgs$source, msgs$row_order, method = "radix"), ]
   msgs$row_order <- NULL
   rownames(msgs) <- NULL
   dta_attach_message_ids(msgs)
@@ -914,7 +914,7 @@ dta_group_violations_to_df <- function(violations) {
       if (length(r) == 0) {
         return("")
       }
-      formatted <- dta_format_group_rows(sort(unique(as.integer(r))), length(r), 30L)
+      formatted <- dta_format_group_rows(sort(unique(r)), length(r), 30L)
       # For streaming results, v$rows holds only a head; flag truncated output.
       if (isTRUE(v$rows_truncated)) {
         paste0(formatted, " (+more)")
@@ -1074,7 +1074,7 @@ dta_rule_failure_row_indices <- function(rule, df) {
     }
 
     rows <- unlist(lapply(result$details, function(v) v$rows), use.names = FALSE)
-    return(sort(unique(as.integer(rows))))
+    return(sort(unique(rows)))
   }
 
   integer(0)
@@ -1459,6 +1459,11 @@ dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory",
   out$type <- "rule"
   out$why <- if (is_group_condition) {
     "A group-level constraint was violated: within one or more groups of rows, conditions that must be mutually exclusive co-occur, or a required follow-on condition is absent."
+  } else if (!is.null(rule_def) && inherits(rule_def, "DTAtools::DTARuleColUnique")) {
+    # The rule's message counts the repeats beyond the first row of each key;
+    # the failing rows are every member of a duplicate set, so the two counts
+    # differ by one per set. Say so rather than let them read as a contradiction.
+    "Rows share the same key values. Every row of a duplicate set is listed as failing, while the violation message counts only the repeats beyond the first row of each set."
   } else {
     "Rule logic found rows that violate IF/THEN, range, or uniqueness constraints."
   }

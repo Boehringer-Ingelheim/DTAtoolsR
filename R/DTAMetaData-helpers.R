@@ -90,6 +90,12 @@
 #' @keywords internal
 .date_to_iso <- function(value) {
   if (inherits(value, "Date")) {
+    # An NA date would format to NA_character_, which YAML writes as
+    # `.na.character` and reads back as a string the constructor rejects. An
+    # unset date is NULL, which round-trips.
+    if (length(value) == 1L && is.na(value)) {
+      return(NULL)
+    }
     return(format(value, "%Y-%m-%d"))
   }
   value

@@ -117,17 +117,17 @@ export_specs_table <- function(
   )
 
   if (
-    suppressWarnings(all(
-      colnames ==
-        c(
-          "Variable Name",
-          "Variable Label",
-          "Type",
-          "Format",
-          "Nullable",
-          "Description"
-        )
-    ))
+    identical(
+      as.character(colnames),
+      c(
+        "Variable Name",
+        "Variable Label",
+        "Type",
+        "Format",
+        "Nullable",
+        "Description"
+      )
+    )
   ) {
     # Subset to the requested columns (as the 7-name branch does). Without this
     # the excluded "Length" column survived into the table and the j = 1..6
@@ -153,18 +153,18 @@ export_specs_table <- function(
       flextable::padding(padding = 1, part = "all") %>%
       flextable::valign(part = "body", valign = "top")
   } else if (
-    suppressWarnings(all(
-      colnames ==
-        c(
-          "Variable Name",
-          "Variable Label",
-          "Type",
-          "Length",
-          "Format",
-          "Nullable",
-          "Description"
-        )
-    ))
+    identical(
+      as.character(colnames),
+      c(
+        "Variable Name",
+        "Variable Label",
+        "Type",
+        "Length",
+        "Format",
+        "Nullable",
+        "Description"
+      )
+    )
   ) {
     df <- df %>%
       dplyr::select(dplyr::any_of(colnames))
@@ -203,8 +203,7 @@ export_specs_table <- function(
       i = "Specify 'overwrite = TRUE' to overwrite the current file."
     ))
   } else {
-    ft %>%
-      flextable::save_as_docx(path = file)
+    .dta_write_staged(file, function(stage) flextable::save_as_docx(ft, path = stage))
     if (!isTRUE(quiet)) {
       cli::cli_alert_success(
         "Table has been written to {file} successfully."
@@ -228,6 +227,7 @@ export_specs_table <- function(
 #' @param file Character. The name of the word file, to which the table shall be written. Default is "column_value_table.docx".
 #' @param id Character. The id of the column for which a table with all its values shall be generated.
 #' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
+#' @param overwrite Logical. If FALSE (default), an existing `file` is not replaced and an error is raised.
 #' @return Invisibly, the data.frame of values that was written to `file`.
 #' @export
 #' @examples
@@ -240,7 +240,8 @@ export_column_value_table <- function(
   DTAColumnSpecCollection,
   file = "column_value_table.docx",
   id,
-  quiet = FALSE
+  quiet = FALSE,
+  overwrite = FALSE
 ) {
   if (!inherits(DTAColumnSpecCollection, "DTAtools::DTAColumnSpecCollection")) {
     cli::cli_abort("'DTAColumnSpecCollection' must be a DTAColumnSpecCollection object.")
@@ -259,11 +260,18 @@ export_column_value_table <- function(
     )
   }
 
+  if (file.exists(file) && !overwrite) {
+    cli::cli_abort(c(
+      "File exists!",
+      i = "Specify 'overwrite = TRUE' to overwrite the current file."
+    ))
+  }
+
   df <- data.frame(id = specs@values)
   colnames(df) <- id
 
   # Add a table with the specified format
-  flextable::flextable(df) %>%
+  ft <- flextable::flextable(df) %>%
     flextable::font(fontname = "Times New Roman", part = "all") %>%
     flextable::italic(part = "all") %>%
     flextable::bold(part = "header") %>%
@@ -273,8 +281,8 @@ export_column_value_table <- function(
     flextable::border_inner(part = "all") %>%
     flextable::align(align = "left", part = "all") %>%
     flextable::padding(padding = 5, part = "all") %>%
-    flextable::valign(part = "body", valign = "top") %>%
-    flextable::save_as_docx(path = file)
+    flextable::valign(part = "body", valign = "top")
+  .dta_write_staged(file, function(stage) flextable::save_as_docx(ft, path = stage))
 
   if (!isTRUE(quiet)) {
     cli::cli_alert_success(

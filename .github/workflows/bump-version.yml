@@ -9,9 +9,10 @@
 # there is no second implementation to keep in step.
 #
 # What gets rewritten is defined in .github/scripts/bump_version.R: DESCRIPTION,
-# inst/shiny/dta_app/VERSION, the two version-carrying entries in the app's
-# manifest.json, the badge and footer in docs/index.html, and the CHANGELOG
-# heading. The r-style workflow runs the same script in `--check` mode, so a
+# inst/shiny/dta_app/VERSION, the badge and footer in docs/index.html,
+# `package_version:` in the qualification requirements index, the CHANGELOG
+# heading, and (regenerated afterwards) the qualification installed-file
+# manifest. The r-style workflow runs the same script in `--check` mode, so a
 # hand-edited version that misses a site fails CI.
 #
 # It opens a PR rather than pushing to `dev` directly: `dev` is the shared
@@ -53,7 +54,9 @@ jobs:
           use-public-rspm: true
 
       - name: Bump every version site
-        run: Rscript .github/scripts/bump_version.R "${{ inputs.version }}"
+        env:
+          VERSION: ${{ inputs.version }}
+        run: Rscript .github/scripts/bump_version.R "$VERSION"
 
       - name: Verify the result is self-consistent
         run: Rscript .github/scripts/check_version_sync.R
@@ -81,6 +84,8 @@ jobs:
 
             - `DESCRIPTION` — `Version:`
             - `inst/shiny/dta_app/VERSION`
+            - `inst/qualification/requirements/_index.yaml` — `package_version:`
+            - `inst/qualification/baseline/inst-files.sha256` — regenerated
             - `docs/index.html` — version badge and footer
             - `CHANGELOG.md` — `[Unreleased]` promoted to this version, or a new
               stanza inserted

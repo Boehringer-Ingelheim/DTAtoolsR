@@ -70,6 +70,9 @@ dta_as_numeric_strict <- function(x) {
   # streaming path -- runs on that subset instead of the whole column.
   values <- suppressWarnings(as.numeric(raw_chr))
   missing <- is.na(raw_chr)
+  # as.numeric() also reads hex ("0x1A" is 26) and "Inf" spellings. That is
+  # deliberate: the oracle matrix (vc_numeric_edges) and the qualification
+  # matrix OQ-TYPE-numeric pin them as valid numbers.
   failed <- is.na(values) & !missing
   if (any(failed)) {
     idx <- which(failed)
@@ -681,7 +684,7 @@ dta_condition_mask <- function(column_name, operator, value, x, converted = NULL
     greater_equal = x >= value,
     less_equal = x <= value,
     range = x >= value[1] & x <= value[2],
-    pattern = grepl(value, as.character(x), perl = TRUE),
+    pattern = grepl(value, if (is.numeric(x)) dta_numeric_text(x) else as.character(x), perl = TRUE),
     empty = {
       empty_mask <- is.na(x)
 
@@ -745,25 +748,33 @@ dta_condition_undecidable <- function(conditions, df, numeric_cache = NULL) {
   out <- rep(FALSE, nrow(df))
   numeric_operators <- dta_numeric_condition_operators()
 
+  # A row is undecidable only when no other predicate is NA because its value
+  # is MISSING: a missing value leaves the row out of scope whatever else is
+  # wrong with it.
+  missing_other <- rep(FALSE, nrow(df))
+
   for (column_name in names(conditions)) {
     if (!column_name %in% names(df)) {
       next
     }
-    if (!any(names(conditions[[column_name]]) %in% numeric_operators)) {
-      next
-    }
-
     x <- df[[column_name]]
     # Dates and date-times bypass dta_as_numeric_strict() in
     # dta_numeric_operands(), so they can never be unconvertible here either.
-    if (inherits(x, "Date") || inherits(x, "POSIXt")) {
-      next
+    unconvertible <- if (
+      any(names(conditions[[column_name]]) %in% numeric_operators) &&
+        !(inherits(x, "Date") || inherits(x, "POSIXt"))
+    ) {
+      dta_numeric_cache_get(df, column_name, numeric_cache)$unconvertible
+    } else {
+      rep(FALSE, nrow(df))
     }
 
-    out <- out | dta_numeric_cache_get(df, column_name, numeric_cache)$unconvertible
+    na_here <- is.na(evaluate_condition(column_name, conditions[[column_name]], df, numeric_cache))
+    out <- out | (na_here & unconvertible)
+    missing_other <- missing_other | (na_here & !unconvertible)
   }
 
-  out
+  out & !missing_other
 }
 
 #' @title Rows a Conditional Rule's IF Clause Applies To
@@ -1313,7 +1324,9 @@ rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
   groups_idx_cache <- NULL
   groups_idx <- function() {
     if (is.null(groups_idx_cache)) {
-      groups_idx_cache <<- split(seq_len(nrow(df)), gid)
+      # Every level present, so the list is positional: [[g]] is O(1), where a
+      # lookup by as.character(g) name was a linear scan per violating group.
+      groups_idx_cache <<- split(seq_len(nrow(df)), factor(gid, levels = seq_len(n_groups)))
     }
     groups_idx_cache
   }
@@ -1353,11 +1366,25 @@ rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
 
   # `hit` per condition, over the whole table -- the same truth value
   # `mask %in% TRUE` computed once per group before.
-  cond_hit <- lapply(cond_hits, function(mask) mask %in% TRUE)
+  #
+  # A condition used ONLY as the IF side of a `requires` constraint keeps the
+  # rows whose value is unconvertible in scope (as col_condition does), so bad
+  # data cannot exempt its group. Other roles need a determinate TRUE.
+  if_only <- dta_group_if_only_conditions(constraints)
+  cond_hit <- lapply(names(cond_hits), function(cond_name) {
+    mask <- cond_hits[[cond_name]]
+    if (cond_name %in% if_only) {
+      mask <- dta_condition_in_scope(conditions[[cond_name]], df, mask, numeric_cache)
+    }
+    mask %in% TRUE
+  })
+  names(cond_hit) <- names(cond_hits)
   # Rows where the condition holds, but only for groups that have at least one
   # such row: cheap, because it only touches the (usually few) matching rows,
   # not every group.
-  cond_rows_by_group <- lapply(cond_hit, function(hit) split(which(hit), gid[hit]))
+  cond_rows_by_group <- lapply(cond_hit, function(hit) {
+    split(which(hit), factor(gid[hit], levels = seq_len(n_groups)))
+  })
   cond_n_true <- lapply(cond_hit, function(hit) tabulate(gid[hit], nbins = n_groups))
   cond_any_true <- lapply(cond_n_true, function(n_true) n_true > 0)
   # Matches dta_group_scope_truth()'s "all": a group with no rows is not
@@ -1388,8 +1415,7 @@ rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
   }
 
   group_rows <- function(cond_name, g) {
-    rows <- cond_rows_by_group[[cond_name]][[as.character(g)]]
-    if (is.null(rows)) integer(0) else rows
+    cond_rows_by_group[[cond_name]][[g]]
   }
 
   # Evaluate each constraint's truth condition across ALL groups at once
@@ -1466,7 +1492,7 @@ rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
         then_scope <- constraint$then_scope %||% "any"
 
         if_rows <- group_rows(if_name, g)
-        row_idx <- groups_idx()[[as.character(g)]]
+        row_idx <- groups_idx()[[g]]
         then_failed <- if (identical(then_scope, "all")) {
           row_idx[!cond_hit[[then_name]][row_idx]]
         } else {
@@ -1679,4 +1705,21 @@ check_rule_class <- function(x) {
   } else {
     cli::cli_abort("Rule is not of class 'DTARule'")
   }
+}
+
+#' @title Conditions Used Only as the IF Side of a `requires` Constraint
+#' @param constraints The `constraints` slot of a group_condition rule.
+#' @return Character vector of condition names. Shared by the materialising
+#'   and streaming group paths so both give those conditions the same
+#'   unconvertible-value scope treatment (see [dta_condition_in_scope()]).
+#' @keywords internal
+#' @noRd
+dta_group_if_only_conditions <- function(constraints) {
+  role_names <- function(key) {
+    unlist(lapply(constraints, function(k) k[[key]]), use.names = FALSE)
+  }
+  setdiff(
+    unlist(lapply(constraints, function(k) if (identical(k$type, "requires")) k[["if"]]), use.names = FALSE),
+    c(role_names("then"), role_names("left"), role_names("right"))
+  )
 }

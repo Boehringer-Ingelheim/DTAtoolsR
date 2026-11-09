@@ -723,7 +723,7 @@ test_that("a party slot that cannot be read becomes a problem row", {
 
 test_that("the collector aborts with cli conditions, never stop()", {
   path <- file.path(testthat::test_path("..", ".."), "R", "templateGuide-collect.R")
-  skip_if_not(file.exists(path), "source tree not available")
+  skip_if_no_source_tree("source tree not available")
   code <- readLines(path, warn = FALSE)
   code <- code[!grepl("^\\s*#", code)]
   expect_false(any(grepl("\\bstop\\(", code)))

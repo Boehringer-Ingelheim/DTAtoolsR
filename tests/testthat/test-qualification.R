@@ -163,17 +163,18 @@ test_that("the runner produces a complete evidence bundle", {
 # a stand-in; what these tests exercise is which files get written, not what
 # is in them.
 qual_bundle_fixture <- function() {
-  stub <- data.frame(a = 1, stringsAsFactors = FALSE)
-  trace <- stub
-  attr(trace, "requirements") <- stub
+  # Each slot gets its own value, so a file written from the wrong slot shows.
+  stub <- function(v) data.frame(a = v, stringsAsFactors = FALSE)
+  trace <- stub(3)
+  attr(trace, "requirements") <- stub(2)
   structure(
     list(
       run = list(id = "Q-fixture", hash_algorithm = "md5"),
       environment = list(package = list(version = "9.9.9")),
       summary = list(verdict = "PASS"),
-      tests = stub, expectations = stub, traceability = trace,
-      requirements = stub, deviations = stub, limitations = stub,
-      deviation_status = stub, meta_checks = stub, performance = NULL,
+      tests = stub(1), expectations = stub(4), traceability = trace,
+      requirements = stub(5), deviations = stub(6), limitations = stub(7),
+      deviation_status = stub(8), meta_checks = stub(9), performance = NULL,
       unit_tests = list(run = FALSE, results = NULL)
     ),
     class = "dta_qualification"
@@ -198,9 +199,25 @@ test_that("qual_write_bundle() records a failed evidence write and still writes 
 
   expect_identical(bundle$failed, "tests.csv")
   expect_false(file.exists(file.path(dir, "results", "tests.csv")))
-  expect_true(file.exists(file.path(dir, "results", "expectations.csv")))
-  expect_true(file.exists(file.path(dir, "results", "coverage.csv")))
-  expect_true(file.exists(file.path(dir, "results", "results.json")))
+  # The surviving files must hold the fixture's content, not merely exist.
+  # Expected values are the fixture's per-slot constants: coverage.csv comes
+  # from the traceability "requirements" attribute, the rest from their slot.
+  expected <- c(
+    expectations.csv = 4L, coverage.csv = 2L, traceability.csv = 3L,
+    requirements.csv = 5L, deviations.csv = 6L, limitations.csv = 7L,
+    meta_checks.csv = 9L
+  )
+  for (nm in names(expected)) {
+    csv <- utils::read.csv(file.path(dir, "results", nm))
+    expect_identical(names(csv), "a")
+    expect_identical(csv$a, unname(expected[[nm]]))
+  }
+  json <- jsonlite::read_json(file.path(dir, "results", "results.json"))
+  expect_identical(json$schema_version, 1L)
+  expect_identical(json$run$id, "Q-fixture")
+  expect_identical(unlist(json$run$evidence_write_failures), "tests.csv")
+  expect_identical(json$expectations[[1]]$a, 4L)
+  expect_identical(json$coverage[[1]]$a, 2L)
 })
 
 test_that("qual_write_bundle() leaves no results.json when it fails to serialise, and reports it", {
@@ -261,30 +278,55 @@ test_that("a failed evidence write downgrades the run verdict to FAIL and is rec
 test_that("the runner refuses to overwrite an existing evidence bundle", {
   skip_on_cran()
   out <- withr::local_tempdir()
-  for (id in qual_run_id(time = Sys.time() + seq(0, 20))) {
+  ids <- qual_run_id(time = Sys.time() + seq(0, 20))
+  for (id in ids) {
     dir.create(file.path(out, id), recursive = TRUE, showWarnings = FALSE)
+    writeLines("precious", file.path(out, id, "marker.txt"))
   }
   expect_error(
     run_qualification(out, stages = character(0), formats = "md", quiet = TRUE),
+    "evidence bundle already exists",
     class = "rlang_error"
   )
+  # Refusing means leaving every existing bundle exactly as it was.
+  for (id in ids) {
+    expect_identical(list.files(file.path(out, id)), "marker.txt")
+    expect_identical(readLines(file.path(out, id, "marker.txt")), "precious")
+  }
 })
 
 test_that("bad arguments to the runner are rejected by name", {
-  expect_error(run_qualification(1L), class = "rlang_error")
-  expect_error(run_qualification(tempfile(), stages = "SIT"), class = "rlang_error")
-  expect_error(run_qualification(tempfile(), formats = "epub"), class = "rlang_error")
-  expect_error(run_qualification(tempfile(), filter = c("a", "b")), class = "rlang_error")
+  expect_error(
+    run_qualification(1L), "must be a single directory path",
+    class = "rlang_error", fixed = TRUE
+  )
+  expect_error(
+    run_qualification(tempfile(), stages = "SIT"), "`stages` must be a subset",
+    class = "rlang_error", fixed = TRUE
+  )
+  expect_error(
+    run_qualification(tempfile(), formats = "epub"), "`formats` must be a subset",
+    class = "rlang_error", fixed = TRUE
+  )
+  expect_error(
+    run_qualification(tempfile(), filter = c("a", "b")),
+    "`filter` must be `NULL` or a single regular expression",
+    class = "rlang_error", fixed = TRUE
+  )
   # `scale` and `include_unit_tests` used base::match.arg(), whose failure is a
   # plain simpleError carrying a message in the system language -- so the only
   # thing assertable about it was "some base R error happened", which a typo in
   # the call satisfies just as well as the rejection. They now fail the way
   # their four siblings above do, which is what REQ-ROBUST-015 requires of a
   # user-facing error.
-  expect_error(run_qualification(tempfile(), scale = "enormous"), class = "rlang_error")
+  expect_error(
+    run_qualification(tempfile(), scale = "enormous"), "must be one of",
+    class = "rlang_error", fixed = TRUE
+  )
   expect_error(
     run_qualification(tempfile(), include_unit_tests = "sometimes"),
-    class = "rlang_error"
+    "must be one of",
+    class = "rlang_error", fixed = TRUE
   )
 })
 
@@ -306,19 +348,25 @@ test_that("the runner still accepts the abbreviations match.arg() accepted", {
   expect_identical(qual_match_arg(qual_scales(), qual_scales(), "scale"), "full")
   expect_error(
     qual_match_arg("a", qual_unit_test_modes(), "include_unit_tests"),
-    class = "rlang_error"
+    "must be one of",
+    class = "rlang_error", fixed = TRUE
   )
 
   # And through the exported function: an abbreviated `scale` gets past the
   # matcher, leaving the deliberately bad `formats` to be the thing that
   # aborts. Were the abbreviation rejected, the message would name `scale`.
-  expect_error(
-    run_qualification(tempfile(), scale = "qu", formats = "epub"), "formats"
+  err <- expect_error(
+    run_qualification(tempfile(), scale = "qu", formats = "epub"),
+    "`formats` must be a subset",
+    fixed = TRUE
   )
-  expect_error(
+  expect_false(grepl("`scale` must", conditionMessage(err), fixed = TRUE))
+  err <- expect_error(
     run_qualification(tempfile(), include_unit_tests = "n", formats = "epub"),
-    "formats"
+    "`formats` must be a subset",
+    fixed = TRUE
   )
+  expect_false(grepl("`include_unit_tests` must", conditionMessage(err), fixed = TRUE))
 })
 
 test_that("the runner's declared defaults are the vocabulary they are checked against", {
@@ -390,4 +438,123 @@ test_that("the evidence-inventory section still reads sensibly with no manifest 
 
   expect_match(text, "the hash manifest", fixed = TRUE)
   expect_no_match(text, "below", fixed = TRUE)
+})
+
+test_that("report cells and failure messages are escaped, so rendered documents keep the evidence verbatim", {
+  skip_on_cran()
+  skip_if_not_installed("rmarkdown")
+  skip_if_not(rmarkdown::pandoc_available(), "pandoc is not available")
+
+  path <- "C:\\Users\\someone\\data\\x.csv"
+  re <- "\\d+ *a* b"
+  msg <- paste0("Expected <data.frame> got <script>alert(1)</script> at ", path, "; pattern ", re, " | c")
+  # The failure line comes from the real report code, fed a fixture holding the
+  # hostile message, so dropping qual_md_escape() there fails this test.
+  fixture <- list(
+    expectations = data.frame(
+      tc_id = "OQ-X-001", type = "failure", file = "f.R", line = 1L, message = msg,
+      stringsAsFactors = FALSE
+    )
+  )
+  rows <- data.frame(tc_id = "OQ-X-001", status = "fail", title = "t", stringsAsFactors = FALSE)
+  detail <- qual_report_stage_detail(fixture, rows)
+  expect_true(any(grepl("`f.R:1` [failure]", detail, fixed = TRUE)))
+  md <- c(
+    "# t", "",
+    qual_md_table(data.frame(id = "OQ-X-001", message = msg)),
+    "",
+    detail
+  )
+  dir <- withr::local_tempdir()
+  md_path <- file.path(dir, "r.md")
+  writeLines(md, md_path)
+  html_path <- rmarkdown::render(
+    md_path,
+    output_format = rmarkdown::html_document(self_contained = FALSE),
+    quiet = TRUE
+  )
+  html <- paste(readLines(html_path, warn = FALSE), collapse = "\n")
+  body <- gsub("[[:space:]]+", " ", sub("(?s)^.*<body[^>]*>", "", html, perl = TRUE))
+
+  # No element was created out of the message, and nothing was emphasised.
+  expect_no_match(body, "<script>alert", fixed = TRUE)
+  expect_no_match(body, "<em>", fixed = TRUE)
+  # Both renderings keep the literal characters: the path, the regular
+  # expression, the asterisks and the text after the angle brackets.
+  expect_gte(lengths(regmatches(body, gregexpr("&lt;script&gt;alert(1)&lt;/script&gt;", body, fixed = TRUE))), 2L)
+  expect_gte(lengths(regmatches(body, gregexpr(path, body, fixed = TRUE))), 2L)
+  expect_gte(lengths(regmatches(body, gregexpr(re, body, fixed = TRUE))), 2L)
+  expect_gte(lengths(regmatches(body, gregexpr("<td>", body, fixed = TRUE))), 2L)
+})
+
+test_that("a run filter that selects no file in a stage is an empty stage, not an aborted one", {
+  skip_on_cran()
+  tests_dir <- withr::local_tempdir()
+  writeLines(
+    'test_that("OQ-AAA-001 | one | REQ-AAA-001", { testthat::expect_true(TRUE) })',
+    file.path(tests_dir, "test-OQ-AAA-one.R")
+  )
+  writeLines(
+    'test_that("OQ-BBB-001 | two | REQ-BBB-001", { testthat::expect_true(TRUE) })',
+    file.path(tests_dir, "test-OQ-BBB-two.R")
+  )
+
+  expect_identical(qual_stage_files("OQ", tests_dir), c("OQ-AAA-one", "OQ-BBB-two"))
+  expect_identical(qual_stage_files("IQ", tests_dir, "AAA"), character(0))
+  # An anchored filter is applied to the whole name, as written.
+  expect_identical(qual_stage_files("OQ", tests_dir, "^OQ-BBB"), "OQ-BBB-two")
+
+  # No IQ file exists, so the stage is empty rather than "No test files found".
+  expect_identical(qual_run_stage("IQ", tests_dir, "AAA"), list())
+
+  res <- qual_run_stage("OQ", tests_dir, "^OQ-AAA")
+  expect_false(inherits(res, "qual_stage_abort"))
+  expect_identical(vapply(res, function(r) r$file, character(1)), "test-OQ-AAA-one.R")
+})
+
+test_that("the installed-file hash honours the manifest's algorithm and never substitutes md5 for sha256", {
+  f <- withr::local_tempfile()
+  writeLines("abc", f)
+
+  # Expected value from the independent base-R implementation, not from the
+  # function under test.
+  expect_identical(qual_hash_one(f, algo = "md5"), unname(tools::md5sum(f)))
+
+  # An R before 4.5 has no tools::sha256sum (simulated here).
+  testthat::local_mocked_bindings(qual_has_sha256 = function() FALSE)
+  expect_identical(qual_hash_algorithm(), "md5")
+  expect_error(qual_hash_one(f, algo = "sha256"), "sha256 is not available", fixed = TRUE)
+  expect_identical(qual_hash_one(f), unname(tools::md5sum(f)))
+})
+
+test_that("a run filter that selects no test in any stage aborts instead of passing", {
+  skip_on_cran()
+  out <- withr::local_tempdir()
+  expect_error(
+    run_qualification(
+      out,
+      stages = "IQ", filter = "ZZZNOPE", include_unit_tests = "never",
+      scale = "quick", formats = "md", quiet = TRUE
+    ),
+    "matched no qualification test",
+    class = "rlang_error"
+  )
+  # KNOWN DEFECT, pinned rather than endorsed: the abort is raised after the
+  # bundle directory and its log have been created (the check needs the stage
+  # results, so it cannot simply move above dir.create()), so a mistyped filter
+  # leaves a half-written bundle in `out` -- a directory with no report. When
+  # run_qualification() removes it on this path, replace the two assertions
+  # below with
+  #   expect_length(list.files(out), 0L)
+  left <- list.files(out, full.names = TRUE)
+  expect_length(left, 1L)
+  expect_identical(list.files(file.path(left, "report")), character(0))
+  # Not a filter run, or no stage to select from: nothing to mistype.
+  # A second run needs its own output dir: the first leaves a bundle behind and
+  # bundle names carry a one-second timestamp.
+  bundle <- run_qualification(
+    withr::local_tempdir(),
+    stages = character(0), filter = "ZZZNOPE", scale = "quick", formats = "md", quiet = TRUE
+  )
+  expect_s3_class(bundle, "dta_qualification")
 })

@@ -68,10 +68,8 @@ test_that("dta_count_duplicates() matches sum(duplicated()) for multi-column key
 
 test_that("dta_count_duplicates() matches sum(duplicated()) for a double key column", {
   df <- data.frame(ID = c(0.1 + 0.2, 0.3, 0.3, 1.5, 1.5, 1.5))
-  expect_identical(
-    dta_count_duplicates(df, "ID"),
-    sum(duplicated(df[, "ID", drop = FALSE]))
-  )
+  # 0.3 once, 1.5 twice; 0.1 + 0.2 is not 0.3
+  expect_identical(dta_count_duplicates(df, "ID"), 3L)
 })
 
 test_that("dta_count_duplicates() matches sum(duplicated()) for a factor key column", {
@@ -99,10 +97,8 @@ test_that("dta_count_duplicates() matches sum(duplicated()) for a Date key colum
       "2020-01-03", "2020-01-02", "2020-01-02"
     ))
   )
-  expect_identical(
-    dta_count_duplicates(df, "ID"),
-    sum(duplicated(df[, "ID", drop = FALSE]))
-  )
+  # 01-01 once, 01-02 twice
+  expect_identical(dta_count_duplicates(df, "ID"), 3L)
 })
 
 test_that("dta_count_duplicates() matches sum(duplicated()) for a POSIXct key column", {
@@ -112,10 +108,8 @@ test_that("dta_count_duplicates() matches sum(duplicated()) for a POSIXct key co
       "2020-01-01 12:00:00", "2020-01-01 11:00:00", "2020-01-01 11:00:00"
     ), tz = "UTC")
   )
-  expect_identical(
-    dta_count_duplicates(df, "ID"),
-    sum(duplicated(df[, "ID", drop = FALSE]))
-  )
+  # 10:00 once, 11:00 twice
+  expect_identical(dta_count_duplicates(df, "ID"), 3L)
 })
 
 test_that("dta_count_duplicates() matches sum(duplicated()) for a mixed character+integer key", {
@@ -151,6 +145,11 @@ test_that("Arrow branch produces the same count as the R path when forced on", {
   expected <- sum(duplicated(df[, c("ID", "GROUP"), drop = FALSE]))
 
   options(DTAtools.use_arrow_compute = TRUE, DTAtools.arrow_min_rows = 10L)
+  # dta_count_duplicates() swallows an Arrow error and falls back to R, so
+  # make the R fallback fail loudly: a silent fallback would otherwise pass.
+  testthat::local_mocked_bindings(
+    dta_unique_key = function(...) stop("R fallback used instead of Arrow")
+  )
   arrow_result <- dta_count_duplicates(df, c("ID", "GROUP"))
 
   expect_identical(arrow_result, expected)
@@ -197,4 +196,9 @@ test_that("set_dta_compute_threads() aborts on invalid input", {
     set_dta_compute_threads(c(1, 2)),
     class = "dta_invalid_thread_count"
   )
+})
+
+test_that("set_dta_compute_threads() rejects non-finite and out-of-int-range counts by class", {
+  expect_error(set_dta_compute_threads(Inf), class = "dta_invalid_thread_count")
+  expect_error(set_dta_compute_threads(1e10), class = "dta_invalid_thread_count")
 })

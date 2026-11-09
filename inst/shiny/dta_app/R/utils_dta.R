@@ -187,6 +187,31 @@ dta_numeric_column_ids <- function(dta, dataset) {
 
 # ---- Loading -------------------------------------------------------------
 
+# Reject a parsed YAML whose alias-EXPANDED size is absurd (an "alias bomb":
+# nested anchors share memory while parsed, but every later walk or copy
+# expands them exponentially). Walks the parsed object, stopping as soon as the
+# leaf count passes `max_leaves`, so a bomb costs ~max_leaves steps, not 9^depth.
+dta_check_yaml_size <- function(x, max_leaves = 1e6) {
+  n <- 0
+  walk <- function(v) {
+    if (is.list(v) && length(v)) {
+      for (e in v) walk(e)
+    } else {
+      n <<- n + 1
+      if (n > max_leaves) {
+        stop(
+          "The YAML is too large once its anchors/aliases are expanded ",
+          "(more than ", format(max_leaves, scientific = FALSE), " values). ",
+          "Remove nested aliases and try again.",
+          call. = FALSE
+        )
+      }
+    }
+  }
+  walk(x)
+  invisible(TRUE)
+}
+
 # Read a YAML file into a DTA object, detecting its shape first.
 # A DTA YAML has a top-level `metadata:` and/or `datasets:` key. A standalone
 # DATASET YAML (e.g. gf_dataset.yaml) has the dataset fields at the top level
@@ -202,7 +227,11 @@ dta_numeric_column_ids <- function(dta, dataset) {
 #   wrapped_dataset : TRUE when a standalone dataset YAML was wrapped into a new
 #                     empty DTA (used only for an informative load message).
 dta_read_yaml <- function(path) {
-  raw <- dta_try(yaml::read_yaml(path))
+  raw <- dta_try({
+    parsed <- yaml::read_yaml(path)
+    dta_check_yaml_size(parsed)
+    parsed
+  })
   if (!raw$ok) {
     return(list(
       ok = FALSE, value = NULL, error = raw$error,
@@ -567,13 +596,70 @@ dta_load_file <- function(dta, dataset, file, handler_index, name = NULL) {
 # Run validation for all datasets or one named dataset. Returns dta_try()
 # result whose value (on success) is the UPDATED dta object.
 dta_check <- function(dta, dataset = NULL) {
-  dta_try({
-    if (is.null(dataset)) {
-      DTAtools::check(dta, quiet = TRUE, persist = FALSE)
-    } else {
-      DTAtools::check(dta, datasets = dataset, quiet = TRUE, persist = FALSE)
-    }
+  prior <- dta_file_count_findings(dta)
+  out <- dta_try({
+    # check() warns (class `dta_file_count_mismatch`) when a dataset's file
+    # count is outside its declared bounds. Muffling that one class is safe:
+    # the same finding rides on the returned object's
+    # `last_file_count_findings` attribute, which the status map and the
+    # report read. Every other warning still propagates.
+    withCallingHandlers(
+      if (is.null(dataset)) {
+        DTAtools::check(dta, quiet = TRUE, persist = FALSE)
+      } else {
+        DTAtools::check(dta, datasets = dataset, quiet = TRUE, persist = FALSE)
+      },
+      warning = function(w) {
+        if (inherits(w, "dta_file_count_mismatch")) invokeRestart("muffleWarning")
+      }
+    )
   })
+  # A per-dataset check overwrites the findings attribute with only the
+  # re-checked datasets' rows, which would silently un-fail every other
+  # dataset. Keep the prior rows for datasets that were NOT re-checked.
+  if (isTRUE(out$ok) && !is.null(dataset) && !is.null(prior)) {
+    kept <- prior[!(prior$dataset %in% dataset), , drop = FALSE]
+    new <- attr(out$value, "last_file_count_findings", exact = TRUE)
+    merged <- if (is.data.frame(new)) {
+      keep_cols <- c("dataset", "message")
+      tryCatch(
+        rbind(kept[, keep_cols, drop = FALSE], new[, keep_cols, drop = FALSE]),
+        error = function(e) kept
+      )
+    } else {
+      kept
+    }
+    attr(out$value, "last_file_count_findings") <- merged
+  }
+  out
+}
+
+# File-count findings recorded by the last check(), or NULL when there are
+# none. Never throws: the attribute may be absent or malformed.
+dta_file_count_findings <- function(dta) {
+  f <- tryCatch(
+    attr(dta, "last_file_count_findings", exact = TRUE),
+    error = function(e) NULL
+  )
+  if (!is.data.frame(f) || nrow(f) == 0 || !all(c("dataset", "message") %in% names(f))) {
+    return(NULL)
+  }
+  # The attribute survives removing or renaming a dataset, so a finding can
+  # outlive the dataset it was about; drop those rather than report a ghost.
+  live <- tryCatch(dta_dataset_names(dta), error = function(e) NULL)
+  if (!is.null(live)) f <- f[f$dataset %in% live, , drop = FALSE]
+  if (nrow(f) == 0) NULL else f
+}
+
+# The human-readable reasons behind those findings (character(0) when none).
+# `datasets` restricts them to the datasets of the current run.
+dta_file_count_messages <- function(dta, datasets = NULL) {
+  f <- dta_file_count_findings(dta)
+  if (is.null(f)) {
+    return(character(0))
+  }
+  if (!is.null(datasets)) f <- f[f$dataset %in% datasets, , drop = FALSE]
+  as.character(f$message)
 }
 
 # Update a single metadata scalar field, returning an updated dta object.
@@ -950,6 +1036,13 @@ dta_status_map <- function(dta) {
     } else {
       out[[nm]] <- "pending"
     }
+  }
+  # A dataset whose supplied file count is outside its declared bounds fails
+  # even when every table it holds is valid; results() cannot see that, so
+  # the findings recorded by check() are folded in here. This map is the single
+  # source for the chips, the completion toast and the report banner.
+  for (nm in dta_file_count_findings(dta)$dataset) {
+    if (nm %in% names(out) && !identical(out[[nm]], "nodata")) out[[nm]] <- "fail"
   }
   out
 }
@@ -1871,7 +1964,13 @@ dta_build_validation_report <- function(dta, status = NULL, document_name = NULL
   # Three-state banner. "Passed" is reserved for the case where EVERY dataset in
   # the DTA was actually validated and passed -- a dataset skipped for missing
   # data leaves the run incomplete, and calling that a pass overstates it.
-  banner_cls <- if (n_fail > 0) {
+  #
+  # A recorded file-count failure can never produce "pass", even if the status
+  # map handed in does not reflect it.
+  count_msgs <- dta_file_count_messages(dta)
+  count_failed <- isFALSE(attr(dta, "last_validation_ok", exact = TRUE)) &&
+    !is.null(dta_file_count_findings(dta))
+  banner_cls <- if (n_fail > 0 || count_failed) {
     "warn"
   } else if (n_pass > 0 && n_unvalidated == 0) {
     "pass"
@@ -1897,6 +1996,17 @@ dta_build_validation_report <- function(dta, status = NULL, document_name = NULL
       "cannot be reported as passed. Load the missing data and re-check the ",
       "datasets listed below as &ldquo;No data&rdquo; or &ldquo;Not ",
       "validated&rdquo;.</div>"
+    )
+  } else {
+    ""
+  }
+  # Why a dataset failed on file count: the per-target table below cannot show
+  # it because every table may be individually valid. Messages are escaped.
+  count_html <- if (length(count_msgs) > 0) {
+    paste0(
+      "<h2>File count</h2><ul>",
+      paste0("<li>", vapply(count_msgs, esc, character(1)), "</li>", collapse = ""),
+      "</ul>"
     )
   } else {
     ""
@@ -1938,7 +2048,7 @@ dta_build_validation_report <- function(dta, status = NULL, document_name = NULL
     "<div class='banner ", banner_cls, "'>", banner_txt, "</div>",
     "<div class='summary'>", esc(summary_line), "</div>", caveat,
     "<h2>Datasets</h2><table><thead><tr><th>Dataset</th><th>Name</th><th>Status</th></tr>",
-    "</thead><tbody>", ds_rows, "</tbody></table>", detail_html,
+    "</thead><tbody>", ds_rows, "</tbody></table>", count_html, detail_html,
     "</body></html>"
   )
 }

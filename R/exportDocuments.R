@@ -394,11 +394,11 @@ write_dta <- function(
   lines <- c(
     paste("#", .plain_text_to_md(.export_document_name())),
     "",
-    if (nzchar(.dta_display_title(meta@title, fallback = ""))) paste("**Title:**", meta@title),
+    if (nzchar(.dta_display_title(meta@title, fallback = ""))) paste("**Title:**", .plain_text_to_md(meta@title)),
     if (nzchar(.export_org_line())) paste("**Organisation:**", .plain_text_to_md(.export_org_line())),
-    if (!is.null(meta@version)) paste("**Version:**", meta@version) else "",
+    if (!is.null(meta@version)) paste("**Version:**", .plain_text_to_md(as.character(meta@version))) else "",
     if (!is.null(meta@date)) paste("**Date:**", format(meta@date, "%Y-%m-%d")) else "",
-    if (!is.null(meta@header)) paste("**Header:**", meta@header) else "",
+    if (!is.null(meta@header)) paste("**Header:**", .plain_text_to_md(meta@header)) else "",
     ""
   )
 
@@ -411,6 +411,7 @@ write_dta <- function(
     lines <- c(lines, "## Document Information", "")
     doc_info_df <- .format_metadata_pairs(doc_info)
     names(doc_info_df) <- c("Item", "Details")
+    doc_info_df$Details <- .plain_text_to_md(as.character(doc_info_df$Details), table = TRUE)
     lines <- c(lines, .df_to_md_table(doc_info_df), "")
   }
 
@@ -425,17 +426,21 @@ write_dta <- function(
     vh_df <- get_version_history_df(meta)
     vh_df$date <- format(vh_df$date, "%Y-%m-%d")
     names(vh_df) <- c("Version", "Date", "Changes")
+    vh_df$Version <- .plain_text_to_md(as.character(vh_df$Version), table = TRUE)
+    vh_df$Changes <- .plain_text_to_md(as.character(vh_df$Changes), table = TRUE)
     lines <- c(lines, .df_to_md_table(vh_df), "")
   }
 
   if (length(meta@transmission) > 0) {
     lines <- c(lines, "## Transmission Details", "")
-    trans_pairs <- as.list(meta@transmission)
+    trans_pairs <- lapply(as.list(meta@transmission), function(v) {
+      if (is.character(v)) .plain_text_to_md(v) else v
+    })
     lines <- c(lines, .kv_bullets_md(trans_pairs, truncate = FALSE), "")
   }
 
   if (!is.null(meta@error_handling)) {
-    lines <- c(lines, "## Error Handling", "", meta@error_handling, "")
+    lines <- c(lines, "## Error Handling", "", .plain_text_to_md(meta@error_handling), "")
   }
 
   # Supplier and Receiver information, in data-flow order (see the docx export).
@@ -730,6 +735,19 @@ dta_pdf_backend <- function() {
   )
 }
 
+#' Shell-safe `-env:UserInstallation=` argument for a LibreOffice profile dir
+#'
+#' `system2()` does not quote its arguments, so the file URL is
+#' percent-encoded (spaces, `#`, `%`, ...) and the whole argument quoted.
+#' @param profile_dir Character. Profile directory.
+#' @keywords internal
+.soffice_profile_arg <- function(profile_dir) {
+  path <- gsub("^/+", "", normalizePath(profile_dir, winslash = "/", mustWork = FALSE))
+  enc <- gsub("%2F", "/", utils::URLencode(path, reserved = TRUE), fixed = TRUE)
+  enc <- gsub("%3A", ":", enc, fixed = TRUE)
+  shQuote(paste0("-env:UserInstallation=file:///", enc))
+}
+
 #' Run the LibreOffice DOCX -> PDF conversion
 #'
 #' Converts in a private profile directory (`-env:UserInstallation`) so a
@@ -750,10 +768,7 @@ dta_pdf_backend <- function() {
   suppressWarnings(system2(
     soffice,
     c(
-      paste0(
-        "-env:UserInstallation=file:///",
-        gsub("^/+", "", gsub("\\\\", "/", normalizePath(profile_dir, winslash = "/", mustWork = FALSE)))
-      ),
+      .soffice_profile_arg(profile_dir),
       "--headless", "--norestore", "--convert-to", "pdf",
       "--outdir", shQuote(normalizePath(out_dir, winslash = "/", mustWork = TRUE)),
       shQuote(normalizePath(docx_file, winslash = "/", mustWork = TRUE))

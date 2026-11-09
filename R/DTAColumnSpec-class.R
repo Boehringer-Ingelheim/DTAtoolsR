@@ -25,20 +25,43 @@
 #' @keywords internal
 dta_normalise_spec_values <- function(values) {
   if (is.null(values) || !is.list(values)) {
-    return(values)
-  }
-
-  if (length(values) == 0) {
+    result <- values
+  } else if (length(values) == 0) {
     return(NULL)
+  } else {
+    flattened <- do.call(c, values)
+    result <- if (is.list(flattened)) {
+      unlist(values, recursive = TRUE, use.names = FALSE)
+    } else {
+      unname(flattened)
+    }
   }
 
-  flattened <- do.call(c, values)
-
-  if (is.list(flattened)) {
-    return(unlist(values, recursive = TRUE, use.names = FALSE))
+  # YAML 1.1 reads an unquoted Y, N, yes or no as a logical, so
+  # `values: [Y, N]` arrives here as TRUE/FALSE and would then fail the
+  # property type with no hint as to why.
+  if (is.logical(result)) {
+    cli_abort(
+      c(
+        "Permitted values or examples were read as logical, not as text.",
+        "i" = "YAML reads an unquoted {.code Y}, {.code N}, {.code yes} or {.code no} as a logical; quote them: {.code values: [\"Y\", \"N\"]}."
+      ),
+      class = "dta_spec_logical_values"
+    )
   }
+  result
+}
 
-  unname(flattened)
+# One id per column or rule: a single, non-missing, non-empty string without
+# whitespace. Returns NULL when valid, else the reason (for validators).
+dta_id_problem <- function(id) {
+  if (!is.character(id) || length(id) != 1L || is.na(id) || !nzchar(id)) {
+    return("@id must be a single, non-missing, non-empty string.")
+  }
+  if (grepl("\\s", id)) {
+    return("@id cannot have whitespaces.")
+  }
+  NULL
 }
 
 #' @title DTA Column Specification Class
@@ -124,8 +147,16 @@ DTAColumnSpec <- S7::new_class(
     colclass = class_character_or_null
   ),
   validator = function(self) {
-    if (is.null(self@id) || any(grepl("\\s", self@id))) {
-      cli_abort("@id cannot have whitespaces and needs to be defined.")
+    id_problem <- dta_id_problem(self@id)
+    if (!is.null(id_problem)) {
+      cli_abort(id_problem, class = "dta_spec_invalid_id")
+    }
+
+    if (!is.null(self@nullable) && (length(self@nullable) != 1L || is.na(self@nullable))) {
+      cli_abort(
+        "{self@id}: 'nullable' must be a single TRUE or FALSE.",
+        class = "dta_spec_invalid_nullable"
+      )
     }
 
     # `self@id` (and, below, `ex`/`self@pattern`) are INTERPOLATED as
@@ -260,6 +291,12 @@ get_arrow_type <- function(x) {
 #' create_example_DTAColumnSpec()
 #' @export
 create_example_DTAColumnSpec <- function(index = 1) {
+  if (length(index) != 1L) {
+    cli::cli_abort(
+      "{.arg index} must be a single value, not length {length(index)}.",
+      class = "dta_example_index_invalid"
+    )
+  }
   switch(as.character(index),
     "1" = {
       DTAtools::DTAColumnSpec(
@@ -312,7 +349,7 @@ create_example_DTAColumnSpec <- function(index = 1) {
       )
     },
     {
-      stop("Invalid index value for example DTAColumnSpec.")
+      cli_abort("Invalid index value for example DTAColumnSpec.")
     }
   )
 }
@@ -324,7 +361,7 @@ create_example_DTAColumnSpec <- function(index = 1) {
 method(print, DTAColumnSpec) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTAColumnSpec}> ")
-  if (!is.null(x@label)) {
+  if (!is.null(x@id)) {
     cli_alert("id         : {.field {x@id}}")
   }
   if (!is.null(x@label)) {
@@ -371,17 +408,23 @@ method(print, DTAColumnSpec) <- function(x, ...) {
 #' \code{\link{DTAColumnSpecCollection}} yields a list of column lists rather
 #' than a list of S7 objects.
 #'
-#' Unset properties are omitted rather than written as an empty value. On a
-#' \code{\link{DTAColumnSpecStructure}} that matters for round-tripping: a
+#' On a \code{\link{DTAColumnSpecStructure}} unset properties are omitted
+#' rather than written as an empty value; that matters for round-tripping, as a
 #' bare backend prefix (\code{"SAS "}) would re-parse to an empty type and
-#' fail the SAS validator on the next read.
+#' fail the SAS validator on the next read. On a
+#' \code{\link{DTAColumnSpec}} the entries for its own unset properties
+#' (\code{label}, \code{nullable}, \code{description}, \code{values},
+#' \code{examples}, \code{pattern}, \code{colclass}) are kept as
+#' \code{NULL}, so a YAML dump shows them as \code{~}; only the structure
+#' entries (\code{type}, \code{format}, \code{length}) are omitted when unset.
 #' @param x A DTAtools object: a \code{\link{DTAColumnSpec}},
 #'   \code{\link{DTAColumnSpecCollection}},
 #'   \code{\link{DTAColumnSpecStructure}} (or its SAS subclass),
 #'   \code{\link{DTAMetaData}}, or any \code{\link{DTARule}} subclass.
 #' @param ... Additional arguments (ignored).
-#' @return A named list of the object's properties, with unset properties
-#'   omitted. For a \code{\link{DTAColumnSpecCollection}} the list holds one
+#' @return A named list of the object's properties (unset structure
+#'   properties omitted; unset \code{\link{DTAColumnSpec}} properties kept as
+#'   \code{NULL}). For a \code{\link{DTAColumnSpecCollection}} the list holds one
 #'   entry per column; for a \code{\link{DTAMetaData}} it holds every metadata
 #'   field.
 #' @section Dates in a DTAMetaData list:
@@ -502,6 +545,8 @@ method(as_json_schema_type, DTAColumnSpec) <- function(x) {
 #'   when the specification declares none -- including a column with no
 #'   \code{@structure} at all (no \code{type}, \code{format} or \code{length}),
 #'   which has no length to read.
+#' @examples
+#' as_json_schema_length(DTAColumnSpec(id = "SUBJID", type = "SAS Char", length = 8))
 #' @usage as_json_schema_length(x, ...)
 #' @export
 if (!exists("as_json_schema_length", mode = "function", inherits = FALSE)) {

@@ -147,3 +147,77 @@ test_that("print() of a column-condition rule names the columns and keeps the op
   expect_match(out, "'SEX' = 'F'", fixed = TRUE)
   expect_match(out, "'STATUS' = 'adult'", fixed = TRUE)
 })
+
+# ---- review fixes ----------------------------------------------------------
+
+test_that("rule ids must be a single, non-missing, non-empty string without whitespace", {
+  for (bad in list("", NA_character_, character(0), c("A", "B"), "A B")) {
+    expect_error(DTARuleColUnique(id = bad, columns = "X"), class = "dta_rule_invalid_id")
+    expect_error(DTARule(id = bad, type = "col_unique", description = NULL), class = "dta_rule_invalid_id")
+    expect_error(DTARuleColRange(id = bad, columns = "X", min = 0, max = 1), class = "dta_rule_invalid_id")
+    expect_error(
+      DTARuleColCondition(id = bad, condition = list(A = list(greater = 0)), then = list(B = list(equals = "x"))),
+      class = "dta_rule_invalid_id"
+    )
+    expect_error(
+      DTARuleGroupCondition(
+        id = bad, group_by = "G",
+        conditions = list(a = list(A = list(equals = "x"))),
+        constraints = list(list(type = "requires", `if` = "a", then = "a"))
+      ),
+      class = "dta_rule_invalid_id"
+    )
+  }
+})
+
+test_that("a col_range rule needs single, non-missing bounds", {
+  expect_error(
+    DTARuleColRange(id = "r", columns = "A", min = NA_real_, max = 5),
+    class = "dta_rule_invalid_range"
+  )
+  expect_error(
+    DTARuleColRange(id = "r", columns = "A", min = c(1, 2), max = 5),
+    class = "dta_rule_invalid_range"
+  )
+})
+
+test_that("check() on a concrete rule says it is not implemented instead of returning NULL", {
+  tab <- arrow::arrow_table(A = 1:3)
+  rules <- list(
+    DTARuleColRange(id = "r1", columns = "A", min = 0, max = 5),
+    DTARuleColUnique(id = "r2", columns = "A"),
+    DTARuleColCondition(id = "r3", condition = list(A = list(greater = 0)), then = list(B = list(equals = "x"))),
+    DTARuleGroupCondition(
+      id = "r4", group_by = "A",
+      conditions = list(a = list(A = list(equals = 1))),
+      constraints = list(list(type = "requires", `if` = "a", then = "a"))
+    )
+  )
+  for (rule in rules) {
+    expect_error(check(rule, tab), class = "dta_rule_check_not_implemented")
+  }
+})
+
+test_that("a col_range rule naming several columns is accepted at construction and only rejected at evaluation", {
+  # KNOWN DEFECT, pinned rather than endorsed: DTARuleColRange documents that a
+  # range rule names exactly one column, but the constructor does not enforce
+  # it. The abort only happens when the rule is evaluated
+  # (dta_range_target()), so a malformed rule survives loading and fails late.
+  # A multi-column range rule should be rejected at construction. When that
+  # lands, replace the expect_no_error() and length assertion below with
+  # expect_error(DTARuleColRange(id = "r", columns = c("A", "B"), min = 0, max = 5), "exactly one")
+  # and drop the evaluation half. (No condition class exists for either abort
+  # today -- dta_range_target() raises a bare cli_abort() -- so the message is
+  # the only handle; give both a class when the check moves to construction.)
+  rule <- NULL
+  expect_no_error(
+    rule <- DTARuleColRange(id = "r", columns = c("A", "B"), min = 0, max = 5)
+  )
+  expect_length(rule@columns, 2L)
+
+  expect_error(
+    rule_check_range(rule, data.frame(A = 1, B = 2)),
+    "exactly one target column",
+    fixed = TRUE
+  )
+})

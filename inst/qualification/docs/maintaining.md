@@ -189,9 +189,11 @@ decision worth stating in the Validation Plan's scope.
 
 ### The package version was bumped
 
-Update `package_version:` in `requirements/_index.yaml` to match. M12 fails
+`package_version:` in `requirements/_index.yaml` must match. M12 fails
 otherwise, on the reasoning that requirements written for one version say
-nothing certain about another. `bump_version.R` does not do this for you.
+nothing certain about another. `bump_version.R` rewrites it and regenerates the
+installed-file manifest (the app's `VERSION` file is hashed in it), and
+`check_version_sync.R` checks it; a hand-made bump must do both itself.
 
 ---
 
@@ -327,8 +329,13 @@ Work outward. Do not start with the full run; it takes half an hour.
 Rscript --no-init-file -e "pkgload::load_all(quiet = TRUE); r <- DTAtools::run_qualification(tempfile('q'), stages = 'OQ', scale = 'quick', formats = 'md', filter = 'VAL', quiet = TRUE); print(summary(r))"
 ```
 
-`filter` is a regular expression on the test file name, so `"VAL|ROBUST"`
-works, and `"APP"` runs the application area alone.
+`filter` is a regular expression matched against the whole test name: the file
+name without `test-` and `.R` (e.g. `OQ-VAL-codelist`). It is not anchored, so
+`"VAL|ROBUST"` selects both areas, `"^OQ-VAL"` works as written, and `"APP"`
+runs the application area alone. A stage in which the filter selects no file is
+simply empty, so `stages = 'OQ'` is optional. A filter that selects no test in
+*any* stage of the run is treated as a typo: `run_qualification()` aborts with
+"matched no qualification test" rather than returning an empty pass.
 
 **The pull-request guard**, which is what gates a PR and needs no install:
 

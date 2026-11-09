@@ -264,7 +264,7 @@ create_template_repo <- function(path, examples = TRUE, ci = TRUE, overwrite = F
     cli::cli_abort(c(
       "{.arg overwrite} is {.code FALSE} and {length(existing)} file{?s} already
         exist{?s/} at {.arg path}:",
-      stats::setNames(existing, rep("x", length(existing))),
+      stats::setNames(.cli_escape(existing), rep("x", length(existing))),
       "i" = "Set {.code overwrite = TRUE} to replace {cli::qty(length(existing))}
         {?it/them}, or choose an empty {.arg path}."
     ))

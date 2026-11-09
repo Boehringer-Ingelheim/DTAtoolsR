@@ -74,6 +74,23 @@ test_that("the validation-messages table renders the empty state before a check"
   })
 })
 
+test_that("the messages dock bar is keyboard-operable and announces its state", {
+  # The bar is a div that holds real buttons (downloads), so it cannot be a
+  # <button> itself: it must carry the button role, be focusable, and handle
+  # Enter/Space, with aria-expanded kept in sync by the toggle script.
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    html <- paste(output$floating_msgs$html, collapse = "\n")
+    expect_match(html, 'class="msgs-dock-bar"[^>]*role="button"')
+    expect_match(html, 'class="msgs-dock-bar"[^>]*tabindex="0"')
+    expect_match(html, 'class="msgs-dock-bar"[^>]*aria-expanded="false"')
+    expect_match(html, 'class="msgs-dock-bar"[^>]*onkeydown="DTA_msgsDockKey\\(event\\)"')
+  })
+  # The toggle script lives in app.R itself, not in R/, so read it as text.
+  src <- paste(readLines(file.path(.shiny_app_dir(), "app.R"), warn = FALSE), collapse = "\n")
+  expect_match(src, "setAttribute('aria-expanded'", fixed = TRUE)
+})
+
 test_that("the validation-messages table renders genuine rows for a failing check", {
   # clinical_data_error_rules.csv against clinical_dta.yaml is a fixture pair
   # already pinned in test-clinical-error-fixtures.R: exactly 7 rule failures,

@@ -17,7 +17,11 @@
 qual_md_escape <- function(x) {
   x <- as.character(x)
   x[is.na(x)] <- ""
-  gsub("\\|", "\\\\|", gsub("[\r\n]+", " ", x))
+  # Evidence text (failure messages, titles, paths, regular expressions) is
+  # data: pandoc must not read it as raw HTML, TeX, maths or emphasis. The
+  # pipe is escaped last, after the general escaper has doubled backslashes.
+  x <- .plain_text_to_md(gsub("[\r\n]+", " ", x), table = TRUE)
+  gsub("|", "\\|", x, fixed = TRUE)
 }
 
 qual_md_table <- function(df, align = NULL) {
@@ -339,13 +343,13 @@ qual_report_stage_detail <- function(x, rows) {
     ]
     out <- c(
       out,
-      sprintf("**%s** (%s) - %s", bad$tc_id[[i]], bad$status[[i]], bad$title[[i]]),
+      sprintf("**%s** (%s) - %s", bad$tc_id[[i]], bad$status[[i]], qual_md_escape(bad$title[[i]])),
       ""
     )
     for (j in seq_len(nrow(exps))) {
       out <- c(out, sprintf(
         "- `%s:%s` [%s] %s",
-        exps$file[[j]], exps$line[[j]], exps$type[[j]], exps$message[[j]]
+        exps$file[[j]], exps$line[[j]], exps$type[[j]], qual_md_escape(exps$message[[j]])
       ))
     }
     out <- c(out, "")

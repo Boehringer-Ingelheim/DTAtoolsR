@@ -132,7 +132,7 @@ jobs:
 
       - uses: r-lib/actions/setup-r-dependencies@v2.12.1
         with:
-          extra-packages: any::rcmdcheck,any::remotes
+          extra-packages: any::rcmdcheck,any::remotes,any::devtools
           needs: check
           use-public-rspm: true
 
@@ -148,6 +148,18 @@ jobs:
             stop("No DOCX -> PDF backend on this runner; setup-tinytex did not take effect.")
           }
           cat("PDF backend:", backend$name, "| engine:", backend$engine, "\n")
+
+      # The source-tree tests skip themselves under R CMD check (the tarball has
+      # no tests/ tree to find), so they can silently go quiet there. Run them
+      # once from the checkout with the require flag set, which turns a skip into
+      # a failure. One leg is enough; they are platform-independent. A step, not
+      # a job, so it adds no required-check name.
+      - name: Run source-tree tests (must not skip)
+        if: ${{ matrix.config.os == 'ubuntu-latest' && matrix.config.r == 'release' }}
+        env:
+          DTATOOLS_REQUIRE_SOURCE_TREE: "true"
+          NOT_CRAN: "true"
+        run: Rscript -e "devtools::test(filter='generic-guards|source-portability|templateGuide-collect')"
 
       - uses: r-lib/actions/check-r-package@v2.12.1
         with:

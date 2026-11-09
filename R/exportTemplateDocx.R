@@ -74,15 +74,10 @@
 #'     malformed marker -- unclosed, unopened, or not alone in its paragraph
 #'     -- is left in place and reported alongside unrendered blocks. A dataset
 #'     value that happens to spell a *block* placeholder renders as the text it
-#'     is, not as that block. The same is not yet true of an *inline*
-#'     placeholder: a value spelling one is substituted again by the pass that
-#'     follows region expansion, so a dataset described as
-#'     `"Title is {DTA_TITLE}"` comes out with the title resolved. That is a
-#'     known defect (DEV-016 in `inst/qualification/deviations.yaml`), not a
-#'     documented behaviour to rely on -- the two passes are separated by a
-#'     write and a re-read of the document, and only a token's spelling
-#'     survives that, which identifies a block paragraph but not an inline
-#'     placeholder inside a sentence.}
+#'     is, not as that block. The same holds for an *inline* placeholder: a
+#'     dataset described as `"Title is {DTA_TITLE}"` renders that text
+#'     literally, without the title being resolved a second time (this was
+#'     DEV-016 in `inst/qualification/deviations.yaml`, now closed).}
 #' }
 #'
 #' Additional or overriding values can be supplied through `variables`; names
@@ -922,9 +917,20 @@ dta_template_placeholders <- function(dta = NULL) {
   unresolved <- character(0)
 
   for (p in paras) {
+    # Only this paragraph's OWN runs: a nested paragraph (text box content) is
+    # visited as a paragraph in its own right.
+    # Descendants (content controls, simple fields, custom XML, ... wrap runs),
+    # but only those whose nearest enclosing paragraph is this one.
+    depth <- xml2::xml_find_num(p, "count(ancestor-or-self::*[local-name()='p'])")
     t_nodes <- xml2::xml_find_all(
       p,
-      ".//*[local-name()='r']/*[local-name()='t']"
+      sprintf(
+        paste0(
+          ".//*[local-name()='r']/*[local-name()='t']",
+          "[count(ancestor::*[local-name()='p']) = %d]"
+        ),
+        as.integer(depth)
+      )
     )
     if (length(t_nodes) == 0) {
       next
@@ -1230,40 +1236,32 @@ dta_template_placeholders <- function(dta = NULL) {
     return(invisible(NULL))
   }
 
-  kids <- xml2::xml_children(run)
-  rpr_idx <- which(vapply(
-    kids,
-    function(ch) grepl("(^|:)rPr$", xml2::xml_name(ch)),
-    logical(1)
-  ))
-  if (length(kids) > 0) {
-    if (length(rpr_idx) > 0) {
-      drop_idx <- setdiff(seq_along(kids), rpr_idx[[1]])
-      if (length(drop_idx) > 0) {
-        xml2::xml_remove(kids[drop_idx])
-      }
-    } else {
-      xml2::xml_remove(kids)
-    }
-  }
-
   chunks <- .tv_split_word_chunks(text)
   if (length(chunks) == 0) {
     chunks <- list(list(type = "text", value = ""))
   }
 
+  # Replace ONLY the target w:t, in place: the run's other w:t / w:tab / w:br
+  # children (Word writes several per run) and its w:rPr stay untouched.
+  cursor <- t_node
   for (chunk in chunks) {
     if (identical(chunk$type, "break")) {
-      xml2::xml_add_child(run, "w:br")
+      cursor <- xml2::xml_add_sibling(cursor, "w:br", .where = "after")
       next
     }
     if (identical(chunk$type, "tab")) {
-      xml2::xml_add_child(run, "w:tab")
+      cursor <- xml2::xml_add_sibling(cursor, "w:tab", .where = "after")
       next
     }
-    t_new <- xml2::xml_add_child(run, "w:t", chunk$value)
-    .tv_set_preserve_space(t_new)
+    cursor <- xml2::xml_add_sibling(
+      cursor,
+      "w:t",
+      chunk$value,
+      .where = "after"
+    )
+    .tv_set_preserve_space(cursor)
   }
+  xml2::xml_remove(t_node)
 
   invisible(run)
 }
@@ -1278,6 +1276,11 @@ dta_template_placeholders <- function(dta = NULL) {
   text <- as.character(text)[[1]]
   text <- gsub("\r\n", "\n", text, fixed = TRUE)
   text <- gsub("\r", "\n", text, fixed = TRUE)
+
+  # Vertical tab / form feed read as line breaks; every other C0 control is
+  # forbidden in XML 1.0 and would make the part unparseable, so drop it.
+  text <- gsub("[\v\f]", "\n", text, perl = TRUE)
+  text <- gsub("[\x01-\x08\x0E-\x1F]", "", text, perl = TRUE)
 
   marks <- gregexpr("[\n\t]", text, perl = TRUE)[[1]]
   if (length(marks) == 1L && marks[[1]] == -1L) {

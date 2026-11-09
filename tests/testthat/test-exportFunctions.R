@@ -247,3 +247,54 @@ test_that("write_table_to_file() with get_md5sum = FALSE returns NA_character_ a
   expect_identical(res$n_cols, ncol(written))
   expect_false(file.exists(paste0(out, ".md5")))
 })
+
+test_that("export_column_value_table() refuses to overwrite unless asked", {
+  specs <- DTAColumnSpecCollection(
+    columns = list(VISIT = DTAColumnSpec(id = "VISIT", type = "SAS Char", nullable = FALSE, values = c("V01", "EOT")))
+  )
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  writeLines("precious", out)
+
+  expect_error(
+    export_column_value_table(specs, file = out, id = "VISIT", quiet = TRUE),
+    "File exists",
+    class = "rlang_error"
+  )
+  expect_identical(readLines(out, warn = FALSE), "precious")
+
+  export_column_value_table(specs, file = out, id = "VISIT", quiet = TRUE, overwrite = TRUE)
+  expect_true(any(officer::docx_summary(officer::read_docx(out))$text == "EOT"))
+})
+
+test_that("export_specs_table() aborts with the cli error for empty colnames", {
+  specs <- create_example_DTAColumnSpecCollection()
+  out <- tempfile(fileext = ".docx")
+  expect_error(
+    export_specs_table(specs, file = out, colnames = character(0), quiet = TRUE),
+    "colnames not supported",
+    class = "rlang_error"
+  )
+  expect_false(file.exists(out))
+})
+
+test_that("export_specs_table() and export_column_value_table() leave an existing file intact when the writer fails", {
+  specs <- create_example_DTAColumnSpecCollection()
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  writeLines("precious", out)
+  testthat::local_mocked_bindings(
+    save_as_docx = function(x, path, ...) {
+      writeLines("partial", path)
+      stop("disk full")
+    },
+    .package = "flextable"
+  )
+  expect_error(export_specs_table(specs, file = out, overwrite = TRUE, quiet = TRUE), "disk full")
+  expect_identical(readLines(out, warn = FALSE), "precious")
+  expect_error(
+    export_column_value_table(specs, file = out, id = "STUDYID", overwrite = TRUE, quiet = TRUE),
+    "disk full"
+  )
+  expect_identical(readLines(out, warn = FALSE), "precious")
+})

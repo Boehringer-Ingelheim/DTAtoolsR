@@ -32,7 +32,7 @@ test_that("a fresh scaffold and the bundled library lint clean, with the full co
   expect_identical(names(res), lint_columns)
 
   lib <- system.file("extdata", "library", package = "DTAtools")
-  skip_if(!nzchar(lib))
+  expect_true(nzchar(lib), info = "bundled extdata/library missing")
   res <- lint_quiet(lib, fail_on = "warning")
   expect_equal(nrow(res), 0L)
   expect_identical(names(res), lint_columns)

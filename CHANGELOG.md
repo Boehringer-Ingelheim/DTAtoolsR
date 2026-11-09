@@ -14,12 +14,91 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   error (class `dta_template_lint_error`) when a finding reaches `fail_on`.
   The CI assets written by `create_template_repo()` (GitHub Actions,
   Bitbucket Pipelines, Jenkins) now call it.
+- `check()` on a `DTA` now enforces the file count its tabular datasets'
+  handlers declare. The bound is the dataset-wide sum over all its handlers,
+  not checked per handler. A dataset holding more or fewer tables than the
+  declared bounds signals a warning of class `dta_file_count_mismatch`, adds an
+  `n_file_count_errors` column (placed before `n_import_errors`) to
+  `last_validation_summary`, is listed in the new `last_file_count_findings`
+  attribute, sets `last_validation_ok` to `FALSE`, is named in the console
+  summary alongside other failures, and turns the HTML validation report's
+  overview and messages to failed. A dataset checked on its own is unaffected.
+
+### Changed
+
+- `export_column_value_table()` gained an `overwrite` argument, default
+  `FALSE`: it now refuses to overwrite an existing file, as the other export
+  functions do. Pass `overwrite = TRUE` for the old behaviour.
+- The qualification runner's `filter` now matches the whole test name, not a
+  fragment of it, so `"IQ-ENV-01"` no longer selects `IQ-ENV-010` to `-019`.
 
 ### Fixed
 
+- The Shiny app no longer reports a DTA whose supplied file count is outside the
+  declared bounds as passed: the dataset is marked failed, the reason is listed
+  in the completion message, and the HTML summary report shows VALIDATION
+  FAILED with the file-count finding.
 - `validate_template()` now reports `kind_suffix_mismatch`,
   `party_profile_invalid` and `export_template_no_placeholders`, which the app
   silently skipped while validation passed.
+- Streaming: Int-key uniqueness checked through Arrow now agrees with the eager
+  path. A `fail_fast` scan that stopped early reports `NA` instead of a clean
+  column-specification axis and skips the uniqueness pre-pass.
+  `set_dta_compute_threads(Inf)` raises the classed error instead of failing
+  obscurely.
+- Reading: leading blank lines before a header (CRLF, BOM and CR-only files)
+  no longer turn the header into data. CR-only files are converted with bounded
+  memory. The UTF-16/UTF-32 refusal no longer suggests a workaround that fails,
+  header-parse errors carry a specific hint, and a header with a quoted line
+  break is refused.
+- `write_table_to_file()` refuses unquoted cells that would not read back (a
+  leading quote, the separator, CR or LF).
+- `DTADataSetFile` no longer keeps stale "not delivered" rows and now enforces
+  `min_number_of_files` / `max_number_of_files` for pattern handlers. An
+  unbounded maximum file count prints as open-ended.
+- Rule evaluation: group conditions look groups up by position (it was
+  quadratic); `pattern` on a numeric column matches plain digits, not
+  scientific notation; a missing `IF` value keeps the row out of scope; an
+  unconvertible `IF` value no longer exempts a group (eager and streaming);
+  `messages()` ordering no longer depends on the locale; huge row numbers are
+  no longer narrowed to integer; `inspect()` duplicate wording corrected.
+- `lint_dta()`: a logical operand (unquoted `Y`/`N`) on a non-`Bool` column is
+  an error; a numeric operand on a text column, and numeric operators on SAS
+  Date, Time or DateTime columns, are warnings. Unknown metadata keys are
+  reported by name without printing their values, which also closes an
+  alias-bomb hang.
+- S7 classes: column and rule ids must be a single non-empty string without
+  whitespace; a column with only a `length` gets a clear error; `DTA()` with no
+  datasets works; `datasets()` and `files()` reject bad name arguments; `DTA`
+  rejects non-dataset entries; an `NA` transmission date round-trips through
+  YAML; `nullable` and range `min`/`max` are validated; unnamed column
+  collections are rejected; `check()` stubs on rules abort instead of returning
+  `NULL`; YAML values written unquoted as `Y`/`N` get a quoting hint; the
+  `create_example_*()` index is guarded.
+- Export: `export_specs_table()`, the column value table and the validation
+  report write through the staged writer; empty `colnames` gives the `cli`
+  error; markdown export escapes author text; the LibreOffice profile argument
+  is quoted; the HTML report no longer loses capped rows after sort and filter.
+- Template DOCX: substitution keeps tabs, breaks and other text in a run; text
+  boxes no longer leak into the outer paragraph; `\v`, `\f` and control
+  characters no longer produce an invalid DOCX. `create_template_repo()`
+  escapes braces in paths. The DEV-016 documentation is corrected.
+- Shiny app: a YAML alias-bomb guard (1e6 leaf cap); a stale carry-over upload
+  is no longer reused; overwritten tables are removed from every slot; the
+  maximum-files gate counts only matching files; the messages dock is keyboard
+  accessible and re-selecting a message works.
+- Qualification: report text is escaped, so test messages can no longer inject
+  HTML or TeX; a filter that selects nothing aborts; IQ-ENV-016 uses the
+  manifest's hash algorithm and IQ-ENV-020 reads the real defaults.
+  `bump_version.R` now also updates the qualification `_index.yaml` and
+  regenerates its manifest.
+- CI: workflow input injection closed, `r-style` also fails on untracked `man/`
+  or `NAMESPACE` files, and the `pre-commit` checkout is safe for forks. The
+  source-tree tests now run once with `DTATOOLS_REQUIRE_SOURCE_TREE=true`, so
+  a skip fails the build.
+- Packaging: the unused `doconv` is dropped from `Suggests`, and a stray
+  top-level markdown file is excluded from the tarball. `validation_status()`,
+  `validation_errors()` and `as_json_schema_length()` gained runnable examples.
 
 ## [0.26.0] - 2026-11-07
 

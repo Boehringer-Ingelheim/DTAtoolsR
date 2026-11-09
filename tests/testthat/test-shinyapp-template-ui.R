@@ -788,6 +788,46 @@ test_that("'From a file' with no file chosen is a clear error, and the modal sta
   })
 })
 
+test_that("a carry-over file chosen in an earlier dialog is not silently reused after the dialog is reopened", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+  write_min_template(root, id = "stalecarry_tpl", version = "1.0", label = "Stale Carry Template")
+
+  anc_path <- file.path(withr::local_tempdir(), "ancestor.yaml")
+  writeLines(
+    c(
+      "metadata:",
+      "  title: Stale Ancestor",
+      '  version: "1.0"',
+      "datasets:",
+      "  - id: anc_ds",
+      "    type: file",
+      "    files: { filename: a.csv, type: csv }"
+    ),
+    anc_path
+  )
+  anc_upload <- data.frame(
+    name = "ancestor.yaml", size = file.size(anc_path), type = "",
+    datapath = anc_path, stringsAsFactors = FALSE
+  )
+
+  shiny::testServer(app_server_dir(), {
+    pick_template_step1(session, output, "stalecarry_tpl", "1.0")
+    session$setInputs(tmpl_carry_source = "file")
+    session$setInputs(tmpl_carry_file = anc_upload)
+
+    # Reopen the options dialog: Shiny's client keeps the OLD fileInput value on
+    # the server even though the re-rendered control is empty.
+    session$setInputs(create_from_template = 2)
+    session$setInputs(template_select_next = 2)
+    session$setInputs(template_create_confirm = 1)
+
+    expect_null(rv$dta)
+  })
+})
+
 # ---- Diagnostics for a broken source ----------------------------------------
 
 test_that("a broken source with no cache shows the diagnostic and offers no templates", {

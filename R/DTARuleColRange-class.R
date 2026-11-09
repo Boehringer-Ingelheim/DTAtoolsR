@@ -81,8 +81,8 @@ DTARuleColRange <- S7::new_class(
     max = class_numeric # Maximum value of the range
   ),
   validator = function(self) {
-    if (!is.null(self@id) && (length(self@id) != 1 || !is.character(self@id) || any(grepl("\\s", self@id)))) {
-      cli_abort("@id cannot have whitespaces and needs to be defined.")
+    if (!is.null(dta_id_problem(self@id))) {
+      cli_abort(dta_id_problem(self@id), class = "dta_rule_invalid_id")
     }
 
     if (!identical(self@type, "col_range")) {
@@ -95,6 +95,13 @@ DTARuleColRange <- S7::new_class(
 
     if (!is.numeric(self@min) || !is.numeric(self@max)) {
       cli_abort("Min and max range must be numeric.")
+    }
+
+    if (length(self@min) != 1L || length(self@max) != 1L || is.na(self@min) || is.na(self@max)) {
+      cli_abort(
+        "Min and max must each be a single, non-missing number.",
+        class = "dta_rule_invalid_range"
+      )
     }
 
     if (self@min >= self@max) {
@@ -143,13 +150,10 @@ create_example_DTARuleColRange <- function(index = 1) {
 
 # check() method for DTARuleColRange; documented at ?check (generic).
 method(check, DTARuleColRange) <- function(x, tab) {
-  # nolint
-
-  if (!inherits(tab, "Table")) {
-    cli::cli_abort("The 'tab' argument must be an arrow Table.")
-  }
-
-  # TODO from here
+  cli::cli_abort(
+    "{.fn check} is not implemented for rules; use {.fn validate_table} on a table instead.",
+    class = "dta_rule_check_not_implemented"
+  )
 }
 
 #' @export

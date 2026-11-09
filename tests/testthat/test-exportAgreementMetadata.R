@@ -163,6 +163,9 @@ test_that("full transmission clauses reach default exports and process placehold
     write_dta(dta, out, quiet = TRUE)
     text <- if (ext == ".docx") .docx_text(out) else paste(readLines(out), collapse = "\n")
     for (value in transmission) {
+      # Markdown output escapes a literal pipe so it cannot be read as a table
+      # cell delimiter; DOCX carries the text unchanged.
+      if (ext == ".md") value <- gsub("|", "\\|", value, fixed = TRUE)
       expect_match(text, value, fixed = TRUE)
     }
   }

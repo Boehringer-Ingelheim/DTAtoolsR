@@ -39,8 +39,8 @@ alongside it.
 }
 \section{Declared-numeric key columns}{
 
-A key column the specs declare \code{Num} or \code{Int} is grouped on
-\code{as.numeric(col)}, so that Arrow keys it on the same values the per-batch
+A key column the specs declare \code{Num} is grouped on \code{as.numeric(col)} (\code{Int}:
+\code{as.integer(col)}, so a value R reads as \code{NA} is refused and falls back), so that Arrow keys it on the same values the per-batch
 accumulator keys its coerced column on -- \code{"1.50"} and \code{"1.5"} are one key on
 both. Two properties of that cast are what make it safe, both measured on
 arrow 25.0.1 rather than assumed:

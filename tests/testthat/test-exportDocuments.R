@@ -349,7 +349,7 @@ test_that("write_dta docx puts a real validation rules table in landscape", {
   # reach the "Validation Rules" heading. This fixture has actual rules, which
   # is what puts a rules flextable on the page.
   yaml_path <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
-  skip_if(!nzchar(yaml_path) || !file.exists(yaml_path), "clinical_dta.yaml fixture missing")
+  expect_true(nzchar(yaml_path) && file.exists(yaml_path), info = "clinical_dta.yaml fixture missing")
 
   dta <- read_dta_from_yaml(yaml_path)
   has_rules <- any(vapply(dta@datasets, function(ds) {
@@ -1527,7 +1527,7 @@ test_that("write_dataset_metadata carries the exact definitions in docx and md",
 
 test_that("every rule of the bundled clinical example rebuilds from its exported definition", {
   yaml_path <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
-  skip_if(!nzchar(yaml_path) || !file.exists(yaml_path), "clinical_dta.yaml fixture missing")
+  expect_true(nzchar(yaml_path) && file.exists(yaml_path), info = "clinical_dta.yaml fixture missing")
   dta <- read_dta_from_yaml(yaml_path)
   rules <- .dta_rules(dta)
   expect_gt(length(rules), 0)
@@ -1838,4 +1838,37 @@ test_that("write_dataset_metadata leads with document_name and shows the organis
   expect_equal(paras[1], "Data Transmission Specification")
   expect_match(paras[2], "^Dataset Specification: ")
   expect_equal(paras[3], "Acme Pharma")
+})
+
+test_that("write_dta md escapes author text in title, error handling, transmission and changes", {
+  dta <- create_example_DTA()
+  md <- metadata(dta)
+  S7::prop(md, "title") <- "Study *Alpha* <b>x</b>"
+  S7::prop(md, "error_handling") <- "# Not a heading\n- not a bullet"
+  S7::prop(md, "transmission") <- list(method = "<i>sftp</i> *fast*")
+  S7::prop(md, "version_history") <- list(
+    list(version = "1.0", date = Sys.Date(), changes = "added <b>col</b> *x*")
+  )
+  dta@metadata <- md
+
+  out <- tempfile(fileext = ".md")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dta(dta, file = out, format = "md", overwrite = TRUE, quiet = TRUE)
+  lines <- readLines(out, warn = FALSE)
+
+  expect_false(any(grepl("<b>|<i>", lines)))
+  bs <- intToUtf8(92L)
+  expect_true(any(lines == paste0(bs, "# Not a heading")))
+  expect_false(any(lines == "# Not a heading"))
+  expect_false(any(lines == "- not a bullet"))
+  expect_true(any(grepl(paste0("Study ", bs, "*Alpha", bs, "* &lt;b&gt;x&lt;/b&gt;"), lines, fixed = TRUE)))
+  expect_true(any(grepl(paste0("&lt;i&gt;sftp&lt;/i&gt; ", bs, "*fast", bs, "*"), lines, fixed = TRUE)))
+  expect_true(any(grepl(paste0("added &lt;b&gt;col&lt;/b&gt; ", bs, "*x", bs, "*"), lines, fixed = TRUE)))
+})
+
+test_that(".soffice_profile_arg quotes the argument and percent-encodes the path", {
+  arg <- .soffice_profile_arg(file.path(tempdir(), "my profile #1"))
+  expect_match(arg, "^[\"']-env:UserInstallation=file:///.+[\"']$")
+  expect_match(arg, "my%20profile%20%231", fixed = TRUE)
+  expect_false(grepl(" ", arg, fixed = TRUE))
 })

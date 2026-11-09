@@ -78,8 +78,8 @@ DTARuleColCondition <- S7::new_class(
     then = class_character_or_list
   ),
   validator = function(self) {
-    if (!is.null(self@id) && (length(self@id) != 1 || !is.character(self@id) || any(grepl("\\s", self@id)))) {
-      cli_abort("@id cannot have whitespaces and needs to be defined.")
+    if (!is.null(dta_id_problem(self@id))) {
+      cli_abort(dta_id_problem(self@id), class = "dta_rule_invalid_id")
     }
     if (!identical(self@type, "col_condition")) {
       cli_abort("{.arg type} must be {.val col_condition}.")
@@ -154,13 +154,10 @@ create_example_DTARuleColCondition <- function(index = 1) {
 
 # check() method for DTARuleColCondition; documented at ?check (generic).
 method(check, DTARuleColCondition) <- function(x, tab) {
-  # nolint
-
-  if (!inherits(tab, "Table")) {
-    cli::cli_abort("The 'tab' argument must be an arrow Table.")
-  }
-
-  # TODO from here
+  cli::cli_abort(
+    "{.fn check} is not implemented for rules; use {.fn validate_table} on a table instead.",
+    class = "dta_rule_check_not_implemented"
+  )
 }
 
 

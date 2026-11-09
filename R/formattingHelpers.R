@@ -741,6 +741,8 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
 #' Escape narrative text rather than interpreting it as Markdown or HTML
 #' @keywords internal
 .plain_text_to_md <- function(text, table = FALSE) {
+  # NA means "not specified", not the text "NA"; callers format it later.
+  missing <- is.na(text)
   text <- gsub("&", "&amp;", text, fixed = TRUE)
   text <- gsub("<", "&lt;", text, fixed = TRUE)
   text <- gsub(">", "&gt;", text, fixed = TRUE)
@@ -763,6 +765,7 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
       strrep("\u00a0", width)
     }, character(1))
   })
+  text[missing] <- NA_character_
   text
 }
 

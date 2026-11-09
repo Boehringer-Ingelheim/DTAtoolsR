@@ -902,7 +902,16 @@ test_that("a wide encoding is refused rather than converted", {
   wide <- DTAFileCSV(filename = basename(path), encoding = "UTF-16LE")
 
   expect_error(open_file(wide, path), "cannot be converted block by block")
-  expect_error(open_file(wide, path), "stream = \"never\"", fixed = TRUE)
+  # It must not promise a workaround that also fails.
+  expect_error(open_file(wide, path), "not supported for tabular reading")
+  msg <- gsub("[[:space:]]+", " ", paste(
+    tryCatch(open_file(wide, path), error = conditionMessage),
+    collapse = " "
+  ))
+  expect_match(msg, "cannot be converted block by block", fixed = TRUE)
+  expect_no_match(msg, 'stream = "never"', fixed = TRUE)
+  # ... nor claim a mode-independence that stream = "never" does not have.
+  expect_no_match(msg, "whichever", fixed = TRUE)
 })
 
 test_that("an encoding name iconv does not know is refused by name", {
@@ -920,8 +929,10 @@ test_that("an encoding name iconv does not know is refused by name", {
 
   # The in-memory reader hands the name to Arrow, which has its own opinion of
   # it; only the lazy path converts the bytes itself, so only it is this
-  # function's to answer for.
-  expect_error(read_file(misspelled, path))
+  # function's to answer for. No package-authored fragment exists on this path
+  # (the message is Arrow's: it names the encoding, not the file), so the
+  # encoding name is the strongest handle there is.
+  expect_error(read_file(misspelled, path), "latin-1", fixed = TRUE)
 })
 
 test_that("bytes that are not the declared encoding are refused, not mangled", {
@@ -1120,4 +1131,71 @@ test_that("a latin1 header name is decoded exactly once on the lazy path", {
   # differently.
   expect_identical(names(open_file(handler, path)), c("NAMÉ", "V"))
   expect_identical(names(open_file(handler, path)), names(read_file(handler, path)))
+})
+
+test_that("real UTF-16 and UTF-32 files are refused with advice that works (stream = never is a pinned defect)", {
+  # KNOWN LIMITATION: the refusal in dta_transcode_to_utf8() is a plain
+  # cli_abort() with no condition class, so the message fragments below are the
+  # only handle on it. If a class is ever added, switch these to
+  # expect_error(..., class = "<that class>").
+  text <- "NAME,V\nAnn,1\nBob,2\n"
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      NAME = DTAColumnSpec(id = "NAME", type = "SAS Char", length = 6),
+      V = DTAColumnSpec(id = "V", type = "SAS Num")
+    )
+  )
+  write_encoded <- function(name, encoding) {
+    path <- file.path(tempdir(), name)
+    writeBin(iconv(text, from = "UTF-8", to = encoding, toRaw = TRUE)[[1]], path)
+    path
+  }
+  # cli wraps long bullets; compare on whitespace-normalised text.
+  message_of <- function(expr) {
+    msg <- tryCatch(expr, error = conditionMessage)
+    expect_type(msg, "character")
+    gsub("[[:space:]]+", " ", paste(msg, collapse = " "))
+  }
+  expect_refusal <- function(msg, info) {
+    expect_match(msg, "cannot be converted block by block", fixed = TRUE, info = info)
+    expect_match(msg, "UTF-16 and UTF-32 are not supported", fixed = TRUE, info = info)
+    expect_match(msg, "Convert the file to UTF-8 first", fixed = TRUE, info = info)
+    expect_false(grepl("stream = \"never\"", msg, fixed = TRUE), info = info)
+  }
+
+  for (encoding in c("UTF-16LE", "UTF-32LE")) {
+    path <- write_encoded(paste0("wide_", encoding, ".csv"), encoding)
+    on.exit(unlink(path), add = TRUE)
+    # Guard against a vacuous fixture: the bytes really are wide.
+    expect_gt(length(readBin(path, "raw", 1000L)), nchar(text))
+
+    handler <- DTAFileCSV(filename = basename(path), encoding = encoding)
+    expect_refusal(message_of(open_file(handler, path)), paste(encoding, "open_file"))
+
+    ds <- DTADataSetTabular(id = "wide", specs = specs, files = list(handler))
+    expect_refusal(
+      message_of(load_file(ds, file = path, handler_index = 1, stream = "always")),
+      paste(encoding, "always")
+    )
+
+    # KNOWN DEFECT, pinned rather than endorsed: the refusal is not raised for
+    # every stream mode, because stream = "never" never reaches
+    # dta_transcode_to_utf8() and fails later in the in-memory Arrow reader with
+    # an unrelated message. It does error, which is what is pinned here. When
+    # fixed, replace this block with
+    #   expect_refusal(message_of(load_file(ds, file = path, handler_index = 1,
+    #                                       stream = "never")), ...)
+    never_msg <- message_of(
+      load_file(ds, file = path, handler_index = 1, stream = "never")
+    )
+    expect_match(never_msg, "Cannot read the column names", fixed = TRUE)
+    expect_false(grepl("cannot be converted block by block", never_msg, fixed = TRUE))
+  }
+
+  # Positive control: the same content declared as UTF-8 reads fine.
+  utf8_path <- file.path(tempdir(), "wide_control_utf8.csv")
+  writeBin(charToRaw(text), utf8_path)
+  on.exit(unlink(utf8_path), add = TRUE)
+  ok <- open_file(DTAFileCSV(filename = basename(utf8_path), encoding = "UTF-8"), utf8_path)
+  expect_equal(nrow(as.data.frame(ok)), 2L)
 })

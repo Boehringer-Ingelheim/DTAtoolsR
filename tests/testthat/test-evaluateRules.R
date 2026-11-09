@@ -1024,6 +1024,11 @@ test_that("rule_check_unique() gives identical valid/message with Arrow on and o
   result_off <- rule_check_unique(rule, df)
 
   options(DTAtools.use_arrow_compute = TRUE, DTAtools.arrow_min_rows = 10L)
+  # dta_count_duplicates() swallows an Arrow error and falls back to R; make
+  # the fallback fail loudly so "Arrow on" cannot silently be the R path.
+  testthat::local_mocked_bindings(
+    dta_unique_key = function(...) stop("R fallback used instead of Arrow")
+  )
   result_on <- rule_check_unique(rule, df)
 
   expect_identical(result_on$valid, result_off$valid)
@@ -1164,7 +1169,7 @@ test_that("Unsupported condition operators abort via cli, naming column and key"
       ),
       data.frame(VISIT = "V03", AGE = 1, stringsAsFactors = FALSE)
     ),
-    class = "rlang_error"
+    regexp = "bogus_op", class = "rlang_error"
   )
   # The abort must identify both the column and the offending key, otherwise a
   # typo in a large DTS is untraceable.
@@ -1182,7 +1187,7 @@ test_that("Unsupported condition operators abort via cli, naming column and key"
       ),
       data.frame(VISIT = "V03", AGE = 1, stringsAsFactors = FALSE)
     ),
-    class = "rlang_error"
+    regexp = "bogus_op", class = "rlang_error"
   )
 })
 
@@ -1341,14 +1346,14 @@ test_that("Malformed conditions abort with a clear message, never 'invalid argum
       condition = "VISIT == V03",
       then = list(AGE = list(less = 5))
     ),
-    class = "rlang_error"
+    regexp = "must map column names to operators", class = "rlang_error"
   )
   expect_match(conditionMessage(chr_err), "condition")
   expect_false(grepl("invalid argument", conditionMessage(chr_err), fixed = TRUE))
 
   engine_err <- expect_error(
     evaluate_conditions("VISIT == V03", df),
-    class = "rlang_error"
+    regexp = "must map column names to operators", class = "rlang_error"
   )
   expect_false(grepl("invalid argument", conditionMessage(engine_err), fixed = TRUE))
 
@@ -1360,7 +1365,7 @@ test_that("Malformed conditions abort with a clear message, never 'invalid argum
       condition = list(list(equals = "V03")),
       then = list(AGE = list(less = 5))
     ),
-    class = "rlang_error"
+    regexp = "must name the column", class = "rlang_error"
   )
 
   # An empty operator map must abort, not wave every row through.
@@ -1373,7 +1378,7 @@ test_that("Malformed conditions abort with a clear message, never 'invalid argum
       ),
       df
     ),
-    class = "rlang_error"
+    regexp = "must map operators to values", class = "rlang_error"
   )
 
   # The same column named twice is ambiguous: one of the two would be lost.
@@ -1386,7 +1391,7 @@ test_that("Malformed conditions abort with a clear message, never 'invalid argum
       ),
       then = list(AGE = list(less = 5))
     ),
-    class = "rlang_error"
+    regexp = "more than once", class = "rlang_error"
   )
 })
 
@@ -2243,4 +2248,218 @@ test_that("well-formed operator values are unaffected by the arity check", {
   # range check must not insist on numbers.
   expect_true(check(list(D = list(range = c("2020-01-01", "2020-12-31")))))
   expect_false(check(list(AGE = list(range = c(15, 40)))))
+})
+
+# ---- review fixes: VAL-2..VAL-7 ------------------------------------------------
+
+test_that("requires with then_scope = all attributes rows per group, at linear cost", {
+  # groups_idx() (the row indices of each group) is read positionally, [[g]],
+  # only on the requires + then_scope = "all" path; a lookup by name scanned the
+  # names vector once per violating group. Every group fails here: IF holds on
+  # its first row, THEN (all rows) fails on its second.
+  make <- function(n) {
+    df <- data.frame(
+      SUBJ = rep(sprintf("S%05d", seq_len(n)), each = 2L),
+      A = rep(c("x", "y"), times = n),
+      stringsAsFactors = FALSE
+    )
+    rule <- DTARuleGroupCondition(
+      id = "perf",
+      group_by = "SUBJ",
+      conditions = list(a = list(A = list(equals = "x")), b = list(A = list(equals = "x"))),
+      constraints = list(list(type = "requires", `if` = "a", then = "b", then_scope = "all"))
+    )
+    list(df = df, rule = rule)
+  }
+
+  # n is large enough that a quadratic name scan dominates the linear work
+  # (measured: ratio ~4 as written, ~10 with a scan), yet the case stays ~2 s.
+  n <- 2000L
+  small <- make(n)
+  res <- rule_check_group_condition(small$rule, small$df)
+  expect_false(res$valid)
+  expect_length(res$details, n)
+  # Rows are attributed to the right group: first and last (IF row + failing row).
+  expect_identical(res$details[[1]]$rows, c(1L, 2L))
+  expect_identical(res$details[[n]]$rows, c(2L * n - 1L, 2L * n))
+  expect_match(res$details[[n]]$message, "rows 4000 do not satisfy", fixed = TRUE)
+
+  # Cost shape, not a wall-clock threshold: 4x the groups must cost about 4x,
+  # not 16x. Best of three on each side to shed scheduler noise.
+  best <- function(case) {
+    min(vapply(1:3, function(i) {
+      system.time(rule_check_group_condition(case$rule, case$df))[["elapsed"]]
+    }, numeric(1)))
+  }
+  big <- make(4L * n)
+  # Linear measures 3.6-4.8, a name scan about 7; 5.5 sits between them.
+  expect_lt(best(big) / max(best(small), 0.01), 5.5)
+})
+
+test_that("pattern on a numeric column matches the plain digits, not 1e+05", {
+  expect_identical(
+    dta_condition_mask("N", "pattern", "^100000$", c(100000, 5)),
+    c(TRUE, FALSE)
+  )
+})
+
+test_that("a missing IF value leaves the row out of scope even if another IF value is unconvertible", {
+  df <- data.frame(
+    SEX = c(NA, "F", "F"),
+    AGE = c("ninety", "ninety", "50"),
+    stringsAsFactors = FALSE
+  )
+  rule <- DTARuleColCondition(
+    id = "r",
+    condition = list(SEX = list(equals = "F"), AGE = list(greater = 18)),
+    then = list(SEX = list(equals = "M"))
+  )
+  # Row 1: SEX missing -> out of scope. Row 2: AGE unconvertible, SEX decided
+  # -> stays in scope and fails THEN. Row 3: in scope and fails THEN.
+  expect_identical(dta_condition_violated(rule, df), c(FALSE, TRUE, TRUE))
+})
+
+test_that("group IF conditions keep unconvertible rows in scope", {
+  df <- data.frame(
+    SUBJ = c("S1", "S1"),
+    AGE = c("ninety", "5"),
+    FLAG = c("N", "N"),
+    stringsAsFactors = FALSE
+  )
+  rule <- DTARuleGroupCondition(
+    id = "g",
+    group_by = "SUBJ",
+    conditions = list(
+      adult = list(AGE = list(greater = 18)),
+      flagged = list(FLAG = list(equals = "Y"))
+    ),
+    constraints = list(list(type = "requires", `if` = "adult", then = "flagged"))
+  )
+  res <- rule_check_group_condition(rule, df)
+  expect_false(res$valid)
+  expect_identical(res$details[[1]]$rows, 1L)
+})
+
+# ---- group_condition on a zero-row table (TST-11) ----------------------------
+# Semantics of the nrow == 0 early return in rule_check_group_condition() (the
+# roxygen does not state them): an empty table has no group to violate
+# anything, so the rule is valid. The grouping column is still required to exist, so a table
+# lacking it is "not applicable" rather than silently valid.
+
+zero_row_group_rule <- function(scope) {
+  DTARuleGroupCondition(
+    id = paste0("grp_zero_", scope),
+    group_by = "SUBJ",
+    conditions = list(
+      failed = list(REASND = list(empty = FALSE)),
+      done = list(STAT = list(equals = "DONE"))
+    ),
+    constraints = list(
+      list(
+        type = "mutually_exclusive", left = "failed", right = "done",
+        left_scope = scope, right_scope = scope
+      ),
+      list(
+        type = "requires", `if` = "failed", then = "done",
+        if_scope = scope, then_scope = scope
+      )
+    )
+  )
+}
+
+zero_row_group_df <- function() {
+  data.frame(
+    SUBJ = character(), REASND = character(), STAT = character(),
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("group_condition is valid on a zero-row table for every supported scope", {
+  df <- zero_row_group_df()
+  expect_identical(nrow(df), 0L)
+
+  for (scope in c("any", "all")) {
+    res <- rule_check_group_condition(zero_row_group_rule(scope), df)
+    expect_true(res$valid, info = scope)
+    expect_null(res$message, info = scope)
+  }
+})
+
+test_that("group_condition on a zero-row table is valid through apply_rules() too", {
+  res <- apply_rules(list(zero_row_group_rule("all")), zero_row_group_df(), verbose = FALSE)[[1]]
+  expect_true(res$valid)
+})
+
+test_that("group_condition on a zero-row table still requires the grouping column", {
+  df <- data.frame(REASND = character(), STAT = character(), stringsAsFactors = FALSE)
+  expect_error(
+    rule_check_group_condition(zero_row_group_rule("any"), df),
+    class = "dta_rule_not_applicable"
+  )
+})
+
+test_that("group_condition then_scope 'all' fails a group with a non-matching row, 'any' passes it", {
+  # Group A is flagged "failed" and has one DONE and one OPEN row: "any" is
+  # satisfied, "all" is not. Group B is entirely DONE. Only the scope differs
+  # between the two rules, so this distinguishes "all" from "any".
+  df <- data.frame(
+    SUBJ = c("A", "A", "B", "B"),
+    REASND = c("BROKEN", NA_character_, NA_character_, NA_character_),
+    STAT = c("DONE", "OPEN", "DONE", "DONE"),
+    stringsAsFactors = FALSE
+  )
+  make_rule <- function(scope) {
+    DTARuleGroupCondition(
+      id = paste0("grp_then_", scope),
+      group_by = "SUBJ",
+      conditions = list(
+        failed = list(REASND = list(empty = FALSE)),
+        done = list(STAT = list(equals = "DONE"))
+      ),
+      constraints = list(list(type = "requires", `if` = "failed", then = "done", then_scope = scope))
+    )
+  }
+
+  res_all <- rule_check_group_condition(make_rule("all"), df)
+  expect_false(res_all$valid)
+  expect_match(res_all$message, "SUBJ=A", fixed = TRUE)
+  expect_false(grepl("SUBJ=B", res_all$message, fixed = TRUE))
+
+  expect_true(rule_check_group_condition(make_rule("any"), df)$valid)
+})
+
+test_that("group_condition then_scope 'all' reports exactly the failing rows as evidence", {
+  # Rows 1-4 are group A, rows 5-6 group B (row numbers are 1-based, whole table).
+  # "failed" holds only at row 1. "done" holds at rows 1 and 3 of A but not at
+  # rows 2 and 4, so with then_scope "all" the rows failing "done" are 2 and 4.
+  # Evidence = rows where `if` holds (1) plus rows failing `then` (2, 4) = 1, 2, 4.
+  # Group B is entirely DONE and has no "failed" row, so it must not appear.
+  df <- data.frame(
+    SUBJ = c("A", "A", "A", "A", "B", "B"),
+    REASND = c("BROKEN", NA, NA, NA, NA, NA),
+    STAT = c("DONE", "OPEN", "DONE", "OPEN", "DONE", "DONE"),
+    stringsAsFactors = FALSE
+  )
+  rule <- DTARuleGroupCondition(
+    id = "grp_then_all_evidence",
+    group_by = "SUBJ",
+    conditions = list(
+      failed = list(REASND = list(empty = FALSE)),
+      done = list(STAT = list(equals = "DONE"))
+    ),
+    constraints = list(list(type = "requires", `if` = "failed", then = "done", then_scope = "all"))
+  )
+
+  res <- rule_check_group_condition(rule, df)
+  expect_false(res$valid)
+  expect_match(res$message, "SUBJ=A", fixed = TRUE)
+  expect_false(grepl("SUBJ=B", res$message, fixed = TRUE))
+  # "all"-scope wording, not the "any"-scope wording
+  expect_match(res$message, "do not satisfy \"done\"", fixed = TRUE)
+  expect_false(grepl("no row in the group satisfies", res$message, fixed = TRUE))
+
+  expect_length(res$details, 1L)
+  expect_match(res$details[[1]]$group, "SUBJ=A", fixed = TRUE)
+  expect_equal(as.integer(res$details[[1]]$rows), c(1L, 2L, 4L))
+  expect_false(res$details[[1]]$rows_truncated)
 })

@@ -729,3 +729,21 @@ test_that("write_validation_report validates the document and organisation argum
   expect_error(write_validation_report(dta, out, document_name = 1), "document_name")
   expect_false(file.exists(out))
 })
+
+test_that("write_validation_report leaves an existing file intact when writing fails", {
+  out <- tempfile(fileext = ".html")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  writeLines("precious", out)
+  testthat::local_mocked_bindings(
+    writeLines = function(text, con, ...) {
+      cat("partial\n", file = con)
+      stop("disk full")
+    },
+    .package = "base"
+  )
+  expect_error(
+    write_validation_report(create_example_DTA(), file = out, overwrite = TRUE, quiet = TRUE),
+    "disk full"
+  )
+  expect_identical(base::readLines(out, warn = FALSE), "precious")
+})

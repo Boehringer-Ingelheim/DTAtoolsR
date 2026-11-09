@@ -419,3 +419,24 @@ requirements:
       15-AUG-2025 and right-aligns its text, hence the optional hyphens and the
       ignored surrounding spaces. A TIME value is a duration, so 100:00:00 fits
       TIME10.
+
+  - id: REQ-VAL-032
+    text: >
+      When check() is applied to a DTA, a tabular dataset that holds tables
+      and whose declared file handlers bound the number of files shall fail
+      the run if the number of tables supplied is below the sum of the
+      handlers' minimum or above the sum of their maximum: check() shall
+      signal a warning of class dta_file_count_mismatch for that dataset,
+      report it with a count of 1 in the n_file_count_errors column of the
+      summary and as one row of the last_file_count_findings attribute, and
+      set last_validation_ok to FALSE. A dataset checked on its own, a dataset
+      with no declared file handlers and a dataset holding no tables shall not
+      be judged on file count.
+    risk: high
+    category: functional
+    covers: [check]
+    source: "R/DTA-class.R (check); R/DTADataSetTabular-class.R (dta_tabular_file_count_finding)"
+    notes: >
+      A tabular dataset keeps no file list of its own; each load_file() binds
+      one table, so the supplied count is the number of tables. A dataset with
+      no tables is reported as undelivered by REQ-VAL-001's axes, not here.

@@ -800,7 +800,7 @@ test_that("write_dta rejects templates for markdown output", {
 
 test_that("template variables are extracted from a bundled YAML fixture", {
   yaml_file <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
-  skip_if(yaml_file == "", "clinical_dta.yaml fixture not available")
+  expect_true(nzchar(yaml_file), info = "clinical_dta.yaml fixture not available")
 
   dta <- read_dta_from_yaml(yaml_file)
   vars <- .extract_template_variables(dta)
@@ -904,4 +904,108 @@ test_that("export_with_template called directly uses the default document placeh
   on.exit(unlink(c(template, out), force = TRUE), add = TRUE)
   export_with_template(dta, template, out, quiet = TRUE)
   expect_match(.docx_text(out), "Doc: Data Transfer Agreement / DTA", fixed = TRUE)
+})
+
+# ---- run-level substitution fidelity ------------------------------------------
+
+.sub_xml <- function(body, variables) {
+  xml <- paste0(
+    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
+    "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">",
+    "<w:body>", body, "</w:body></w:document>"
+  )
+  path <- tempfile(fileext = ".xml")
+  writeLines(xml, path, useBytes = TRUE)
+  .replace_placeholders_in_xml(path, variables)
+  d <- xml2::read_xml(path)
+  unlink(path)
+  d
+}
+
+test_that("substituting one w:t keeps the run's other w:t / w:tab children", {
+  d <- .sub_xml(
+    paste0(
+      "<w:p><w:r><w:t>Title:</w:t><w:tab/><w:t>{DTA_TITLE}</w:t><w:tab/>",
+      "<w:t>end</w:t></w:r></w:p>"
+    ),
+    list("{DTA_TITLE}" = "MyTitle")
+  )
+  kids <- xml2::xml_children(xml2::xml_find_first(d, ".//*[local-name()='r']"))
+  expect_equal(
+    xml2::xml_name(kids),
+    c("t", "tab", "t", "tab", "t")
+  )
+  expect_equal(xml2::xml_text(kids)[c(1, 3, 5)], c("Title:", "MyTitle", "end"))
+})
+
+test_that("a placeholder split across runs inside a text box does not blank the box", {
+  d <- .sub_xml(
+    paste0(
+      "<w:p><w:r><w:t>Outside</w:t></w:r><w:r><w:txbxContent>",
+      "<w:p><w:r><w:t>{DTA_TI</w:t></w:r><w:r><w:t>TLE}</w:t></w:r></w:p>",
+      "</w:txbxContent></w:r></w:p>"
+    ),
+    list("{DTA_TITLE}" = "MyTitle")
+  )
+  paras <- xml2::xml_find_all(d, ".//*[local-name()='p']")
+  own <- function(p) {
+    paste(
+      xml2::xml_text(xml2::xml_find_all(
+        p, "./*[local-name()='r']/*[local-name()='t']"
+      )),
+      collapse = ""
+    )
+  }
+  expect_equal(own(paras[[1]]), "Outside")
+  expect_equal(own(paras[[2]]), "MyTitle")
+})
+
+test_that("control characters in a value never make the part unparseable", {
+  for (v in c("a\vb", "a\fb", "a\001b\037c")) {
+    d <- .sub_xml(
+      "<w:p><w:r><w:t>{X}</w:t></w:r></w:p>",
+      list("{X}" = v)
+    )
+    txt <- xml2::xml_text(xml2::xml_find_all(d, ".//*[local-name()='t']"))
+    expect_equal(paste(txt, collapse = ""), if (grepl("[\v\f]", v)) "ab" else "abc")
+  }
+  d <- .sub_xml("<w:p><w:r><w:t>{X}</w:t></w:r></w:p>", list("{X}" = "a\vb"))
+  expect_length(xml2::xml_find_all(d, ".//*[local-name()='br']"), 1)
+})
+
+test_that("placeholders inside inline wrappers (content control, simple field) are substituted", {
+  txt_of <- function(d) {
+    paste(
+      xml2::xml_text(xml2::xml_find_all(d, ".//*[local-name()='t']")),
+      collapse = "|"
+    )
+  }
+  vars <- list("{DTA_TITLE}" = "MyTitle")
+
+  d <- .sub_xml(
+    paste0(
+      "<w:p><w:sdt><w:sdtContent><w:r><w:t>{DTA_TITLE}</w:t></w:r>",
+      "</w:sdtContent></w:sdt></w:p>"
+    ),
+    vars
+  )
+  expect_equal(txt_of(d), "MyTitle")
+
+  d <- .sub_xml(
+    paste0(
+      "<w:p><w:fldSimple w:instr=\"X\"><w:r><w:t>{DTA_TITLE}</w:t></w:r>",
+      "</w:fldSimple></w:p>"
+    ),
+    vars
+  )
+  expect_equal(txt_of(d), "MyTitle")
+
+  d <- .sub_xml(
+    paste0(
+      "<w:p><w:sdt><w:sdtContent><w:r><w:t>{DTA_TI</w:t></w:r>",
+      "<w:r><w:t>TLE}</w:t></w:r></w:sdtContent></w:sdt></w:p>"
+    ),
+    vars
+  )
+  expect_equal(txt_of(d), "MyTitle|")
 })

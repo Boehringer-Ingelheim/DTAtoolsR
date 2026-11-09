@@ -147,7 +147,11 @@ jobs:
       - name: Fail loudly and print the diff if man/ or NAMESPACE is out of date
         if: '!cancelled()'
         run: |
-          if ! git diff --exit-code -- man NAMESPACE; then
+          # `git diff` ignores untracked files, so a newly generated man/*.Rd
+          # that was never committed needs its own check.
+          untracked=$(git status --porcelain -- man NAMESPACE)
+          if ! git diff --exit-code -- man NAMESPACE || [ -n "$untracked" ]; then
+            echo "$untracked"
             echo
             echo "::error::man/ or NAMESPACE is out of date. Run" \
               "'Rscript -e \"roxygen2::roxygenise()\"' locally and commit the result."
