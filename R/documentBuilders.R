@@ -2,9 +2,14 @@
 #' @noRd
 NULL
 
-#' Create and add a title page section to a Word document
+#' Title page of the dataset document (write_dataset_metadata())
+#'
+#' Title, subtitle, organisation line and the fact table, closed as a section
+#' of its own without running header or footer, as the cover of write_dta().
+#' Nothing on it depends on the day the document is written.
+#' @param facts A key/value data.frame (see .pairs_df()); zero rows for none.
 #' @keywords internal
-.add_title_section <- function(doc, title, subtitle = NULL, date = Sys.Date(), version = NULL) {
+.add_title_section <- function(doc, title, subtitle = NULL, facts = NULL) {
   # A DTA may legitimately carry datasets without metadata (e.g. a standalone
   # dataset YAML), in which case `title` is NULL/empty. Normalize it to a single,
   # safe display string so we never pass a zero-length or NA value to officer.
@@ -52,17 +57,68 @@ NULL
     )
   }
 
-  doc <- .add_spacer(doc)
-
-  # ISO 8601 (YYYY-MM-DD): locale-independent, unlike "%B %d, %Y", whose month
-  # name is taken from LC_TIME and differs per workstation.
-  doc <- .add_body_par(doc, paste("Date:", .format_document_date(date)), color = THEME_COLORS$gray_mid)
-  if (!is.null(version)) {
-    doc <- .add_body_par(doc, paste("Version:", version), color = THEME_COLORS$gray_mid)
+  for (i in seq_len(3)) {
+    doc <- .add_spacer(doc)
   }
 
-  doc <- officer::body_add_break(doc)
+  if (!is.null(facts) && nrow(facts) > 0) {
+    ft <- .kv_table(facts, width = 4.6, label_width = 1.3)
+    doc <- flextable::body_add_flextable(doc, ft, align = "left")
+  }
 
+  .end_section_orientation(doc, "portrait")
+}
+
+#' Running header and footer of the dataset document
+#'
+#' The frame of write_dta()'s (`.page_furniture()`), filled from the dataset:
+#' header and footer name the document ("Dataset Specification: ..."), the
+#' footer adds the template version and date and, on a small second line, the
+#' template the dataset was taken from. No date of the run.
+#' @param dataset A `DTADataSet`.
+#' @param title The document title, e.g. "Dataset Specification: Demographics (demographics)".
+#' @return A function of the text-column width returning list(header, footer),
+#'   as `.section_props(furniture =)` takes it.
+#' @keywords internal
+.dataset_furniture <- function(dataset, title) {
+  text <- function(x) if (is.null(x) || length(x) == 0 || is.na(x[[1]])) "" else as.character(x[[1]])
+  source <- text(dataset@template_source)
+  version <- text(dataset@template_version)
+  template <- if (nzchar(source)) list(id = source, version = version, date = dataset@template_date) else list()
+  bits <- c(
+    if (nzchar(version)) paste("Template version", version),
+    .format_document_date(dataset@template_date)
+  )
+  bits <- bits[nzchar(bits)]
+  function(width) {
+    .running_furniture(
+      header_title = title,
+      footer_left = title,
+      footer_right = paste(bits, collapse = paste0("  ", intToUtf8(0xB7), "  ")),
+      footer_small = .template_provenance_text(template),
+      width = width
+    )
+  }
+}
+
+#' Author text as paragraphs: a blank line separates two paragraphs, a single
+#' line break inside a paragraph stays a line break.
+#' @keywords internal
+.add_text_paragraphs <- function(doc, text) {
+  text <- gsub("\r\n|\r", "\n", text)
+  paragraphs <- strsplit(paste0(text, "\n\n"), "\n\n", fixed = TRUE)[[1]]
+  for (paragraph in paragraphs) {
+    lines <- strsplit(paste0(paragraph, "\n"), "\n", fixed = TRUE)[[1]]
+    chunks <- list()
+    for (i in seq_along(lines)) {
+      if (i > 1L) chunks <- c(chunks, list(officer::run_linebreak()))
+      chunks <- c(chunks, list(officer::ftext(lines[[i]], .house_fp_text())))
+    }
+    doc <- officer::body_add_fpar(
+      doc,
+      do.call(officer::fpar, c(chunks, list(fp_p = officer::fp_par(padding.bottom = 2))))
+    )
+  }
   doc
 }
 
@@ -281,19 +337,9 @@ NULL
     doc <- .add_spacer(doc)
   }
 
-  party <- function(org) org$affiliation$name %||% ""
-  facts <- c(
-    Version = meta@version %||% "",
-    Date = .format_document_date(.current_version_date(meta)),
-    `Study ID` = meta@study$id %||% "",
-    `Protocol ID` = meta@study$protocol_id %||% "",
-    Supplier = party(meta@supplier),
-    Receiver = party(meta@receiver),
-    Template = if (length(meta@template) > 0) sub("^Template: ", "", .template_provenance_text(meta@template)) else ""
-  )
-  facts <- facts[nzchar(facts)]
-  if (length(facts) > 0) {
-    ft <- .kv_table(data.frame(key = names(facts), value = unname(facts)), width = 4.6, label_width = 1.3)
+  facts <- .cover_facts(meta)
+  if (nrow(facts) > 0) {
+    ft <- .kv_table(facts, width = 4.6, label_width = 1.3)
     doc <- flextable::body_add_flextable(doc, ft, align = "left")
   }
 
@@ -362,32 +408,6 @@ NULL
   doc
 }
 
-#' Add metadata section with key-value pairs
-#' @keywords internal
-.add_metadata_section <- function(doc, title, metadata_list, truncate = TRUE) {
-  if (!is.null(title) && nzchar(title)) {
-    doc <- .add_heading(doc, title, level = 2)
-  }
-
-  # Create a two-column table for metadata
-  if (length(metadata_list) > 0) {
-    pairs <- .format_metadata_pairs(metadata_list, truncate = truncate)
-
-    # Create flextable
-    ft <- flextable::flextable(pairs)
-    ft <- flextable::set_header_labels(ft, key = "Item", value = "Details")
-    ft <- flextable::width(ft, j = 1, width = 1.6)
-    ft <- flextable::width(ft, j = 2, width = 4.7)
-    ft <- .style_table(ft)
-    ft <- flextable::bold(ft, j = 1, bold = TRUE, part = "body")
-
-    doc <- flextable::body_add_flextable(doc, ft)
-  }
-
-  doc <- .add_spacer(doc)
-  doc
-}
-
 #' Add study identity, sharing the built-in and template-block layout
 #' @keywords internal
 .add_study_section <- function(doc, study, heading = .add_heading, level = 2) {
@@ -409,55 +429,16 @@ NULL
   doc <- heading(doc, "Agreement Sections", level = level)
   for (section in sections) {
     doc <- heading(doc, section$title, level = level + 1)
-    text <- gsub("\r\n|\r", "\n", section$text)
-    paragraphs <- strsplit(paste0(text, "\n\n"), "\n\n", fixed = TRUE)[[1]]
-    for (paragraph in paragraphs) {
-      lines <- strsplit(paste0(paragraph, "\n"), "\n", fixed = TRUE)[[1]]
-      chunks <- list()
-      for (i in seq_along(lines)) {
-        if (i > 1L) chunks <- c(chunks, list(officer::run_linebreak()))
-        chunks <- c(chunks, list(officer::ftext(lines[[i]], .house_fp_text())))
-      }
-      doc <- officer::body_add_fpar(
-        doc,
-        do.call(officer::fpar, c(chunks, list(fp_p = officer::fp_par(padding.bottom = 2))))
-      )
-    }
+    doc <- .add_text_paragraphs(doc, section$text)
     doc <- .add_spacer(doc)
   }
   doc
 }
 
-#' Build a professional flextable of individual contacts (one row per person)
-#' @keywords internal
-.build_contacts_flextable <- function(contacts) {
-  df <- .contacts_to_df(contacts)
-  if (nrow(df) == 0) {
-    return(NULL)
-  }
-
-  ft <- flextable::flextable(df)
-  ft <- flextable::width(ft, j = 1, width = 1.3)
-  ft <- flextable::width(ft, j = 2, width = 1.5)
-  ft <- flextable::width(ft, j = 3, width = 1.3)
-  ft <- flextable::width(ft, j = 4, width = 2.0)
-  ft <- flextable::width(ft, j = 5, width = 1.1)
-  ft <- flextable::width(ft, j = 6, width = 0.8)
-  ft <- flextable::width(ft, j = 7, width = 0.8)
-  ft <- flextable::width(ft, j = 8, width = 1.1)
-  ft <- .style_table(ft, center_cols = c(6, 7, 8))
-
-  ft
-}
-
 #' Build the version-history table (flextable). Shared by the built-in layout and
 #' by the `{VERSION_HISTORY_TABLE}` template block.
 #'
-#' `changes` is flattened rather than passed straight into the data.frame: the
-#' class permits a character vector there, and a vector of length > 1 makes
-#' `data.frame()` abort with "arguments imply differing number of rows". The
-#' date goes through [.format_document_date()] so it reads the same whatever the
-#' machine's locale, and whether it arrives as a `Date` or as text.
+#' The rows come from .version_history_df().
 #'
 #' @param version_history A list of `list(version =, date =, changes =)` records,
 #'   as `DTAMetaData@version_history` holds them, or `NULL`.
@@ -468,22 +449,7 @@ NULL
     return(NULL)
   }
 
-  version_data <- data.frame(
-    Version = character(),
-    Date = character(),
-    Changes = character(),
-    stringsAsFactors = FALSE,
-    check.names = FALSE
-  )
-  for (vh in version_history) {
-    version_data <- rbind(version_data, data.frame(
-      Version = if (is.null(vh$version)) "" else as.character(vh$version)[[1]],
-      Date = .format_document_date(vh$date),
-      Changes = paste(unlist(vh$changes), collapse = "; "),
-      stringsAsFactors = FALSE,
-      check.names = FALSE
-    ))
-  }
+  version_data <- .version_history_df(version_history)
 
   ft <- flextable::flextable(version_data)
   ft <- flextable::width(ft, j = 1, width = 1.0)
@@ -507,12 +473,9 @@ NULL
   }
 
   # Affiliation details (name / country / address / any extension field)
-  pairs <- .affiliation_pairs(org_list$affiliation)
-  if (length(pairs) > 0) {
-    ft <- .kv_table(data.frame(
-      key = names(pairs),
-      value = vapply(pairs, .format_any_value, character(1))
-    ))
+  pairs <- .party_facts(org_list)
+  if (nrow(pairs) > 0) {
+    ft <- .kv_table(pairs)
     doc <- flextable::body_add_flextable(doc, ft, align = "left")
     doc <- .add_spacer(doc)
   }
@@ -521,7 +484,7 @@ NULL
   if (!is.null(ft)) {
     doc <- flextable::body_add_flextable(doc, ft, align = "left")
     doc <- .add_spacer(doc)
-  } else if (length(pairs) == 0) {
+  } else if (nrow(pairs) == 0) {
     doc <- .add_body_par(doc, "No contacts specified.", italic = TRUE, color = THEME_COLORS$gray_mid)
   }
 
@@ -533,37 +496,10 @@ NULL
 #' Responsibilities. Backup-only contacts are listed last.
 #' @keywords internal
 .build_party_contacts_table <- function(contacts) {
-  if (is.null(contacts) || length(contacts) == 0) {
+  df <- .party_contacts_df(contacts)
+  if (nrow(df) == 0) {
     return(NULL)
   }
-  contacts <- lapply(contacts, function(ct) if (is.list(ct)) ct else list(name = as.character(ct)))
-  is_backup <- vapply(contacts, function(ct) isTRUE(ct$backup) && !isTRUE(ct$signature), logical(1))
-  contacts <- c(contacts[!is_backup], contacts[is_backup])
-
-  text <- function(x) {
-    if (is.null(x) || length(x) == 0 || all(is.na(x))) "" else paste(as.character(x), collapse = ", ")
-  }
-  known <- c("name", "role", "department", "email", "phone", "address", "reviewer", "backup", "signature")
-  rows <- lapply(contacts, function(ct) {
-    contact <- c(text(ct$email), text(ct$phone), text(ct$address))
-    for (f in setdiff(names(ct), known)) {
-      contact <- c(contact, paste0(.title_case_field(f), ": ", .format_any_value(ct[[f]])))
-    }
-    flags <- c(
-      if (isTRUE(ct$signature)) "Signatory",
-      if (isTRUE(ct$reviewer)) "Reviewer",
-      if (isTRUE(ct$backup)) "Backup"
-    )
-    data.frame(
-      Name = if (nzchar(text(ct$name))) text(ct$name) else "(Unnamed)",
-      Role = text(ct$role),
-      Department = text(ct$department),
-      Contact = paste(contact[nzchar(contact)], collapse = "\n"),
-      Responsibilities = paste(flags, collapse = "\n"),
-      stringsAsFactors = FALSE
-    )
-  })
-  df <- do.call(rbind, rows)
 
   ft <- flextable::flextable(df, col_keys = c("Name", "Department", "Contact", "Responsibilities"))
   ft <- flextable::width(ft, j = 1:4, width = c(1.7, 1.25, 2.35, 1.0))
@@ -666,44 +602,7 @@ NULL
     return(NULL)
   }
 
-  file_data <- data.frame(
-    `File Name / Pattern` = character(),
-    `Match Type` = character(),
-    `Format` = character(),
-    `Expected Count` = character(),
-    `Description` = character(),
-    stringsAsFactors = FALSE,
-    check.names = FALSE
-  )
-
-  for (i in seq_along(files)) {
-    f <- files[[i]]
-    min_n <- f@min_number_of_files %||% 0
-    max_n <- f@max_number_of_files %||% 0
-    match_type <- if (isTRUE(f@pattern)) "Regex pattern" else "Exact name"
-
-    desc <- if (!is.null(f@pattern_description)) f@pattern_description else ""
-    info_txt <- tryCatch(f@info, error = function(e) NULL)
-    if (!is.null(info_txt) && length(info_txt) > 0) {
-      info_flat <- if (is.list(info_txt)) .format_any_value(info_txt) else paste(info_txt, collapse = "; ")
-      if (nzchar(info_flat)) {
-        desc <- if (nzchar(desc)) paste0(desc, " (", info_flat, ")") else info_flat
-      }
-    }
-
-    file_data <- rbind(file_data, data.frame(
-      `File Name / Pattern` = if (!is.null(f@filename)) paste(f@filename, collapse = ", ") else "pattern_not_specified",
-      `Match Type` = match_type,
-      `Format` = .file_format_label(f),
-      `Expected Count` = paste0(
-        min_n,
-        if (min_n != max_n) paste0(" to ", max_n) else ""
-      ),
-      `Description` = desc,
-      stringsAsFactors = FALSE,
-      check.names = FALSE
-    ))
-  }
+  file_data <- .file_specs_df(files)
 
   ft <- flextable::flextable(file_data)
   ft <- flextable::width(ft, j = 1, width = 1.8)
@@ -725,29 +624,7 @@ NULL
     doc <- .add_body_par(doc, "No files specified.", italic = TRUE, color = THEME_COLORS$gray_mid)
     return(doc)
   }
-  total_min <- sum(sapply(files, function(f) {
-    tryCatch(f@min_number_of_files %||% 0, error = function(e) 0)
-  }))
-
-  total_max <- sum(sapply(files, function(f) {
-    tryCatch(f@max_number_of_files %||% 0, error = function(e) 0)
-  }))
-
-  count_txt <- if (total_min != total_max) {
-    paste0(total_min, " to ", total_max, " files are")
-  } else if (total_min == 1) {
-    "1 file is"
-  } else {
-    paste(total_min, "files are")
-  }
-  doc <- .add_body_par(
-    doc,
-    paste0(
-      count_txt, " expected for this dataset in total. Each file name is given ",
-      "either as an exact name or as a regular-expression pattern that a ",
-      "delivered file must match; the expected count states how many files may match it."
-    )
-  )
+  doc <- .add_body_par(doc, .file_count_sentence(files))
   doc <- .add_spacer(doc)
 
   ft <- .build_file_specs_table(files)
@@ -769,40 +646,11 @@ NULL
 #' the specification a supplier must meet, so they belong in the document.
 #' @keywords internal
 .build_file_format_table <- function(files) {
-  tabular <- Filter(function(f) inherits(f, "DTAtools::DTAFileTabular"), files)
-  if (length(tabular) == 0) {
+  df <- .file_format_df(files)
+  if (nrow(df) == 0) {
     return(NULL)
   }
-  named_char <- function(x, empty = "(none)") {
-    if (is.null(x) || length(x) == 0) {
-      return(empty)
-    }
-    labels <- stats::setNames(
-      c(
-        "Comma ( , )", "Tab", "Semicolon ( ; )", "Pipe ( | )",
-        "Double quote ( \" )", "Single quote ( ' )", "Space", "(empty string)"
-      ),
-      c(",", "\t", ";", "|", "\"", "'", " ", "")
-    )
-    hit <- match(x, names(labels))
-    shown <- ifelse(is.na(hit), x, unname(labels)[hit])
-    shown[is.na(x)] <- MISSING_VALUE_DISPLAY
-    paste(shown, collapse = ", ")
-  }
-  yes_no <- function(x) if (isTRUE(x)) "Yes" else "No"
-  rows <- lapply(tabular, function(f) {
-    data.frame(
-      File = paste(f@filename, collapse = ", "),
-      Delimiter = named_char(f@sep),
-      `Header row` = yes_no(f@has_header),
-      Quote = named_char(f@quote),
-      `Missing values` = named_char(f@missing_values),
-      Encoding = if (length(f@encoding) > 0 && nzchar(f@encoding)) f@encoding else MISSING_VALUE_DISPLAY,
-      `Line breaks in values` = yes_no(f@newlines_in_values),
-      stringsAsFactors = FALSE, check.names = FALSE
-    )
-  })
-  ft <- flextable::flextable(do.call(rbind, rows))
+  ft <- flextable::flextable(df)
   ft <- flextable::width(ft, j = 1:7, width = c(1.5, 0.9, 0.6, 0.9, 1.1, 0.7, 0.7))
   .fit_table_width(.style_table(ft))
 }
@@ -836,6 +684,10 @@ NULL
 
 #' Build a validation rules table (flextable). Shared by write_dataset_metadata()
 #' and write_dta()'s per-dataset sections.
+#'
+#' Two columns, `Rule ID | Description`. The description is the complete
+#' plain-English wording from `R/rulePhrasing.R` (bold labels, bulleted
+#' lists); a rule is never shown as code, YAML or in a monospace font.
 #' @param rules_collection A list of DTARule objects (e.g. `specs@rules`) or `NULL`.
 #' @param width Total table width in inches, or `NULL` to keep the built widths.
 #' @keywords internal
@@ -845,41 +697,69 @@ NULL
     return(NULL)
   }
 
+  # The plain text fills the cell first so the data frame (and with it
+  # ft$body$dataset) carries the description; compose() then lays the same
+  # text out with bold labels.
   rule_data <- data.frame(
-    `Rule ID` = character(),
-    `Description` = character(),
-    `Definition` = character(),
+    `Rule ID` = vapply(rules, function(rule) rule@id, character(1)),
+    `Description` = vapply(rules, .rule_text, character(1)),
     stringsAsFactors = FALSE,
     check.names = FALSE
   )
 
-  for (rule in rules) {
-    rule_data <- rbind(rule_data, data.frame(
-      `Rule ID` = rule@id,
-      `Description` = translate_rule_to_human(rule),
-      # Leading spaces become non-breaking spaces: pandoc (the PDF path) strips
-      # ordinary leading whitespace, which would flatten the YAML nesting. Replace
-      # U+00A0 with a space before pasting the cell into a YAML file.
-      `Definition` = {
-        def_lines <- strsplit(.rule_definition_yaml(rule), "\n", fixed = TRUE)[[1]]
-        lead <- attr(regexpr("^ *", def_lines), "match.length")
-        paste(paste0(strrep("\u00a0", lead), substring(def_lines, lead + 1)), collapse = "\n")
-      },
-      stringsAsFactors = FALSE,
-      check.names = FALSE
-    ))
-  }
-
   ft <- flextable::flextable(rule_data)
+  for (i in seq_along(rules)) {
+    ft <- flextable::compose(
+      ft,
+      i = i, j = 2, part = "body",
+      value = .rule_docx_paragraph(rules[[i]])
+    )
+  }
   # Relative widths only: .fit_table_width() scales them to `width`.
   ft <- flextable::width(ft, j = 1, width = 1.4)
-  ft <- flextable::width(ft, j = 2, width = 3.3)
-  ft <- flextable::width(ft, j = 3, width = 3.7)
+  ft <- flextable::width(ft, j = 2, width = 6.0)
   ft <- .style_table(ft)
   ft <- flextable::bold(ft, j = 1, bold = TRUE, part = "body")
-  ft <- flextable::font(ft, j = 3, fontname = FONTS$monospace, part = "body")
-  ft <- flextable::fontsize(ft, j = 3, size = FONT_SIZES$table_body - 1, part = "body")
   .fit_table_width(ft, width)
+}
+
+#' Does the document already hold the rule reading guide?
+#'
+#' The guide is shown once per document, before the first rules table. Every
+#' caller that adds a rules table asks the document itself, so the guide
+#' appears once however many datasets or blocks the document repeats.
+#' @keywords internal
+.doc_has_rule_reading_guide <- function(doc) {
+  first <- .rule_reading_guide()[[1]]
+  body <- officer::docx_body_xml(doc)
+  texts <- xml2::xml_text(xml2::xml_find_all(body, ".//*[local-name()='p']"))
+  any(texts == first)
+}
+
+#' Add the rule reading guide, unless the document already holds it
+#' @keywords internal
+.add_rule_reading_guide <- function(doc) {
+  if (.doc_has_rule_reading_guide(doc)) {
+    return(doc)
+  }
+  # A bold title, then one paragraph per point.
+  doc <- .add_body_par(doc, RULE_READING_GUIDE_TITLE, bold = TRUE)
+  for (text in .rule_reading_guide()) {
+    doc <- .add_body_par(doc, text)
+  }
+  .add_spacer(doc)
+}
+
+# Title of the rule reading guide, in Word and Markdown alike.
+RULE_READING_GUIDE_TITLE <- "How to read the rules"
+
+# Is the cursor on a section break, i.e. was nothing added since the last one?
+.doc_at_section_start <- function(doc) {
+  node <- officer::docx_current_block_xml(doc)
+  if (inherits(node, "xml_missing")) {
+    return(FALSE)
+  }
+  length(xml2::xml_find_all(node, "./*[local-name()='pPr']/*[local-name()='sectPr']")) > 0
 }
 
 #' Close the current document section with the given page orientation.
@@ -957,14 +837,15 @@ NULL
 }
 
 #' Add Column Specifications + Validation Rules sections for one dataset (DOCX).
-#' Used standalone by write_dataset_metadata() (heading_level = 2) and embedded
-#' within write_dta()'s per-dataset "Datasets" section (heading_level = NULL,
-#' which uses bold subheadings instead of doc heading styles, so it also works
-#' on a template such as officer's default that lacks the deeper heading
-#' styles).
+#' Used standalone by write_dataset_metadata() (heading_level = 1) and embedded
+#' within write_dta()'s per-dataset "Datasets" section (heading_level = 3);
+#' heading_level = NULL uses bold subheadings instead of doc heading styles, so
+#' it also works on a template such as officer's default that lacks the deeper
+#' heading styles. The sections it closes carry the running header and footer
+#' of `furniture_meta` (a DTAMetaData) or of `furniture` (see .section_props()).
 #' @keywords internal
 .add_dataset_specs_section <- function(doc, dataset, include_rules = TRUE, heading_level = 2,
-                                       furniture_meta = NULL) {
+                                       furniture_meta = NULL, furniture = NULL) {
   if (!inherits(dataset, "DTAtools::DTADataSetTabular")) {
     return(doc)
   }
@@ -979,7 +860,12 @@ NULL
   # orphan). officer terminates a section for the content *already added*,
   # hence: close the preceding portrait content first, add the tables, then
   # close them as landscape.
-  doc <- .end_section_orientation(doc, "portrait", furniture_meta)
+  # Nothing added since the last section break (e.g. a dataset document with
+  # neither description, signatories nor file table after its title page):
+  # closing again would leave an empty portrait page.
+  if (!.doc_at_section_start(doc)) {
+    doc <- .end_section_orientation(doc, "portrait", furniture_meta, furniture = furniture)
+  }
 
   doc <- add_section_heading(doc, "Column Specifications")
   ft <- .build_column_specs_table(dataset@specs)
@@ -994,6 +880,7 @@ NULL
     doc <- add_section_heading(doc, "Validation Rules")
     ft_rules <- .build_rules_table(dataset@specs@rules)
     if (!is.null(ft_rules)) {
+      doc <- .add_rule_reading_guide(doc)
       doc <- flextable::body_add_flextable(doc, ft_rules)
     } else {
       doc <- .add_body_par(doc, "No validation rules specified.", italic = TRUE, color = THEME_COLORS$gray_mid)
@@ -1001,7 +888,7 @@ NULL
     doc <- .add_spacer(doc)
   }
 
-  doc <- .end_section_orientation(doc, "landscape", furniture_meta)
+  doc <- .end_section_orientation(doc, "landscape", furniture_meta, furniture = furniture)
 
   doc
 }
@@ -1013,77 +900,7 @@ NULL
     return(NULL)
   }
 
-  specs <- specs_collection@columns
-
-  column_data <- data.frame(
-    `Variable Name` = character(),
-    `Label` = character(),
-    `Type` = character(),
-    `Nullable` = character(),
-    `Allowed Values / Pattern` = character(),
-    `Description` = character(),
-    stringsAsFactors = FALSE,
-    check.names = FALSE
-  )
-
-  for (spec in specs) {
-    # Get type
-    type_str <- "unspecified"
-    if (!is.null(spec@structure) && !is.null(spec@structure@type)) {
-      type_str <- spec@structure@type
-      if (!is.null(spec@structure@backend) && nzchar(spec@structure@backend)) {
-        type_str <- paste0(spec@structure@backend, " ", type_str)
-      }
-    }
-    # Length and format are part of the contract a supplier must meet (a SAS
-    # Char of length 10 is not a SAS Char of length 200), so they are shown.
-    if (!is.null(spec@structure)) {
-      len <- spec@structure@length
-      if (!is.null(len) && length(len) == 1 && !is.na(len)) type_str <- paste0(type_str, " (", len, ")")
-      fmt <- spec@structure@format
-      if (!is.null(fmt) && length(fmt) == 1 && !is.na(fmt) && nzchar(fmt)) {
-        type_str <- paste0(type_str, "\nFormat: ", fmt)
-      }
-    }
-    if (!is.null(spec@colclass) && nzchar(spec@colclass)) {
-      type_str <- paste0(type_str, "\nR class: ", spec@colclass)
-    }
-
-    # Get nullable
-    nullable_str <- if (!is.null(spec@nullable)) {
-      ifelse(spec@nullable, "Yes", "No")
-    } else {
-      "Not specified"
-    }
-
-    # Allowed values and pattern, both when both are given, never truncated:
-    # a specification that hides its eleventh permitted value is wrong.
-    all_values <- function(v) {
-      if (is.list(v)) .format_any_value(v) else paste(as.character(v), collapse = ", ")
-    }
-    values_str <- c(
-      if (!is.null(spec@values) && length(spec@values) > 0) all_values(spec@values),
-      if (!is.null(spec@pattern) && nzchar(spec@pattern)) paste0("Pattern: ", spec@pattern)
-    )
-    values_str <- paste(values_str, collapse = "\n")
-
-    # Get description
-    desc_str <- if (!is.null(spec@description)) spec@description else ""
-    if (!is.null(spec@examples) && length(spec@examples) > 0) {
-      desc_str <- paste0(desc_str, if (nzchar(desc_str)) "\n", "Examples: ", all_values(spec@examples))
-    }
-
-    column_data <- rbind(column_data, data.frame(
-      `Variable Name` = spec@id,
-      `Label` = if (!is.null(spec@label)) spec@label else "",
-      `Type` = type_str,
-      `Nullable` = nullable_str,
-      `Allowed Values / Pattern` = values_str,
-      `Description` = desc_str,
-      stringsAsFactors = FALSE,
-      check.names = FALSE
-    ))
-  }
+  column_data <- .column_specs_df(specs_collection)
 
   # Create flextable
   ft <- flextable::flextable(column_data)
@@ -1104,25 +921,4 @@ NULL
   ft <- .fit_table_width(ft, width)
 
   ft
-}
-
-#' Add a closing paragraph with generation time and version metadata
-#' (a "Generated: ... | Document Version: ..." line; no page numbers).
-#' @keywords internal
-.add_footer_section <- function(doc, version = NULL, template_version = NULL, document_date = Sys.Date()) {
-  # This is typically handled through section properties, but for simplicity,
-  # we can add a footer-like paragraph at the end
-
-  footer_text <- paste(
-    "Generated:",
-    format(Sys.time(), "%Y-%m-%d %H:%M"),
-    if (!is.null(version)) paste("| Document Version:", version) else "",
-    if (!is.null(template_version)) paste("| Template Version:", template_version) else "",
-    sep = " "
-  )
-
-  doc <- .add_spacer(doc)
-  doc <- .add_body_par(doc, footer_text, size = FONT_SIZES$footer, color = THEME_COLORS$gray_mid)
-
-  doc
 }

@@ -364,14 +364,19 @@ requirements:
       constraint that was violated and the offending value in plain text,
       taking the allowed values from the column specification and the
       offending value from the data, and shall return one row per explained
-      message.
+      message. For a rule violation the stated constraint shall be the rule
+      statement in the shared plain-English rule wording of REQ-EXPORT-036,
+      not the validator's own message and not code.
     risk: medium
     category: interface
     covers: [explain_messages]
-    source: R/validationReporting.R
+    source: R/validationReporting.R; R/rulePhrasing.R
     notes: >
       The wording is shared with the HTML report, so a codelist violation reads
-      "Must be one of: <values>." in both.
+      "Must be one of: <values>." in both. A rule violation reads as the rule
+      statement of R/rulePhrasing.R, the same sentence the documents show;
+      a range rule on AGE from 18 to 70 reads "Every value in column AGE must
+      be a number from 18 to 70, inclusive."
 
   - id: REQ-VAL-031
     text: >

@@ -9,7 +9,7 @@
 # library below is built in qa_tempdir(), and a .docx written by tmpl_library()
 # carries a {PLACEHOLDER} marker because the discovery skips one that has none.
 
-tmpl_fixture <- function(...) file.path(qa_suite_root(), "fixtures", "tpl", ...)
+tmpl_fixture <- function(...) file.path(qa_suite_root(), "fx", "t", ...)
 
 # A Word file with the given paragraphs; its default is a fill-in template.
 tmpl_docx <- function(path, lines = c("Agreement {TITLE}", "{VERSION}")) {
@@ -200,7 +200,7 @@ test_that("OQ-TMPL-098 | files in the wrong folder are not indexed and are repor
 
   # Fixture: templates/ok.dta-template.yaml (in its folder), a party profile in
   # templates/ and a vocabulary directly in the root.
-  root <- tmpl_fixture("codes", "template_misplaced")
+  root <- tmpl_fixture("c", "template_misplaced")
   built <- tmpl_index_of(root, engine)
   qa_step("only the file in its own folder is indexed", "misplaced_ok", built$index$id)
   qa_step("one note per misplaced file", 2L, length(built$notes))
@@ -234,7 +234,7 @@ test_that("OQ-TMPL-098 | files in the wrong folder are not indexed and are repor
   )
 
   # A clean library raises nothing.
-  clean <- tmpl_index_of(tmpl_fixture("layout", "folder"), engine)
+  clean <- tmpl_index_of(tmpl_fixture("lay", "folder"), engine)
   qa_step("a library in the documented layout raises no warning", 0L, length(clean$warned))
   qa_step("and has no note", 0L, length(clean$notes))
   qa_step(
@@ -244,7 +244,7 @@ test_that("OQ-TMPL-098 | files in the wrong folder are not indexed and are repor
   )
 
   # The source is pointed one level too deep, at templates/ itself.
-  deep <- tmpl_index_of(file.path(tmpl_fixture("codes", "library_subfolder_given"), "templates"), engine)
+  deep <- tmpl_index_of(file.path(tmpl_fixture("c", "library_subfolder_given"), "templates"), engine)
   qa_step("a kind folder given as the source is reported once, not once per file", 1L, length(deep$notes))
   qa_check(
     "as a library sub-folder whose parent should be used",

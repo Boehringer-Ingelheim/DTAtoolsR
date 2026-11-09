@@ -679,12 +679,49 @@ write_template_guide <- function(
   .tg_add_table(doc, .tg_props(ft, keep = n <= 15))
 }
 
-.tg_rules_table <- function(doc, rules) {
+# The cell of one rule: labels in bold, list items as bullets, one line per
+# row of .rule_lines(); the text equals .rule_text(). `lines` is the layout
+# from .rule_lines(); without it the wording is set as plain lines.
+.tg_rule_cell <- function(text, lines = NULL) {
+  if (is.null(lines)) {
+    lines <- .tg_lines(text)
+    if (length(lines) == 0L) lines <- ""
+    return(.tg_paragraph(lapply(lines, function(l) list(.tg_chunk(l)))))
+  }
+  pieces <- lapply(seq_len(nrow(lines)), function(i) {
+    label <- lines$label[[i]]
+    body <- lines$text[[i]]
+    if (lines$bullet[[i]]) {
+      list(.tg_chunk(paste0("\u2022 ", body)))
+    } else if (nzchar(label)) {
+      c(
+        list(.tg_chunk(paste0(label, ":"), bold = TRUE)),
+        if (nzchar(body)) list(.tg_chunk(paste0(" ", body)))
+      )
+    } else {
+      list(.tg_chunk(body))
+    }
+  })
+  .tg_paragraph(pieces)
+}
+
+# How to read the rule descriptions; set once, before the first rules table.
+.tg_rule_reading <- function(doc) {
+  guide <- .rule_reading_guide()
+  doc <- .tg_par(doc, "How to read the rules", bold = TRUE, keep_next = TRUE)
+  for (i in seq_along(guide)) {
+    doc <- .tg_par(doc, paste0("\u2022 ", guide[[i]]), keep_next = TRUE, after = 2)
+  }
+  doc
+}
+
+.tg_rules_table <- function(doc, rules, lines = NULL) {
   rules <- .tg_clean_df(rules)
   n <- nrow(rules)
   change <- if ("Change" %in% names(rules)) rules[["Change"]] else rep("", n)
+  if (!is.list(lines) || length(lines) != n) lines <- NULL
   df <- data.frame(
-    Rule = rules[["Rule"]], `What it checks` = rules[["What it checks"]],
+    `Rule ID` = rules[["Rule ID"]], Description = rules[["Description"]],
     check.names = FALSE, stringsAsFactors = FALSE
   )
   ft <- .style_table(flextable::flextable(df))
@@ -693,13 +730,17 @@ write_template_guide <- function(
   ft <- .fit_table_width(ft, TEXT_WIDTH$landscape)
   for (i in seq_len(n)) {
     if (nzchar(change[[i]])) {
-      ft <- flextable::compose(ft, i = i, j = 1, part = "body", value = .tg_id_cell(df[["Rule"]][[i]], "", change[[i]]))
+      ft <- flextable::compose(ft, i = i, j = 1, part = "body", value = .tg_id_cell(df[["Rule ID"]][[i]], "", change[[i]]))
     }
+    ft <- flextable::compose(ft, i = i, j = 2, part = "body", value = .tg_rule_cell(df[["Description"]][[i]], lines[[i]]))
   }
-  .tg_add_table(doc, .tg_props(ft, keep = n <= 15))
+  # Rules are longer than one line: keep a table on one page only while the
+  # rendered lines still fit (about 110 characters per line at 9 pt).
+  keep <- n <= 15L && .tg_card_lines(df[["Description"]], chars = 110) <= 30
+  .tg_add_table(doc, .tg_props(ft, keep = keep))
 }
 
-.tg_dataset <- function(doc, ds) {
+.tg_dataset <- function(doc, ds, reading = FALSE) {
   title <- ds[["title"]]
   if (.tg_has(ds[["variant"]])) {
     title <- paste0(title, " \u2014 ", sub("^For ", "for ", ds[["variant"]]))
@@ -741,7 +782,8 @@ write_template_guide <- function(
   rules <- ds[["rules"]]
   if (.tg_n(rules) > 0L) {
     doc <- .add_heading(doc, paste0("Rules (", nrow(rules), ")"), 3)
-    doc <- .tg_rules_table(doc, rules)
+    if (isTRUE(reading)) doc <- .tg_rule_reading(doc)
+    doc <- .tg_rules_table(doc, rules, ds[["rule_lines"]])
   }
   if (length(ds[["removed_rules"]]) > 0L) {
     doc <- .tg_par(doc, paste0(
@@ -964,7 +1006,12 @@ write_template_guide <- function(
     # so far, add the chapter, then close it as landscape.
     doc <- .end_section_orientation(doc, "portrait", furniture = furniture)
     doc <- .add_heading(doc, "Datasets it creates", 1)
-    for (ds in e[["datasets"]]) doc <- .tg_dataset(doc, ds)
+    # The reading guide for the rules comes once, before the first rules table.
+    has_rules <- vapply(e[["datasets"]], function(d) .tg_n(d[["rules"]]) > 0L, logical(1))
+    first_rules <- if (any(has_rules)) which(has_rules)[[1]] else 0L
+    for (i in seq_along(e[["datasets"]])) {
+      doc <- .tg_dataset(doc, e[["datasets"]][[i]], reading = i == first_rules)
+    }
     doc <- .end_section_orientation(doc, "landscape", furniture = furniture)
   }
 

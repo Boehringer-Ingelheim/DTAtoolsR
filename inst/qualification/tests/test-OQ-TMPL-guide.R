@@ -171,3 +171,89 @@ test_that("OQ-TMPL-099 | one template file is guided from inside its library fol
   )
   qa_check("and nothing was written", !dir.exists(out))
 })
+
+# ---- REQ-TMPL-040 / REQ-EXPORT-039: the rules, in the shared words ----------
+#
+# The rule parameters are read from the bundled dataset template's YAML; the
+# sentences are written by hand from the wording specification restated in
+# REQ-EXPORT-036 (the condition form, the operator table and the missing-value
+# notes, typographic double quotes around text values, lists read "a, b and
+# c"). The guide's cell is then compared with the Word cell write_dataset_metadata()
+# writes for the same rule: REQ-EXPORT-039 asks for the same lines in both.
+
+test_that("OQ-TMPL-114 | the guide's rules table describes each rule in the same plain-English lines as the Word documents | REQ-TMPL-040 REQ-EXPORT-039", {
+  rules <- guide_yaml("gf_smrnaseq.dta-dataset-template.yaml")[["dataset"]][["rules"]]
+  rule <- function(id) Filter(function(r) identical(r[["id"]], id), rules)[[1]]
+  eq <- rule("check_equals")
+  uq <- rule("unique_check")
+  lq <- intToUtf8(0x201c)
+  rq <- intToUtf8(0x201d)
+  bullet <- intToUtf8(0x2022)
+  if_col <- names(eq[["condition"]])[[1]]
+  then_col <- names(eq[["then"]])[[1]]
+  expected <- list(
+    check_equals = c(
+      paste0("Purpose: ", eq[["description"]]),
+      paste0(
+        "When ", if_col, " is equal to ", lq, eq[["condition"]][[1]][["equals"]], rq, ", ",
+        then_col, " must be equal to ", lq, eq[["then"]][[1]][["equals"]], rq, "."
+      ),
+      "Missing values:",
+      paste(bullet, "If", if_col, "is missing, the condition is not met and the row is not checked."),
+      paste(bullet, "If", then_col, "is missing in a row that meets the condition, the rule is violated.")
+    ),
+    unique_check = c(
+      paste0(
+        "No two rows may have the same combination of values in columns ",
+        paste(utils::head(unlist(uq[["columns"]]), -1), collapse = ", "), " and ",
+        utils::tail(unlist(uq[["columns"]]), 1), "."
+      ),
+      paste(
+        "Missing values: Two missing values are equal; so are two",
+        paste0(lq, "not a number", rq, " (NaN) values, which are not missing.")
+      )
+    )
+  )
+
+  out <- guide_write(qa_tempdir(), templates = "biomarker_gf")
+  rule_tabs <- Filter(function(t) nrow(t) > 0 && identical(t$col1[[1]], "Rule ID"), qa_docx_tables(out$paths[["biomarker_gf"]]))
+  qa_step("the guide has one rules table for the dataset with rules", 1L, length(rule_tabs))
+  tab <- rule_tabs[[1]]
+  qa_step("with exactly the columns Rule ID and Description", c("Rule ID", "Description"), unname(unlist(tab[1, ])))
+  ids <- vapply(names(expected), function(id) match(TRUE, startsWith(tab$col1, id)), integer(1))
+  guide_cells <- tab$col2[ids]
+  for (i in seq_along(expected)) {
+    qa_step(
+      paste0("guide: rule ", names(expected)[[i]], " is described in the specified lines"),
+      paste(expected[[i]], collapse = "\n"), guide_cells[[i]]
+    )
+  }
+
+  # The same two rules in a Word document of write_dataset_metadata().
+  cols <- unique(c(if_col, then_col, unlist(uq[["columns"]])))
+  ds <- DTADataSetTabular(
+    id = "gf_rules",
+    specs = DTAColumnSpecCollection(
+      columns = stats::setNames(lapply(cols, function(nm) DTAColumnSpec(id = nm, type = "SAS Char", nullable = TRUE)), cols),
+      rules = list(
+        DTARuleColCondition(
+          id = "check_equals", description = eq[["description"]],
+          condition = stats::setNames(list(list(equals = eq[["condition"]][[1]][["equals"]])), if_col),
+          then = stats::setNames(list(list(equals = eq[["then"]][[1]][["equals"]])), then_col)
+        ),
+        DTARuleColUnique(id = "unique_check", columns = unlist(uq[["columns"]]))
+      )
+    )
+  )
+  word <- file.path(qa_tempdir(), "gf_rules.docx")
+  write_dataset_metadata(ds, file = word, quiet = TRUE)
+  word_tab <- Filter(function(t) nrow(t) > 0 && identical(t$col1[[1]], "Rule ID"), qa_docx_tables(word))[[1]]
+  qa_step(
+    "the guide's cells hold the same lines as the Word document's cells",
+    word_tab$col2[match(names(expected), word_tab$col1)], guide_cells
+  )
+  qa_check(
+    "no guide rule cell holds a YAML key of the rule definition",
+    !any(grepl("(^|\\s)(type|columns|condition|then):", tab$col2[-1]))
+  )
+})

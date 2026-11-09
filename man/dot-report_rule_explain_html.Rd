@@ -15,9 +15,11 @@ A length-1 character string (\code{""} when \code{rule_def} is \code{NULL}).
 \description{
 A neutral (not pass/fail-colored) box describing the rule's own
 definition, shown above the should-be/actual comparison so a reader
-understands the rule's intent before its failure. Only built for
-\code{type == "rule"} messages; the caller skips it entirely for
-columnspec/import messages, whose "should be" text already states the
+understands the rule's intent before its failure. The rule ID and kind
+come first, followed by the shared plain-English wording of the rule
+(\code{.rule_html_dl()}: purpose, statement, lists and missing-value notes).
+Only built for \code{type == "rule"} messages; the caller skips it entirely
+for columnspec/import messages, whose "should be" text already states the
 constraint in full.
 }
 \keyword{internal}

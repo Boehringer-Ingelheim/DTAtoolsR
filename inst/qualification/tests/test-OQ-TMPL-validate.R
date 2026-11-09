@@ -1,14 +1,14 @@
 # validate_template(): the codes it emits, and its strict/kinds/path arguments.
 # REQ-TMPL-001 .. REQ-TMPL-018, REQ-TMPL-031, REQ-TMPL-033 and REQ-TMPL-034.
 #
-# Every fixture below lives under fixtures/tpl/ and is built to trigger
+# Every fixture below lives under fx/t/ and is built to trigger
 # EXACTLY the one code its test names -- verified by running validate_template()
 # over it and reading back what actually came out, not by reasoning about the
 # source alone. Where a fixture is abstract: true, that is deliberate: it stops
 # the dry-run instantiate step from adding an unrelated instantiate_failed row
 # on top of the structural check under test.
 
-tmpl_fixture <- function(...) file.path(qa_suite_root(), "fixtures", "tpl", ...)
+tmpl_fixture <- function(...) file.path(qa_suite_root(), "fx", "t", ...)
 
 # The severity recorded for one code, or NA if the code did not appear at all --
 # so a test that expects a code absent can say so with the same helper.
@@ -64,7 +64,7 @@ test_that("OQ-TMPL-001 | the result carries the documented columns and only two 
 
   # Every code fixture built for this file, in one pass: whatever severities
   # they produce between them, none may be a third value.
-  code_dirs <- list.dirs(tmpl_fixture("codes"), recursive = FALSE)
+  code_dirs <- list.dirs(tmpl_fixture("c"), recursive = FALSE)
   all_severities <- unlist(lapply(code_dirs, function(d) validate_template(d)$severity))
   qa_step(
     "across every code fixture, only 'error' and 'warning' ever appear",
@@ -76,8 +76,8 @@ test_that("OQ-TMPL-001 | the result carries the documented columns and only two 
 
 test_that("OQ-TMPL-002 | a template kept below the folder of its kind is reported, not silently dropped | REQ-TMPL-002", {
   # Fixture: templates/top.dta-template.yaml (id nest_top) and
-  # templates/archive/nested.dta-template.yaml (id nest_sub).
-  dir <- tmpl_fixture("codes", "template_in_subdirectory")
+  # templates/archive/n.dta-template.yaml (id nest_sub).
+  dir <- tmpl_fixture("c", "template_in_subdir")
   result <- validate_template(dir)
 
   qa_step(
@@ -86,7 +86,7 @@ test_that("OQ-TMPL-002 | a template kept below the folder of its kind is reporte
   )
   qa_step(
     "exactly one row is reported, for the nested file",
-    "nested.dta-template.yaml", basename(result$file)
+    "n.dta-template.yaml", basename(result$file)
   )
   qa_step(
     "it is reported template_in_subdirectory, at warning",
@@ -121,7 +121,7 @@ test_that("OQ-TMPL-002 | a template kept below the folder of its kind is reporte
 # ---- REQ-TMPL-003: parse_failed ---------------------------------------------
 
 test_that("OQ-TMPL-003 | YAML that will not parse is reported parse_failed | REQ-TMPL-003", {
-  result <- validate_template(tmpl_fixture("codes", "parse_failed"))
+  result <- validate_template(tmpl_fixture("c", "parse_failed"))
   qa_step("severity is error", "error", tmpl_severity(result, "parse_failed"))
   qa_check(
     "the file's own parser error is carried in the message",
@@ -132,19 +132,19 @@ test_that("OQ-TMPL-003 | YAML that will not parse is reported parse_failed | REQ
 # ---- REQ-TMPL-004: kind_unknown / id_missing / version_missing -------------
 
 test_that("OQ-TMPL-004 | an unrecognised kind is reported kind_unknown, alone | REQ-TMPL-004", {
-  result <- validate_template(tmpl_fixture("codes", "kind_unknown"))
+  result <- validate_template(tmpl_fixture("c", "kind_unknown"))
   qa_step("exactly one row", 1L, nrow(result))
   qa_step("severity is warning", "warning", tmpl_severity(result, "kind_unknown"))
 })
 
 test_that("OQ-TMPL-005 | a missing id is reported id_missing, alone | REQ-TMPL-004", {
-  result <- validate_template(tmpl_fixture("codes", "id_missing"))
+  result <- validate_template(tmpl_fixture("c", "id_missing"))
   qa_step("exactly one row", 1L, nrow(result))
   qa_step("severity is warning", "warning", tmpl_severity(result, "id_missing"))
 })
 
 test_that("OQ-TMPL-006 | a missing version is reported version_missing, alone | REQ-TMPL-004", {
-  result <- validate_template(tmpl_fixture("codes", "version_missing"))
+  result <- validate_template(tmpl_fixture("c", "version_missing"))
   qa_step("exactly one row", 1L, nrow(result))
   qa_step("severity is warning", "warning", tmpl_severity(result, "version_missing"))
 })
@@ -152,7 +152,7 @@ test_that("OQ-TMPL-006 | a missing version is reported version_missing, alone | 
 # ---- REQ-TMPL-005: version_unquoted (the important one) --------------------
 
 test_that("OQ-TMPL-007 | an unquoted version is an error, because it silently loses precision | REQ-TMPL-005", {
-  path <- tmpl_fixture("codes", "version_unquoted", "templates", "v.dta-template.yaml")
+  path <- tmpl_fixture("c", "version_unquoted", "templates", "v.dta-template.yaml")
 
   # Make the consequence concrete against the ACTUAL fixture file, not an
   # illustration: read it the naive way (no version-preserving handlers) and
@@ -180,7 +180,7 @@ test_that("OQ-TMPL-007 | an unquoted version is an error, because it silently lo
 })
 
 test_that("OQ-TMPL-008 | a quoted but unparseable version is a warning, not the unquoted error | REQ-TMPL-006", {
-  result <- validate_template(tmpl_fixture("codes", "version_unparseable"))
+  result <- validate_template(tmpl_fixture("c", "version_unparseable"))
   qa_step("exactly one row", 1L, nrow(result))
   qa_step("severity is warning", "warning", tmpl_severity(result, "version_unparseable"))
   qa_check(
@@ -192,7 +192,7 @@ test_that("OQ-TMPL-008 | a quoted but unparseable version is a warning, not the 
 # ---- REQ-TMPL-007: duplicate_id_version -------------------------------------
 
 test_that("OQ-TMPL-009 | two files sharing kind+id+version are reported once, naming the earlier one | REQ-TMPL-007", {
-  result <- validate_template(tmpl_fixture("codes", "duplicate_id_version"))
+  result <- validate_template(tmpl_fixture("c", "duplicate_id_version"))
   qa_step("exactly one row", 1L, nrow(result))
   qa_step(
     "reported against the file that sorts later",
@@ -207,7 +207,7 @@ test_that("OQ-TMPL-009 | two files sharing kind+id+version are reported once, na
 # ---- REQ-TMPL-008: no_templates ---------------------------------------------
 
 test_that("OQ-TMPL-010 | a directory with no recognised template files is reported, not accepted silently | REQ-TMPL-008", {
-  dir <- tmpl_fixture("codes", "no_templates")
+  dir <- tmpl_fixture("c", "no_templates")
   qa_check("the directory is non-empty (a decoy file), yet still trips the check", length(list.files(dir)) > 0)
   result <- validate_template(dir)
   qa_step("exactly one row", 1L, nrow(result))
@@ -218,7 +218,7 @@ test_that("OQ-TMPL-010 | a directory with no recognised template files is report
 
 test_that("OQ-TMPL-011 | strict = TRUE raises a condition summarising the errors | REQ-TMPL-009", {
   err <- tryCatch(
-    validate_template(tmpl_fixture("codes", "target_machine_owned"), strict = TRUE),
+    validate_template(tmpl_fixture("c", "target_machine_owned"), strict = TRUE),
     error = function(e) e
   )
   qa_check("a condition is raised", inherits(err, "condition"))
@@ -230,7 +230,7 @@ test_that("OQ-TMPL-011 | strict = TRUE raises a condition summarising the errors
 test_that("OQ-TMPL-012 | strict = TRUE does not abort when only warnings were found | REQ-TMPL-009", {
   outcome <- tryCatch(
     {
-      validate_template(tmpl_fixture("codes", "target_invalid"), strict = TRUE)
+      validate_template(tmpl_fixture("c", "target_invalid"), strict = TRUE)
       "no condition"
     },
     error = function(e) "condition"
@@ -241,7 +241,7 @@ test_that("OQ-TMPL-012 | strict = TRUE does not abort when only warnings were fo
 # ---- REQ-TMPL-010: kinds ------------------------------------------------------
 
 test_that("OQ-TMPL-013 | kinds restricts which files get a report row | REQ-TMPL-010", {
-  dir <- tmpl_fixture("codes_args", "kinds_filter")
+  dir <- tmpl_fixture("ca", "kinds_filter")
 
   both <- validate_template(dir)
   qa_step("with no kinds filter, both files report", c("dta_creation_template", "dta_vocabulary"), sort(both$kind))
@@ -255,7 +255,7 @@ test_that("OQ-TMPL-013 | kinds restricts which files get a report row | REQ-TMPL
 })
 
 test_that("OQ-TMPL-014 | kinds also narrows the duplicate_id_version check | REQ-TMPL-010", {
-  dir <- tmpl_fixture("codes_args", "kinds_duplicate_scope")
+  dir <- tmpl_fixture("ca", "kinds_duplicate_scope")
 
   default_run <- validate_template(dir)
   qa_step(
@@ -272,7 +272,7 @@ test_that("OQ-TMPL-014 | kinds also narrows the duplicate_id_version check | REQ
 
 test_that("OQ-TMPL-015 | an unrecognised kind in `kinds` raises a condition naming the known set | REQ-TMPL-010", {
   err <- tryCatch(
-    validate_template(tmpl_fixture("codes_args", "kinds_filter"), kinds = "not_a_kind"),
+    validate_template(tmpl_fixture("ca", "kinds_filter"), kinds = "not_a_kind"),
     error = function(e) e
   )
   qa_check("a condition is raised", inherits(err, "condition"))
@@ -282,7 +282,7 @@ test_that("OQ-TMPL-015 | an unrecognised kind in `kinds` raises a condition nami
 })
 
 test_that("OQ-TMPL-016 | kinds has no effect when path names a single file | REQ-TMPL-010", {
-  file <- tmpl_fixture("codes_args", "kinds_filter", "templates", "t.dta-template.yaml")
+  file <- tmpl_fixture("ca", "kinds_filter", "templates", "t.dta-template.yaml")
   result <- validate_template(file, kinds = "dta_vocabulary")
   qa_step(
     "the explicitly named creation-template file is still checked",
@@ -293,7 +293,7 @@ test_that("OQ-TMPL-016 | kinds has no effect when path names a single file | REQ
 # ---- REQ-TMPL-011: independence from the private-template-source env vars --
 
 test_that("OQ-TMPL-017 | validate_template() ignores the app's private-template-source variables | REQ-TMPL-011", {
-  dir <- tmpl_fixture("codes_args", "kinds_filter")
+  dir <- tmpl_fixture("ca", "kinds_filter")
   baseline <- validate_template(dir)
 
   under_env <- withr::with_envvar(
@@ -318,7 +318,7 @@ test_that("OQ-TMPL-017 | validate_template() ignores the app's private-template-
 # ---- REQ-TMPL-012: target_machine_owned / target_invalid -------------------
 
 test_that("OQ-TMPL-018 | an option targeting a machine-owned metadata field is an error | REQ-TMPL-012", {
-  result <- validate_template(tmpl_fixture("codes", "target_machine_owned"))
+  result <- validate_template(tmpl_fixture("c", "target_machine_owned"))
   qa_step("exactly one row", 1L, nrow(result))
   qa_step("severity is error", "error", tmpl_severity(result, "target_machine_owned"))
   qa_check(
@@ -328,13 +328,13 @@ test_that("OQ-TMPL-018 | an option targeting a machine-owned metadata field is a
 })
 
 test_that("OQ-TMPL-019 | an option targeting no known metadata field is a warning | REQ-TMPL-012", {
-  result <- validate_template(tmpl_fixture("codes", "target_invalid"))
+  result <- validate_template(tmpl_fixture("c", "target_invalid"))
   qa_step("exactly one row", 1L, nrow(result))
   qa_step("severity is warning", "warning", tmpl_severity(result, "target_invalid"))
 })
 
 test_that("OQ-TMPL-020 | a dataset-template option not rooted at 'dataset.' is target_invalid too | REQ-TMPL-012", {
-  result <- validate_template(tmpl_fixture("codes", "target_invalid_dataset"))
+  result <- validate_template(tmpl_fixture("c", "target_invalid_dataset"))
   qa_step("severity is warning", "warning", tmpl_severity(result, "target_invalid"))
   qa_check(
     "naming the wrong root",
@@ -345,7 +345,7 @@ test_that("OQ-TMPL-020 | a dataset-template option not rooted at 'dataset.' is t
 # ---- REQ-TMPL-013: party_slot_invalid --------------------------------------
 
 test_that("OQ-TMPL-021 | a party slot naming an unknown profile id is a warning | REQ-TMPL-013", {
-  result <- validate_template(tmpl_fixture("codes", "party_slot_invalid"))
+  result <- validate_template(tmpl_fixture("c", "party_slot_invalid"))
   qa_step("exactly one row", 1L, nrow(result))
   qa_step("severity is warning", "warning", tmpl_severity(result, "party_slot_invalid"))
   qa_check(
@@ -355,7 +355,7 @@ test_that("OQ-TMPL-021 | a party slot naming an unknown profile id is a warning 
 })
 
 test_that("OQ-TMPL-022 | a party slot with a malformed target is party_slot_invalid too | REQ-TMPL-013", {
-  result <- validate_template(tmpl_fixture("codes", "party_slot_invalid_shape"))
+  result <- validate_template(tmpl_fixture("c", "party_slot_invalid_shape"))
   qa_step("severity is warning", "warning", tmpl_severity(result, "party_slot_invalid"))
   qa_check(
     "naming the two legal targets",
@@ -366,12 +366,12 @@ test_that("OQ-TMPL-022 | a party slot with a malformed target is party_slot_inva
 # ---- REQ-TMPL-014: vocab_slot_invalid / vocab_slot_unresolved --------------
 
 test_that("OQ-TMPL-023 | a malformed vocabulary slot is an error | REQ-TMPL-014", {
-  result <- validate_template(tmpl_fixture("codes", "vocab_slot_invalid"))
+  result <- validate_template(tmpl_fixture("c", "vocab_slot_invalid"))
   qa_step("severity is error", "error", tmpl_severity(result, "vocab_slot_invalid"))
 })
 
 test_that("OQ-TMPL-024 | a vocabulary slot naming an unresolved vocabulary is a warning | REQ-TMPL-014", {
-  result <- validate_template(tmpl_fixture("codes", "vocab_slot_unresolved"))
+  result <- validate_template(tmpl_fixture("c", "vocab_slot_unresolved"))
   qa_step("severity is warning", "warning", tmpl_severity(result, "vocab_slot_unresolved"))
   qa_check(
     "naming the unresolved reference",
@@ -382,13 +382,13 @@ test_that("OQ-TMPL-024 | a vocabulary slot naming an unresolved vocabulary is a 
 # ---- REQ-TMPL-015: dataset_template_unresolved / patch_incoherent ---------
 
 test_that("OQ-TMPL-025 | an unresolved dataset-template reference is a warning | REQ-TMPL-015", {
-  result <- validate_template(tmpl_fixture("codes", "dataset_template_unresolved"))
+  result <- validate_template(tmpl_fixture("c", "dataset_template_unresolved"))
   qa_step("exactly one row", 1L, nrow(result))
   qa_step("severity is warning", "warning", tmpl_severity(result, "dataset_template_unresolved"))
 })
 
 test_that("OQ-TMPL-026 | a patch naming a column the dataset template lacks is patch_incoherent | REQ-TMPL-015", {
-  result <- validate_template(tmpl_fixture("codes", "patch_incoherent"))
+  result <- validate_template(tmpl_fixture("c", "patch_incoherent"))
   qa_step("severity is warning", "warning", tmpl_severity(result, "patch_incoherent"))
   qa_check(
     "naming the unknown column",
@@ -399,11 +399,11 @@ test_that("OQ-TMPL-026 | a patch naming a column the dataset template lacks is p
 # ---- REQ-TMPL-016: dataset_missing ------------------------------------------
 
 test_that("OQ-TMPL-027 | a dataset template with no dataset body is an error | REQ-TMPL-016", {
-  result <- validate_template(tmpl_fixture("codes", "dataset_missing"))
+  result <- validate_template(tmpl_fixture("c", "dataset_missing"))
   qa_step("exactly one row", 1L, nrow(result))
   qa_step("severity is error", "error", tmpl_severity(result, "dataset_missing"))
 
-  hinted <- validate_template(tmpl_fixture("codes", "dataset_missing_plural"))
+  hinted <- validate_template(tmpl_fixture("c", "dataset_missing_plural"))
   qa_check(
     "authoring the plural 'datasets:' by mistake earns a specific hint",
     grepl("Found 'datasets:' (plural) instead", tmpl_message(hinted, "dataset_missing"), fixed = TRUE)
@@ -413,13 +413,13 @@ test_that("OQ-TMPL-027 | a dataset template with no dataset body is an error | R
 # ---- REQ-TMPL-017: values_and_values_from / values_from_pattern -----------
 
 test_that("OQ-TMPL-028 | a column setting both values and values_from is a warning, the binding wins | REQ-TMPL-017", {
-  result <- validate_template(tmpl_fixture("codes", "values_and_values_from"))
+  result <- validate_template(tmpl_fixture("c", "values_and_values_from"))
   qa_step("exactly one row", 1L, nrow(result))
   qa_step("severity is warning", "warning", tmpl_severity(result, "values_and_values_from"))
 })
 
 test_that("OQ-TMPL-029 | combining values_from with pattern is an error, and short-circuits | REQ-TMPL-017", {
-  result <- validate_template(tmpl_fixture("codes", "values_from_pattern"))
+  result <- validate_template(tmpl_fixture("c", "values_from_pattern"))
   qa_step("exactly one row -- the unresolved vocabulary is never even reached", 1L, nrow(result))
   qa_step("severity is error", "error", tmpl_severity(result, "values_from_pattern"))
 })
@@ -427,17 +427,17 @@ test_that("OQ-TMPL-029 | combining values_from with pattern is an error, and sho
 # ---- REQ-TMPL-018: values_from_invalid / _unresolved / _terms_invalid -----
 
 test_that("OQ-TMPL-030 | a malformed values_from mapping is an error | REQ-TMPL-018", {
-  result <- validate_template(tmpl_fixture("codes", "values_from_invalid"))
+  result <- validate_template(tmpl_fixture("c", "values_from_invalid"))
   qa_step("severity is error", "error", tmpl_severity(result, "values_from_invalid"))
 })
 
 test_that("OQ-TMPL-031 | values_from naming an unresolved vocabulary is a warning | REQ-TMPL-018", {
-  result <- validate_template(tmpl_fixture("codes", "values_from_unresolved"))
+  result <- validate_template(tmpl_fixture("c", "values_from_unresolved"))
   qa_step("severity is warning", "warning", tmpl_severity(result, "values_from_unresolved"))
 })
 
 test_that("OQ-TMPL-032 | include naming a code the vocabulary lacks is an error | REQ-TMPL-018", {
-  result <- validate_template(tmpl_fixture("codes", "values_from_terms_invalid"))
+  result <- validate_template(tmpl_fixture("c", "values_terms_invalid"))
   qa_step("severity is error", "error", tmpl_severity(result, "values_from_terms_invalid"))
   qa_check(
     "naming the unknown code",
@@ -471,7 +471,7 @@ tmpl_unquote_versions <- function(files) {
 }
 
 test_that("OQ-TMPL-062 | a library root with a folder per kind validates cleanly, and each kind is read from its own folder | REQ-TMPL-031", {
-  root <- tmpl_fixture("layout", "folder")
+  root <- tmpl_fixture("lay", "folder")
   result <- validate_template(root)
   qa_step("the four-folder library has no findings", 0L, nrow(result))
   strict <- tryCatch(
@@ -504,7 +504,7 @@ test_that("OQ-TMPL-062 | a library root with a folder per kind validates cleanly
 })
 
 test_that("OQ-TMPL-063 | a template left in the root is an error and never a duplicate candidate, while the folders are still read | REQ-TMPL-031", {
-  root <- tmpl_fixture("layout", "mixed")
+  root <- tmpl_fixture("lay", "mixed")
   result <- validate_template(root)
   qa_step("exactly one finding, not a duplicate or nested warning", 1L, nrow(result))
   qa_step("the code identifies a misplaced file", "template_misplaced", result$code)
@@ -540,7 +540,7 @@ test_that("OQ-TMPL-063 | a template left in the root is an error and never a dup
 })
 
 test_that("OQ-TMPL-064 | templates kept directly in the root are no library: each is misplaced and nothing else is reported | REQ-TMPL-031", {
-  root <- tmpl_fixture("layout", "root")
+  root <- tmpl_fixture("lay", "root")
   result <- validate_template(root)
   qa_step("exactly one finding for the one root-level template", 1L, nrow(result))
   qa_step("it is template_misplaced", "template_misplaced", result$code)
@@ -560,7 +560,7 @@ test_that("OQ-TMPL-065 | kind folders holding nothing of their kind are no_templ
   writeLines("Supporting notes, not a template.", file.path(root, "templates", "notes.txt"))
   qa_step("a folder holding only notes is still no_templates", "no_templates", validate_template(root)$code)
   file.copy(
-    file.path(tmpl_fixture("layout", "root"), "example.dta-template.yaml"),
+    file.path(tmpl_fixture("lay", "root"), "example.dta-template.yaml"),
     file.path(root, "example.dta-template.yaml")
   )
   qa_step(
@@ -572,31 +572,31 @@ test_that("OQ-TMPL-065 | kind folders holding nothing of their kind are no_templ
 # ---- REQ-TMPL-033: dataset_id_missing / dataset_field_invalid --------------
 
 test_that("OQ-TMPL-068 | a dataset with no id, or a list for a field, is reported, the pre-id shape included | REQ-TMPL-033", {
-  tpl <- validate_template(tmpl_fixture("codes", "dataset_id_missing"))
+  tpl <- validate_template(tmpl_fixture("c", "dataset_id_missing"))
   qa_step("dataset template without id: exactly one row", 1L, nrow(tpl))
   qa_step("dataset template without id: severity is error", "error", tmpl_severity(tpl, "dataset_id_missing"))
 
-  inline <- validate_template(tmpl_fixture("codes", "dataset_id_missing_inline"))
+  inline <- validate_template(tmpl_fixture("c", "dataset_id_missing_inline"))
   qa_step("inline dataset without id, abstract template: severity is error", "error", tmpl_severity(inline, "dataset_id_missing"))
 
-  field <- validate_template(tmpl_fixture("codes", "dataset_field_invalid"))
+  field <- validate_template(tmpl_fixture("c", "dataset_field_invalid"))
   qa_step("a list for name: severity is error", "error", tmpl_severity(field, "dataset_field_invalid"))
   qa_check("a list for name: the message names 'name'", grepl("'name'", tmpl_message(field, "dataset_field_invalid"), fixed = TRUE))
 
-  field_legacy <- validate_template(tmpl_fixture("codes", "dataset_field_invalid_legacy"))
+  field_legacy <- validate_template(tmpl_fixture("c", "dataset_field_legacy"))
   qa_check(
     "a list for a pre-id name: the message names 'name', the key as written",
     grepl("'name'", tmpl_message(field_legacy, "dataset_field_invalid"), fixed = TRUE)
   )
 
-  legacy <- validate_template(tmpl_fixture("codes", "dataset_legacy_shape"))
+  legacy <- validate_template(tmpl_fixture("c", "dataset_legacy_shape"))
   qa_step("pre-id shape (name: with no id:): dataset_id_missing is an error", "error", tmpl_severity(legacy, "dataset_id_missing"))
   qa_step("pre-id shape: its scalar fields are not dataset_field_invalid", NA_character_, tmpl_severity(legacy, "dataset_field_invalid"))
 
-  verbs <- validate_template(tmpl_fixture("codes", "dataset_verb_form"))
+  verbs <- validate_template(tmpl_fixture("c", "dataset_verb_form"))
   qa_step("verb-form datasets: with ids under add:/modify:: no row is reported", 0L, nrow(verbs))
 
-  verb_add <- validate_template(tmpl_fixture("codes", "dataset_id_missing_verb_add"))
+  verb_add <- validate_template(tmpl_fixture("c", "dataset_id_no_verb_add"))
   qa_step("verb-form add: entry without id: exactly one dataset_id_missing row", 1L, sum(verb_add$code == "dataset_id_missing"))
   qa_step("verb-form add: entry without id: severity is error", "error", tmpl_severity(verb_add, "dataset_id_missing"))
 })
@@ -606,7 +606,7 @@ test_that("OQ-TMPL-068 | a dataset with no id, or a list for a field, is reporte
 test_that("OQ-TMPL-069 | a dataset template column that cannot be built is reported, alone and by name | REQ-TMPL-034", {
   # C1 declares length 3 and the example ABCD; C2 is the same with ABC. The
   # first contradicts itself, the second does not.
-  result <- validate_template(tmpl_fixture("codes", "column_spec_invalid"))
+  result <- validate_template(tmpl_fixture("c", "column_spec_invalid"))
   qa_step("exactly one row is reported", "column_spec_invalid", result$code)
   qa_step("at severity error", "error", tmpl_severity(result, "column_spec_invalid"))
   qa_step(
@@ -621,7 +621,7 @@ test_that("OQ-TMPL-069 | a dataset template column that cannot be built is repor
   # The control: a dataset template whose columns all build is not reported.
   qa_step("a dataset template with buildable columns is not reported", 0L, nrow(validate_template(tmpl_fixture("base"))))
 
-  err <- tryCatch(validate_template(tmpl_fixture("codes", "column_spec_invalid"), strict = TRUE), error = function(e) e)
+  err <- tryCatch(validate_template(tmpl_fixture("c", "column_spec_invalid"), strict = TRUE), error = function(e) e)
   qa_check("under strict = TRUE the finding aborts with the package's own error", inherits(err, "rlang_error"))
   qa_check(
     "and the abort names the code and the error count",
@@ -632,7 +632,7 @@ test_that("OQ-TMPL-069 | a dataset template column that cannot be built is repor
 })
 
 test_that("OQ-TMPL-070 | an inline column that cannot be built is an instantiate_failed, not a column_spec_invalid | REQ-TMPL-034", {
-  result <- validate_template(tmpl_fixture("codes", "column_spec_invalid_inline"))
+  result <- validate_template(tmpl_fixture("c", "column_spec_invalid_inline"))
   qa_step("the build failure is the one row reported", "instantiate_failed", result$code)
   qa_step("at severity error", "error", tmpl_severity(result, "instantiate_failed"))
   qa_step("and the dataset-template code is absent", NA_character_, tmpl_severity(result, "column_spec_invalid"))
@@ -644,7 +644,7 @@ test_that("OQ-TMPL-071 | a dataset template's rules are checked against its colu
   # lint_a: rule r1 names C2, but only C1 is declared.
   # lint_b: a col_range on C1, a Char column.
   # lint_c: a rule, but no column at all, so there is nothing to check it against.
-  result <- validate_template(tmpl_fixture("codes", "lint_rules"))
+  result <- validate_template(tmpl_fixture("c", "lint_rules"))
   by_file <- function(prefix) result[startsWith(basename(result$file), prefix), , drop = FALSE]
 
   qa_step("one row per template, three in all", 3L, nrow(result))
@@ -657,12 +657,12 @@ test_that("OQ-TMPL-071 | a dataset template's rules are checked against its colu
   qa_step("at severity warning", "warning", by_file("c.")$severity)
 
   only_warning <- tryCatch(
-    validate_template(file.path(tmpl_fixture("codes", "lint_rules"), "templates", "c.dta-dataset-template.yaml"), strict = TRUE),
+    validate_template(file.path(tmpl_fixture("c", "lint_rules"), "templates", "c.dta-dataset-template.yaml"), strict = TRUE),
     error = function(e) e
   )
   qa_check("strict = TRUE does not abort on a warning alone", is.data.frame(only_warning))
   aborted <- tryCatch(
-    validate_template(file.path(tmpl_fixture("codes", "lint_rules"), "templates", "a.dta-dataset-template.yaml"), strict = TRUE),
+    validate_template(file.path(tmpl_fixture("c", "lint_rules"), "templates", "a.dta-dataset-template.yaml"), strict = TRUE),
     error = function(e) e
   )
   qa_check("but aborts on the error", inherits(aborted, "error"))
@@ -671,7 +671,7 @@ test_that("OQ-TMPL-071 | a dataset template's rules are checked against its colu
 test_that("OQ-TMPL-072 | a creation template whose instance breaks the invariant is instantiate_failed alone | REQ-TMPL-035", {
   # The only dataset has column C1 and a rule on NOPE, which the collection
   # refuses to build.
-  result <- validate_template(tmpl_fixture("codes", "lint_instance_invalid"))
+  result <- validate_template(tmpl_fixture("c", "lint_instance_invalid"))
   qa_step("the build failure is the one row reported", "instantiate_failed", result$code)
   qa_step("at severity error", "error", result$severity)
   qa_step(
@@ -685,7 +685,7 @@ test_that("OQ-TMPL-072 | a creation template whose instance breaks the invariant
 test_that("OQ-TMPL-073 | a malformed prior_versions entry is prior_versions_invalid, a good one is not | REQ-TMPL-036", {
   # Entry 1 (4.0) is well formed; entry 2 (3.0) has no changes; entry 3 (5.0)
   # is not older than the file's own version 5.0.
-  result <- validate_template(tmpl_fixture("codes", "prior_versions_invalid"))
+  result <- validate_template(tmpl_fixture("c", "prior_versions_invalid"))
   rows <- result[result$code == "prior_versions_invalid", , drop = FALSE]
   qa_step("one row per malformed entry", 2L, nrow(rows))
   qa_step("at severity error", "error", unique(rows$severity))
@@ -782,7 +782,7 @@ test_that("OQ-TMPL-100 | a template in the wrong folder is template_misplaced an
   # Fixture: templates/ok.dta-template.yaml (id misplaced_ok, in its folder),
   # templates/stray.dta-party.yaml (a party profile in templates/) and
   # stray_root.dta-vocabulary.yaml (a vocabulary directly in the root).
-  root <- tmpl_fixture("codes", "template_misplaced")
+  root <- tmpl_fixture("c", "template_misplaced")
   result <- validate_template(root)
 
   qa_step(
@@ -841,7 +841,7 @@ test_that("OQ-TMPL-100 | a template in the wrong folder is template_misplaced an
 test_that("OQ-TMPL-101 | a kind folder given instead of the library root is one library_subfolder_given error | REQ-TMPL-031", {
   # Fixture: codes/library_subfolder_given/templates/t.dta-template.yaml. The
   # directory handed over is the templates/ folder itself.
-  lib_root <- tmpl_fixture("codes", "library_subfolder_given")
+  lib_root <- tmpl_fixture("c", "library_subfolder_given")
   folder <- file.path(lib_root, "templates")
   result <- validate_template(folder)
   qa_step("exactly one row, not one per file", 1L, nrow(result))
@@ -868,12 +868,12 @@ test_that("OQ-TMPL-101 | a kind folder given instead of the library root is one 
   copy <- qa_tempdir()
   dir.create(file.path(copy, "parties"))
   file.copy(
-    file.path(tmpl_fixture("layout", "folder"), "parties", "example.dta-party.yaml"),
+    file.path(tmpl_fixture("lay", "folder"), "parties", "example.dta-party.yaml"),
     file.path(copy, "parties")
   )
   dir.create(file.path(copy, "vocabulary"))
   file.copy(
-    file.path(tmpl_fixture("layout", "folder"), "vocabulary", "example.dta-vocabulary.yaml"),
+    file.path(tmpl_fixture("lay", "folder"), "vocabulary", "example.dta-vocabulary.yaml"),
     file.path(copy, "vocabulary")
   )
   qa_step(
@@ -889,7 +889,7 @@ test_that("OQ-TMPL-101 | a kind folder given instead of the library root is one 
 test_that("OQ-TMPL-102 | a dta-app.yaml outside the root is app_config_misplaced and unread; both spellings in the root are app_config_duplicate | REQ-TMPL-037", {
   # Fixture: dta-app.yaml in templates/ holding a bad colour, dta-app.yml in
   # parties/ holding nothing but its kind line, and one creation template.
-  root <- tmpl_fixture("codes", "app_config_misplaced")
+  root <- tmpl_fixture("c", "app_config_misplaced")
   result <- validate_template(root)
   rows <- result[result$code == "app_config_misplaced", , drop = FALSE]
   qa_step(
@@ -907,7 +907,7 @@ test_that("OQ-TMPL-102 | a dta-app.yaml outside the root is app_config_misplaced
   lib <- qa_tempdir()
   dir.create(file.path(lib, "templates"))
   file.copy(
-    file.path(tmpl_fixture("layout", "folder"), "templates", "example.dta-template.yaml"),
+    file.path(tmpl_fixture("lay", "folder"), "templates", "example.dta-template.yaml"),
     file.path(lib, "templates")
   )
   writeLines("kind: dta_app_config", file.path(lib, "dta-app.yaml"))
@@ -928,7 +928,7 @@ test_that("OQ-TMPL-103 | a file in export-templates/ that is not a .docx is an e
   # inside the package.
   root <- qa_tempdir()
   file.copy(
-    list.files(tmpl_fixture("codes", "export_template_invalid"), full.names = TRUE),
+    list.files(tmpl_fixture("c", "export_template_invalid"), full.names = TRUE),
     root,
     recursive = TRUE
   )

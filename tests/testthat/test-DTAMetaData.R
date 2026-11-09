@@ -247,6 +247,31 @@ test_that("DTAMetaData validator checks version_history shape and changes", {
   )
 })
 
+test_that("version_history changes may be one string or several", {
+  rec <- function(changes) {
+    list(list(version = "1.0", date = as.Date("2026-01-01"), changes = changes))
+  }
+  expect_no_error(DTAMetaData(version_history = rec(c("a", "b"))))
+  expect_no_error(DTAMetaData(version_history = rec(list("a", "b"))))
+
+  # YAML `changes: [a, b]` simplifies to a character vector
+  parsed <- yaml::yaml.load(paste(
+    "version: '1.0'", "date: '2026-01-01'",
+    "changes: [Added files, Added rules]",
+    sep = "\n"
+  ))
+  md <- DTAMetaData(version_history = list(parsed))
+  expect_equal(md@version_history[[1]]$changes, c("Added files", "Added rules"))
+  expect_equal(get_version_history_df(md)$changes, "Added files; Added rules")
+
+  for (bad in list(character(0), c("a", ""), NA_character_, c("a", NA), NA, list(), list("a", 1))) {
+    expect_error(
+      DTAMetaData(version_history = rec(bad)),
+      "changes (must be one or more|cannot be an empty string or NA)"
+    )
+  }
+})
+
 test_that("DTAMetaData validator checks transmission date field types", {
   expect_error(
     DTAMetaData(

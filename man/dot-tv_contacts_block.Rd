@@ -7,6 +7,8 @@
 .tv_contacts_block(org)
 }
 \description{
-Render a detailed contact block with signature lines for signers
+Per contact: name, role, department, email, phone and address, then the
+responsibilities of the built-in contact table (Signatory / Reviewer /
+Backup, each "Yes"), and a signature line for a signatory.
 }
 \keyword{internal}

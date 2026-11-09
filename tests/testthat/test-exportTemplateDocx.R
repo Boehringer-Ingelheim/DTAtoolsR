@@ -1009,3 +1009,42 @@ test_that("placeholders inside inline wrappers (content control, simple field) a
   )
   expect_equal(txt_of(d), "MyTitle|")
 })
+
+test_that("contact and process placeholders use the labels of the built-in layout", {
+  meta <- DTAMetaData(
+    title = "Contacts",
+    supplier = list(
+      affiliation = list(name = "Supplier Ltd"),
+      contacts = list(
+        list(
+          name = "Ann Lee", role = "Lead Data Manager", email = "ann@example.org",
+          address = "1 Main Road, Town", signature = TRUE, reviewer = TRUE, backup = TRUE
+        )
+      )
+    ),
+    transmission = list(type = "sFTP", date_first_transfer = "2026-01-05", test_upload = TRUE)
+  )
+  vars <- .extract_template_variables(DTA(datasets = list(create_example_DTADataSetTabular(2)), metadata = meta))
+
+  expect_identical(
+    strsplit(vars[["{SUPPLIER_CONTACTS}"]], "\n", fixed = TRUE)[[1]],
+    c(
+      "- Ann Lee",
+      "  - Role: Lead Data Manager",
+      "  - Email: ann@example.org",
+      "  - Address: 1 Main Road, Town",
+      "  - Signatory: Yes",
+      "  - Reviewer: Yes",
+      "  - Backup: Yes",
+      "  - Signature: ______________________________   Date: ______________"
+    )
+  )
+
+  process <- strsplit(vars[["{PROCESS_INFORMATION}"]], "\n", fixed = TRUE)[[1]]
+  expect_identical(process[1:4], c(
+    "- Transmission",
+    "  - Transfer method: sFTP",
+    "  - First transfer: 2026-01-05",
+    "  - Test upload: Yes"
+  ))
+})

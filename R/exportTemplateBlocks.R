@@ -347,6 +347,17 @@
   .add_spacer(doc)
 }
 
+#' A validation-rules table for a block, preceded by the rule reading guide
+#' when the document does not hold it yet (once per document)
+#' @keywords internal
+.tv_block_rules_table <- function(doc, rules) {
+  ft <- .build_rules_table(rules, width = NULL)
+  if (!is.null(ft)) {
+    doc <- .add_rule_reading_guide(doc)
+  }
+  .tv_block_table(doc, ft, "No validation rules specified.")
+}
+
 #' Datasets a block should render, honouring its `:NAME` argument
 #'
 #' @param tabular_only Keep only `DTADataSetTabular` datasets (column specs and
@@ -400,10 +411,7 @@
     if (isTRUE(heading)) {
       doc <- .tv_block_heading(doc, paste0("Validation Rules \u2014 ", dta_dataset_heading(sets[[nm]])), level = 2)
     }
-    doc <- .tv_block_table(
-      doc, .build_rules_table(sets[[nm]]@specs@rules, width = NULL),
-      "No validation rules specified."
-    )
+    doc <- .tv_block_rules_table(doc, sets[[nm]]@specs@rules)
   }
   doc
 }
@@ -428,8 +436,8 @@
   doc
 }
 
-#' `{DATASETS}` block: the full per-dataset section -- description, files,
-#' columns, rules -- optionally without the dataset-name heading (for a
+#' `{DATASETS}` block: the full per-dataset section -- description, fact
+#' table (ID, Type, template), files, columns, rules -- optionally without the dataset-name heading (for a
 #' region-bound repetition; the Files/Column Specifications/Validation Rules
 #' sub-headings always stay)
 #' @keywords internal
@@ -444,10 +452,13 @@
     if (isTRUE(heading)) {
       doc <- .tv_block_heading(doc, dta_dataset_heading(ds), level = 2)
     }
-    doc <- .add_body_par(doc, paste0("Type: ", ds@type))
+    # Description, then the fact table (ID, Type, template), as in the
+    # built-in layout.
     if (!is.null(ds@description) && nzchar(ds@description)) {
       doc <- .add_body_par(doc, ds@description)
+      doc <- .add_spacer(doc)
     }
+    doc <- .tv_block_table(doc, .kv_table(.dataset_facts(ds)), "")
 
     doc <- .tv_block_heading(doc, "Files", level = 3)
     doc <- .tv_block_table(doc, .build_file_specs_table(ds@files, width = NULL), "No files specified.")
@@ -459,10 +470,7 @@
         "No column specifications available."
       )
       doc <- .tv_block_heading(doc, "Validation Rules", level = 3)
-      doc <- .tv_block_table(
-        doc, .build_rules_table(ds@specs@rules, width = NULL),
-        "No validation rules specified."
-      )
+      doc <- .tv_block_rules_table(doc, ds@specs@rules)
     }
 
     doc <- .add_spacer(doc)
@@ -471,13 +479,14 @@
 }
 
 #' `{SUPPLIER_CONTACTS_TABLE}` / `{RECEIVER_CONTACTS_TABLE}` block: contacts for
-#' one side of the agreement as a table
+#' one side of the agreement, in the contact table of the built-in layout
+#' (`.build_party_contacts_table()`)
 #' @keywords internal
 .tv_block_render_contacts <- function(doc, dta, arg, side) {
   org <- if (identical(side, "supplier")) dta@metadata@supplier else dta@metadata@receiver
   title <- if (identical(side, "supplier")) "Supplier Contacts" else "Receiver Contacts"
   doc <- .tv_block_heading(doc, title, level = 2)
-  .tv_block_table(doc, .build_contacts_flextable(.tv_get(org, "contacts")), "No contacts specified.")
+  .tv_block_table(doc, .build_party_contacts_table(.tv_get(org, "contacts")), "No contacts specified.")
 }
 
 #' `{SIGNATURES_TABLE}` block: the approval and signatures table
@@ -544,6 +553,17 @@
   )
 }
 
+# The sentinels in the order their paragraphs appear in the document body;
+# a sentinel that is not found (it renders nothing) goes last.
+.tv_sentinels_in_document_order <- function(doc, sentinels) {
+  if (length(sentinels) < 2L) {
+    return(sentinels)
+  }
+  paras <- xml2::xml_find_all(officer::docx_body_xml(doc), ".//*[local-name()='p']")
+  pos <- match(sentinels, trimws(xml2::xml_text(paras)))
+  sentinels[order(is.na(pos), pos)]
+}
+
 #' Replace the stamped block-placeholder paragraphs with rendered Word content
 #'
 #' Runs only when [.tv_mark_block_paragraphs()] stamped something, so a template
@@ -567,7 +587,10 @@
 .tv_render_blocks <- function(docx_path, dta, blocks = character(0), quiet = FALSE, bare = character(0)) {
   if (length(blocks) > 0) {
     doc <- officer::read_docx(docx_path)
-    for (sentinel in names(blocks)) {
+    # Render in document order, whichever pass stamped a block: what a block
+    # adds once per document (the rule reading guide) belongs to the block
+    # that comes first in the document.
+    for (sentinel in .tv_sentinels_in_document_order(doc, names(blocks))) {
       token <- blocks[[sentinel]]
       anchored <- paste0("^\\s*", .tv_escape_regex(sentinel), "\\s*$")
       if (!isTRUE(officer::cursor_reach_test(doc, anchored))) {

@@ -120,7 +120,7 @@ test_that("biomarker_gf lists every column and rule of its dataset, none marked 
   expect_identical(nrow(ds$columns), 33L)
   expect_identical(nrow(ds$rules), 7L)
   expect_named(ds$columns, c(.tgc_col_headers, "Change"))
-  expect_named(ds$rules, c("Rule", "What it checks", "Change"))
+  expect_named(ds$rules, c("Rule ID", "Description", "Change"))
   expect_true(all(ds$columns$Change == ""))
   expect_true(all(ds$rules$Change == ""))
   expect_length(ds$removed_columns, 0L)
@@ -207,13 +207,86 @@ test_that("changes_status says whether the differences were compared", {
   expect_identical(nrow(e$changes), 0L)
 })
 
-test_that("a rule keeps its plain sentence and drops the IF/THEN line that repeats it", {
-  expect_identical(.tgc_rule_text("Plain sentence\nIF 'A' = 1 THEN 'B' = 2"), "Plain sentence")
-  expect_identical(.tgc_rule_text("IF 'A' = 1 THEN 'B' = 2"), "IF 'A' = 1 THEN 'B' = 2")
-  expect_identical(.tgc_rule_text("Two\nplain lines"), "Two\nplain lines")
+test_that("a rule row keeps the author's purpose and the full condition", {
+  # Wording from the specification in R/rulePhrasing.R: the purpose is its own
+  # line; the statement reads "When <IF form>, <THEN form>." with typographic
+  # double quotes around text values.
+  lq <- "\u201c"
+  rq <- "\u201d"
+  e <- entry_by_id(bundled_guide()$creation, "biomarker_gf")
+  rules <- e$datasets[[1]]$rules
+  row <- rules[rules[["Rule ID"]] == "check_equals", ]
+  expect_identical(nrow(row), 1L)
+  lines <- strsplit(row$Description, "\n", fixed = TRUE)[[1]]
+  expect_identical(lines[[1]], "Purpose: If STUDYID is '1234-5678', then DOMAIN must be 'GF'")
+  expect_identical(lines[[2]], paste0(
+    "When STUDYID is equal to ", lq, "1234-5678", rq, ", DOMAIN must be equal to ", lq, "GF", rq, "."
+  ))
+  # The unique rule has no author text at all: only the mechanical sentence.
+  uq <- rules[rules[["Rule ID"]] == "unique_check", ]
+  expect_match(
+    strsplit(uq$Description, "\n", fixed = TRUE)[[1]][[1]],
+    "^No two rows may have the same combination of values in columns SUBJIDN, VISIT and GFSEQID\\.$"
+  )
+  # The old two-line "IF ... THEN ..." form is gone from every rule row.
   for (e in bundled_guide()$creation) {
-    for (d in e$datasets) expect_false(any(grepl("\nIF ", d$rules[["What it checks"]], fixed = TRUE)))
+    for (d in e$datasets) expect_false(any(grepl("(^|\n)(IF|THEN) ", d$rules[["Description"]])))
   }
+})
+
+test_that("the rule lines kept for the Word table spell out the same text as the row", {
+  e <- entry_by_id(bundled_guide()$creation, "biomarker_gf")
+  ds <- e$datasets[[1]]
+  expect_length(ds$rule_lines, nrow(ds$rules))
+  for (i in seq_len(nrow(ds$rules))) {
+    l <- ds$rule_lines[[i]]
+    again <- ifelse(
+      l$bullet, paste0("\u2022 ", l$text),
+      ifelse(nzchar(l$label), trimws(paste0(l$label, ": ", l$text)), l$text)
+    )
+    expect_identical(paste(again, collapse = "\n"), ds$rules$Description[[i]])
+  }
+})
+
+# A creation template that takes the bundled dataset template and sets the
+# given rule fields; returns the rule rows of the dataset it builds.
+rules_with_patch <- function(set) {
+  dir <- copy_bundled_library()
+  write_lines(dir, "rule_edit.dta-template.yaml", c(
+    "kind: dta_creation_template", "id: rule_edit", "version: '1.0'", "label: Rule edit",
+    "base:", "  metadata:", "    title: T",
+    "datasets:", "  - template: gf_smrnaseq@3.0", "    as: gf",
+    "    patch:", "      set:",
+    paste0("        ", names(set), ": ", unlist(set))
+  ))
+  g <- .template_guide_collect(dir)
+  expect_identical(nrow(g$problems), 0L)
+  rules <- entry_by_id(g$creation, "rule_edit")$datasets[[1]]$rules
+  stats::setNames(rules$Change, rules[["Rule ID"]])
+}
+
+test_that("a rule is marked Changed when only its condition or a limit differs", {
+  # Regression: the change key used to be the author's description alone, so
+  # a changed condition or limit under an unchanged description was missed.
+  unchanged <- rules_with_patch(list(
+    "rules.GFORRES must have a range.max" = "100000000"
+  ))
+  expect_true(all(unchanged == ""))
+
+  # A limit of a range rule (description stays "GFORRES must be between ...").
+  limit <- rules_with_patch(list("rules.GFORRES must have a range.max" = "5"))
+  expect_identical(limit[["GFORRES_must_have_a_range"]], "Changed")
+  expect_true(all(limit[names(limit) != "GFORRES_must_have_a_range"] == ""))
+
+  # The requirement of a condition rule (its description stays the same).
+  then <- rules_with_patch(list("rules.mutual_exclusivity_check.then.GFORRES.empty" = "false"))
+  expect_identical(then[["mutual_exclusivity_check"]], "Changed")
+  expect_true(all(then[names(then) != "mutual_exclusivity_check"] == ""))
+
+  # The author's description is part of the wording as well.
+  descr <- rules_with_patch(list("rules.unique_check.description" = "'Rows are unique'"))
+  expect_identical(descr[["unique_check"]], "Changed")
+  expect_true(all(descr[names(descr) != "unique_check"] == ""))
 })
 
 test_that("a list of allowed values is one value per line", {

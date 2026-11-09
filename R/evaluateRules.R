@@ -603,8 +603,9 @@ dta_check_condition_arity <- function(conditions, arg = "condition") {
         if (n != 2L || missing) "exactly two non-missing values, the lower and upper bound" else NULL
       } else if (operator %in% c("in", "not_in")) {
         # A missing member is allowed: `in: [A, ~]` deliberately selects the
-        # rows that are A or missing, through `%in%`'s own NA matching.
-        if (n < 1L) "one or more values" else NULL
+        # rows that are A or missing. Count list members, not the flattened
+        # vector: unlist() drops a YAML `~`, so `in: [~]` would count none.
+        if (length(value) < 1L) "one or more values" else NULL
       } else if (identical(operator, "empty")) {
         if (!(isTRUE(flat) || isFALSE(flat))) "a single TRUE or FALSE" else NULL
       } else {
@@ -668,6 +669,12 @@ dta_condition_mask <- function(column_name, operator, value, x, converted = NULL
   # narrowing decisions. A bound that does not parse as a number keeps the
   # string comparison exactly as before, and non-numeric columns (Char ids
   # with leading zeros above all) are never touched.
+  if (operator %in% c("in", "not_in") && is.list(value)) {
+    # YAML `~` reads as NULL: unlist() would drop it and `%in%` would match the
+    # text "NULL". Make it a missing member, so `in: [A, ~]` matches A or NA.
+    # Same as a missing text entry (YAML .na.character), which already works.
+    value[lengths(value) == 0L] <- list(NA_character_)
+  }
   if (operator %in% c("equals", "equal", "not_equals", "not_equal", "in", "not_in")) {
     value <- dta_equality_bound(x, value)
   }
@@ -684,7 +691,7 @@ dta_condition_mask <- function(column_name, operator, value, x, converted = NULL
     greater_equal = x >= value,
     less_equal = x <= value,
     range = x >= value[1] & x <= value[2],
-    pattern = grepl(value, if (is.numeric(x)) dta_numeric_text(x) else as.character(x), perl = TRUE),
+    pattern = grepl(value, as.character(x), perl = TRUE),
     empty = {
       empty_mask <- is.na(x)
 
@@ -748,33 +755,25 @@ dta_condition_undecidable <- function(conditions, df, numeric_cache = NULL) {
   out <- rep(FALSE, nrow(df))
   numeric_operators <- dta_numeric_condition_operators()
 
-  # A row is undecidable only when no other predicate is NA because its value
-  # is MISSING: a missing value leaves the row out of scope whatever else is
-  # wrong with it.
-  missing_other <- rep(FALSE, nrow(df))
-
   for (column_name in names(conditions)) {
     if (!column_name %in% names(df)) {
       next
     }
+    if (!any(names(conditions[[column_name]]) %in% numeric_operators)) {
+      next
+    }
+
     x <- df[[column_name]]
     # Dates and date-times bypass dta_as_numeric_strict() in
     # dta_numeric_operands(), so they can never be unconvertible here either.
-    unconvertible <- if (
-      any(names(conditions[[column_name]]) %in% numeric_operators) &&
-        !(inherits(x, "Date") || inherits(x, "POSIXt"))
-    ) {
-      dta_numeric_cache_get(df, column_name, numeric_cache)$unconvertible
-    } else {
-      rep(FALSE, nrow(df))
+    if (inherits(x, "Date") || inherits(x, "POSIXt")) {
+      next
     }
 
-    na_here <- is.na(evaluate_condition(column_name, conditions[[column_name]], df, numeric_cache))
-    out <- out | (na_here & unconvertible)
-    missing_other <- missing_other | (na_here & !unconvertible)
+    out <- out | dta_numeric_cache_get(df, column_name, numeric_cache)$unconvertible
   }
 
-  out & !missing_other
+  out
 }
 
 #' @title Rows a Conditional Rule's IF Clause Applies To

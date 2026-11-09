@@ -15,13 +15,10 @@
 # ---- small Markdown helpers -------------------------------------------------
 
 qual_md_escape <- function(x) {
-  x <- as.character(x)
-  x[is.na(x)] <- ""
   # Evidence text (failure messages, titles, paths, regular expressions) is
-  # data: pandoc must not read it as raw HTML, TeX, maths or emphasis. The
-  # pipe is escaped last, after the general escaper has doubled backslashes.
-  x <- .plain_text_to_md(gsub("[\r\n]+", " ", x), table = TRUE)
-  gsub("|", "\\|", x, fixed = TRUE)
+  # data: pandoc must not read it as raw HTML, TeX, maths or emphasis, and an
+  # address in it stays text rather than becoming a link.
+  .md_escape(gsub("[\r\n]+", " ", as.character(x)), table = TRUE, links = FALSE)
 }
 
 qual_md_table <- function(df, align = NULL) {

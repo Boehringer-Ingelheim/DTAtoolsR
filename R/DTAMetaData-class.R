@@ -14,7 +14,8 @@
 #'     \item \code{version}: version string (e.g. "1.0")
 #'     \item \code{date}: Date object for this version; a character string
 #'       \code{"YYYY-MM-DD"}, as loaded from YAML, is also read as a date
-#'     \item \code{changes}: character description of what was changed in this version
+#'     \item \code{changes}: one or more non-empty character descriptions (a
+#'       character vector or list of strings) of what was changed in this version
 #'   }
 #' @param receiver list with affiliation and contacts (authorized to request corrections)
 #' @param supplier list with affiliation and contacts
@@ -181,9 +182,21 @@ DTAMetaData <- S7::new_class(
               ". Each version record must have: version (string), date (Date), changes (description)."
             ))
           }
-          # Validate that changes is not empty
-          if (!is.null(hist$changes) && is.character(hist$changes) && nchar(hist$changes) == 0) {
-            errors <- c(errors, paste0("version_history[[", i, "]]$changes cannot be an empty string."))
+          # changes is one or more descriptions (character vector or list of
+          # strings, as YAML `changes: [a, b]` loads); none may be empty or NA.
+          if (!is.null(hist$changes)) {
+            ch <- hist$changes
+            is_text <- if (is.list(ch)) all(vapply(ch, is.character, logical(1))) else is.character(ch)
+            ch <- unlist(ch)
+            if (!is_text || length(ch) == 0) {
+              errors <- c(errors, paste0(
+                "version_history[[", i, "]]$changes must be one or more non-empty character strings."
+              ))
+            } else if (anyNA(ch) || any(!nzchar(ch))) {
+              errors <- c(errors, paste0(
+                "version_history[[", i, "]]$changes cannot be an empty string or NA."
+              ))
+            }
           }
         }
       }
@@ -466,7 +479,8 @@ method(print_info, DTAMetaData) <- function(x, ...) {
       date_str <- if (is.na(hist_date)) "N/A" else format(hist_date, "%Y-%m-%d")
       cli::cli_alert("  [{i}] v{version_str} ({date_str})")
       if (!is.null(hist$changes)) {
-        cli::cli_text("       {hist$changes}")
+        changes_str <- paste(unlist(hist$changes), collapse = "; ")
+        cli::cli_text("       {changes_str}")
       }
     }
   }

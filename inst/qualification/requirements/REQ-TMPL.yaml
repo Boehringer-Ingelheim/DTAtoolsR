@@ -803,7 +803,9 @@ requirements:
       (non-abstract) creation template of a library into a folder, named from
       the template's id and version. Each document shall show every question
       with its pre-filled answer, every column of the datasets it creates
-      (tagging those the template adds), and a running header and footer on
+      (tagging those the template adds), every validation rule of those
+      datasets in a table with the columns Rule ID and Description, worded
+      as REQ-EXPORT-039 requires, and a running header and footer on
       every page carrying the organisation, the template id and version, and
       "Page X of Y" as page fields. An abstract template shall be refused when
       requested by id, an existing output file shall not be replaced unless

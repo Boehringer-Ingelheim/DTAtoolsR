@@ -7700,11 +7700,10 @@ server <- function(input, output, session) {
           ))
 
           # The YAML is embedded as an HTML comment, which only a .md file
-          # can hide: the PDF routes read with raw HTML disabled, so the
-          # comment would print as a paragraph of literal text. The checkbox
-          # is therefore not offered alongside PDF, and a value it kept from
-          # before PDF was ticked is ignored -- also when the PDF falls back
-          # to Markdown.
+          # can hide: the pandoc routes drop it, but the built-in renderer of
+          # route 3 would print its lines as text. The checkbox is therefore
+          # not offered alongside PDF, and a value it kept from before PDF was
+          # ticked is ignored -- also when the PDF falls back to Markdown.
           if (isTRUE(input$export_include_yaml_md) && !sel$as_pdf) {
             md_text <- readLines(output_file, warn = FALSE)
             md_text <- paste(md_text, collapse = "\n")
@@ -7732,26 +7731,22 @@ server <- function(input, output, session) {
                 {
                   # output_file is markdown built from document text a third
                   # party controls (metadata title, dataset description,
-                  # error_handling, contact names, ...), so the reader is
-                  # pinned to a dialect without raw passthrough -- left at
-                  # the default "markdown" reader, a `\input{}` planted in
-                  # any of those fields reads a server-side file into the
-                  # PDF, and a `<script>` in one runs in whatever headless
-                  # browser ends up rendering it (wkhtmltopdf included).
-                  # Markdown image syntax survives that reader, so the
-                  # filter drops images too: pandoc would otherwise fetch
-                  # a planted http(s) URL from the server, and LaTeX would
-                  # embed any image file on the server's disk.
-                  no_images <- pandoc_no_images_filter()
+                  # error_handling, contact names, ...): the filter strips
+                  # raw HTML, images, maths and metadata, so a `\input{}` or
+                  # a `<script>` planted in one cannot reach the PDF or
+                  # whatever headless browser renders it, while <br> in a
+                  # table cell still becomes a line break. See
+                  # pandoc_markdown_filter().
+                  md_filter <- pandoc_markdown_filter()
                   tryCatch(
                     rmarkdown::pandoc_convert(
                       input = normalizePath(output_file),
-                      from = "markdown-raw_tex-raw_html-raw_attribute",
+                      from = pandoc_markdown_reader(),
                       to = "pdf",
                       output = pdf_file,
-                      options = c("--lua-filter", no_images)
+                      options = c("--lua-filter", md_filter)
                     ),
-                    finally = unlink(no_images)
+                    finally = unlink(md_filter)
                   )
                   file.exists(pdf_file)
                 },

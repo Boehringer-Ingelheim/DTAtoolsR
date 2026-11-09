@@ -346,7 +346,12 @@ get_version_history_df <- function(x) {
     if (is.null(value) || length(value) == 0) {
       return(NA_character_)
     }
-    as.character(value)[[1]]
+    value <- as.character(unlist(value))
+    if (!length(value)) {
+      return(NA_character_)
+    }
+    # Several change descriptions are one cell, joined as in the documents.
+    if (field == "changes") paste(value, collapse = "; ") else value[[1]]
   }
 
   data.frame(

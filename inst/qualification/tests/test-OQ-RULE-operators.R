@@ -250,3 +250,16 @@ test_that("OQ-RULE-050 | an operator given the wrong number of values is rejecte
   qa_step("in with two values is accepted and selects both", 2L, ro_selected("in", c("A", "B"), c("A", "B", "C")))
   qa_step("range with two values is accepted", 3L, ro_selected("range", c(2, 4), c(1, 2, 3, 4, 5)))
 })
+
+test_that("OQ-RULE-051 | an empty YAML entry in an in or not_in list matches a missing value | REQ-RULE-033", {
+  # `~` in a YAML list is an empty member. It stands for "missing": `in: [A, ~]`
+  # selects the rows that are A or missing, never the text "NULL".
+  members <- yaml::yaml.load("v: [A, ~]")$v
+  text <- c("A", NA, "B", "NULL")
+  qa_step("in selects the A row and the missing row of a text column", 2L, ro_selected("in", members, text))
+  qa_step("not_in selects the B row and the text NULL row", 2L, ro_selected("not_in", members, text))
+
+  numbers <- yaml::yaml.load("v: [1, ~]")$v
+  qa_step("in selects the 1 row and the missing row of a number column", 2L, ro_selected("in", numbers, c(1, NA, 2)))
+  qa_step("not_in selects only the 2 row of a number column", 1L, ro_selected("not_in", numbers, c(1, NA, 2)))
+})

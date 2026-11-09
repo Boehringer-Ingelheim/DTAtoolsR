@@ -31,18 +31,18 @@ when the file has none.}
 \item{overwrite}{Logical. Whether to overwrite existing files. Default: FALSE.}
 
 \item{include_signatures}{Logical. Whether to include the signature section.
-Default: TRUE. In DOCX/PDF the section appears only when \code{signature_list}
-is non-empty.}
+Default: TRUE. In every format the section appears only when
+\code{signature_list} is non-empty.}
 
 \item{include_file_specs}{Logical. Whether to include file specifications.
-Default: TRUE. Ignored for \code{format = "md"}, which always includes them.}
+Default: TRUE. Applies to every format.}
 
 \item{include_rules}{Logical. Whether to include validation rules
-(DTADataSetTabular only). Default: TRUE. Ignored for \code{format = "md"},
-which always includes them.}
+(DTADataSetTabular only). Default: TRUE. Applies to every format.}
 
 \item{signature_list}{List of signatories, each a list with \code{name}, \code{role}
-and optionally \code{organization} (or \code{org}) fields.}
+and optionally \code{organization} (or \code{org}) fields, or a data.frame with
+columns \code{Organization}, \code{Name}, \code{Role}.}
 
 \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
 
@@ -53,9 +53,9 @@ uses "Data Transfer Agreement".}
 
 \item{organisation, organisation_unit}{Optional single strings naming the
 organisation (and unit within it) issuing the document. When given they are
-shown on the title page (Word/PDF) or in the top header block (Markdown);
-the dataset document has no running header. \code{NULL} or empty (the default)
-shows nothing.}
+shown on the title page and in the running header of every later page
+(Word/PDF) or in the top header block (Markdown). \code{NULL} or empty (the
+default) shows nothing.}
 }
 \value{
 Invisibly \code{NULL}. The document is written to \code{file}.
@@ -64,6 +64,16 @@ Invisibly \code{NULL}. The document is written to \code{file}.
 Creates a professionally formatted DOCX, PDF, or Markdown document from a DTADataSet object,
 including metadata, file specifications, column specifications with allowed values,
 and validation rules in human-readable format.
+
+The Markdown output (\code{format = "md"}) is a complete GitHub-flavoured
+Markdown document: a fact table, a linked table of contents and numbered
+chapters (Approval and Signatures, Description, Files, Column
+Specifications, Validation Rules; chapters without content are left out).
+It is deterministic: UTF-8 with LF line endings and no time stamp.
+
+The Word (and PDF) document has the same chapters, numbered, after a title
+page with the same fact table; its running header and footer name the
+dataset and the template it was taken from. It carries no time stamp either.
 }
 \examples{
 ds <- create_example_DTADataSetTabular()

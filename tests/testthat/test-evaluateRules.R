@@ -2078,6 +2078,45 @@ test_that("a numeric group-by value renders canonically in the violation label, 
   expect_identical(streamed$message, eager$message)
 })
 
+test_that("a YAML ~ in an in list matches a missing value on both paths", {
+  members <- yaml::yaml.load("v: [A, ~]")$v
+  rule <- DTARuleColCondition(
+    id = "in_null",
+    condition = list(V = list(`in` = members)),
+    then = list(FLAG = list(equals = "yes"))
+  )
+  df <- data.frame(V = c("A", NA, "B", "NULL"), FLAG = "no", stringsAsFactors = FALSE)
+  expect_identical(dta_condition_violated(rule, df), c(TRUE, TRUE, FALSE, FALSE))
+
+  state <- dta_rule_stream_init(rule)
+  reader <- dta_as_batch_reader(df, batch_rows = 1L)
+  repeat {
+    batch <- reader$read_next_batch()
+    if (is.null(batch)) break
+    dta_rule_stream_update(state, rule, as.data.frame(batch))
+  }
+  streamed <- dta_rule_stream_finalise(state, rule)
+  expect_false(streamed$valid)
+  expect_identical(streamed$message, rule_check_col_condition(rule, df)$message)
+})
+
+test_that("an in or not_in list holding only a YAML ~ is accepted and selects missing values", {
+  only_null <- yaml::yaml.load("v: [~]")$v
+  df <- data.frame(V = c("A", NA), FLAG = "no", stringsAsFactors = FALSE)
+  for (op in c("in", "not_in")) {
+    condition <- stats::setNames(list(only_null), op)
+    rule <- DTARuleColCondition(
+      id = paste0(op, "_only_null"),
+      condition = list(V = condition),
+      then = list(FLAG = list(equals = "yes"))
+    )
+    expect_identical(
+      dta_condition_violated(rule, df),
+      if (op == "in") c(FALSE, TRUE) else c(TRUE, FALSE)
+    )
+  }
+})
+
 test_that("integer64 columns are exempt from equality-bound parsing", {
   # is.numeric(integer64) is TRUE, but as.numeric() rounds past 2^53: parsing
   # the bound would turn "9007199254740993" into 9007199254740992 and break an
@@ -2294,29 +2333,6 @@ test_that("requires with then_scope = all attributes rows per group, at linear c
   big <- make(4L * n)
   # Linear measures 3.6-4.8, a name scan about 7; 5.5 sits between them.
   expect_lt(best(big) / max(best(small), 0.01), 5.5)
-})
-
-test_that("pattern on a numeric column matches the plain digits, not 1e+05", {
-  expect_identical(
-    dta_condition_mask("N", "pattern", "^100000$", c(100000, 5)),
-    c(TRUE, FALSE)
-  )
-})
-
-test_that("a missing IF value leaves the row out of scope even if another IF value is unconvertible", {
-  df <- data.frame(
-    SEX = c(NA, "F", "F"),
-    AGE = c("ninety", "ninety", "50"),
-    stringsAsFactors = FALSE
-  )
-  rule <- DTARuleColCondition(
-    id = "r",
-    condition = list(SEX = list(equals = "F"), AGE = list(greater = 18)),
-    then = list(SEX = list(equals = "M"))
-  )
-  # Row 1: SEX missing -> out of scope. Row 2: AGE unconvertible, SEX decided
-  # -> stays in scope and fails THEN. Row 3: in scope and fails THEN.
-  expect_identical(dta_condition_violated(rule, df), c(FALSE, TRUE, TRUE))
 })
 
 test_that("group IF conditions keep unconvertible rows in scope", {

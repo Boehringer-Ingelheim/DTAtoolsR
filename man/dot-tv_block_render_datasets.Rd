@@ -2,16 +2,16 @@
 % Please edit documentation in R/exportTemplateBlocks.R
 \name{.tv_block_render_datasets}
 \alias{.tv_block_render_datasets}
-\title{\code{{DATASETS}} block: the full per-dataset section -- description, files,
-columns, rules -- optionally without the dataset-name heading (for a
+\title{\code{{DATASETS}} block: the full per-dataset section -- description, fact
+table (ID, Type, template), files, columns, rules -- optionally without the dataset-name heading (for a
 region-bound repetition; the Files/Column Specifications/Validation Rules
 sub-headings always stay)}
 \usage{
 .tv_block_render_datasets(doc, dta, arg, heading = TRUE)
 }
 \description{
-\code{{DATASETS}} block: the full per-dataset section -- description, files,
-columns, rules -- optionally without the dataset-name heading (for a
+\code{{DATASETS}} block: the full per-dataset section -- description, fact
+table (ID, Type, template), files, columns, rules -- optionally without the dataset-name heading (for a
 region-bound repetition; the Files/Column Specifications/Validation Rules
 sub-headings always stay)
 }

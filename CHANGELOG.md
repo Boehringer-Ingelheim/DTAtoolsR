@@ -32,12 +32,88 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - The qualification runner's `filter` now matches the whole test name, not a
   fragment of it, so `"IQ-ENV-01"` no longer selects `IQ-ENV-010` to `-019`.
 
+### Changed
+
+- **Breaking:** Word, PDF and Markdown exports (including the
+  `{VALIDATION_RULES}` and `{DATASETS}` template blocks and
+  `write_dataset_metadata()`) no longer show a rule's exact definition as YAML
+  (the monospace `Definition` column in Word/PDF and the fenced YAML block per
+  rule in Markdown, both introduced in 0.26.0). They now describe every rule
+  completely in plain English, never as code: no YAML, code block or monospace
+  font. The description names every parameter of the rule (each column, test,
+  value, grouping column, condition, requirement id, scope and message) and
+  says how missing and non-numeric values are treated, so nothing of the rule
+  is lost. Values are written in full, numbers at full precision. A rule's own
+  description is shown as its "Purpose" above the mechanical wording and never
+  replaces it. The Word rules table has two columns, `Rule ID` and
+  `Description`, with bold labels and bulleted lists; a short guide to reading
+  the rules precedes the first rules table of a document. The console
+  `print()` of a column-condition rule uses the same wording.
+- The HTML validation report, `explain_messages()`, the template guide and the
+  Shiny app describe a rule with the same wording as the Word and Markdown
+  exports instead of three different dialects. A uniqueness rule over several
+  columns is worded as one combination of values, not as if each column had to
+  be unique on its own. The template guide lists a rule as `Rule ID` and
+  `Description` and reports any change to a rule (a bound, a requirement, a
+  condition) as changed, not only a change to its author's description. The
+  app's rules overview shows every operator of a column and no longer sets the
+  text in a monospace font.
+- **Breaking:** the Markdown export of `write_dta()` and
+  `write_dataset_metadata()` is redesigned and follows the Word layout. It has
+  numbered chapters in the same order (approval and signatures, document
+  information, study, parties, process information, agreement sections,
+  datasets), a linked table of contents, and tables for the document facts,
+  the parties' organisations and contacts, the transmission, the files and
+  their format, the columns and the approval block. Allowed values are listed in
+  full, not cut after five. Every author text is escaped, so it cannot change
+  the structure of the document. The footer carries no timestamp, so the same
+  specification always produces the same bytes. A parser of the old format
+  (`**Title:**` lines, `Exact rule definitions`, per-column headings) must be
+  adapted.
+- `write_dataset_metadata()` honours `include_file_specs`, `include_rules` and
+  `include_signatures` for Markdown as well, and its Word document is built
+  like the agreement document: numbered chapters, the full description, the
+  same `Files` chapter name, and a title page with the dataset's facts.
+- A missing file name or column type reads "(not specified)" and an unset
+  `nullable` reads "No (default)", the same in Word, Markdown and the template
+  blocks. The contact and dataset blocks of a Word template (`{*_CONTACTS_TABLE}`,
+  `{DATASETS}`, `{SUPPLIER_CONTACTS}`, `{PROCESS_INFORMATION}`) use the same
+  tables and labels as the built-in layout, with "Yes" instead of "yes".
+- The app builds a PDF from the new Markdown with working table-of-contents
+  links and line breaks inside table cells.
+
 ### Fixed
 
 - The Shiny app no longer reports a DTA whose supplied file count is outside the
   declared bounds as passed: the dataset is marked failed, the reason is listed
   in the completion message, and the HTML summary report shows VALIDATION
   FAILED with the file-count finding.
+- The Word document of `write_dataset_metadata()` no longer prints the day it
+  was generated, shows the full description instead of its first 80 characters,
+  and no longer labels the document version with the template version in its
+  footer.
+- A rule that cannot be evaluated (a range over two columns, an unknown
+  operator) is described as such instead of as a valid rule; `equals: true` is
+  no longer worded as "is present"; a list of values is worded as "one of", not
+  as all of them; large numbers are written in full instead of as `1e+08`.
+- An empty YAML entry in an `in` or `not_in` list (`in: [A, ~]`) now matches a
+  missing value, as documented. It used to be dropped on numeric columns and,
+  on text columns, to match the literal text `"NULL"` instead of a missing
+  value, so such a rule passed or failed the wrong rows.
+- `export_with_template()` and `write_dta(template = )` write to a relative
+  output path. They used to fail with "not a valid DOCX" (or, with the default
+  `fallback = TRUE`, fall back to the built-in layout with a warning), because
+  the document was zipped relative to a temporary folder. Closes DEV-017.
+- The `{PROCESS_INFORMATION}` and contact blocks of a Word template no longer
+  abort when a transmission, error-handling or contact field holds several
+  values (a YAML list); the values are joined with ", " as the single
+  placeholders already did. Transfer dates in the block use the same date
+  format as the single placeholders.
+- A version-history entry may list several `changes`. A YAML list or character
+  vector used to fail with an internal R error, and `get_version_history_df()`
+  kept only the first change; the change descriptions are now joined with
+  "; " in every export. An empty list, an empty string or a missing entry is
+  rejected with a clear message.
 - `validate_template()` now reports `kind_suffix_mismatch`,
   `party_profile_invalid` and `export_template_no_placeholders`, which the app
   silently skipped while validation passed.
@@ -57,11 +133,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `min_number_of_files` / `max_number_of_files` for pattern handlers. An
   unbounded maximum file count prints as open-ended.
 - Rule evaluation: group conditions look groups up by position (it was
-  quadratic); `pattern` on a numeric column matches plain digits, not
-  scientific notation; a missing `IF` value keeps the row out of scope; an
-  unconvertible `IF` value no longer exempts a group (eager and streaming);
-  `messages()` ordering no longer depends on the locale; huge row numbers are
-  no longer narrowed to integer; `inspect()` duplicate wording corrected.
+  quadratic); an unconvertible `IF` value no longer exempts a group (eager and
+  streaming); `messages()` ordering no longer depends on the locale; huge row
+  numbers are no longer narrowed to integer; `inspect()` duplicate wording corrected.
 - `lint_dta()`: a logical operand (unquoted `Y`/`N`) on a non-`Bool` column is
   an error; a numeric operand on a text column, and numeric operators on SAS
   Date, Time or DateTime columns, are warnings. Unknown metadata keys are

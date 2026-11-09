@@ -690,6 +690,30 @@ dta_explain_rows_lines <- function(detail, prefix_pattern, max_rows = 5) {
   lines
 }
 
+# Lines of the shared rule wording that .rule_summary() leaves out: the
+# author's purpose and the notes on missing and non-numeric values. List items
+# keep their bullet.
+dta_explain_rule_info <- function(rule_def) {
+  if (!.rule_is(rule_def, "DTARule")) {
+    return(character(0))
+  }
+  lines <- .rule_lines(rule_def)
+  lines <- lines[lines$role %in% c("purpose", "missing", "nonnumeric"), , drop = FALSE]
+  vapply(seq_len(nrow(lines)), function(i) {
+    if (lines$bullet[[i]]) {
+      paste0("\u2022 ", lines$text[[i]])
+    } else if (nzchar(lines$label[[i]])) {
+      if (nzchar(lines$text[[i]])) {
+        paste0(lines$label[[i]], ": ", lines$text[[i]])
+      } else {
+        paste0(lines$label[[i]], ":")
+      }
+    } else {
+      lines$text[[i]]
+    }
+  }, character(1))
+}
+
 #' @keywords internal
 #' @title Print and Return the Explanation of One Message
 #' @description
@@ -745,23 +769,14 @@ dta_explain_one <- function(msg_row, detail, rule_def) {
     should_be <- .report_import_expected_text(row1, html = FALSE)
     actual <- .report_import_actual_text(row1, html = FALSE)
   } else if (identical(type, "rule")) {
-    desc <- tryCatch(rule_def@description, error = function(e) NULL)
-    if (!is.null(desc) && length(desc) == 1 && !is.na(desc) && nzchar(desc)) {
-      info <- paste0("What this rule checks: ", desc)
-    }
+    should_be <- .report_rule_should_be(rule_def, html = FALSE)
+    info <- dta_explain_rule_info(rule_def)
     if (inherits(rule_def, "DTAtools::DTARuleGroupCondition")) {
-      should_be <- .report_group_condition_expected_text(rule_def, html = FALSE)
-      info <- c(info, vapply(
-        rule_def@constraints,
-        function(cn) .report_group_constraint_desc(cn, html = FALSE),
-        character(1)
-      ))
       table_lines <- c(
         dta_explain_rows_lines(detail, "^group_violation_"),
         dta_explain_rows_lines(detail, "^failing_")
       )
     } else {
-      should_be <- .report_rule_expected_text(rule_def, html = FALSE)
       pattern <- if (any(grepl("^failing_", names(detail)))) "^failing_" else "^context_"
       table_lines <- dta_explain_rows_lines(detail, pattern)
     }

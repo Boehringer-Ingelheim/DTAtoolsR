@@ -56,9 +56,9 @@ test_that("OQ-EXPORT-045 | default documents include study and ordered agreement
         grepl(transmission[[field]], text, fixed = TRUE)
       )
     }
-    # Word labels the decisions for readers; Markdown keeps the YAML key.
-    flags <- if (format == "docx") c("Test upload", "Blinded transfer") else c("test_upload", "blinded_transfer")
-    for (flag in flags) {
+    # Both formats label the decisions for readers, with the same labels;
+    # an absent decision is not shown under its label or its YAML key.
+    for (flag in c("Test upload", "Blinded transfer", "test_upload", "blinded_transfer")) {
       qa_check(paste(format, "does not invent an absent decision", flag), !grepl(flag, text, fixed = TRUE))
     }
     # Markdown escapes the dataset id's `_`, Word shows it as written.
@@ -81,13 +81,15 @@ test_that("OQ-EXPORT-045 | default documents include study and ordered agreement
   write_dta(dta, file = false_markdown, format = "md")
   summary <- qa_docx_summary(false_word)
   cells <- summary$text[summary$content_type == "table cell"]
-  false_markdown_lines <- readLines(false_markdown, warn = FALSE)
+  false_markdown_lines <- readLines(false_markdown, warn = FALSE, encoding = "UTF-8")
   word_labels <- c(test_upload = "Test upload", blinded_transfer = "Blinded transfer")
   for (flag in c("test_upload", "blinded_transfer")) {
     qa_step(paste("Word renders explicit FALSE as No for", flag), "No", cells[match(word_labels[[flag]], cells) + 1L])
+    # A row of the Markdown "Item | Details" table, under the Word label (the
+    # labels hold no character Markdown would escape).
     qa_check(
       paste("Markdown renders explicit FALSE as No for", flag),
-      paste0("- **", flag, ":** No") %in% false_markdown_lines
+      paste0("| ", word_labels[[flag]], " | No |") %in% false_markdown_lines
     )
   }
 })
