@@ -440,3 +440,74 @@ requirements:
       A tabular dataset keeps no file list of its own; each load_file() binds
       one table, so the supplied count is the number of tables. A dataset with
       no tables is reported as undelivered by REQ-VAL-001's axes, not here.
+
+  - id: REQ-VAL-033
+    text: >
+      When check() is applied to a DTA, a tabular dataset whose number of
+      tables is below the sum of its file handlers' minimum, or above the sum
+      of their maximum, shall be reported in the last_file_count_findings
+      attribute with its dataset id, the number of tables supplied (n_supplied)
+      and the summed bounds (min, max), shall raise a warning of class
+      dta_file_count_mismatch, and shall set last_validation_ok to FALSE.
+    risk: high
+    category: functional
+    covers: [check]
+    source: "R/DTA-class.R check() roxygen, paragraph on files supplied to a tabular dataset; CHANGELOG [Unreleased]"
+    notes: >
+      Refines REQ-VAL-032 for the two directions of violation: too few and too
+      many are distinct failures with distinct counts.
+
+  - id: REQ-VAL-034
+    text: >
+      When check() is applied to a DTA, a tabular dataset whose number of
+      tables equals the sum of its handlers' minimum, equals the sum of their
+      maximum, or lies between them shall not be judged a file-count violation:
+      no dta_file_count_mismatch warning is raised, n_file_count_errors is 0,
+      last_file_count_findings has no row for it and the file count does not
+      make last_validation_ok FALSE.
+    risk: high
+    category: functional
+    covers: [check]
+    source: "R/DTA-class.R check() roxygen, paragraph on files supplied to a tabular dataset"
+    notes: >
+      The bounds are inclusive on both sides; a false alarm here would fail
+      every correct delivery.
+
+  - id: REQ-VAL-035
+    text: >
+      A missing bound shall be no bound on that side: when check() is applied
+      to a DTA, a tabular dataset whose handler declares a minimum but no
+      maximum shall not be judged for holding too many tables (the maximum is
+      unbounded, reported as Inf in last_file_count_findings) and a handler
+      declaring a maximum but no minimum shall not be judged for holding too
+      few; the declared bound on the other side still applies.
+    risk: high
+    category: functional
+    covers: [check]
+    source: "R/DTA-class.R check() roxygen: a handler without a maximum makes the maximum unbounded; a missing bound counts as no bound"
+    notes: >
+      The unbounded maximum is reported as Inf.
+
+  - id: REQ-VAL-036
+    text: >
+      When check() is applied to a DTA, the bounds on a tabular dataset's
+      number of tables shall be the dataset-wide SUM of its file handlers'
+      minima and the SUM of their maxima, not a per-handler limit: with two
+      handlers each declaring exactly one file, two tables are within bounds
+      and three are not; if any handler declares no maximum the summed
+      maximum is unbounded.
+    risk: high
+    category: functional
+    covers: [check]
+    source: "R/DTA-class.R check() roxygen: dataset-wide SUM of the handlers' minima and maxima, not handler by handler"
+
+  - id: REQ-VAL-037
+    text: >
+      A tabular dataset checked on its own with check() shall not be judged on
+      its file count: no dta_file_count_mismatch warning is raised and the
+      verdict of its tables is unaffected by the number of tables supplied,
+      even when the same dataset inside a DTA would fail on it.
+    risk: medium
+    category: functional
+    covers: [check]
+    source: "R/DTA-class.R check() roxygen: applies only to a DTA-level check, not to a dataset checked alone"

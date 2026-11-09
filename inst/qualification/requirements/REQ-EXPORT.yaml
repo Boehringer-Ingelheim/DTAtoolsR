@@ -536,3 +536,30 @@ requirements:
     category: interface
     covers: [write_dta, export_with_template, dta_template_placeholders]
     source: R/exportTemplateDocx.R; R/exportDocuments.R
+
+  - id: REQ-EXPORT-039
+    text: >
+      The Markdown files written by write_dta() and write_dataset_metadata()
+      shall show author-supplied plain text (title, header, version, error
+      handling, transmission details, dataset name and description) literally
+      when rendered, and not interpret it as Markdown or HTML. Each of the
+      characters \ ` * _ { } [ ] # ! ~ = and | shall be written preceded by a
+      backslash; & < > shall be written as &amp; &lt; &gt;; a list marker (-,
+      + or "<digits>." or "<digits>)" followed by a space) at the start of a line shall have
+      its marker character escaped; and leading indentation shall be written
+      as non-breaking spaces of the same width, so it cannot begin an indented
+      code block. Text that contains none of these shall be written unchanged.
+    risk: medium
+    category: functional
+    covers: [write_dta, write_dataset_metadata]
+    source: R/formattingHelpers.R; R/exportDocuments.R
+
+  - id: REQ-EXPORT-040
+    text: >
+      A metadata field that is missing (NA) shall be shown in the Markdown
+      files written by write_dta() as the text "(not specified)", and never
+      as an empty value or as the text "NA".
+    risk: low
+    category: functional
+    covers: [write_dta]
+    source: R/formattingHelpers.R; R/exportDocuments.R

@@ -322,3 +322,54 @@ test_that("OQ-SPEC-054 | strict mode and the readers abort with every error and 
   got_specs <- tryCatch(import_specs_from_yaml(specs_path), error = function(e) e)
   qa_check("import_specs_from_yaml() aborts with class dta_lint_error", inherits(got_specs, "dta_lint_error"))
 })
+
+test_that("OQ-SPEC-055 | a numeric operator on a Date, Time or DateTime column is a warning, on a Char column an error, on a numeric column no finding | REQ-SPEC-030", {
+  # One condition column X of the type under test and one numeric column Y for
+  # the consequence, so the only thing that varies is the type of X.
+  numeric_on <- function(type, op = "greater") {
+    out <- lint_dta(list(
+      columns = list(list(id = "X", type = type), list(id = "Y", type = "SAS Num")),
+      rules = list(list(
+        id = "r1", type = "col_condition",
+        condition = list(X = stats::setNames(list(5), op)),
+        then = list(Y = list(greater_equal = 0))
+      ))
+    ))
+    out[out$code == "rule_condition_numeric_on_text", c("id", "severity")]
+  }
+
+  for (type in c("SAS Date", "SAS Time", "SAS DateTime")) {
+    qa_step(
+      paste0("a numeric operator on a ", type, " column is one warning on the rule"),
+      "r1:warning",
+      paste(numeric_on(type)$id, numeric_on(type)$severity, sep = ":")
+    )
+  }
+  qa_step(
+    "another numeric operator on a Date column is a warning too",
+    "warning", numeric_on("SAS Date", "less_equal")$severity
+  )
+  qa_step(
+    "on a Char column the same finding is an error",
+    "error", numeric_on("SAS Char")$severity
+  )
+  for (type in c("SAS Num", "SAS Int")) {
+    qa_step(paste0("on a ", type, " column there is no such finding"), 0L, nrow(numeric_on(type)))
+  }
+
+  # A warning does not refuse the specification: it still constructs.
+  built <- tryCatch(
+    DTAColumnSpecCollection(
+      columns = list(
+        DTAColumnSpec(id = "D", type = "SAS Date", format = "SAS DATE9."),
+        DTAColumnSpec(id = "Y", type = "SAS Num")
+      ),
+      rules = list(DTARuleColCondition(
+        id = "r1", condition = list(D = list(greater = 5)),
+        then = list(Y = list(greater_equal = 0))
+      ))
+    ),
+    error = function(e) e
+  )
+  qa_check("the specification with the warning still constructs", !inherits(built, "condition"))
+})

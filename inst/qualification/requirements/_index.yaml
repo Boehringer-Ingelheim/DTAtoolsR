@@ -14,19 +14,19 @@ package_version: 0.26.0
 areas:
   - area: CORE
     title: The qualification runner itself
-    min_tests: 11
+    min_tests: 13
   - area: ENV
     title: Installed system and environment
     min_tests: 23
   - area: SPEC
     title: Specifications, YAML and factories
-    min_tests: 32
+    min_tests: 34
   - area: TYPE
     title: Declared types and typing at read
     min_tests: 31
   - area: VAL
     title: Validation engine and result accessors
-    min_tests: 40
+    min_tests: 45
   - area: RULE
     title: Cross-column and grouped rules
     min_tests: 40
@@ -35,7 +35,7 @@ areas:
     min_tests: 42
   - area: STREAM
     title: Streaming validation and engine parity
-    min_tests: 31
+    min_tests: 32
   - area: META
     title: Transfer metadata
     min_tests: 22
@@ -44,7 +44,7 @@ areas:
     min_tests: 112
   - area: EXPORT
     title: Document and data export
-    min_tests: 54
+    min_tests: 59
   - area: REPORT
     title: The standalone HTML validation report
     min_tests: 17

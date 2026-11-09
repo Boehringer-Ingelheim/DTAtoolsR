@@ -23,6 +23,10 @@ test_that("write_dta validates inputs and exports markdown/docx", {
   on.exit(unlink(out_docx, force = TRUE), add = TRUE)
   write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
   expect_true(file.exists(out_docx))
+  # Read the DOCX back: document name first, then the DTA title (as in the
+  # markdown export above), not an empty or unrelated document.
+  docx_paragraphs <- Filter(nzchar, .docx_paragraphs(out_docx))
+  expect_equal(docx_paragraphs[1:2], c("Data Transfer Agreement", "Example DTA"))
 })
 
 test_that("write_dta exports docx when metadata has no title (regression)", {
@@ -110,11 +114,16 @@ test_that("write_dataset_metadata and alias export metadata documents", {
   on.exit(unlink(out_docx, force = TRUE), add = TRUE)
   write_dataset_metadata(ds, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
   expect_true(file.exists(out_docx))
+  expect_equal(Filter(nzchar, .docx_paragraphs(out_docx))[1], "Data Transfer Agreement")
 
   alias_out <- tempfile(fileext = ".md")
   on.exit(unlink(alias_out, force = TRUE), add = TRUE)
   write_file_specification(ds, file = alias_out, format = "md", overwrite = TRUE, quiet = TRUE)
   expect_true(file.exists(alias_out))
+  # The alias is the same export under another name: identical document.
+  # (Only the generation timestamp, written per call, may differ.)
+  strip_stamp <- function(lines) lines[!grepl("^[*]Generated on:", lines)]
+  expect_identical(strip_stamp(readLines(alias_out, warn = FALSE)), strip_stamp(md_lines))
 })
 
 # .read_docx_body_xml() and .docx_paragraphs() live in helper-docx.R.
@@ -549,7 +558,8 @@ test_that("write_dta pdf export writes a real PDF or aborts loudly", {
   )
   expect_error(
     write_dta(dta, file = out_missing, format = "pdf", overwrite = TRUE, quiet = TRUE),
-    class = "rlang_error"
+    "no DOCX to PDF conversion backend is available",
+    fixed = TRUE, class = "rlang_error"
   )
   # The requested path must not hold a DOCX wearing a .pdf extension, and the
   # error handler must not have written to some other path instead.
@@ -576,7 +586,8 @@ test_that("write_dta pdf export rejects a converter that yields a non-PDF", {
 
   expect_error(
     write_dta(dta, file = out, format = "pdf", overwrite = TRUE, quiet = TRUE),
-    class = "rlang_error"
+    "PDF conversion failed; nothing was written to",
+    fixed = TRUE, class = "rlang_error"
   )
   # The ZIP/DOCX masquerading as a PDF must be removed, not handed to the user.
   expect_false(file.exists(out))
@@ -622,7 +633,8 @@ test_that("write_dataset_metadata pdf export aborts when conversion is impossibl
   )
   expect_error(
     write_dataset_metadata(ds, file = out, format = "pdf", overwrite = TRUE, quiet = TRUE),
-    class = "rlang_error"
+    "no DOCX to PDF conversion backend is available",
+    fixed = TRUE, class = "rlang_error"
   )
   expect_false(file.exists(out))
 })
@@ -820,7 +832,11 @@ test_that("a failed PDF conversion never touches a valid file already at the des
     .pandoc_docx_to_pdf = function(docx_file, pdf_file) cli::cli_abort("pandoc exploded")
   )
 
-  expect_error(.convert_docx_to_pdf(docx, out), class = "rlang_error")
+  expect_error(
+    .convert_docx_to_pdf(docx, out),
+    "PDF conversion failed; nothing was written to",
+    fixed = TRUE, class = "rlang_error"
+  )
   expect_identical(readBin(out, what = "raw", n = length(original)), original)
   # No staging file left behind next to the untouched destination.
   expect_identical(list.files(test_dir), "out.pdf")
@@ -836,7 +852,8 @@ test_that(".dta_write_staged leaves an existing destination untouched when write
 
   expect_error(
     .dta_write_staged(dest, write = function(stage) cli::cli_abort("write blew up")),
-    class = "rlang_error"
+    "write blew up",
+    fixed = TRUE, class = "rlang_error"
   )
   expect_identical(readBin(dest, what = "raw", n = length(original)), original)
   expect_identical(list.files(test_dir), "out.bin")
@@ -856,7 +873,8 @@ test_that(".dta_write_staged leaves an existing destination untouched when check
       write = function(stage) writeBin(charToRaw("garbage"), stage),
       check = function(stage) cli::cli_abort("rejected")
     ),
-    class = "rlang_error"
+    "rejected",
+    fixed = TRUE, class = "rlang_error"
   )
   expect_identical(readBin(dest, what = "raw", n = length(original)), original)
   expect_identical(list.files(test_dir), "out.bin")

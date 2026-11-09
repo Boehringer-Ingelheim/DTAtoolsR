@@ -82,7 +82,10 @@ test_that("status_chip rejects an unrecognised status instead of silently render
   # chip. (The error text itself is match.arg()'s own, base-R, translated on
   # this locale, so only the fact of the error is asserted, not its wording.)
   f <- app_fn("status_chip")
-  expect_error(f("bogus"))
+  err <- expect_error(f("bogus"))
+  # Pin the source of the error structurally: it must come from match.arg()
+  # validating `status`, not from some later failure inside the builder.
+  expect_identical(as.character(err$call[[1]]), "match.arg")
 })
 
 test_that("slot_state_label renders the icon and class for each known state", {

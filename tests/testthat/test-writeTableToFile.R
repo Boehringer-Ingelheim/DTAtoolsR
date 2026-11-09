@@ -285,5 +285,9 @@ test_that("write_table_to_file() writes a mid-cell quote that reads back, and ac
     sep = "", arrange_by = NULL, quiet = TRUE,
     get_md5sum = FALSE, write_md5sum_to_file = FALSE
   ))
-  expect_true(file.exists(out2))
+  # The file must hold the header and both rows, not merely exist.
+  lines2 <- gsub("\"", "", readLines(out2, warn = FALSE), fixed = TRUE)
+  expect_length(lines2, 3L)
+  expect_identical(lines2[[1]], "A")
+  expect_setequal(lines2[-1], c("a", "b"))
 })

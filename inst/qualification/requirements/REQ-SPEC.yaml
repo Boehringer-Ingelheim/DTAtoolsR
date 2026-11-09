@@ -389,3 +389,37 @@ requirements:
     notes: >
       Specifications written before the cross-object check that carry
       dangling rules no longer load; lint_dta() on the file lists what to fix.
+
+  - id: REQ-SPEC-030
+    text: >
+      lint_dta() shall report a numeric comparison operator (greater, less,
+      greater_equal, less_equal and the other numeric operators) applied to a
+      column of SAS type Date, Time or DateTime as a finding with code
+      rule_condition_numeric_on_text at severity warning, and the same
+      operator applied to a SAS Char column as that code at severity error.
+      A numeric operator on a SAS Num or SAS Int column shall produce no such
+      finding. A specification with the warning shall still construct.
+    risk: medium
+    category: functional
+    covers: [lint_dta]
+    source: R/lintDTA.R (dta_specs_findings); CHANGELOG [Unreleased], Fixed
+    notes: >
+      A file read holds a date as text and a date is not a number, so the
+      comparison means something other than what the author wrote. The
+      warning does not refuse the specification because an in-memory table of
+      Date class compares correctly; a Char column can never compare as a
+      number, so there it is an error.
+
+  - id: REQ-SPEC-031
+    text: >
+      Constructing a DTA whose datasets list holds an entry that is not a
+      DTADataSet shall abort with a condition of class
+      dta_invalid_dataset_entry whose message names every offending entry,
+      and a list holding only DTADataSet entries shall construct.
+    risk: medium
+    category: integrity
+    covers: [DTA]
+    source: R/DTA-class.R (validator)
+    notes: >
+      Without the check, a stray entry fails later and obscurely, in a
+      validator or in check(), far from the place it was supplied.

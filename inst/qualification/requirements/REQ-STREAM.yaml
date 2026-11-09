@@ -360,3 +360,23 @@ requirements:
       context and failing-row preview it produced were otherwise the same
       values a reader would get from the in-memory path; the fix changes how
       they are obtained, not what they say.
+
+  # ---- file count under streaming ---------------------------------------------
+
+  - id: REQ-STREAM-025
+    text: >
+      The file-count verdict of a DTA-level check() shall not depend on how the
+      tables were loaded: a tabular dataset whose tables were loaded lazily
+      (stream = "always") shall be judged against its handlers' summed bounds
+      exactly as the same dataset loaded in memory (stream = "never"),
+      producing the same last_file_count_findings (dataset, n_supplied, min,
+      max), the same n_file_count_errors and the same last_validation_ok, for
+      a count above the maximum, a count below the minimum and a count within
+      bounds.
+    risk: high
+    category: functional
+    covers: [check, load_file]
+    source: "R/DTA-class.R check() roxygen; R/DTADataSetTabular-class.R dta_tabular_file_count_finding()"
+    notes: >
+      A streamed table is still one table of the dataset, so the supplied
+      count is the number of tables whichever way each was held.

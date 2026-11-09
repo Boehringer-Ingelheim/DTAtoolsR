@@ -938,3 +938,91 @@ test_that("OQ-EXPORT-054 | the document and organisation placeholders are filled
   qa_check("all four are reported", all(tokens %in% names(described)))
   qa_step("as inline placeholders", rep("inline", 4), unname(attr(described, "kind")[tokens]))
 })
+
+# ---- Markdown escaping and missing values (REQ-EXPORT-039, REQ-EXPORT-040) ----
+#
+# Expected strings are built from the requirement text: a backslash before each
+# listed character, HTML entities for & < >, escaped list markers, non-breaking
+# spaces for indentation.
+
+et_md_lines <- function(dta, name, ...) {
+  out <- file.path(qa_tempdir(), name)
+  write_dta(dta, file = out, format = "md", quiet = TRUE, overwrite = TRUE, ...)
+  readLines(out, warn = FALSE, encoding = "UTF-8")
+}
+
+et_with_meta <- function(...) {
+  dta <- et_dta()
+  md <- metadata(dta)
+  vals <- list(...)
+  for (nm in names(vals)) S7::prop(md, nm) <- vals[[nm]]
+  dta@metadata <- md
+  dta
+}
+
+test_that("OQ-EXPORT-055 | every Markdown-significant character in a title is written escaped | REQ-EXPORT-039", {
+  bs <- "\\"
+  specials <- c("\\", "`", "*", "_", "{", "}", "[", "]", "#", "!", "~", "=", "|")
+  for (ch in specials) {
+    lines <- et_md_lines(et_with_meta(title = paste0("a", ch, "b")), "esc.md")
+    qa_check(
+      paste0("'", ch, "' is preceded by a backslash"),
+      paste0("**Title:** a", bs, ch, "b") %in% lines
+    )
+  }
+  lines <- et_md_lines(et_with_meta(title = "x & y <z>"), "ent.md")
+  qa_check("& < > become entities", "**Title:** x &amp; y &lt;z&gt;" %in% lines)
+})
+
+test_that("OQ-EXPORT-056 | list markers and indentation in narrative text cannot start Markdown structures | REQ-EXPORT-039", {
+  bs <- "\\"
+  nbsp <- "\u00a0"
+  lines <- et_md_lines(
+    et_with_meta(error_handling = "- a\n+ b\n1. c\n2) d\n    e\nplain - dash"),
+    "lists.md"
+  )
+  qa_step(
+    "markers escaped, indentation became four non-breaking spaces, mid-line dash untouched",
+    c(
+      paste0(bs, "- a"), paste0(bs, "+ b"), paste0("1", bs, ". c"), paste0("2", bs, ") d"),
+      paste0(strrep(nbsp, 4), "e"), "plain - dash"
+    ),
+    lines[(which(lines == "## Error Handling") + 2):(which(lines == "## Error Handling") + 7)]
+  )
+  qa_check("no unescaped bullet line was written", !any(lines %in% c("- a", "+ b", "1. c")))
+})
+
+test_that("OQ-EXPORT-057 | text without special characters is written unchanged | REQ-EXPORT-039", {
+  txt <- "Plain study title 2024, with words (and parentheses)."
+  lines <- et_md_lines(et_with_meta(title = txt, header = "Header text"), "plain.md")
+  qa_check("title unchanged", paste("**Title:**", txt) %in% lines)
+  qa_check("header unchanged", "**Header:** Header text" %in% lines)
+})
+
+test_that("OQ-EXPORT-058 | transmission details and dataset name and description are written escaped | REQ-EXPORT-039", {
+  bs <- "\\"
+  lines <- et_md_lines(et_with_meta(transmission = list(method = "sftp *fast* <b>")), "trans.md")
+  qa_check(
+    "transmission value escaped",
+    any(grepl(paste0("sftp ", bs, "*fast", bs, "* &lt;b&gt;"), lines, fixed = TRUE))
+  )
+
+  ds <- et_dta()@datasets[[1]]
+  S7::prop(ds, "name") <- "Set [1]"
+  S7::prop(ds, "description") <- "Uses *stars* & _bars_"
+  out <- file.path(qa_tempdir(), "ds.md")
+  write_dataset_metadata(ds, file = out, format = "md", quiet = TRUE, overwrite = TRUE)
+  dlines <- readLines(out, warn = FALSE, encoding = "UTF-8")
+  qa_check("name escaped", paste0("**Name:** Set ", bs, "[1", bs, "]") %in% dlines)
+  qa_check(
+    "description escaped",
+    paste0("**Description:** Uses ", bs, "*stars", bs, "* &amp; ", bs, "_bars", bs, "_") %in% dlines
+  )
+})
+
+test_that("OQ-EXPORT-059 | a missing metadata field is shown as (not specified) in the Markdown file | REQ-EXPORT-040", {
+  lines <- et_md_lines(et_with_meta(transmission = list(method = NA_character_, frequency = "weekly")), "na.md")
+  qa_check("the NA field reads (not specified)", "- **method:** (not specified)" %in% lines)
+  qa_check("a present sibling is unaffected", "- **frequency:** weekly" %in% lines)
+  qa_check("the text NA is never written", !any(grepl("**method:** NA", lines, fixed = TRUE)))
+})
