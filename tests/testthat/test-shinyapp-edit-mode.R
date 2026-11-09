@@ -13,10 +13,6 @@
 # ui_components.R) is only the affordance; every observer behind it still
 # calls req(editing()), which is the enforcement these tests exercise.
 
-render_html <- function(tag) {
-  paste(as.character(tag), collapse = "\n")
-}
-
 # ---- Pure UI: meta_field_text() ---------------------------------------------
 
 test_that("meta_field_text renders the label and value as plain text, not an input", {
@@ -155,29 +151,6 @@ skip_if_not_installed("shiny")
 skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
-
-app_server_dir <- function() .shiny_app_dir()
-
-app_file_input <- function(filename) {
-  path <- app_fixture_path(filename)
-  data.frame(
-    name = filename, size = file.size(path), type = "",
-    datapath = path, stringsAsFactors = FALSE
-  )
-}
-
-clean_session_file <- function() {
-  f <- list.files(tempdir(),
-    pattern = "^dtatools_app_session.*\\.rds$", full.names = TRUE
-  )
-  unlink(f, force = TRUE)
-  invisible(f)
-}
-
-# Load the fixture DTA into a running server, ready to edit.
-load_fixture <- function(session) {
-  session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
-}
 
 test_that("editing starts off for a fresh server session", {
   clean_session_file()

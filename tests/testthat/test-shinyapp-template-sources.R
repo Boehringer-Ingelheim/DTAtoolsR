@@ -2,29 +2,6 @@
 # app_env()/app_fn() harness in helper-shinyapp.R (see that file for why the
 # app's helper files must be sourced into a private environment for testing).
 
-# Every DTATOOLS_TEMPLATE_* variable is cleared for the duration of each test.
-# WHY: a developer machine with DTATOOLS_TEMPLATE_SOURCES exported would flip
-# the app into private-only mode and fail unrelated tests confusingly.
-local_clean_template_env <- function(..., .local_envir = parent.frame()) {
-  withr::local_envvar(
-    c(
-      DTATOOLS_TEMPLATE_SOURCES = NA,
-      DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = NA,
-      DTATOOLS_TEMPLATE_REFRESH_SECONDS = NA,
-      DTATOOLS_TEMPLATE_CACHE_DIR = NA,
-      DTATOOLS_TEMPLATE_GIT_TOKEN = NA,
-      DTATOOLS_TEMPLATE_GIT_USER = NA,
-      DTATOOLS_TEMPLATE_GIT_AUTH = NA,
-      ...
-    ),
-    .local_envir = .local_envir
-  )
-  withr::local_options(
-    list(DTAtools.template_dir = NULL),
-    .local_envir = .local_envir
-  )
-}
-
 # A local bare git repo (no network) with one committed template file, used
 # by the resolve_git_source()/resolve_template_source() tests below. The repo
 # is a library: the file sits in its templates/ folder. `flat = TRUE` commits

@@ -8,10 +8,6 @@
 # component owns -- that the markup Shiny and Bootstrap each need is present,
 # and that the rows are in the documented order.
 
-render_html <- function(tag) {
-  paste(as.character(tag), collapse = "\n")
-}
-
 test_that("the Edit menu offers columns, rules, files and details in that order", {
   html <- render_html(app_fn("ds_edit_menu")("tabular"))
 

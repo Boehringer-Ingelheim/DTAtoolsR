@@ -2478,3 +2478,23 @@ test_that("OQ-EXPORT-071 | a missing metadata field is shown as (not specified) 
   qa_check("a present sibling is unaffected", any(grepl("^\\| Frequency \\| weekly \\|$", lines, ignore.case = TRUE)))
   qa_check("the text NA is never written as a value", !any(grepl("\\| NA \\|", lines)))
 })
+
+test_that("OQ-EXPORT-072 | export_with_template keeps an existing output unless overwrite = TRUE | REQ-EXPORT-045", {
+  dir <- qa_tempdir()
+  template <- et_write_template("Title: {DTA_TITLE}", dir)
+  out <- file.path(dir, "existing.docx")
+  writeLines("original", out)
+
+  refused <- tryCatch(
+    {
+      export_with_template(et_dta(), template, out, quiet = TRUE)
+      FALSE
+    },
+    error = function(e) grepl("already exists", conditionMessage(e), fixed = TRUE)
+  )
+  qa_check("a call without overwrite aborts naming the existing file", refused)
+  qa_step("the existing file is untouched", "original", readLines(out, warn = FALSE))
+
+  export_with_template(et_dta(), template, out, quiet = TRUE, overwrite = TRUE)
+  qa_step("overwrite = TRUE replaces it", "Title: Clinical Data Specification", qa_docx_text(out))
+})

@@ -391,3 +391,13 @@ requirements:
       one of several declared patterns hid every other, still-missing pattern
       from the report entirely -- a partial delivery could check() as if every
       declared pattern had arrived.
+
+  - id: REQ-FILE-032
+    text: >
+      A delimited-file handler declared with quote = "" shall be accepted and
+      shall read a file with no quote character, keeping a double-quote
+      character inside a value as ordinary data.
+    risk: medium
+    category: functional
+    covers: [DTAFileDelim, read_file]
+    source: R/DTAFileTabular-class.R

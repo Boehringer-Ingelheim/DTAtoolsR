@@ -7847,7 +7847,8 @@ server <- function(input, output, session) {
               output = output_file,
               variables = variables,
               quiet = TRUE,
-              fallback = FALSE
+              fallback = FALSE,
+              overwrite = TRUE
             )
           } else {
             # Built-in template. write_dta() throws on error; no $ok returned.

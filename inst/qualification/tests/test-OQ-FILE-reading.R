@@ -355,3 +355,15 @@ test_that("OQ-FILE-037 | open_file returns a lazy dataset, never a materialised 
   qa_check("open_file() returns a lazy Dataset object", inherits(ds, "Dataset"))
   qa_check("...unlike read_file(), which returns an already-materialised table", !inherits(t, "Dataset"))
 })
+
+test_that("OQ-FILE-055 | quote = \"\" declares a file with no quote character and keeps a literal double quote | REQ-FILE-032", {
+  dir <- qa_tempdir()
+  p <- file.path(dir, "noquote.psv")
+  fr_write_raw(c("ID|NOTE", "1|5\" pipe", "2|plain"), p)
+
+  handler <- DTAFileDelim(filename = "noquote.psv", sep = "|", quote = "")
+  t <- as.data.frame(read_file(handler, p))
+
+  qa_step("the value with a double quote is read as written", c("5\" pipe", "plain"), as.character(t$NOTE))
+  qa_step("both rows are read", 2L, nrow(t))
+})

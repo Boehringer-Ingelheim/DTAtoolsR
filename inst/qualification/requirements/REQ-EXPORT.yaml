@@ -810,3 +810,13 @@ requirements:
     category: functional
     covers: [write_dta]
     source: R/formattingHelpers.R; R/exportDocuments.R
+
+  - id: REQ-EXPORT-045
+    text: >
+      export_with_template() shall refuse to replace an existing output file
+      unless overwrite = TRUE, leaving that file untouched, and shall replace
+      it when overwrite = TRUE.
+    risk: medium
+    category: functional
+    covers: [export_with_template]
+    source: R/exportTemplateDocx.R

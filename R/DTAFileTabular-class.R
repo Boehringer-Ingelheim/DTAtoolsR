@@ -164,9 +164,9 @@ DTAFileTabular <- S7::new_class(
       !is.character(self@quote) ||
         length(self@quote) != 1 ||
         is.na(self@quote) ||
-        nchar(self@quote) != 1
+        nchar(self@quote) > 1
     ) {
-      problems <- c(problems, "'quote' must be a single character.")
+      problems <- c(problems, "'quote' must be a single character, or \"\" for no quoting.")
     }
 
     # Same shape as the `has_header` check, plus the NA guard: this value ends

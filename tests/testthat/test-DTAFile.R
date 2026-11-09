@@ -257,7 +257,18 @@ test_that("DTAFileTabular reports every validator violation at once", {
   msg <- conditionMessage(err)
   expect_match(msg, "'sep' must be a single character.", fixed = TRUE)
   expect_match(msg, "'has_header' must be a single logical value.", fixed = TRUE)
-  expect_match(msg, "'quote' must be a single character.", fixed = TRUE)
+  expect_match(msg, "'quote' must be a single character", fixed = TRUE)
+})
+
+test_that("an empty quote declares quote-off and keeps a literal double quote in a value", {
+  expect_no_error(handler <- DTAFileDelim("a.psv", sep = "|", quote = ""))
+  expect_identical(handler@quote, "")
+
+  path <- tempfile(fileext = ".psv")
+  on.exit(unlink(path), add = TRUE)
+  writeLines(c("id|note", "1|5\" pipe", "2|plain"), path)
+  tbl <- dta_read_delim_normalized(path, delim = "|", quote = "", has_header = TRUE)
+  expect_identical(as.character(tbl$note), c("5\" pipe", "plain"))
 })
 
 test_that("DTAFileTabular accepts a valid configuration", {

@@ -32,7 +32,7 @@ areas:
     min_tests: 40
   - area: FILE
     title: File handlers and readers
-    min_tests: 42
+    min_tests: 43
   - area: STREAM
     title: Streaming validation and engine parity
     min_tests: 32
@@ -44,7 +44,7 @@ areas:
     min_tests: 113
   - area: EXPORT
     title: Document and data export
-    min_tests: 71
+    min_tests: 72
   - area: REPORT
     title: The standalone HTML validation report
     min_tests: 17

@@ -26,32 +26,6 @@ skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
 
-app_server_dir <- function() .shiny_app_dir()
-
-clean_session_file <- function() {
-  f <- list.files(tempdir(),
-    pattern = "^dtatools_app_session.*[.]rds$", full.names = TRUE
-  )
-  unlink(f, force = TRUE)
-  invisible(f)
-}
-
-app_file_input <- function(filename) {
-  path <- app_fixture_path(filename)
-  data.frame(
-    name = filename, size = file.size(path), type = "",
-    datapath = path, stringsAsFactors = FALSE
-  )
-}
-
-# Flatten a renderUI() result to text, so a rendered output can be asserted on
-# rather than trusted. Deliberately this file's own copy, for the same reason
-# clean_session_file() above is: a test file owns its helpers rather than
-# depending on another test file's internals.
-render_html <- function(tag) {
-  paste(as.character(tag), collapse = "\n")
-}
-
 # Drive the create-new modal to completion.
 create_new <- function(session, title = "Brand New DTA", version = "1.0") {
   session$setInputs(create_new = 1)

@@ -171,7 +171,10 @@ write_dta <- function(
       output = target_docx,
       variables = template_variables,
       quiet = TRUE,
-      fallback = FALSE
+      fallback = FALSE,
+      # write_dta() has already refused an existing `file`; a pdf's docx is a
+      # fresh tempfile() name.
+      overwrite = TRUE
     )
     if (format == "pdf") {
       .convert_docx_to_pdf(target_docx, file)

@@ -713,7 +713,7 @@ test_that("a failed template render never touches a valid file already at the de
   )
 
   expect_error(
-    export_with_template(dta, template, out, quiet = TRUE, fallback = FALSE),
+    export_with_template(dta, template, out, quiet = TRUE, fallback = FALSE, overwrite = TRUE),
     "Template processing failed"
   )
   expect_identical(readBin(out, what = "raw", n = length(original)), original)
@@ -737,7 +737,7 @@ test_that("the template fallback is detectable programmatically", {
   caught <- NULL
   suppressMessages(
     withCallingHandlers(
-      export_with_template(dta, bad_template, out, quiet = FALSE, fallback = TRUE),
+      export_with_template(dta, bad_template, out, quiet = FALSE, fallback = TRUE, overwrite = TRUE),
       warning = function(w) {
         caught <<- w
         invokeRestart("muffleWarning")
@@ -751,7 +751,7 @@ test_that("the template fallback is detectable programmatically", {
 
   # tryCatch(warning = ) sees it too, which is what a Shiny observer uses.
   trapped <- suppressMessages(tryCatch(
-    export_with_template(dta, bad_template, out, quiet = FALSE, fallback = TRUE),
+    export_with_template(dta, bad_template, out, quiet = FALSE, fallback = TRUE, overwrite = TRUE),
     warning = function(w) "trapped"
   ))
   expect_equal(trapped, "trapped")

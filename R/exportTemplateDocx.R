@@ -101,6 +101,8 @@
 #'   TRUE`), so it can be trapped programmatically with
 #'   `withCallingHandlers(warning = )`. If `FALSE`, a failure is raised as an
 #'   error.
+#' @param overwrite Logical. Whether to replace an existing `output` file.
+#'   Default: `FALSE`, so a call against an existing path aborts.
 #'
 #' @return Invisibly returns the `output` path.
 #'
@@ -133,8 +135,12 @@ export_with_template <- function(
   output,
   variables = NULL,
   quiet = FALSE,
-  fallback = TRUE
+  fallback = TRUE,
+  overwrite = FALSE
 ) {
+  if (!is.logical(overwrite) || length(overwrite) != 1L || is.na(overwrite)) {
+    cli::cli_abort("{.arg overwrite} must be a single {.code TRUE}/{.code FALSE}.")
+  }
   if (!inherits(dta, "DTAtools::DTA")) {
     cli::cli_abort("{.arg dta} must be a DTA object.")
   }
@@ -146,6 +152,12 @@ export_with_template <- function(
   }
   if (!file.exists(template)) {
     cli::cli_abort("Template file not found: {.file {template}}")
+  }
+  if (file.exists(output) && !overwrite) {
+    cli::cli_abort(c(
+      "File {.file {output}} already exists.",
+      i = "Specify {.code overwrite = TRUE} to replace it."
+    ))
   }
   if (tolower(tools::file_ext(template)) != "docx") {
     cli::cli_abort("{.arg template} must be a {.file .docx} file, not {.file {template}}.")
