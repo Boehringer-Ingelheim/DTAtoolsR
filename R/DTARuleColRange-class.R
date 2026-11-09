@@ -11,7 +11,7 @@
 #' @param columns Character. The single column the range applies to. The
 #'   property is a character vector for consistency with the other rule
 #'   classes, but a range rule must name exactly one column; more than one is
-#'   an error when the rule is evaluated.
+#'   an error (class `dta_rule_range_columns`) when the rule is constructed.
 #' @param range Numeric vector or list of length 2 (lower, upper). Legacy
 #'   argument for range checks; it is used only when both \code{min} and
 #'   \code{max} are \code{NULL}, and is ignored otherwise.
@@ -89,6 +89,13 @@ DTARuleColRange <- S7::new_class(
 
     if (is.null(self@columns) || length(self@columns) < 1) {
       cli_abort("A 'columns' must be set.")
+    }
+
+    if (length(self@columns) != 1L) {
+      cli_abort(
+        "A range rule names exactly one column, not {length(self@columns)}.",
+        class = "dta_rule_range_columns"
+      )
     }
 
     if (!is.numeric(self@min) || !is.numeric(self@max)) {

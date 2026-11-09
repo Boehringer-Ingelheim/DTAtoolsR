@@ -3388,22 +3388,34 @@ test_that("a missing grouping column fails the streamed group rule instead of ab
   expect_match(streamed$message, "SUBJ", fixed = TRUE)
 })
 
-test_that("a zero-row source lacking the grouping column disagrees with the materialising path", {
-  # KNOWN DEFECT, pinned rather than endorsed: eager and streaming should
-  # agree. The eager check aborts with dta_rule_not_applicable before its
-  # zero-row early return, but streaming only checks the column inside
-  # dta_group_stream_update, which a source producing no batches never reaches,
-  # so the rule finalises valid. When fixed, replace the valid assertion with
-  # expect_false(streamed$valid) and
-  # expect_match(streamed$message, "could not be evaluated", fixed = TRUE),
-  # mirroring the non-empty missing-column test above.
+test_that("a zero-row source lacking the grouping column agrees with the materialising path", {
+  # Through the real driver, as both production entry points call it: a source
+  # that yields no batches never reaches dta_group_stream_update(), so the
+  # driver replays the rules once against an empty table carrying the source's
+  # real column names (`known_columns`).
   rule <- vs_zero_row_group_rule("any")
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "SUBJ", type = "SAS Char", length = 3),
+    DTAColumnSpec(id = "REASND", type = "SAS Char", length = 8),
+    DTAColumnSpec(id = "STAT", type = "SAS Char", length = 8)
+  ), rules = list(rule))
   table <- data.frame(REASND = character(), STAT = character(), stringsAsFactors = FALSE)
 
   expect_error(rule_check_group_condition(rule, table), class = "dta_rule_not_applicable")
+  eager <- validate_table_detailed(specs = specs, table = table, verbose = FALSE)
+  expect_false(eager$rules_valid)
 
   for (batch_rows in c(1L, 100L)) {
-    streamed <- vs_stream_rule(rule, table, batch_rows)
-    expect_true(streamed$valid, info = batch_rows)
+    streamed <- dta_validate_table_stream(
+      specs, vs_reader(table, batch_rows),
+      verbose = FALSE, coerce = FALSE, known_columns = names(table)
+    )
+    expect_false(streamed$rules_valid, info = batch_rows)
+    expect_equal(
+      vapply(streamed$rule_errors, function(e) e$message, character(1)),
+      vapply(eager$rule_errors, function(e) e$message, character(1)),
+      info = batch_rows
+    )
+    expect_match(streamed$rule_errors[[1]]$message, "could not be evaluated", fixed = TRUE)
   }
 })

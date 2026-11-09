@@ -1133,7 +1133,7 @@ test_that("a latin1 header name is decoded exactly once on the lazy path", {
   expect_identical(names(open_file(handler, path)), names(read_file(handler, path)))
 })
 
-test_that("real UTF-16 and UTF-32 files are refused with advice that works (stream = never is a pinned defect)", {
+test_that("real UTF-16 and UTF-32 files are refused with advice that works (every stream mode)", {
   # KNOWN LIMITATION: the refusal in dta_transcode_to_utf8() is a plain
   # cli_abort() with no condition class, so the message fragments below are the
   # only handle on it. If a class is ever added, switch these to
@@ -1178,18 +1178,11 @@ test_that("real UTF-16 and UTF-32 files are refused with advice that works (stre
       paste(encoding, "always")
     )
 
-    # KNOWN DEFECT, pinned rather than endorsed: the refusal is not raised for
-    # every stream mode, because stream = "never" never reaches
-    # dta_transcode_to_utf8() and fails later in the in-memory Arrow reader with
-    # an unrelated message. It does error, which is what is pinned here. When
-    # fixed, replace this block with
-    #   expect_refusal(message_of(load_file(ds, file = path, handler_index = 1,
-    #                                       stream = "never")), ...)
-    never_msg <- message_of(
-      load_file(ds, file = path, handler_index = 1, stream = "never")
+    # The in-memory reader refuses with the same advice as the lazy one.
+    expect_refusal(
+      message_of(load_file(ds, file = path, handler_index = 1, stream = "never")),
+      paste(encoding, "never")
     )
-    expect_match(never_msg, "Cannot read the column names", fixed = TRUE)
-    expect_false(grepl("cannot be converted block by block", never_msg, fixed = TRUE))
   }
 
   # Positive control: the same content declared as UTF-8 reads fine.

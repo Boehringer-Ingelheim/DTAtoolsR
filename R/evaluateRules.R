@@ -342,7 +342,10 @@ dta_range_target <- function(rule) {
   col <- dta_rule_target_columns(rule)
 
   if (length(col) != 1) {
-    cli::cli_abort("Range rules require exactly one target column.")
+    cli::cli_abort(
+      "Range rules require exactly one target column.",
+      class = "dta_rule_range_columns"
+    )
   }
 
   range <- rule_get_slot(rule, "range")

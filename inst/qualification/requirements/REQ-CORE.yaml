@@ -165,7 +165,8 @@ requirements:
     text: >
       run_qualification() shall abort, before producing a verdict, when its
       filter matches no test file in any of the stages run, naming the filter
-      in the message.
+      in the message and leaving no evidence bundle behind in the output
+      directory.
     risk: medium
     category: integrity
     covers: [run_qualification]

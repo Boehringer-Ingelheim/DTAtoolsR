@@ -549,11 +549,8 @@ test_that("Range rules support min/max slots and reject multi-column usage", {
   expect_true(all_na$valid)
 
   expect_error(
-    rule_check_range(
-      DTARuleColRange(id = "range_multi", columns = c("AGE", "WEIGHT"), min = 0, max = 100),
-      data.frame(AGE = 1, WEIGHT = 2)
-    ),
-    "exactly one"
+    DTARuleColRange(id = "range_multi", columns = c("AGE", "WEIGHT"), min = 0, max = 100),
+    class = "dta_rule_range_columns"
   )
 })
 
@@ -1896,13 +1893,11 @@ test_that("A rule naming an absent column fails the rule instead of aborting the
 
   # Precision check: a malformed rule is a specification error, not an
   # unevaluable one, and must still abort rather than be reported as a failure.
+  multi_col <- DTARuleColRange(id = "multi_col", columns = "A", min = 0, max = 1)
+  S7::prop(multi_col, "columns", check = FALSE) <- c("A", "B")
   expect_error(
-    apply_rules(
-      list(DTARuleColRange(id = "multi_col", columns = c("A", "B"), min = 0, max = 1)),
-      data.frame(A = 1, B = 2),
-      verbose = FALSE
-    ),
-    "exactly one"
+    apply_rules(list(multi_col), data.frame(A = 1, B = 2), verbose = FALSE),
+    class = "dta_rule_range_columns"
   )
 })
 
@@ -2163,10 +2158,10 @@ test_that("print() on the other rule classes already survives braces in id/colum
   expect_true(any(grepl("cc{r}", out_cond, fixed = TRUE)))
   expect_true(any(grepl("desc{ription}", out_cond, fixed = TRUE)))
 
-  range_rule <- DTARuleColRange(id = "range{r}", columns = c("A{B}", "C{D}"), min = 0, max = 10)
+  range_rule <- DTARuleColRange(id = "range{r}", columns = "A{B}", min = 0, max = 10)
   out_range <- capture.output(print(range_rule), type = "message")
   expect_true(any(grepl("range{r}", out_range, fixed = TRUE)))
-  expect_true(any(grepl("A{B}, C{D}", out_range, fixed = TRUE)))
+  expect_true(any(grepl("A{B}", out_range, fixed = TRUE)))
 
   group_rule <- DTARuleGroupCondition(
     id = "grp{r}",

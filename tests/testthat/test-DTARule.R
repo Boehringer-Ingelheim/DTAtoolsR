@@ -231,26 +231,23 @@ test_that("check() on a concrete rule says it is not implemented instead of retu
   }
 })
 
-test_that("a col_range rule naming several columns is accepted at construction and only rejected at evaluation", {
-  # KNOWN DEFECT, pinned rather than endorsed: DTARuleColRange documents that a
-  # range rule names exactly one column, but the constructor does not enforce
-  # it. The abort only happens when the rule is evaluated
-  # (dta_range_target()), so a malformed rule survives loading and fails late.
-  # A multi-column range rule should be rejected at construction. When that
-  # lands, replace the expect_no_error() and length assertion below with
-  # expect_error(DTARuleColRange(id = "r", columns = c("A", "B"), min = 0, max = 5), "exactly one")
-  # and drop the evaluation half. (No condition class exists for either abort
-  # today -- dta_range_target() raises a bare cli_abort() -- so the message is
-  # the only handle; give both a class when the check moves to construction.)
-  rule <- NULL
-  expect_no_error(
-    rule <- DTARuleColRange(id = "r", columns = c("A", "B"), min = 0, max = 5)
+test_that("a col_range rule naming several columns is rejected at construction", {
+  expect_error(
+    DTARuleColRange(id = "r", columns = c("A", "B"), min = 0, max = 5),
+    class = "dta_rule_range_columns"
   )
-  expect_length(rule@columns, 2L)
 
+  # Assigning a second column to a valid rule is refused the same way.
+  rule <- DTARuleColRange(id = "r", columns = "A", min = 0, max = 5)
+  expect_error(
+    S7::prop(rule, "columns") <- c("A", "B"),
+    class = "dta_rule_range_columns"
+  )
+
+  # The evaluator keeps its own guard for a rule that bypassed validation.
+  S7::prop(rule, "columns", check = FALSE) <- c("A", "B")
   expect_error(
     rule_check_range(rule, data.frame(A = 1, B = 2)),
-    "exactly one target column",
-    fixed = TRUE
+    class = "dta_rule_range_columns"
   )
 })

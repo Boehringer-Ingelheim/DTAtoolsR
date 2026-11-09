@@ -35,6 +35,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   functions do. Pass `overwrite = TRUE` for the old behaviour.
 - The qualification runner's `filter` now matches the whole test name, not a
   fragment of it, so `"IQ-ENV-01"` no longer selects `IQ-ENV-010` to `-019`.
+- `run_qualification()` removes the half-written evidence bundle when its
+  `filter` matches no test and it aborts.
+- `DTARuleColRange()` now rejects a rule naming more than one column at
+  construction (condition class `dta_rule_range_columns`), instead of only when
+  the rule is evaluated.
+- `load_file(stream = "never")` refuses a UTF-16 or UTF-32 file with the same
+  advice as the streaming readers (convert to UTF-8 first), instead of failing
+  in the Arrow reader with an unrelated message.
 
 ### Changed
 

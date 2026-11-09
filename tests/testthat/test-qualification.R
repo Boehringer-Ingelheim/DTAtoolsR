@@ -539,16 +539,9 @@ test_that("a run filter that selects no test in any stage aborts instead of pass
     "matched no qualification test",
     class = "rlang_error"
   )
-  # KNOWN DEFECT, pinned rather than endorsed: the abort is raised after the
-  # bundle directory and its log have been created (the check needs the stage
-  # results, so it cannot simply move above dir.create()), so a mistyped filter
-  # leaves a half-written bundle in `out` -- a directory with no report. When
-  # run_qualification() removes it on this path, replace the two assertions
-  # below with
-  #   expect_length(list.files(out), 0L)
-  left <- list.files(out, full.names = TRUE)
-  expect_length(left, 1L)
-  expect_identical(list.files(file.path(left, "report")), character(0))
+  # The abort comes after the bundle was created (it needs the stage results),
+  # so the bundle is removed on that path: no half-written evidence is left.
+  expect_length(list.files(out), 0L)
   # Not a filter run, or no stage to select from: nothing to mistype.
   # A second run needs its own output dir: the first leaves a bundle behind and
   # bundle names carry a one-second timestamp.

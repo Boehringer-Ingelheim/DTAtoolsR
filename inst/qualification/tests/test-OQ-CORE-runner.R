@@ -666,9 +666,10 @@ test_that("OQ-CORE-012 | the run filter is a regular expression matched against 
 })
 
 test_that("OQ-CORE-013 | a filter that matches no test file in any stage aborts the run | REQ-CORE-013", {
+  out <- qa_tempdir()
   err <- tryCatch(
     run_qualification(
-      qa_tempdir(),
+      out,
       stages = "OQ", scale = "quick", formats = "md", quiet = TRUE,
       filter = "^NO-SUCH-TEST-FILE$"
     ),
@@ -679,4 +680,5 @@ test_that("OQ-CORE-013 | a filter that matches no test file in any stage aborts 
     "and the message names the filter that matched nothing",
     inherits(err, "condition") && grepl("^NO-SUCH-TEST-FILE$", conditionMessage(err), fixed = TRUE)
   )
+  qa_step("and no evidence bundle is left in the output directory", 0L, length(list.files(out)))
 })

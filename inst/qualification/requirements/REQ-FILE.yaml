@@ -401,3 +401,13 @@ requirements:
     category: functional
     covers: [DTAFileDelim, read_file]
     source: R/DTAFileTabular-class.R
+
+  - id: REQ-FILE-033
+    text: >
+      A delimited file declared as UTF-16 or UTF-32 shall be refused with the
+      same advice to convert it to UTF-8 first, whichever stream mode
+      ("never", "auto" or "always") loads it.
+    risk: medium
+    category: functional
+    covers: [load_file, read_file]
+    source: R/DTAFileTabular-class.R dta_refuse_wide_encoding()

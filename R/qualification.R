@@ -1890,6 +1890,10 @@ run_qualification <- function(output_dir,
   # nothing in ANY stage is a typo, and must not read as a pass.
   if (length(stages) > 0 && length(filter) == 1 && !is.na(filter) &&
     nzchar(filter) && nrow(tests_df) == 0) {
+    # No evidence was produced, so leave no half-written bundle behind. The log
+    # is closed first: Windows will not delete a directory holding an open file.
+    qual_safe(close(log_con), NULL)
+    unlink(bundle_dir, recursive = TRUE)
     cli::cli_abort(
       "{.arg filter} {.val {filter}} matched no qualification test in stage{?s} {.val {stages}}."
     )

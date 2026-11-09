@@ -390,6 +390,19 @@ dta_encoding_is_wide <- function(encoding) {
   grepl("^(utf|ucs)[-_]?(16|32|2|4)", tolower(encoding))
 }
 
+# Refuses a wide encoding for EVERY reader (lazy and eager, whatever `stream`
+# says), so the advice is the same wherever the file is read.
+dta_refuse_wide_encoding <- function(encoding, path) {
+  if (dta_encoding_is_wide(encoding)) {
+    cli::cli_abort(c(
+      "A file declaring {.val {encoding}} cannot be converted block by block.",
+      "x" = "{.path {path}} would have to be split on the byte {.val 0x0A}, which is part of an ordinary character in this encoding.",
+      "i" = "UTF-16 and UTF-32 are not supported for tabular reading. Convert the file to UTF-8 first."
+    ))
+  }
+  invisible(TRUE)
+}
+
 # ---- reading a file that is not UTF-8 ---------------------------------------
 
 #' @title A UTF-8 Copy of a File Declared in Another Encoding
@@ -481,13 +494,7 @@ dta_transcode_to_utf8 <- function(path, encoding) {
   # costs nothing and needs no I/O to establish.
   dta_check_encoding_supported(encoding, path)
 
-  if (dta_encoding_is_wide(encoding)) {
-    cli::cli_abort(c(
-      "A file declaring {.val {encoding}} cannot be converted block by block.",
-      "x" = "{.path {path}} would have to be split on the byte {.val 0x0A}, which is part of an ordinary character in this encoding.",
-      "i" = "UTF-16 and UTF-32 are not supported for tabular reading. Convert the file to UTF-8 first."
-    ))
-  }
+  dta_refuse_wide_encoding(encoding, path)
 
   source <- normalizePath(path, winslash = "/", mustWork = FALSE)
 
@@ -1491,6 +1498,8 @@ dta_read_delim_normalized <- function(
   na = NULL,
   handler = NULL
 ) {
+  dta_refuse_wide_encoding(dta_reader_parse_settings(handler)$encoding, path)
+
   plan <- dta_delim_reader_plan(
     path,
     specs = specs,

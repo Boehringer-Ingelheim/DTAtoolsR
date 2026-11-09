@@ -394,7 +394,10 @@ test_that("invalid rules are described as not evaluable, never as valid", {
     regexp = "Unsupported condition operator"
   )
 
-  two_cols <- DTARuleColRange(id = "r", columns = c("A", "B"), min = 1, max = 5)
+  # A range rule cannot be built with two columns; one that bypassed
+  # validation is still described, not crashed on.
+  two_cols <- DTARuleColRange(id = "r", columns = "A", min = 1, max = 5)
+  S7::prop(two_cols, "columns", check = FALSE) <- c("A", "B")
   expect_identical(.rule_text(two_cols), paste(
     "Every value in columns A and B would have to be a number from 1 to 5, inclusive.",
     "Problem: This rule cannot be evaluated. A range rule needs exactly one column, but this one names 2.",
@@ -403,7 +406,7 @@ test_that("invalid rules are described as not evaluable, never as valid", {
   expect_false(.rule_describe(two_cols)$valid)
   expect_error(
     rule_check_range(two_cols, data.frame(A = 1, B = 2)),
-    regexp = "exactly one target column"
+    class = "dta_rule_range_columns"
   )
 
   # A constraint given as a bare value instead of an operator map.
