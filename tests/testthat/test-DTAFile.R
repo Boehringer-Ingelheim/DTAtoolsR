@@ -926,6 +926,11 @@ test_that("the copy is cached on the source's identity and its encoding", {
   again <- dta_transcode_to_utf8(cleared, "latin1")
   expect_false(identical(again, before))
   expect_true(file.exists(again))
+  # The re-made copy is the UTF-8 conversion, not an empty or raw-latin1 file.
+  expect_identical(
+    readLines(again, encoding = "UTF-8", warn = FALSE),
+    c("NAME,V", "Jürgen,1", "Möller,2")
+  )
 })
 
 test_that("a wide encoding is refused before anything is read", {
@@ -1029,6 +1034,11 @@ test_that("a re-delivery replaces its copy instead of adding to it", {
   expect_false(identical(second, first))
   expect_false(file.exists(first))
   expect_true(file.exists(second))
+  # The replacement holds the grown delivery, converted.
+  expect_identical(
+    readLines(second, encoding = "UTF-8", warn = FALSE),
+    c("NAME,V", "Jürgen,1", "Möller,2", "Zoe,3")
+  )
 
   # And the entry went with the file: nothing in the cache still points at it.
   entries <- mget(

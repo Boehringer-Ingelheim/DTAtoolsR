@@ -611,3 +611,72 @@ test_that("OQ-CORE-011 | a requirement a live deviation affects is reported as v
   pending <- attr(qual_traceability(req_df, disc_df, tests_df, "OQ", dev_df), "requirements")
   qa_step("a pending deviation counts as live", "verified_with_deviation", pending$status[[2]])
 })
+
+# A synthetic tests directory whose files are named so that anchored filters
+# have something to tell apart. Each file holds one case with its own id, so
+# which cases ran identifies which files were selected.
+qa_core_filter_fixture <- function(dir) {
+  files <- c(
+    "OQ-A-demo" = "OQ-XX-001", "OQ-B" = "OQ-XX-002",
+    "OQ-B-demo" = "OQ-XX-003", "OQ-C-OQ-A-late" = "OQ-XX-004"
+  )
+  for (nm in names(files)) {
+    writeLines(
+      c(
+        sprintf("test_that(\"%s | a passing case | REQ-XX-001\", {", files[[nm]]),
+        "  qa_step(\"two is two\", 2L, 2L)",
+        "})"
+      ),
+      file.path(dir, paste0("test-", nm, ".R"))
+    )
+  }
+  file.copy(
+    file.path(qa_suite_root(), "tests", "helper-00-qa.R"),
+    file.path(dir, "helper-00-qa.R")
+  )
+  dir
+}
+
+test_that("OQ-CORE-012 | the run filter is a regular expression matched against the whole test name | REQ-CORE-012 | tags: white-box", {
+  dir <- qa_core_filter_fixture(qa_tempdir())
+  ran <- function(filter) {
+    sort(qual_tests_df(qual_run_stage("OQ", dir, filter), "OQ")$tc_id)
+  }
+
+  qa_step(
+    "no filter runs every file",
+    c("OQ-XX-001", "OQ-XX-002", "OQ-XX-003", "OQ-XX-004"), ran(NULL)
+  )
+  qa_step(
+    "a start anchor selects only names that begin with the pattern",
+    "OQ-XX-001", ran("^OQ-A")
+  )
+  qa_step(
+    "an end anchor selects only the name that ends with the pattern, not the longer one",
+    "OQ-XX-002", ran("OQ-B$")
+  )
+  qa_step(
+    "an unanchored pattern selects every name containing it",
+    c("OQ-XX-001", "OQ-XX-004"), ran("OQ-A")
+  )
+  qa_step(
+    "an alternation is a regular expression, not a literal",
+    c("OQ-XX-001", "OQ-XX-002"), ran("^OQ-A-demo$|^OQ-B$")
+  )
+})
+
+test_that("OQ-CORE-013 | a filter that matches no test file in any stage aborts the run | REQ-CORE-013", {
+  err <- tryCatch(
+    run_qualification(
+      qa_tempdir(),
+      stages = "OQ", scale = "quick", formats = "md", quiet = TRUE,
+      filter = "^NO-SUCH-TEST-FILE$"
+    ),
+    error = function(e) e
+  )
+  qa_check("the run aborts instead of returning a verdict", inherits(err, "error"))
+  qa_check(
+    "and the message names the filter that matched nothing",
+    inherits(err, "condition") && grepl("^NO-SUCH-TEST-FILE$", conditionMessage(err), fixed = TRUE)
+  )
+})

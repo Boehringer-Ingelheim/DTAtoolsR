@@ -81,9 +81,7 @@ DTARuleColRange <- S7::new_class(
     max = class_numeric # Maximum value of the range
   ),
   validator = function(self) {
-    if (!is.null(dta_id_problem(self@id))) {
-      cli_abort(dta_id_problem(self@id), class = "dta_rule_invalid_id")
-    }
+    # The id is validated once, by the DTARule parent validator S7 runs first.
 
     if (!identical(self@type, "col_range")) {
       cli_abort("{.arg type} must be {.val col_range}.")

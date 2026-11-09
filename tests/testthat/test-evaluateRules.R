@@ -1169,7 +1169,7 @@ test_that("Unsupported condition operators abort via cli, naming column and key"
       ),
       data.frame(VISIT = "V03", AGE = 1, stringsAsFactors = FALSE)
     ),
-    regexp = "bogus_op", class = "rlang_error"
+    regexp = "Unsupported condition operator.*bogus_op.*for column.*AGE", class = "rlang_error"
   )
   # The abort must identify both the column and the offending key, otherwise a
   # typo in a large DTS is untraceable.
@@ -1187,7 +1187,7 @@ test_that("Unsupported condition operators abort via cli, naming column and key"
       ),
       data.frame(VISIT = "V03", AGE = 1, stringsAsFactors = FALSE)
     ),
-    regexp = "bogus_op", class = "rlang_error"
+    regexp = "Unsupported condition operator.*bogus_op.*for column.*AGE", class = "rlang_error"
   )
 })
 
@@ -2291,7 +2291,7 @@ test_that("well-formed operator values are unaffected by the arity check", {
 
 # ---- review fixes: VAL-2..VAL-7 ------------------------------------------------
 
-test_that("requires with then_scope = all attributes rows per group, at linear cost", {
+test_that("requires with then_scope = all attributes rows per group, by positional lookup", {
   # groups_idx() (the row indices of each group) is read positionally, [[g]],
   # only on the requires + then_scope = "all" path; a lookup by name scanned the
   # names vector once per violating group. Every group fails here: IF holds on
@@ -2311,8 +2311,6 @@ test_that("requires with then_scope = all attributes rows per group, at linear c
     list(df = df, rule = rule)
   }
 
-  # n is large enough that a quadratic name scan dominates the linear work
-  # (measured: ratio ~4 as written, ~10 with a scan), yet the case stays ~2 s.
   n <- 2000L
   small <- make(n)
   res <- rule_check_group_condition(small$rule, small$df)
@@ -2323,16 +2321,44 @@ test_that("requires with then_scope = all attributes rows per group, at linear c
   expect_identical(res$details[[n]]$rows, c(2L * n - 1L, 2L * n))
   expect_match(res$details[[n]]$message, "rows 4000 do not satisfy", fixed = TRUE)
 
-  # Cost shape, not a wall-clock threshold: 4x the groups must cost about 4x,
-  # not 16x. Best of three on each side to shed scheduler noise.
-  best <- function(case) {
-    min(vapply(1:3, function(i) {
-      system.time(rule_check_group_condition(case$rule, case$df))[["elapsed"]]
-    }, numeric(1)))
-  }
-  big <- make(4L * n)
-  # Linear measures 3.6-4.8, a name scan about 7; 5.5 sits between them.
-  expect_lt(best(big) / max(best(small), 0.01), 5.5)
+  # Cost shape, asserted structurally rather than by wall clock: the group
+  # index must be read by integer position, [[g]]. A lookup by name (or by
+  # match() against names()) is a linear scan per violating group, which is
+  # the quadratic cost this test exists to catch. split() is wrapped so the
+  # list it returns records every character subscript and every names() call.
+  probe <- new.env(parent = emptyenv())
+  probe$by_name <- 0L
+  probe$names_calls <- 0L
+  probe$positional <- 0L
+  # Only the group-index split of this very table is wrapped (every other
+  # split() call, here and in testthat, passes straight through).
+  real_split <- base::split
+  local_mocked_bindings(
+    split = function(x, f, ...) {
+      out <- real_split(x, f, ...)
+      if (identical(x, seq_len(2L * n)) && nlevels(f) == n) class(out) <- "dta_probe"
+      out
+    },
+    .package = "base"
+  )
+  local_mocked_s3_method("[[", "dta_probe", function(x, i, ...) {
+    if (is.character(i)) probe$by_name <- probe$by_name + 1L else probe$positional <- probe$positional + 1L
+    unclass(x)[[i, ...]]
+  })
+  local_mocked_s3_method("[", "dta_probe", function(x, i, ...) {
+    if (is.character(i)) probe$by_name <- probe$by_name + 1L
+    unclass(x)[i, ...]
+  })
+  local_mocked_s3_method("names", "dta_probe", function(x) {
+    probe$names_calls <- probe$names_calls + 1L
+    names(unclass(x))
+  })
+  res <- rule_check_group_condition(small$rule, small$df)
+  expect_length(res$details, n)
+  # One positional read per violating group, and not a single name lookup.
+  expect_gte(probe$positional, n)
+  expect_identical(probe$by_name, 0L)
+  expect_identical(probe$names_calls, 0L)
 })
 
 test_that("group IF conditions keep unconvertible rows in scope", {

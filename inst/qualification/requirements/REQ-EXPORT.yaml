@@ -779,3 +779,34 @@ requirements:
       leading comment block of R/rulePhrasing.R. A heading per rule lets a
       reader of a long agreement find and link to one rule; the Word
       documents keep the two-column rules table (REQ-EXPORT-036).
+
+  - id: REQ-EXPORT-043
+    text: >
+      The Markdown files written by write_dta() and write_dataset_metadata()
+      shall show author-supplied plain text (title, header, version, error
+      handling, transmission details, dataset name and description) literally
+      when rendered, and not interpret it as Markdown or HTML. Each of the
+      characters \ ` * _ { } [ ] # ! ~ | and $ shall be written preceded by a
+      backslash; < and > shall be written as &lt; and &gt;; a list marker (-
+      or +, or "<digits>." or "<digits>)" followed by a space) at the start
+      of a line shall have its marker character escaped; and leading
+      indentation shall be written as non-breaking spaces of the same width,
+      so it cannot begin an indented code block. Text that contains none of
+      these shall be written unchanged.
+    risk: medium
+    category: functional
+    covers: [write_dta, write_dataset_metadata]
+    source: R/exportMarkdown.R; R/exportDocuments.R
+    notes: >
+      Complements REQ-EXPORT-040, which states the structural guarantee; this
+      statement fixes the per-character rules.
+
+  - id: REQ-EXPORT-044
+    text: >
+      A metadata field that is missing (NA) shall be shown in the Markdown
+      files written by write_dta() as the text "(not specified)", and never
+      as an empty value or as the text "NA".
+    risk: low
+    category: functional
+    covers: [write_dta]
+    source: R/formattingHelpers.R; R/exportDocuments.R

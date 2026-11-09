@@ -2382,3 +2382,99 @@ test_that("OQ-EXPORT-066 | every rule has its own heading with an anchor, its ty
   write_dta(et_minimal_dta(), file = bare, format = "md", quiet = TRUE)
   qa_step("a document without rules has no reading guide", 0L, sum(grepl("How to read the rules", et_md_lines(bare), fixed = TRUE)))
 })
+
+
+# ---- Markdown escaping and missing values (REQ-EXPORT-043, REQ-EXPORT-044) ----
+#
+# Expected strings are built from the requirement text: a backslash before each
+# listed character, entities for < and >, escaped list markers, non-breaking
+# spaces for indentation. Where a piece of text sits in the document (a bold
+# title line, a table cell, a paragraph) is REQ-EXPORT-040's business, so
+# these tests look for the escaped text anywhere in the written lines.
+
+et_md_written <- function(dta, name, ...) {
+  out <- file.path(qa_tempdir(), name)
+  write_dta(dta, file = out, format = "md", quiet = TRUE, overwrite = TRUE, ...)
+  readLines(out, warn = FALSE, encoding = "UTF-8")
+}
+
+et_with_meta <- function(...) {
+  dta <- et_dta()
+  md <- metadata(dta)
+  vals <- list(...)
+  for (nm in names(vals)) S7::prop(md, nm) <- vals[[nm]]
+  dta@metadata <- md
+  dta
+}
+
+test_that("OQ-EXPORT-067 | every Markdown-significant character in a title is written escaped | REQ-EXPORT-043", {
+  bs <- "\\"
+  specials <- c("\\", "`", "*", "_", "{", "}", "[", "]", "#", "!", "~", "$", "|")
+  for (ch in specials) {
+    lines <- et_md_written(et_with_meta(title = paste0("a", ch, "b")), "esc.md")
+    qa_check(
+      paste0("'", ch, "' is preceded by a backslash"),
+      any(grepl(paste0("a", bs, ch, "b"), lines, fixed = TRUE))
+    )
+  }
+  lines <- et_md_written(et_with_meta(title = "x <z>"), "ent.md")
+  qa_check("< and > become entities", any(grepl("x &lt;z&gt;", lines, fixed = TRUE)))
+})
+
+test_that("OQ-EXPORT-068 | list markers and indentation in narrative text cannot start Markdown structures | REQ-EXPORT-043", {
+  bs <- "\\"
+  nbsp <- " "
+  lines <- et_md_written(
+    et_with_meta(error_handling = "- a\n+ b\n1. c\n2) d\n    e\nplain - dash"),
+    "lists.md"
+  )
+  start <- grep("Error Handling$", lines)
+  start <- start[length(start)]
+  # A line break inside a paragraph is written as a trailing backslash
+  # (REQ-EXPORT-040's structure); it is not part of what is compared here.
+  body <- sub("\\\\$", "", lines[(start + 2L):(start + 7L)])
+  qa_step(
+    "markers escaped, indentation became four non-breaking spaces, mid-line dash untouched",
+    c(
+      paste0(bs, "- a"), paste0(bs, "+ b"), paste0("1", bs, ". c"), paste0("2", bs, ") d"),
+      paste0(strrep(nbsp, 4), "e"), "plain - dash"
+    ),
+    body
+  )
+  qa_check("no unescaped bullet line was written", !any(lines %in% c("- a", "+ b", "1. c")))
+})
+
+test_that("OQ-EXPORT-069 | text without special characters is written unchanged | REQ-EXPORT-043", {
+  txt <- "Plain study title 2024, with words (and parentheses)."
+  lines <- et_md_written(et_with_meta(title = txt, header = "Header text"), "plain.md")
+  qa_check("title unchanged", any(grepl(txt, lines, fixed = TRUE)))
+  qa_check("header unchanged", any(grepl("| Header text |", lines, fixed = TRUE)))
+})
+
+test_that("OQ-EXPORT-070 | transmission details and dataset name and description are written escaped | REQ-EXPORT-043", {
+  bs <- "\\"
+  lines <- et_md_written(et_with_meta(transmission = list(method = "sftp *fast* <b>")), "trans.md")
+  qa_check(
+    "transmission value escaped",
+    any(grepl(paste0("sftp ", bs, "*fast", bs, "* &lt;b&gt;"), lines, fixed = TRUE))
+  )
+
+  ds <- et_dta()@datasets[[1]]
+  S7::prop(ds, "name") <- "Set [1]"
+  S7::prop(ds, "description") <- "Uses *stars* and _bars_"
+  out <- file.path(qa_tempdir(), "ds.md")
+  write_dataset_metadata(ds, file = out, format = "md", quiet = TRUE, overwrite = TRUE)
+  dlines <- readLines(out, warn = FALSE, encoding = "UTF-8")
+  qa_check("name escaped", any(grepl(paste0("Set ", bs, "[1", bs, "]"), dlines, fixed = TRUE)))
+  qa_check(
+    "description escaped",
+    paste0("Uses ", bs, "*stars", bs, "* and ", bs, "_bars", bs, "_") %in% dlines
+  )
+})
+
+test_that("OQ-EXPORT-071 | a missing metadata field is shown as (not specified) in the Markdown file | REQ-EXPORT-044", {
+  lines <- et_md_written(et_with_meta(transmission = list(method = NA_character_, frequency = "weekly")), "na.md")
+  qa_check("the NA field reads (not specified)", any(grepl("^\\| Method \\| \\(not specified\\) \\|$", lines, ignore.case = TRUE)))
+  qa_check("a present sibling is unaffected", any(grepl("^\\| Frequency \\| weekly \\|$", lines, ignore.case = TRUE)))
+  qa_check("the text NA is never written as a value", !any(grepl("\\| NA \\|", lines)))
+})

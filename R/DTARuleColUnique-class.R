@@ -65,9 +65,7 @@ DTARuleColUnique <- S7::new_class(
     columns = class_character
   ),
   validator = function(self) {
-    if (!is.null(dta_id_problem(self@id))) {
-      cli_abort(dta_id_problem(self@id), class = "dta_rule_invalid_id")
-    }
+    # The id is validated once, by the DTARule parent validator S7 runs first.
 
     if (!identical(self@type, "col_unique")) {
       cli_abort("{.arg type} must be {.val col_unique}.")

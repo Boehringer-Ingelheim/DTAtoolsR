@@ -475,3 +475,27 @@ test_that("OQ-SPEC-048 | a column specification whose own values or examples can
       identical(from_yaml$findings$id, "CODE")
   )
 })
+
+test_that("OQ-SPEC-056 | a DTA with an entry that is not a DTADataSet is refused, naming the entry | REQ-SPEC-031", {
+  ds <- DTADataSetTabular(id = "good", specs = create_example_DTAColumnSpecCollection(1))
+  md <- create_example_DTAMetaData()
+
+  err <- tryCatch(
+    DTA(datasets = list(good = ds, stray = "not a dataset", other = 3), metadata = md),
+    error = function(e) e
+  )
+  qa_check("the refusal has class dta_invalid_dataset_entry", inherits(err, "dta_invalid_dataset_entry"))
+  msg <- if (inherits(err, "condition")) conditionMessage(err) else ""
+  qa_step(
+    "the message names both offending entries and not the valid one",
+    c(stray = TRUE, other = TRUE, good = FALSE),
+    c(
+      stray = grepl("stray", msg, fixed = TRUE),
+      other = grepl("other", msg, fixed = TRUE),
+      good = grepl("good", msg, fixed = TRUE)
+    )
+  )
+
+  ok <- tryCatch(DTA(datasets = list(good = ds), metadata = md), error = function(e) e)
+  qa_check("a list of DTADataSet entries alone constructs", !inherits(ok, "condition"))
+})

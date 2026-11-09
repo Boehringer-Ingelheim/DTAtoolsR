@@ -599,9 +599,22 @@ test_that("handler_index resolves a character index numerically, not via string 
 test_that("handler_index aborts on NULL, NA, or a length-2 value", {
   handlers <- list(DTAFileAny(filename = "a.txt"), DTAFileAny(filename = "b.txt"))
 
-  expect_error(dta_resolve_file_handler_index(NULL, handlers), class = "rlang_error")
-  expect_error(dta_resolve_file_handler_index(NA, handlers), class = "rlang_error")
-  expect_error(dta_resolve_file_handler_index(c(1, 2), handlers), class = "rlang_error")
+  abort_text <- "must be a single, non-missing character or numeric value"
+  expect_error(
+    dta_resolve_file_handler_index(NULL, handlers),
+    abort_text,
+    fixed = TRUE, class = "rlang_error"
+  )
+  expect_error(
+    dta_resolve_file_handler_index(NA, handlers),
+    abort_text,
+    fixed = TRUE, class = "rlang_error"
+  )
+  expect_error(
+    dta_resolve_file_handler_index(c(1, 2), handlers),
+    abort_text,
+    fixed = TRUE, class = "rlang_error"
+  )
 })
 
 # ---------------------------------------------------------------------------
