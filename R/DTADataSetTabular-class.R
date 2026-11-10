@@ -9,8 +9,9 @@
 #' @param specs A DTAColumnSpecCollection object specifying the column specs.
 #' @param files A list of DTAFile objects specifying input file information.
 #'   Every handler must inherit \code{DTAFileTabular} (for example
-#'   \code{DTAFileCSV} or \code{DTAFileTSV}), because a tabular dataset parses
-#'   its files; a reader-less handler is rejected.
+#'   \code{DTAFileCSV} or \code{DTAFileTSV}) or be a \code{DTAFileSAS7BDAT},
+#'   because a tabular dataset parses its files; a reader-less handler is
+#'   rejected.
 #' @param tables A named list of tabular objects. A materialised entry
 #'   (data.frame or Arrow Table) is typed by `specs` and converted to an Arrow
 #'   Table before storage. A lazy entry (Arrow Dataset, `arrow_dplyr_query`, or
@@ -184,7 +185,9 @@ DTADataSetTabular <- S7::new_class(
     # A tabular dataset parses every file it is given, so each handler has to be
     # one that can actually read: it supplies the separator, header flag and
     # quoting `read_file()`/`open_file()` need, and only a DTAFileTabular
-    # carries them. A reader-less handler (DTAFileAny, or a bare DTAFile) would
+    # carries them. A SAS dataset is the other readable handler: it carries its
+    # own columns, so it has no such settings, but it has a reader. A
+    # reader-less handler (DTAFileAny, or a bare DTAFile) would
     # construct happily here and then abort deep inside the read with
     # "This method is not implemented", naming the wrong problem long after the
     # document that caused it was accepted.
@@ -196,7 +199,10 @@ DTADataSetTabular <- S7::new_class(
     if (length(self@files) > 0) {
       readable <- vapply(
         self@files,
-        function(file_info) inherits(file_info, "DTAtools::DTAFileTabular"),
+        function(file_info) {
+          inherits(file_info, "DTAtools::DTAFileTabular") ||
+            inherits(file_info, "DTAtools::DTAFileSAS7BDAT")
+        },
         logical(1)
       )
       if (!all(readable)) {
@@ -212,7 +218,7 @@ DTADataSetTabular <- S7::new_class(
         cli_abort(c(
           "A tabular dataset can only hold file handlers that can be read.",
           x = "Handler{?s} {.field {offending}} {?is/are} not tabular.",
-          i = "Use a {.cls DTAFileCSV} or {.cls DTAFileTSV} here, or declare the dataset as {.code type: file} if its files are not parsed."
+          i = "Use a {.cls DTAFileCSV}, {.cls DTAFileTSV} or {.cls DTAFileSAS7BDAT} here, or declare the dataset as {.code type: file} if its files are not parsed."
         ))
       }
     }
@@ -813,7 +819,9 @@ method(print_short_info, DTADataSetTabular) <- function(x, ...) {
 #'       Loading under a name that is already bound drops that table's
 #'       validation state, so no report shows the replaced table's verdict.}
 #'     \item{stream}{whether to keep the file lazy rather than reading it into
-#'       memory. See \code{\link{load_file}}.}
+#'       memory. See \code{\link{load_file}}. A SAS dataset
+#'       (\code{\link{DTAFileSAS7BDAT}}) cannot be streamed: \code{"auto"} reads
+#'       it into memory with a message, and \code{"always"} is refused.}
 #'   }
 #' @return object of class DTADataSetTabular with loaded data
 #' @examples
@@ -897,7 +905,26 @@ method(load_file, DTADataSetTabular) <- function(
   #   unparseable cell turns a whole declared-numeric column into text. Applying
   #   the declared type makes the column a number, that one cell NA, and that one
   #   cell an import error.
-  if (dta_resolve_stream_mode(stream, file)) {
+  lazy <- dta_resolve_stream_mode(stream, file)
+
+  # A SAS dataset has no lazy reader. "auto" is a guess about size, not an
+  # instruction, so it falls back to reading into memory -- and says so, because
+  # that is the one case where the guess was "too big". An explicit
+  # `stream = "always"` is an instruction, and still reaches open_file(), whose
+  # base method refuses it.
+  if (
+    lazy &&
+      inherits(handler, "DTAtools::DTAFileSAS7BDAT") &&
+      !(isTRUE(stream) || identical(stream, "always"))
+  ) {
+    cli::cli_inform(
+      "Reading {.path {file}} into memory: a SAS dataset cannot be streamed.",
+      class = "dta_sas7bdat_in_memory"
+    )
+    lazy <- FALSE
+  }
+
+  if (lazy) {
     # Lazy: the table is a scan plan, not data. The second half of the read --
     # coercion, and the import issues it finds -- cannot happen here, because
     # there are no rows yet. It happens per batch inside check(), which is the

@@ -57,7 +57,8 @@ This class is the base of the file-handler hierarchy and carries
 the metadata and parsing properties every handler shares. It is rarely
 constructed directly: prefer a concrete subclass --
 \code{\link{DTAFileCSV}}, \code{\link{DTAFileTSV}},
-\code{\link{DTAFileDelim}} for a file that is read, or
+\code{\link{DTAFileDelim}} for a delimited file that is read,
+\code{\link{DTAFileSAS7BDAT}} for a SAS dataset that is read, or
 \code{\link{DTAFileAny}} for a deliverable that is only checked for
 arrival.
 }

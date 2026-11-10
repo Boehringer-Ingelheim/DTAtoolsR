@@ -34,7 +34,8 @@
 #'   the metadata and parsing properties every handler shares. It is rarely
 #'   constructed directly: prefer a concrete subclass --
 #'   \code{\link{DTAFileCSV}}, \code{\link{DTAFileTSV}},
-#'   \code{\link{DTAFileDelim}} for a file that is read, or
+#'   \code{\link{DTAFileDelim}} for a delimited file that is read,
+#'   \code{\link{DTAFileSAS7BDAT}} for a SAS dataset that is read, or
 #'   \code{\link{DTAFileAny}} for a deliverable that is only checked for
 #'   arrival.
 #' @examples
@@ -426,7 +427,9 @@ method(read_file_execution, DTAFile) <- function(x, ...) {
 
 #' @title Read a file based on DTAFile
 #' @description Reads a data file using the parameters specified in a
-#'   \code{DTAFile} object or one of its subclasses.
+#'   \code{DTAFile} object or one of its subclasses. A delimited file is parsed
+#'   by Arrow; a SAS dataset (\code{\link{DTAFileSAS7BDAT}}) is decoded by
+#'   \pkg{haven}.
 #'
 #' @param x A \code{DTAFile} object (or subclass) containing file reading
 #'   parameters.
@@ -545,6 +548,10 @@ method(open_file_execution, DTAFile) <- function(x, ...) {
 #'
 #' Both apply the same name checks and the same column-type pinning, so the two
 #' differ in when the data is read, not in what it is read as.
+#'
+#' Only the delimited handlers can be opened lazily. A SAS dataset
+#' (\code{\link{DTAFileSAS7BDAT}}) is decoded whole, so \code{open_file()} on it
+#' aborts and points to \code{stream = "never"}.
 #'
 #' @section What a batch of a delimited scan actually is:
 #' Arrow splits a delimited file into fixed-size READ BLOCKS -- eight megabytes

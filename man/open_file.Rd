@@ -33,6 +33,10 @@ which is what lets a file larger than memory be validated at all.
 
 Both apply the same name checks and the same column-type pinning, so the two
 differ in when the data is read, not in what it is read as.
+
+Only the delimited handlers can be opened lazily. A SAS dataset
+(\code{\link{DTAFileSAS7BDAT}}) is decoded whole, so \code{open_file()} on it
+aborts and points to \code{stream = "never"}.
 }
 \section{What a batch of a delimited scan actually is}{
 

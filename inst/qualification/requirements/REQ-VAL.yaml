@@ -390,8 +390,8 @@ requirements:
       one, only for the leading zero, is displayed without that zero and fits.
       A number with a fraction in a column that accepts integers only, in a
       table typed in R, is reported as a type violation and not additionally as
-      a format violation; read from a file it is an import error (REQ-TYPE-009)
-      and is not reported as a format violation either.
+      a format violation; read from delimited text it is an import error
+      (REQ-TYPE-009) and is not reported as a format violation either.
       For DATEw., TIMEw.d and DATETIMEw., a string that is not display text of
       that format or is longer than w characters, ignoring spaces before and
       after it: a date is a day from 01 to 31, an English three-letter month in

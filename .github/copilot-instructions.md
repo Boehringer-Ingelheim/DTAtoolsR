@@ -32,11 +32,12 @@ The package is organized as a hierarchy of S7 classes, all defined in `R/<ClassN
 
 - **DTA** — Root object: holds metadata + a list of datasets + rules.
 - **DTADataSet** (abstract base)
-  - **DTADataSetTabular** — In-memory or on-disk tabular data (delimited text such as CSV, TSV).
+  - **DTADataSetTabular** — In-memory or on-disk tabular data (delimited text such as CSV or TSV, or a SAS dataset).
   - **DTADataSetFile** — Non-tabular deliverable files (presence/readability validation only).
 - **DTAFile** (abstract base, for file I/O)
   - **DTAFileTabular** — Tabular file handler (child of DTAFile).
     - **DTAFileCSV**, **DTAFileDelim**, **DTAFileTSV** — Delimited text files (children of DTAFileTabular).
+  - **DTAFileSAS7BDAT** — SAS datasets (`.sas7bdat`), read via haven and held in memory only (child of DTAFile, not of DTAFileTabular).
   - **DTAFileAny** — Handler for non-tabular deliverable files (child of DTAFile).
 - **DTAColumnSpec** — Single column type/nullability/allowed values/regex.
 - **DTAColumnSpecCollection** — All columns for one dataset.
@@ -52,7 +53,7 @@ The package is organized as a hierarchy of S7 classes, all defined in `R/<ClassN
 ### Data Flow
 
 1. **Input:** YAML spec file → `read_dta_from_yaml()` → DTA object with metadata + column specs.
-2. **Load:** CSV/TSV (delimited text) file → `load_file(dataset, file)` → Data loaded into DTADataSet, read in declared column types.
+2. **Load:** CSV/TSV (delimited text) or `.sas7bdat` file → `load_file(dataset, file)` → Data loaded into DTADataSet, read in declared column types.
 3. **Validate:** `check(dta)` runs three independent validation passes:
    - **Import** — Can each value be read in its declared type?
    - **Schema** — Does each value conform to nullability, allowed values, regex, etc.?

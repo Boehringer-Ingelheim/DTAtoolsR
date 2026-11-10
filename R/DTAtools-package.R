@@ -49,7 +49,8 @@
 #' \code{\link{DTADataSetFile}}, whose files are only checked for arrival.
 #' Each dataset declares its files through a \code{\link{DTAFile}} handler:
 #' \code{\link{DTAFileCSV}}, \code{\link{DTAFileTSV}} or
-#' \code{\link{DTAFileDelim}} for something that is read,
+#' \code{\link{DTAFileDelim}} for delimited text that is read,
+#' \code{\link{DTAFileSAS7BDAT}} for a SAS dataset that is read,
 #' \code{\link{DTAFileAny}} for something that is not.
 #'
 #' @section Authoring and templates:

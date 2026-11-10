@@ -268,9 +268,11 @@ requirements:
 
   - id: REQ-FILE-022
     text: >
+      For a delimited-text handler (DTAFileCSV, DTAFileTSV, DTAFileDelim),
       load_file(stream = ) at "never", "auto" and "always" shall reach an
       identical validation verdict for the same file and specification,
-      differing only in when the file's bytes are read.
+      differing only in when the file's bytes are read. A SAS dataset handler
+      has no lazy reader and is covered by REQ-FILE-037.
     risk: high
     category: functional
     covers: [load_file, check]
@@ -288,9 +290,9 @@ requirements:
 
   - id: REQ-FILE-024
     text: >
-      open_file() shall return a lazy dataset object exposing the column
-      names from the file's header alone, never a table already materialised
-      into memory.
+      For a delimited-text handler, open_file() shall return a lazy dataset
+      object exposing the column names from the file's header alone, never a
+      table already materialised into memory.
     risk: medium
     category: interface
     covers: [open_file]
@@ -391,3 +393,150 @@ requirements:
       one of several declared patterns hid every other, still-missing pattern
       from the report entirely -- a partial delivery could check() as if every
       declared pattern had arrived.
+
+  # ---- SAS datasets (.sas7bdat) ------------------------------------------------
+
+  - id: REQ-FILE-032
+    text: >
+      DTAFileSAS7BDAT shall be constructible directly, through
+      DTAFileFactory(type = "sas7bdat") and from a YAML file declaration
+      (type: sas7bdat). It shall not be a DTAFileTabular, and a
+      DTADataSetTabular shall accept it as a file handler.
+    risk: medium
+    category: interface
+    covers: [DTAFileSAS7BDAT, DTAFileFactory, DTADataSetTabular, dta_file_handlers_from_list]
+    source: R/DTAFileSAS7BDAT-class.R; R/00_helpers.R; R/DTADataSetTabular-class.R
+    notes: >
+      A SAS dataset carries its own column names and types, so none of the
+      delimited-text settings (separator, header, quote, encoding,
+      missing_values) applies to it. That is why it is a sibling of
+      DTAFileTabular under DTAFile and not a child of it.
+
+  - id: REQ-FILE-033
+    text: >
+      Reading a .sas7bdat file shall return every observation and every
+      variable of the dataset. Variable names shall be returned exactly as
+      stored, including their case. A numeric variable shall hold exactly the
+      stored double values, and a character variable the stored text.
+    risk: high
+    category: functional
+    covers: [DTAFileSAS7BDAT, read_file, load_file]
+    source: R/DTAFileSAS7BDAT-class.R (dta_read_sas7bdat)
+    notes: >
+      Oracle: iris.sas7bdat in fx/sas is the example file shipped with the haven
+      package (MIT licence, see NOTICE-haven-iris.txt there), written by SAS
+      9.04.01M2. Its four numeric variables are bit-identical to the first four
+      columns of datasets::iris, and Species is stored as $6, so its values are
+      setosa, versic and virgin. The expected values in the tests are the iris
+      data set and the bytes of the file, never the output of the reader.
+
+  - id: REQ-FILE-034
+    text: >
+      In a character variable read from a .sas7bdat file a blank value shall
+      be missing, and trailing blanks shall not be part of a value. Leading
+      blanks, leading zeros, non-ASCII characters and the literal text "NA"
+      shall be kept as values.
+    risk: high
+    category: integrity
+    covers: [DTAFileSAS7BDAT, read_file]
+    source: R/DTAFileSAS7BDAT-class.R (dta_sas7bdat_normalise)
+    notes: >
+      SAS pads a character value with blanks to the variable's length and
+      cannot tell an empty value from an all-blank one, so blank is its
+      missing. The literal "NA" differs from delimited text on purpose: the CSV
+      readers treat NA as missing, whereas in SAS it is an ordinary two-letter
+      value (a country or a surname, say) and is kept. The fixture
+      delivery.sas7bdat is written by haven (no SAS-written file with these
+      shapes is available) and its expected values are literals in the test.
+
+  - id: REQ-FILE-035
+    text: >
+      A numeric variable that SAS stores as a date, datetime or time shall be
+      read as follows. When the column declares the matching type (SAS Date,
+      SAS DateTime, SAS Time) and a format, the value shall be the SAS display
+      text of that format (DATEw., DATETIMEw., TIMEw.d); when the column
+      declares a non-temporal type (SAS Num, SAS Int, SAS Char), the value
+      shall be the SAS number itself, days since 1960-01-01 for a date and
+      seconds since 1960-01-01 00:00:00 or seconds since midnight for a
+      datetime and a time; otherwise the value shall be ISO 8601 text
+      (YYYY-MM-DD, YYYY-MM-DDTHH:MM:SS, HH:MM:SS). A missing value shall stay
+      missing in all three forms.
+    risk: high
+    category: functional
+    covers: [DTAFileSAS7BDAT, read_file, load_file, check]
+    source: R/DTAFileSAS7BDAT-class.R (dta_sas7bdat_normalise); R/sasTemporalText.R
+    notes: >
+      Expected values come from the SAS definition of the epoch, not from the
+      reader. SAS counts from 1960-01-01 and R from 1970-01-01, which differ by
+      3653 days, so 2025-08-15 is 20315 + 3653 = 23968 SAS days and the datetime
+      2025-08-15T14:30:00 is 2070887400 SAS seconds. The tests also read the
+      bytes of delivery.sas7bdat: those SAS numbers are present as
+      little-endian doubles (23968, 2070887400, 14669, 1267444800, 315619200,
+      52200, 3653) and the R-epoch number 20315 is absent, which is independent
+      of any decoder. Assumptions, not verified against SAS: fractional seconds
+      are truncated, not rounded, when the format shows fewer digits; a
+      negative time is shown as -h:MM:SS and is rejected by the format check.
+      A date stored with no SAS date format arrives as a plain number and stays
+      one, so declaring it SAS Date fails with a type violation.
+
+  - id: REQ-FILE-036
+    text: >
+      A number read from a .sas7bdat column that is declared SAS Char, and a
+      number with a fraction read from a column declared SAS Int, shall each be
+      reported as a column-specification type violation, once per such value,
+      and not as an import error.
+    risk: medium
+    category: integrity
+    covers: [DTAFileSAS7BDAT, load_file, check]
+    source: R/DTAFileSAS7BDAT-class.R; R/DTADataSetTabular-class.R
+    notes: >
+      A delimited text file holds only text, so a bad value there is an import
+      error; a SAS dataset delivers numbers and text directly, so the same
+      verdict reaches the column-specification axis instead. The axis
+      difference from CSV is deliberate (see REQ-TYPE-009): the verdict is the
+      same, only the count on each axis differs. A numeric SAS column declared
+      SAS Int is held as an Arrow double, not as an integer as in delimited
+      text (REQ-TYPE-009): a whole number within plus or minus 2^31-1 passes
+      the Int check, and a fraction or a value outside that range is a type
+      violation. A SAS datetime declared SAS Int overflows that range after
+      2028-01-19 03:14:07. A date, datetime or time column declared as another
+      temporal kind than it is (a date declared SAS DateTime, say) is a type
+      violation as well. Text read from a SAS dataset under a declared SAS Num
+      or SAS Int is the exception to the rule above: it is parsed as text from
+      a delimited file is, and a value that does not parse is an import error,
+      not a column-specification error. OQ-FILE-059 pins it on the SUBJID
+      text of delivery.sas7bdat: "007" becomes 7, the empty value stays
+      missing, and the four values that are not numbers are four import
+      errors.
+
+  - id: REQ-FILE-037
+    text: >
+      A .sas7bdat file shall always be read into memory. load_file(stream =
+      "auto") shall hold an in-memory table whatever the file size and shall
+      signal a message of class dta_sas7bdat_in_memory, and load_file(stream =
+      "always") and open_file() shall be refused with a message that says
+      streaming is not supported and names stream = "never".
+    risk: medium
+    category: functional
+    covers: [DTAFileSAS7BDAT, load_file, open_file]
+    source: R/DTADataSetTabular-class.R; R/DTAFile-class.R (open_file_execution)
+    notes: >
+      See LIM-010: the whole file, and peak roughly three times its data, is held
+      in memory, so a very large delivery can exhaust a server worker. A
+      session-wide options(DTAtools.stream = "always") makes SAS loads fail
+      until stream = "never" is passed.
+
+  - id: REQ-FILE-038
+    text: >
+      A zero-byte file, or a file that is not a SAS dataset, offered to a
+      DTAFileSAS7BDAT handler shall be refused with a condition of class
+      dta_sas7bdat_read_error that carries the path of the file. A dataset
+      with variables and no observations shall be read as a table of zero
+      rows exposing its variable names.
+    risk: medium
+    category: integrity
+    covers: [DTAFileSAS7BDAT, read_file]
+    source: R/DTAFileSAS7BDAT-class.R (dta_read_sas7bdat)
+    notes: >
+      The condition class and its path field are asserted, never the wording
+      of the decoder's own message.

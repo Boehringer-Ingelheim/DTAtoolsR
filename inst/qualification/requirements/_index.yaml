@@ -32,7 +32,7 @@ areas:
     min_tests: 40
   - area: FILE
     title: File handlers and readers
-    min_tests: 42
+    min_tests: 50
   - area: STREAM
     title: Streaming validation and engine parity
     min_tests: 31

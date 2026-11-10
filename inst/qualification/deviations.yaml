@@ -549,3 +549,54 @@ limitations:
       validate_file_stream() does supply the count for a single delivery. The
       qualification records throughput from the row count its own generator
       wrote, and the throughput_source column of performance.csv says so.
+
+  - id: LIM-010
+    title: A .sas7bdat delivery is always read into memory
+    affects: [REQ-FILE-037]
+    reference: R/DTADataSetTabular-class.R (load_file); R/DTAFile-class.R (open_file_execution)
+    consequence: >
+      The SAS reader decodes the whole dataset at once, so there is no lazy or
+      batched read for it. load_file(stream = "auto") reads a .sas7bdat into
+      memory however large it is, after signalling the message class
+      dta_sas7bdat_in_memory, and stream = "always" and open_file() are refused.
+      The peak is roughly three times the size of the data (the decoded
+      tibble, the Arrow table and the data frame made while the declared types
+      are applied), and a compressed dataset (CHAR or BINARY compression) can
+      expand well beyond its size on disk. A .sas7bdat.gz needs no separate
+      decompression step, but haven unpacks it to a temporary file in
+      tempdir() of the full uncompressed size, which is removed only when it
+      is garbage collected, so the disk there must hold that size as well. A
+      file near the application's 1 GB upload limit can therefore exhaust a
+      Connect worker. A session-wide options(DTAtools.stream = "always") makes
+      every SAS load fail until stream = "never" is passed.
+      validate_file_stream() and cache_as_parquet() are for delimited text and
+      refuse a SAS dataset with an error of class dta_sas7bdat_not_delimited
+      that points to load_file() and read_file().
+
+  - id: LIM-011
+    title: Numeric values under a w.d display format are checked as stored, not as displayed
+    affects: [REQ-VAL-031]
+    reference: R/columnSpecChecks.R (dta_sas_numeric_format_bad)
+    consequence: >
+      SAS keeps a number at full precision and only rounds it for display, so a
+      stored 0.3333333333333333 under the format 8.2 is shown as 0.33. The
+      format check reads the stored value, not the displayed one, and reports a
+      value with more decimals than the format shows as a format violation.
+      A column that SAS wrote with a w.d format and unrounded values therefore
+      fails the format check on every such row, although SAS would have printed
+      every one of them within the format. The delivery is rejected, not
+      corrected; the remedy is to round the data or to drop the format from the
+      specification. No rounding is applied by the reader.
+
+  - id: LIM-012
+    title: A declared length on a SAS Date, Time or DateTime column is checked against the rendered text
+    affects: [REQ-FILE-035, REQ-VAL-031]
+    reference: R/DTAFileSAS7BDAT-class.R (dta_sas7bdat_normalise); R/sasTemporalText.R
+    consequence: >
+      A temporal column read from a .sas7bdat holds the display text of its
+      format, and a declared length is compared with the length of that text.
+      A specification taken from PROC CONTENTS states length 8 for a SAS date,
+      which is the eight-byte numeric storage, and the text 15AUG2025 is nine
+      characters, so every non-missing value is reported as exceeding the
+      length. A length is not to be declared on a SAS Date, Time or DateTime
+      column; the format bounds the text.

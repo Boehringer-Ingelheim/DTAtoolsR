@@ -2406,11 +2406,14 @@ dta_yaml_blank_lines <- function(text, max_depth = 3L) {
   res
 }
 
-# Recover a handler's file-type token ("csv" / "tsv") from its S7 class.
+# Recover a handler's file-type token ("csv" / "tsv" / "sas7bdat" / "any") from
+# its S7 class. The SAS branch must come before the csv fallback: a
+# DTAFileSAS7BDAT is not tabular, and without its own token it would be saved
+# as `type: csv` and read back as a delimited-text handler.
 #
 # KNOWN GAP, not reachable from the app: a DTAFileDelim reports "csv", which
 # discards its `sep`. DTAFileFactory() -- the only route from a document back to
-# an object -- implements csv and tsv only, so no YAML can produce a
+# an object -- implements csv, tsv, sas7bdat and any only, so no YAML can produce a
 # DTAFileDelim and the file editor deliberately does not offer one
 # (dta_handler_types()). A Delim handler can therefore only arrive here from an
 # object built in R and handed to the app. Giving it its own token would make
@@ -2419,6 +2422,9 @@ dta_yaml_blank_lines <- function(text, max_depth = 3L) {
 dta_handler_type <- function(h) {
   if (inherits(h, "DTAtools::DTAFileAny")) {
     return("any")
+  }
+  if (inherits(h, "DTAtools::DTAFileSAS7BDAT")) {
+    return("sas7bdat")
   }
   if (inherits(h, "DTAtools::DTAFileTSV")) {
     return("tsv")
@@ -2454,6 +2460,9 @@ dta_handler_type <- function(h) {
 #
 # `any` is deliberately outside all of this: its one extra property,
 # `extensions`, is already emitted by name, and a DTAFileAny parses nothing.
+# A `sas7bdat` handler has no reader settings either: it is not a
+# DTAFileTabular, so .dta_reader_setting_names() returns none for it, and its
+# constructor refuses all of them.
 
 # A throwaway handler of `type`, carrying nothing but its constructor's own
 # defaults. It answers both questions the filters ask -- which arguments that
@@ -3270,15 +3279,15 @@ dta_move_rule <- function(dta, dataset, index, direction) {
 # happens, and invite a user to declare a PDF or an archive as something it is
 # not.
 #
-# A TABULAR dataset is offered csv and tsv, deliberately narrower than the
-# DTAFile class tree: DTAFileFactory() -- the only route from a YAML document
-# back to an object -- implements csv and tsv only, so offering `delim` would
-# create a handler that cannot be read back.
+# A TABULAR dataset is offered csv, tsv and sas7bdat, deliberately narrower than
+# the DTAFile class tree: DTAFileFactory() -- the only route from a YAML
+# document back to an object -- implements those three and `any`, so offering
+# `delim` would create a handler that cannot be read back.
 dta_handler_types <- function(dataset_type = "tabular") {
   if (identical(dataset_type, "file")) {
     "any"
   } else {
-    c("csv", "tsv")
+    c("csv", "tsv", "sas7bdat")
   }
 }
 
