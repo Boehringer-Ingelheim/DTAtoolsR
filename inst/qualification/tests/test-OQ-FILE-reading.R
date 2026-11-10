@@ -355,3 +355,37 @@ test_that("OQ-FILE-037 | open_file returns a lazy dataset, never a materialised 
   qa_check("open_file() returns a lazy Dataset object", inherits(ds, "Dataset"))
   qa_check("...unlike read_file(), which returns an already-materialised table", !inherits(t, "Dataset"))
 })
+
+test_that("OQ-FILE-055 | quote = \"\" declares a file with no quote character and keeps a literal double quote | REQ-FILE-032", {
+  dir <- qa_tempdir()
+  p <- file.path(dir, "noquote.psv")
+  fr_write_raw(c("ID|NOTE", "1|5\" pipe", "2|plain"), p)
+
+  handler <- DTAFileDelim(filename = "noquote.psv", sep = "|", quote = "")
+  t <- as.data.frame(read_file(handler, p))
+
+  qa_step("the value with a double quote is read as written", c("5\" pipe", "plain"), as.character(t$NOTE))
+  qa_step("both rows are read", 2L, nrow(t))
+})
+
+test_that("OQ-FILE-056 | a UTF-16 file is refused with the same advice in every stream mode | REQ-FILE-033", {
+  dir <- qa_tempdir()
+  p <- file.path(dir, "wide.csv")
+  # Written from the specification's own bytes, not through the package.
+  writeBin(iconv("ID,AGE\nA1,30\n", from = "UTF-8", to = "UTF-16LE", toRaw = TRUE)[[1]], p)
+
+  for (mode in c("never", "auto", "always")) {
+    ds <- DTADataSetTabular(
+      id = "w", specs = fr_specs(),
+      files = list(DTAFileCSV(filename = "wide.csv", encoding = "UTF-16LE"))
+    )
+    msg <- tryCatch(
+      load_file(ds, file = p, handler_index = 1, stream = mode),
+      error = function(e) gsub("[[:space:]]+", " ", conditionMessage(e))
+    )
+    qa_check(
+      paste0("stream = \"", mode, "\" refuses and says to convert to UTF-8 first"),
+      is.character(msg) && grepl("Convert the file to UTF-8 first", msg, fixed = TRUE)
+    )
+  }
+})

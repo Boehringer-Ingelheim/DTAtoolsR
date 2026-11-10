@@ -772,3 +772,17 @@ test_that("a clean ISO metadata date is still written as exactly the ISO string"
   expect_identical(out$date, "2026-01-15")
   expect_identical(out$transmission$date_last_transfer, "2026-12-31")
 })
+
+# ---- review fixes ----------------------------------------------------------
+
+test_that("a metadata object with an NA date survives a YAML round trip", {
+  md <- DTAMetaData(title = "T", version = "1", date = NULL)
+  md@date <- as.Date(NA)
+  lst <- as.list(md)
+  expect_null(lst$date)
+  path <- tempfile(fileext = ".yaml")
+  on.exit(unlink(path))
+  yaml::write_yaml(lst, path)
+  back <- do.call(DTAMetaData, yaml::read_yaml(path))
+  expect_null(back@date)
+})

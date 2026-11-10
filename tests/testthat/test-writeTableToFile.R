@@ -214,3 +214,80 @@ test_that("a destination another process holds open is not replaced (Windows)", 
   close(con)
   expect_identical(readBin(out, "raw", n = file.info(out)$size), original_bytes)
 })
+
+test_that("write_table_to_file() refuses unquoted values that would corrupt the file", {
+  make <- function(value) {
+    DTADataSetTabular(
+      id = "d",
+      specs = specs_from_list(NULL),
+      files = list(DTAFileCSV(filename = "x.csv")),
+      tables = list(t1 = data.frame(A = c("ok", value)))
+    )
+  }
+  for (value in c("a\tb", "a\nb", "a\rb", "\"hi\" there")) {
+    out <- file.path(tempdir(), "wt_unquoted.tsv")
+    unlink(out)
+    expect_error(
+      write_table_to_file(
+        make(value), "t1", out,
+        quiet = TRUE, get_md5sum = TRUE, write_md5sum_to_file = TRUE
+      ),
+      "without quoting",
+      info = deparse(value)
+    )
+    # Nothing is written -- no corrupt file and no sidecar vouching for one.
+    expect_false(file.exists(out), info = deparse(value))
+    expect_length(Sys.glob(paste0(out, "*")), 0L)
+  }
+
+  # With quoting the same values are written, and read back intact.
+  out <- file.path(tempdir(), "wt_quoted.tsv")
+  on.exit(unlink(out), add = TRUE)
+  write_table_to_file(
+    make("a\tb"), "t1", out,
+    quote = TRUE, arrange_by = NULL, quiet = TRUE,
+    get_md5sum = FALSE, write_md5sum_to_file = FALSE
+  )
+  back <- utils::read.delim(out, stringsAsFactors = FALSE)
+  expect_identical(back$A, c("ok", "a\tb"))
+})
+
+test_that("write_table_to_file() writes a mid-cell quote that reads back, and accepts sep = ''", {
+  make <- function(values) {
+    DTADataSetTabular(
+      id = "d",
+      specs = specs_from_list(NULL),
+      files = list(DTAFileCSV(filename = "x.csv")),
+      tables = list(t1 = data.frame(A = values))
+    )
+  }
+  out <- tempfile(fileext = ".tsv")
+  on.exit(unlink(out), add = TRUE)
+
+  write_table_to_file(
+    make(c("5\" pipe", "say \"hi\"")), "t1", out,
+    arrange_by = NULL, quiet = TRUE,
+    get_md5sum = FALSE, write_md5sum_to_file = FALSE
+  )
+  back <- as.data.frame(arrow::read_delim_arrow(
+    out,
+    delim = "\t",
+    col_types = arrow::schema(A = arrow::utf8())
+  ))
+  expect_identical(back$A, c("5\" pipe", "say \"hi\""))
+
+  # An empty separator is contained in every string under fixed matching; it
+  # must not make every export abort.
+  out2 <- tempfile(fileext = ".txt")
+  on.exit(unlink(out2), add = TRUE)
+  expect_no_error(write_table_to_file(
+    make(c("a", "b")), "t1", out2,
+    sep = "", arrange_by = NULL, quiet = TRUE,
+    get_md5sum = FALSE, write_md5sum_to_file = FALSE
+  ))
+  # The file must hold the header and both rows, not merely exist.
+  lines2 <- gsub("\"", "", readLines(out2, warn = FALSE), fixed = TRUE)
+  expect_length(lines2, 3L)
+  expect_identical(lines2[[1]], "A")
+  expect_setequal(lines2[-1], c("a", "b"))
+})

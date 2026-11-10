@@ -122,9 +122,7 @@ DTARuleGroupCondition <- S7::new_class(
     constraints = class_list_or_null
   ),
   validator = function(self) {
-    if (!is.null(self@id) && (length(self@id) != 1 || !is.character(self@id) || any(grepl("\\s", self@id)))) {
-      cli_abort("@id cannot have whitespaces and needs to be defined.")
-    }
+    # The id is validated once, by the DTARule parent validator S7 runs first.
     if (!identical(self@type, "group_condition")) {
       cli_abort("{.arg type} must be {.val group_condition}.")
     }
@@ -288,9 +286,10 @@ method(print, DTARuleGroupCondition) <- function(x, ...) {
 
 # check() method for DTARuleGroupCondition; documented at ?check (generic).
 method(check, DTARuleGroupCondition) <- function(x, tab) {
-  if (!inherits(tab, "Table")) {
-    cli::cli_abort("The 'tab' argument must be an arrow Table.")
-  }
+  cli::cli_abort(
+    "{.fn check} is not implemented for rules; use {.fn validate_table} on a table instead.",
+    class = "dta_rule_check_not_implemented"
+  )
 }
 
 #' @export

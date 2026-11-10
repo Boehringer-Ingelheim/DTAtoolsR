@@ -140,6 +140,92 @@
 
 
 #' @keywords internal
+#' @title File-Count Findings of a Checked DTA
+#' @description
+#' The rows of the `"last_file_count_findings"` attribute `check()` leaves on a
+#' DTA. Like the metadata axis, a file count outside the declared bounds fails
+#' the run (`last_validation_ok`) without appearing in `results()` or
+#' `messages()`, so the report folds it in itself.
+#' @param x The object being reported on.
+#' @return A data frame with at least one row, or `NULL` when there is nothing
+#'   to report (also for an unchecked DTA, which has no attribute).
+.report_file_count_findings <- function(x) {
+  f <- attr(x, "last_file_count_findings", exact = TRUE)
+  if (is.data.frame(f) && nrow(f) > 0 && all(c("dataset", "message") %in% names(f))) f else NULL
+}
+
+#' @keywords internal
+#' @title Add the File-Count Axis to the Overview Rows
+#' @description
+#' One failed row per dataset whose file count is outside its declared bounds,
+#' appended to the `results()` frame, so the overview cards agree with
+#' `last_validation_ok`.
+#' @param x The object being reported on.
+#' @param results_df The frame returned by `results(x)`.
+#' @return `results_df` with the rows appended.
+.report_with_file_count_rows <- function(x, results_df) {
+  f <- .report_file_count_findings(x)
+  if (is.null(f)) {
+    return(results_df)
+  }
+  n <- nrow(f)
+  rows <- if (is.data.frame(results_df) && ncol(results_df) > 0) {
+    results_df[rep(NA_integer_, n), , drop = FALSE]
+  } else {
+    data.frame(
+      dataset = rep(NA_character_, n), target = NA_character_,
+      target_type = NA_character_, status = NA_character_,
+      n_columnspec_errors = NA_integer_, n_rule_errors = NA_integer_,
+      n_import_errors = NA_integer_, stringsAsFactors = FALSE
+    )
+  }
+  rownames(rows) <- NULL
+  rows$dataset <- as.character(f$dataset)
+  rows$target <- "file count"
+  if ("target_type" %in% names(rows)) {
+    rows$target_type <- "file count"
+  }
+  rows$status <- "failed"
+  rows$n_columnspec_errors <- 0L
+  rows$n_rule_errors <- 0L
+  rows$n_import_errors <- 0L
+
+  if (!is.data.frame(results_df) || nrow(results_df) == 0) {
+    return(rows)
+  }
+  rbind(results_df, rows)
+}
+
+#' @keywords internal
+#' @title Add the File-Count Findings to the Messages Table
+#' @description
+#' One message row per finding, appended after the ids `messages()` assigned.
+#' Called after the inspect panels are built: a finding has no inspect detail.
+#' @param x The object being reported on.
+#' @param msgs The frame returned by `messages(x, as_tibble = FALSE)`.
+#' @return `msgs` with the rows appended.
+.report_with_file_count_messages <- function(x, msgs) {
+  f <- .report_file_count_findings(x)
+  if (is.null(f) || !is.data.frame(msgs)) {
+    return(msgs)
+  }
+  n <- nrow(f)
+  rows <- msgs[rep(NA_integer_, n), , drop = FALSE]
+  rownames(rows) <- NULL
+  rows$id <- as.integer(max(c(0L, msgs$id), na.rm = TRUE) + seq_len(n))
+  rows$dataset <- as.character(f$dataset)
+  rows$target <- "file count"
+  rows$severity <- "error"
+  rows$source <- "file_count"
+  rows$message <- as.character(f$message)
+  if (nrow(msgs) == 0) {
+    return(rows)
+  }
+  rbind(msgs, rows)
+}
+
+
+#' @keywords internal
 #' @title Build Validation Summary HTML Section
 #' @description
 #' Renders the top-level summary section with pass/fail/pending counts and

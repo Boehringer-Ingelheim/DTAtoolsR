@@ -103,6 +103,23 @@ test_that("study tokens are discoverable inline values and standalone blocks", {
   )
 })
 
+test_that("export_with_template refuses to overwrite an existing output unless asked", {
+  dta <- .agreement_export_dta()
+  template <- .make_template(c("Title: {DTA_TITLE}"))
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(c(template, out)), add = TRUE)
+  writeLines("precious", out)
+
+  expect_error(
+    export_with_template(dta, template, out, quiet = TRUE),
+    "already exists"
+  )
+  expect_identical(readLines(out), "precious")
+
+  export_with_template(dta, template, out, quiet = TRUE, overwrite = TRUE)
+  expect_true(any(grepl("Title:", officer::docx_summary(officer::read_docx(out))$text)))
+})
+
 test_that("custom study blocks share Word rendering without interpreting metadata tokens", {
   dta <- .agreement_export_dta()
   template <- .make_template(c(
@@ -144,7 +161,7 @@ test_that("custom templates opt in and empty metadata consumes only its new toke
   ))
   on.exit(unlink(empty_template), add = TRUE)
   dta@metadata <- DTAMetaData()
-  expect_no_warning(export_with_template(dta, empty_template, out, quiet = TRUE, fallback = FALSE))
+  expect_no_warning(export_with_template(dta, empty_template, out, quiet = TRUE, fallback = FALSE, overwrite = TRUE))
   text <- .docx_paragraphs(out)
   expect_identical(text[nzchar(text)], c("BEFORE", "AFTER"))
 })
@@ -229,7 +246,7 @@ test_that("NA transfer decisions stay unspecified in scalar and process placehol
   expect_false(any(grepl("Blinded transfer: No", paragraphs, fixed = TRUE)))
 
   dta@metadata@transmission <- list(test_upload = FALSE, blinded_transfer = FALSE)
-  export_with_template(dta, template, out, quiet = TRUE, fallback = FALSE)
+  export_with_template(dta, template, out, quiet = TRUE, fallback = FALSE, overwrite = TRUE)
   paragraphs <- .docx_paragraphs(out)
   expect_true("Test: [No]" %in% paragraphs)
   expect_true("Blinded: [No]" %in% paragraphs)
@@ -238,7 +255,7 @@ test_that("NA transfer decisions stay unspecified in scalar and process placehol
 
   export_with_template(
     dta, template, out,
-    quiet = TRUE, fallback = FALSE,
+    quiet = TRUE, fallback = FALSE, overwrite = TRUE,
     variables = list(TEST_UPLOAD = NA, BLINDED_TRANSFER = NA)
   )
   paragraphs <- .docx_paragraphs(out)

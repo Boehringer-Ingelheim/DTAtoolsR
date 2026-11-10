@@ -127,12 +127,23 @@ Shiny.addCustomMessageHandler('dta_reset_fileinput', function(id) {
 # handler the server calls to open (reveal) it after a validation run. Opening
 # fires a window resize so the DataTable inside (rendered while hidden) re-fits.
 msgs_dock_js <- "
+function DTA_syncMsgsDock(d){
+  var b = d.querySelector('.msgs-dock-bar');
+  if (b) { b.setAttribute('aria-expanded', d.classList.contains('collapsed') ? 'false' : 'true'); }
+}
 function DTA_toggleMsgsDock(e){
   if (e) { e.stopPropagation(); }
   var d = document.getElementById('dta-msgs-dock');
   if (!d) return;
   d.classList.toggle('collapsed');
+  DTA_syncMsgsDock(d);
   if (!d.classList.contains('collapsed')) { window.dispatchEvent(new Event('resize')); }
+}
+// Keyboard access for the bar (a div holding real buttons, so it cannot itself
+// be a <button>): Enter/Space on the bar ONLY, never on the buttons inside it.
+function DTA_msgsDockKey(e){
+  if (e.target !== e.currentTarget) return;
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); DTA_toggleMsgsDock(e); }
 }
 Shiny.addCustomMessageHandler('dta_msgs_dock', function(action){
   var d = document.getElementById('dta-msgs-dock');
@@ -140,6 +151,7 @@ Shiny.addCustomMessageHandler('dta_msgs_dock', function(action){
   if (action === 'open') { d.classList.remove('collapsed'); window.dispatchEvent(new Event('resize')); }
   else if (action === 'close') { d.classList.add('collapsed'); }
   else { d.classList.toggle('collapsed'); }
+  DTA_syncMsgsDock(d);
 });
 "
 
@@ -1239,6 +1251,10 @@ server <- function(input, output, session) {
   # offered when no document is open -- is not an error: it means create the
   # document with no ancestor at all, same as a template with no carry-over
   # feature ever had.
+  observeEvent(input$tmpl_carry_file, {
+    rv$tmpl_carry_upload <- input$tmpl_carry_file
+  })
+
   resolve_carry_over <- function() {
     src <- as.character(input$tmpl_carry_source %||% "none")
     fields <- as.character(input$tmpl_carry_fields %||% character(0))
@@ -1253,7 +1269,7 @@ server <- function(input, output, session) {
       }
       meta <- DTAtools::metadata(rv$dta)
     } else {
-      f <- input$tmpl_carry_file
+      f <- rv$tmpl_carry_upload
       if (is.null(f) || is.null(f$datapath) || !nzchar(f$datapath)) {
         return(list(ok = FALSE, error = paste("Choose a", cfg$document$abbr, "YAML file to carry metadata over from.")))
       }
@@ -1298,6 +1314,9 @@ server <- function(input, output, session) {
   show_template_options_modal <- function(loaded, index, variant_selections = NULL) {
     def <- loaded$value$def
     rv$template_variant_selections <- variant_selections %||% list()
+    # A re-rendered fileInput keeps its old server-side value; the carry-over
+    # upload lives in rv instead and starts empty on every open.
+    rv$tmpl_carry_upload <- NULL
     if (!is.null(def$variants)) {
       if (is.null(variant_selections)) {
         showModal(modalDialog(
@@ -2470,7 +2489,13 @@ server <- function(input, output, session) {
     slot_tbls <- vapply(slot_recs, function(r) r$table %||% "", character(1))
     dropped_tbls <- vapply(as.character(fileinfo$name), tbl_of, character(1))
     kept_after <- length(setdiff(slot_tbls, dropped_tbls))
-    if (!is.na(mx) && (kept_after + nrow(fileinfo)) > mx) {
+    # Only files that can actually bind count: stray (name-mismatch / empty)
+    # files are rejected later and must not push a valid one over the limit.
+    n_candidates <- sum(vapply(seq_len(nrow(fileinfo)), function(i) {
+      sz <- suppressWarnings(as.numeric(fileinfo$size[i]))
+      !is.na(sz) && sz > 0 && isTRUE(handler_matches(h, fileinfo$name[i]))
+    }, logical(1)))
+    if (!is.na(mx) && (kept_after + n_candidates) > mx) {
       showNotification(
         sprintf(
           "This slot accepts at most %d file(s); remove one before adding more.",
@@ -2544,7 +2569,13 @@ server <- function(input, output, session) {
       up <- rv$uploads
       cur <- up[[key]] %||% list()
       new_tbls <- vapply(loaded_recs, function(x) x$table, character(1))
-      cur <- Filter(function(x) !((x$table %||% "") %in% new_tbls), cur)
+      # A table overwritten here may have been bound through ANOTHER handler
+      # slot of this dataset: drop it from every slot's records, not just `key`.
+      up_keys <- as.character(names(up))
+      for (k in up_keys[startsWith(up_keys, paste0(dsname, "||"))]) {
+        up[[k]] <- Filter(function(x) !((x$table %||% "") %in% new_tbls), up[[k]])
+      }
+      cur <- up[[key]] %||% list()
       up[[key]] <- c(cur, loaded_recs)
       rv$uploads <- up
       st <- rv$status
@@ -2875,10 +2906,22 @@ server <- function(input, output, session) {
     if (n_fail > 0) parts <- c(parts, sprintf("%d failed", n_fail))
     if (length(nodata) > 0) parts <- c(parts, sprintf("%d skipped (no data)", length(nodata)))
     if (length(parts) == 0) parts <- "nothing to validate"
-    showNotification(
-      sprintf("Validation complete \u2014 %s.", paste(parts, collapse = ", ")),
-      type = if (n_fail > 0) "warning" else "message"
-    )
+    summary_txt <- sprintf("Validation complete \u2014 %s.", paste(parts, collapse = ", "))
+    # A file-count violation is not visible in the pass/fail tally, so list the
+    # reasons. They go in as plain-text children (htmltools escapes them);
+    # newlines would not render in a toast.
+    count_msgs <- dta_file_count_messages(rv$dta, datasets = ready)
+    if (length(count_msgs) > 0) {
+      showNotification(
+        ui = tagList(summary_txt, tags$ul(lapply(count_msgs, tags$li))),
+        type = "warning"
+      )
+    } else {
+      showNotification(
+        summary_txt,
+        type = if (n_fail > 0) "warning" else "message"
+      )
+    }
 
     # Reveal the floating messages dock when the active dataset now has any
     # validation messages to show.
@@ -5595,6 +5638,8 @@ server <- function(input, output, session) {
       id = "dta-msgs-dock", class = "msgs-dock collapsed",
       div(
         class = "msgs-dock-bar", onclick = "DTA_toggleMsgsDock(event)",
+        role = "button", tabindex = "0", `aria-expanded` = "false",
+        onkeydown = "DTA_msgsDockKey(event)",
         title = "Click to fold or unfold the validation messages",
         tags$span(class = "msgs-dock-title", HTML("&#x2696;&#xFE0F; Validation messages")),
         uiOutput("msgs_dock_meta", inline = TRUE),
@@ -6222,11 +6267,14 @@ server <- function(input, output, session) {
   observeEvent(input$msgs_rows_selected, {
     sel <- input$msgs_rows_selected
     m <- msgs_r()
-    if (is.null(sel) || is.null(m) || nrow(m) == 0) {
+    if (length(sel) == 0 || is.null(m) || nrow(m) == 0) {
       return()
     }
     id <- if ("id" %in% names(m)) m$id[sel] else sel
     show_inspect_modal(rv$active, id)
+    # Clear the highlight so clicking the SAME row again re-selects (and so
+    # re-opens the report) instead of toggling it off and being ignored.
+    DT::selectRows(DT::dataTableProxy("msgs"), NULL)
   })
 
   # --- metadata editing ---------------------------------------------------
@@ -7806,7 +7854,8 @@ server <- function(input, output, session) {
               output = output_file,
               variables = variables,
               quiet = TRUE,
-              fallback = FALSE
+              fallback = FALSE,
+              overwrite = TRUE
             )
           } else {
             # Built-in template. write_dta() throws on error; no $ok returned.

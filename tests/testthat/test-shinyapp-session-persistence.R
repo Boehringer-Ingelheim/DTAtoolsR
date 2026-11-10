@@ -3,16 +3,6 @@
 # stored once as Arrow files rather than re-serialised on every autosave, and
 # every file carrying a user's data is aged out by a retention sweep.
 
-app_server_dir <- function() .shiny_app_dir()
-
-app_file_input <- function(filename) {
-  path <- app_fixture_path(filename)
-  data.frame(
-    name = filename, size = file.size(path), type = "",
-    datapath = path, stringsAsFactors = FALSE
-  )
-}
-
 clean_session_file <- function() {
   f <- list.files(tempdir(), pattern = "^dtatools_app_session", full.names = TRUE)
   unlink(f, recursive = TRUE, force = TRUE)

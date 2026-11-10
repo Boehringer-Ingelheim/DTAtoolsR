@@ -139,3 +139,29 @@ test_that("print() survives a column id containing braces", {
   out <- capture.output(print(specs), type = "message")
   expect_true(any(grepl("A{B}", out, fixed = TRUE)))
 })
+
+# ---- review fixes ----------------------------------------------------------
+
+test_that("assigning an unnamed @columns list is rejected by the validator", {
+  coll <- create_example_DTAColumnSpecCollection(1)
+  expect_error(
+    {
+      coll@columns <- unname(coll@columns)
+    },
+    regexp = "must be named"
+  )
+})
+
+test_that("create_example_DTAColumnSpecCollection selects by value, not by position", {
+  expect_error(
+    create_example_DTAColumnSpecCollection(4),
+    regexp = "No example available"
+  )
+  expect_s3_class(create_example_DTAColumnSpecCollection(2), "S7_object")
+})
+
+test_that("the example constructors reject a non-scalar index by class", {
+  expect_error(create_example_DTAColumnSpecCollection(c(1, 2)), class = "dta_example_index_invalid")
+  expect_error(create_example_DTAColumnSpec(c(1, 2)), class = "dta_example_index_invalid")
+  expect_s7_class(create_example_DTAColumnSpecCollection(1), DTAColumnSpecCollection)
+})

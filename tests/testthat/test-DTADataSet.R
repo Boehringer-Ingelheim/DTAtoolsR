@@ -34,7 +34,7 @@ test_that("DTADataSet object is created and table can be loaded", {
 
   expect_error(read_file(ds@files[[1]], "blala.tsv"), "does not match the filename")
 
-  expect_s3_class(tab, c("R6", "Table", "ArrowTabular", "ArrowObject"))
+  expect_s3_class(tab, "Table")
   expect_equal(nrow(tab), 490)
   expect_equal(ncol(tab), 33)
 
@@ -724,4 +724,40 @@ test_that("datasets() on a DTA agrees its plural with the number of names missin
   two <- expect_error(datasets(dta, c("nope", "nada")), class = "rlang_error")
   expect_match(conditionMessage(two), "following datasets not found", fixed = TRUE)
   expect_no_match(conditionMessage(two), "datasetss", fixed = TRUE)
+})
+
+test_that("a handler without a maximum makes the dataset maximum unbounded", {
+  ds <- DTADataSet(
+    id = "open",
+    type = "file",
+    files = list(
+      DTAFileAny("a.txt"),
+      DTAFileAny("^b_.*[.]txt$", pattern = TRUE, min_number_of_files = 2)
+    )
+  )
+  expect_identical(max_number_of_files(ds), Inf)
+  expect_identical(min_number_of_files(ds), 3)
+  # The summary must say so rather than claim a bound.
+  out <- paste(cli::cli_fmt(print(ds)), collapse = "\n")
+  expect_match(out, "or more files", fixed = TRUE)
+  expect_false(grepl("to Inf", out, fixed = TRUE))
+})
+
+test_that("files() refuses an index that is not a single name or number", {
+  ds <- DTADataSet(
+    id = "two",
+    type = "file",
+    files = list(DTAFileAny("a.txt"), DTAFileAny("b.txt"))
+  )
+  expect_error(files(ds, c(1, 2)), "single")
+  expect_error(files(ds, c("x", "y")), "following files not found")
+  expect_error(files(ds, TRUE), "single")
+  expect_s3_class(files(ds, 1), "DTAtools::DTAFileAny")
+})
+
+test_that("files() refuses several names that all exist instead of indexing recursively", {
+  ds <- create_example_DTADataSetTabular(2)
+  present <- names(files(ds))
+  skip_if(length(present) < 2L, "needs a named multi-handler dataset")
+  expect_error(files(ds, present[1:2]), "single")
 })

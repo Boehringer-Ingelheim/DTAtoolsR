@@ -8,48 +8,6 @@ skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
 
-# Path of `filename` inside library root `root`, routed by its kind suffix:
-# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
-# for everything else (creation and dataset templates, and the plain data
-# files that sit beside them, which resolve relative to the template).
-# Creates the folder, so a fixture can write straight to the returned path.
-lib_path <- function(root, filename) {
-  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
-    "parties"
-  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
-    "vocabulary"
-  } else {
-    "templates"
-  }
-  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
-  file.path(root, sub, filename)
-}
-
-# Local copy of the isolation helper defined in test-shinyapp-template-
-# sources.R, -create.R and -ui.R -- deliberately duplicated (per those files'
-# own stated convention) so this file does not depend on another test file's
-# internals. A developer machine with DTATOOLS_TEMPLATE_SOURCES exported would
-# otherwise flip the index into private-only mode and fail these confusingly.
-local_clean_template_env <- function(..., .local_envir = parent.frame()) {
-  withr::local_envvar(
-    c(
-      DTATOOLS_TEMPLATE_SOURCES = NA,
-      DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = NA,
-      DTATOOLS_TEMPLATE_REFRESH_SECONDS = NA,
-      DTATOOLS_TEMPLATE_CACHE_DIR = NA,
-      DTATOOLS_TEMPLATE_GIT_TOKEN = NA,
-      DTATOOLS_TEMPLATE_GIT_USER = NA,
-      DTATOOLS_TEMPLATE_GIT_AUTH = NA,
-      ...
-    ),
-    .local_envir = .local_envir
-  )
-  withr::local_options(
-    list(DTAtools.template_dir = NULL),
-    .local_envir = .local_envir
-  )
-}
-
 # The rendered HTML of any tag, tagList or NULL, as one string.
 html_of <- function(x) paste(as.character(x), collapse = "")
 

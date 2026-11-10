@@ -78,8 +78,8 @@ DTAColumnSpecCollection <- S7::new_class(
       ))
     }
 
-    if (is.null(names(self@columns))) {
-      names(self@columns) <- columns_ids
+    if (is.null(names(self@columns)) && length(self@columns) > 0) {
+      return("'columns' must be named by the 'id' of each DTAColumnSpec.")
     }
 
     if (!all(names(self@columns) == columns_ids)) {
@@ -805,13 +805,19 @@ method(as.list, DTAColumnSpecCollection) <- function(x, ...) {
 #' create_example_DTAColumnSpecCollection()
 #' @export
 create_example_DTAColumnSpecCollection <- function(index = 1) {
+  if (length(index) != 1L) {
+    cli::cli_abort(
+      "{.arg index} must be a single value, not length {length(index)}.",
+      class = "dta_example_index_invalid"
+    )
+  }
   col1 <- create_example_DTAColumnSpec(1)
   col2 <- create_example_DTAColumnSpec(2)
   col3 <- create_example_DTAColumnSpec(3)
   col4 <- create_example_DTAColumnSpec(4)
   col5 <- create_example_DTAColumnSpec(5)
 
-  switch(index,
+  switch(as.character(index),
     `1` = {
       example_rules <- list()
       DTAColumnSpecCollection(

@@ -141,7 +141,7 @@ test_that("a Files dataset validates a delivered file, and reports a missing one
 
     msgs <- DTAtools::messages(DTAtools::datasets(rv$dta, "reports"), as_tibble = FALSE)
     expect_equal(nrow(msgs), 1L)
-    expect_match(msgs$message, "not found")
+    expect_match(msgs$message, "^File .* not found[.]$")
   })
 })
 
@@ -488,5 +488,70 @@ test_that("the zero-handlers banner is gone once the dataset has a handler", {
 
     html <- paste(output$file_modal_body$html, collapse = "\n")
     expect_false(grepl("expects no files at all", html, fixed = TRUE))
+  })
+})
+
+# A second handler on the same dataset, overlapping the first. Written as a
+# quoted expression for the same reason as file_ds_setup.
+file_ds_setup_two_handlers <- quote({
+  eval(file_ds_setup)
+  session$setInputs(file_add = 2)
+  session$setInputs(
+    file_filename = "^report.*", file_type = "any", file_pattern = TRUE,
+    file_extensions = "pdf", file_count_mode = "range",
+    file_min_number_of_files = 0, file_max_number_of_files = 5
+  )
+  session$setInputs(file_save = 2)
+  slot2 <- paste0("up_", rv$structure[["reports"]]$index, "_2")
+})
+
+test_that("overwriting a table bound through another slot leaves it listed under one slot only", {
+  file_ds_clean_session()
+  dir <- tempfile()
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  shiny::testServer(file_ds_app_dir(), {
+    eval(file_ds_setup_two_handlers)
+    expect_equal(length(DTAtools::datasets(rv$dta, "reports")@files), 2L)
+
+    pdf <- file_ds_write(dir, "report_x.pdf")
+    file_ds_set(session, slot, file_ds_upload(pdf))
+    file_ds_set(session, slot2, file_ds_upload(pdf))
+    session$setInputs(confirm_overwrite = 1)
+
+    listed <- vapply(
+      rv$uploads[startsWith(names(rv$uploads), "reports||")],
+      function(recs) sum(vapply(recs, function(r) identical(r$table, "report_x.pdf"), logical(1))),
+      numeric(1)
+    )
+    expect_equal(sum(listed), 1)
+    expect_equal(length(DTAtools::datasets(rv$dta, "reports")@file_paths), 1L)
+  })
+})
+
+test_that("a stray file dropped next to a valid one does not trip the max-files gate", {
+  file_ds_clean_session()
+  dir <- tempfile()
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  shiny::testServer(file_ds_app_dir(), {
+    eval(file_ds_setup)
+    session$setInputs(edit_files = 2)
+    session$setInputs(file_edit_click = 1)
+    session$setInputs(
+      file_count_mode = "range", file_min_number_of_files = 1,
+      file_max_number_of_files = 1
+    )
+    session$setInputs(file_save = 2)
+
+    both <- rbind(
+      file_ds_upload(file_ds_write(dir, "report_ok.pdf")),
+      file_ds_upload(file_ds_write(dir, "stray.csv", "a,b\n1,2"))
+    )
+    file_ds_set(session, slot, both)
+
+    expect_equal(basename(DTAtools::datasets(rv$dta, "reports")@file_paths), "report_ok.pdf")
   })
 })

@@ -2,40 +2,6 @@
 # computed by building consecutive versions and diffing them -- and for the
 # history section of the picker's detail panel (template_ui.R).
 
-# Path of `filename` inside library root `root`, routed by its kind suffix:
-# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
-# for everything else (creation and dataset templates, and the plain data
-# files that sit beside them, which resolve relative to the template).
-# Creates the folder, so a fixture can write straight to the returned path.
-lib_path <- function(root, filename) {
-  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
-    "parties"
-  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
-    "vocabulary"
-  } else {
-    "templates"
-  }
-  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
-  file.path(root, sub, filename)
-}
-
-local_clean_template_env <- function(..., .local_envir = parent.frame()) {
-  withr::local_envvar(
-    c(
-      DTATOOLS_TEMPLATE_SOURCES = NA,
-      DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = NA,
-      DTATOOLS_TEMPLATE_REFRESH_SECONDS = NA,
-      DTATOOLS_TEMPLATE_CACHE_DIR = NA,
-      DTATOOLS_TEMPLATE_GIT_TOKEN = NA,
-      DTATOOLS_TEMPLATE_GIT_USER = NA,
-      DTATOOLS_TEMPLATE_GIT_AUTH = NA,
-      ...
-    ),
-    .local_envir = .local_envir
-  )
-  withr::local_options(list(DTAtools.template_dir = NULL), .local_envir = .local_envir)
-}
-
 index_over <- function(root, .local_envir = parent.frame()) {
   local_clean_template_env(.local_envir = .local_envir)
   withr::local_envvar(

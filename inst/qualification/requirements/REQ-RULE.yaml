@@ -165,7 +165,9 @@ requirements:
   - id: REQ-RULE-016
     text: >
       A range rule shall require exactly one target column, and shall raise a
-      condition when given none or several.
+      condition when given none or several: a rule naming several columns is
+      refused when it is constructed, with the condition class
+      dta_rule_range_columns.
     risk: medium
     category: interface
     covers: [DTARuleColRange, rule_check_range]

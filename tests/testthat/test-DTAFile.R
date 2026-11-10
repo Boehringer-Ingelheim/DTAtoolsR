@@ -257,7 +257,18 @@ test_that("DTAFileTabular reports every validator violation at once", {
   msg <- conditionMessage(err)
   expect_match(msg, "'sep' must be a single character.", fixed = TRUE)
   expect_match(msg, "'has_header' must be a single logical value.", fixed = TRUE)
-  expect_match(msg, "'quote' must be a single character.", fixed = TRUE)
+  expect_match(msg, "'quote' must be a single character", fixed = TRUE)
+})
+
+test_that("an empty quote declares quote-off and keeps a literal double quote in a value", {
+  expect_no_error(handler <- DTAFileDelim("a.psv", sep = "|", quote = ""))
+  expect_identical(handler@quote, "")
+
+  path <- tempfile(fileext = ".psv")
+  on.exit(unlink(path), add = TRUE)
+  writeLines(c("id|note", "1|5\" pipe", "2|plain"), path)
+  tbl <- dta_read_delim_normalized(path, delim = "|", quote = "", has_header = TRUE)
+  expect_identical(as.character(tbl$note), c("5\" pipe", "plain"))
 })
 
 test_that("DTAFileTabular accepts a valid configuration", {
@@ -926,6 +937,11 @@ test_that("the copy is cached on the source's identity and its encoding", {
   again <- dta_transcode_to_utf8(cleared, "latin1")
   expect_false(identical(again, before))
   expect_true(file.exists(again))
+  # The re-made copy is the UTF-8 conversion, not an empty or raw-latin1 file.
+  expect_identical(
+    readLines(again, encoding = "UTF-8", warn = FALSE),
+    c("NAME,V", "Jürgen,1", "Möller,2")
+  )
 })
 
 test_that("a wide encoding is refused before anything is read", {
@@ -936,7 +952,10 @@ test_that("a wide encoding is refused before anything is read", {
     dta_transcode_to_utf8(path, "UTF-16LE"),
     "cannot be converted block by block"
   )
-  expect_error(dta_transcode_to_utf8(path, "UTF-16LE"), "stream = \"never\"", fixed = TRUE)
+  # The advice must not promise a workaround that also fails.
+  expect_error(dta_transcode_to_utf8(path, "UTF-16LE"), "not supported for tabular reading")
+  msg <- tryCatch(dta_transcode_to_utf8(path, "UTF-16LE"), error = conditionMessage)
+  expect_false(grepl("stream = \"never\"", msg, fixed = TRUE))
 })
 
 test_that("an encoding name this platform cannot use is refused by name", {
@@ -1026,6 +1045,11 @@ test_that("a re-delivery replaces its copy instead of adding to it", {
   expect_false(identical(second, first))
   expect_false(file.exists(first))
   expect_true(file.exists(second))
+  # The replacement holds the grown delivery, converted.
+  expect_identical(
+    readLines(second, encoding = "UTF-8", warn = FALSE),
+    c("NAME,V", "Jürgen,1", "Möller,2", "Zoe,3")
+  )
 
   # And the entry went with the file: nothing in the cache still points at it.
   entries <- mget(
@@ -1482,4 +1506,144 @@ test_that("a file name containing cli markup is not rendered as markup", {
     regexp = "{.field x}",
     fixed = TRUE
   )
+})
+
+# ---- line-break cuts and header layout --------------------------------------
+
+test_that("a block is cut at a lone CR as well as at an LF", {
+  expect_identical(dta_last_newline(c(charToRaw("ab\rcd"))), 3L)
+  expect_identical(dta_last_newline(charToRaw("a\r\nbc")), 3L)
+  expect_true(is.na(dta_last_newline(charToRaw("abc"))))
+})
+
+test_that("a CR-only or CRLF file converts byte-faithfully at every block size", {
+  for (terminator in c("\r", "\r\n")) {
+    body <- rep(latin1_body(terminator)[-(1:nchar(paste0("NAME,V", terminator)))], 40)
+    body <- c(charToRaw(paste0("NAME,V", terminator)), body)
+    expected <- charToRaw(iconv(rawToChar(body), from = "latin1", to = "UTF-8"))
+    path <- transcode_fixture("dta_transcode_cr_only.csv", body)
+    on.exit(unlink(path), add = TRUE)
+
+    # Small blocks put a CR at the end of one block and its LF at the start of
+    # the next for some size; none of them may change a byte.
+    for (size in c(7L, 16L, 33L, 64L, 129L)) {
+      withr::local_options(DTAtools.transcode_block_bytes = size)
+      copy <- dta_transcode_to_utf8(path, "latin1")
+      expect_identical(
+        readBin(copy, "raw", n = file.size(copy)), expected,
+        info = paste(deparse(terminator), size)
+      )
+      dta_transcode_cache_evict(normalizePath(path, winslash = "/", mustWork = FALSE))
+    }
+  }
+})
+
+header_fixture <- function(text, name = "x.csv") {
+  dir <- tempfile("hdr")
+  dir.create(dir)
+  path <- file.path(dir, name)
+  writeBin(charToRaw(text), path)
+  path
+}
+
+test_that("leading empty lines do not turn the header into a data row", {
+  handler <- DTAFileCSV(filename = "x.csv")
+  for (nl in c("\n", "\r\n")) {
+    path <- header_fixture(paste0(nl, nl, "ID,B", nl, "1,a", nl, "2,b", nl))
+    eager <- as.data.frame(read_file(handler, path))
+    expect_identical(names(eager), c("ID", "B"), info = deparse(nl))
+    expect_identical(nrow(eager), 2L, info = deparse(nl))
+
+    lazy <- dplyr::collect(dta_open_normalized_dataset(path, handler = handler))
+    expect_identical(names(lazy), c("ID", "B"), info = deparse(nl))
+    expect_identical(nrow(lazy), 2L, info = deparse(nl))
+  }
+})
+
+test_that("a header with a quoted line break is refused on both paths", {
+  handler <- DTAFileCSV(filename = "x.csv", newlines_in_values = TRUE)
+  path <- header_fixture("\"I\nD\",B\n1,a\n2,b\n")
+  expect_error(read_file(handler, path), "quoted line break")
+  expect_error(dta_open_normalized_dataset(path, handler = handler), "quoted line break")
+})
+
+test_that("an unreadable header is not blamed on repeated names without cause", {
+  po <- arrow::csv_parse_options(delimiter = ",")
+  msg <- function(text) {
+    tryCatch(
+      dta_delim_header_names(header_fixture(text), po, TRUE),
+      error = conditionMessage
+    )
+  }
+  expect_match(msg(""), "holds no header line")
+  expect_false(grepl("Repeated", msg(""), fixed = TRUE))
+  expect_match(msg("A,B\n1,2,3\n"), "different number of fields")
+  expect_false(grepl("Repeated", msg("A,B\n1,2,3\n"), fixed = TRUE))
+  expect_match(msg("A,A\n1,2\n"), "Repeated names")
+})
+
+# ---- header layout: CR-only files, mid-field quotes, BOM + blank ------------
+
+test_that("a CR-only file over one read window is not mistaken for a quoted line break", {
+  body <- paste0(
+    "\"h1\",\"h2\"\r",
+    strrep("\"1\",\"2\"\r", 150000L)
+  )
+  path <- header_fixture(body)
+  expect_gt(file.size(path), 1048576)
+  expect_identical(
+    dta_header_layout(path),
+    list(blank = 0L, multiline = FALSE)
+  )
+  handler <- DTAFileCSV(filename = "x.csv")
+  expect_identical(dta_delim_reader_plan(path, handler = handler)$column_names, c("h1", "h2"))
+})
+
+
+test_that("an unquoted mid-field quote in a header is literal, a quoted break is not", {
+  handler <- DTAFileCSV(filename = "x.csv", newlines_in_values = TRUE)
+  path <- header_fixture("5\" pipe,b\n1,2\n")
+  expect_false(dta_header_layout(path)$multiline)
+  expect_identical(names(as.data.frame(read_file(handler, path))), c("5\" pipe", "b"))
+
+  # still refused: a quoted field that opens a field and runs over a line end
+  expect_true(dta_header_layout(header_fixture("\"I\nD\",B\n1,a\n"))$multiline)
+  # an escaped quote and an empty quoted field do not leave the quote open
+  expect_false(dta_header_layout(header_fixture("\"a\"\"b\",\"\",c\n1,2,3\n"))$multiline)
+})
+
+test_that("a BOM-only line and a CR-only blank line are leading empty lines", {
+  handler <- DTAFileCSV(filename = "x.csv")
+  bom <- as.raw(c(0xef, 0xbb, 0xbf))
+  shapes <- list(
+    bom_lf = c(bom, charToRaw("\nID,B\n1,a\n2,b\n")),
+    cr_only = charToRaw("\rID,B\r1,a\r2,b\r")
+  )
+  for (nm in names(shapes)) {
+    dir <- tempfile("hdr")
+    dir.create(dir)
+    path <- file.path(dir, "x.csv")
+    writeBin(shapes[[nm]], path)
+    expect_identical(dta_header_layout(path)$blank, 1L, info = nm)
+
+    eager <- as.data.frame(read_file(handler, path))
+    expect_identical(names(eager), c("ID", "B"), info = nm)
+    expect_identical(nrow(eager), 2L, info = nm)
+
+    lazy <- dplyr::collect(dta_open_normalized_dataset(path, handler = handler))
+    expect_identical(names(lazy), c("ID", "B"), info = nm)
+    expect_identical(nrow(lazy), 2L, info = nm)
+  }
+})
+
+test_that("a CR-only block is cut into pieces, not carried as one unbounded span", {
+  # With only LF as a cut point a CR-only block was a single span; the piece
+  # size is what bounds the work iconv() is handed.
+  block <- charToRaw(strrep("abcdefgh\r", 20000L))
+  spans <- dta_transcode_spans(block)
+  expect_gt(length(spans$starts), 1L)
+  expect_identical(spans$starts[[1]], 1L)
+  expect_identical(spans$ends[[length(spans$ends)]], length(block))
+  expect_identical(spans$starts[-1], spans$ends[-length(spans$ends)] + 1L)
+  expect_true(all(block[spans$ends[-length(spans$ends)]] == as.raw(0x0d)))
 })

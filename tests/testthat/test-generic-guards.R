@@ -28,8 +28,7 @@ test_that("the package still loads when a non-generic `check` is attached", {
   skip_if_not_installed("pkgload")
 
   pkg <- normalizePath(testthat::test_path("..", ".."), winslash = "/", mustWork = FALSE)
-  skip_if(
-    length(source_r_files()) == 0,
+  skip_if_no_source_tree(
     "not running from a package source tree (R CMD check and covr run from the install)"
   )
 
@@ -83,7 +82,7 @@ test_that("every generic-existence guard in R/ is scoped correctly", {
   unscoped_names <- c("names", "print", "labels")
 
   r_files <- source_r_files()
-  testthat::skip_if(length(r_files) == 0, "package source not available")
+  skip_if_no_source_tree("package source not available")
 
   guard_pattern <- 'exists\\("([a-zA-Z_.]+)",\\s*mode\\s*=\\s*"function"'
 
@@ -141,8 +140,7 @@ test_that("the package still loads when a non-generic `read_file` is attached", 
   skip_if_not_installed("pkgload")
 
   pkg <- normalizePath(testthat::test_path("..", ".."), winslash = "/", mustWork = FALSE)
-  skip_if(
-    length(source_r_files()) == 0,
+  skip_if_no_source_tree(
     "not running from a package source tree (R CMD check and covr run from the install)"
   )
 
@@ -197,6 +195,13 @@ test_that("the skip_on_cran() tests above are not silently skipped on CI", {
   # because `.Rbuildignore` keeps .github out of the built tarball: under the
   # very check this is defending, the file is not there to read. This test
   # itself never skips -- both branches assert.
+  # The source-tree tests also skip under R CMD check (no R/*.R in the
+  # install). A CI step must run `devtools::test(filter =
+  # "generic-guards|source-portability|templateGuide-collect")` from the
+  # checkout with DTATOOLS_REQUIRE_SOURCE_TREE=true; then a missing tree fails.
+  if (identical(Sys.getenv("DTATOOLS_REQUIRE_SOURCE_TREE"), "true")) {
+    expect_gt(length(source_r_files()), 0)
+  }
   if (identical(Sys.getenv("CI"), "true")) {
     expect_identical(
       Sys.getenv("NOT_CRAN"), "true",

@@ -12,3 +12,20 @@ source_r_files <- function(pattern = "[.]R$") {
   }
   list.files(r_dir, pattern = pattern, full.names = TRUE)
 }
+
+# Skip when there is no source tree -- unless the runner says there must be one.
+# Under R CMD check / covr the package runs from its installation, so the
+# source-reading and package-load tests below can never run there. A CI step
+# that runs `devtools::test(filter = "generic-guards|source-portability|
+# templateGuide-collect")` from the checkout sets DTATOOLS_REQUIRE_SOURCE_TREE=true,
+# which turns the skip into a failure so those tests cannot go silently dead.
+skip_if_no_source_tree <- function(message = "package source not available") {
+  if (length(source_r_files()) > 0) {
+    return(invisible())
+  }
+  if (identical(Sys.getenv("DTATOOLS_REQUIRE_SOURCE_TREE"), "true")) {
+    testthat::fail(paste0("DTATOOLS_REQUIRE_SOURCE_TREE=true but no source tree: ", message))
+    return(invisible())
+  }
+  testthat::skip(message)
+}

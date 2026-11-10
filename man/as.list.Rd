@@ -48,8 +48,9 @@ as.list(x, ...)
 \item{...}{Additional arguments (ignored).}
 }
 \value{
-A named list of the object's properties, with unset properties
-omitted. For a \code{\link{DTAColumnSpecCollection}} the list holds one
+A named list of the object's properties (unset structure
+properties omitted; unset \code{\link{DTAColumnSpec}} properties kept as
+\code{NULL}). For a \code{\link{DTAColumnSpecCollection}} the list holds one
 entry per column; for a \code{\link{DTAMetaData}} it holds every metadata
 field.
 }
@@ -65,10 +66,15 @@ recursively, so \code{as.list()} on a
 \code{\link{DTAColumnSpecCollection}} yields a list of column lists rather
 than a list of S7 objects.
 
-Unset properties are omitted rather than written as an empty value. On a
-\code{\link{DTAColumnSpecStructure}} that matters for round-tripping: a
+On a \code{\link{DTAColumnSpecStructure}} unset properties are omitted
+rather than written as an empty value; that matters for round-tripping, as a
 bare backend prefix (\code{"SAS "}) would re-parse to an empty type and
-fail the SAS validator on the next read.
+fail the SAS validator on the next read. On a
+\code{\link{DTAColumnSpec}} the entries for its own unset properties
+(\code{label}, \code{nullable}, \code{description}, \code{values},
+\code{examples}, \code{pattern}, \code{colclass}) are kept as
+\code{NULL}, so a YAML dump shows them as \code{~}; only the structure
+entries (\code{type}, \code{format}, \code{length}) are omitted when unset.
 }
 \section{Dates in a DTAMetaData list}{
 

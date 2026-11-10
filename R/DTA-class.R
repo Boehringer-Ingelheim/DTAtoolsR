@@ -43,6 +43,9 @@ DTA <- S7::new_class(
     metadata = NULL,
     ...
   ) {
+    if (is.null(datasets)) {
+      datasets <- list()
+    }
     if (inherits(datasets, "DTAtools::DTADataSet")) {
       datasets <- list(datasets)
       names(datasets) <- datasets[[1]]@id
@@ -101,9 +104,17 @@ DTA <- S7::new_class(
     # The key IS the id. results() reports a dataset under its @id while
     # messages(), check() and the exports report it under its key, so a key that
     # differs from the id splits one dataset into two names across reports.
-    ids <- vapply(ds, function(d) {
-      if (inherits(d, "DTAtools::DTADataSet")) d@id else NA_character_
-    }, character(1))
+    is_dataset <- vapply(ds, inherits, logical(1), "DTAtools::DTADataSet")
+    if (!all(is_dataset)) {
+      cli_abort(
+        c(
+          "Every entry in @datasets must be a DTADataSet.",
+          x = "{cli::qty(sum(!is_dataset))}Entr{?y/ies} {.val {nms[!is_dataset]}} {?is/are} not."
+        ),
+        class = "dta_invalid_dataset_entry"
+      )
+    }
+    ids <- vapply(ds, function(d) d@id, character(1))
     mismatch <- !is.na(ids) & ids != nms
     if (any(mismatch)) {
       cli_abort(c(
@@ -166,9 +177,10 @@ if (!exists("datasets", mode = "function", inherits = FALSE)) {
 method(datasets, DTA) <- function(x, name = NULL) {
   if (
     !is.null(name) &&
-      !is.character(name) &&
-      !is.numeric(name) &&
-      length(name) != 1
+      (!(is.character(name) || is.numeric(name)) ||
+        length(name) == 0 ||
+        anyNA(name) ||
+        (is.numeric(name) && length(name) != 1))
   ) {
     cli_abort(
       "'name' must be a single character vector, single numeric index or NULL."
@@ -190,6 +202,11 @@ method(datasets, DTA) <- function(x, name = NULL) {
   missing <- setdiff(name, names(all_datasets))
   if (length(missing) > 0) {
     cli_abort("The following dataset{?s} not found: {.field {missing}}")
+  }
+  if (length(name) != 1) {
+    cli_abort(
+      "'name' must be a single character vector, single numeric index or NULL."
+    )
   }
 
   return(all_datasets[[name]])
@@ -451,6 +468,9 @@ dta_count_noun <- function(n, singular, plural) {
 #'   `n_unchecked` is zero for it and every branch below would read it as a
 #'   clean run over an empty world -- the same "certificate covering zero
 #'   checks" the unchecked tally exists to prevent, one level up.
+#' @param n_count_errors Integer. 1 when the dataset's supplied file count lies
+#'   outside the bounds its handlers declare. Named in the line (never a green
+#'   "all valid" over it), alongside any failure or unchecked targets.
 #' @return A list of `severity` (`"danger"`, `"warning"` or `"success"`) and
 #'   `text`.
 #' @keywords internal
@@ -459,19 +479,23 @@ dta_dataset_summary_message <- function(n_targets,
                                         n_valid,
                                         n_invalid,
                                         n_unchecked,
-                                        n_undelivered = 0) {
+                                        n_undelivered = 0,
+                                        n_count_errors = 0L) {
   unchecked_tail <- if (n_unchecked > 0) {
     paste0("; ", dta_count_noun(n_unchecked, "target", "targets"), " not checked")
   } else {
     ""
   }
+  # A file count outside the declared bounds fails the dataset on its own, so a
+  # line that reports the tables as valid must still say it.
+  count_tail <- if (n_count_errors > 0) "; file count outside the declared bounds" else ""
 
   if (n_invalid > 0) {
     return(list(
       severity = "danger",
       text = paste0(
         dta_count_noun(n_validated, "table", "tables"), " validated: ",
-        n_valid, " valid, ", n_invalid, " INVALID", unchecked_tail
+        n_valid, " valid, ", n_invalid, " INVALID", unchecked_tail, count_tail
       )
     ))
   }
@@ -494,14 +518,16 @@ dta_dataset_summary_message <- function(n_targets,
       severity = "warning",
       text = paste0(
         n_valid, " of ", dta_count_noun(n_targets, "table", "tables"),
-        " valid", unchecked_tail
+        " valid", unchecked_tail, count_tail
       )
     ))
   }
 
   list(
-    severity = "success",
-    text = paste0(dta_count_noun(n_validated, "table", "tables"), " validated: all valid")
+    severity = if (n_count_errors > 0) "danger" else "success",
+    text = paste0(
+      dta_count_noun(n_validated, "table", "tables"), " validated: all valid", count_tail
+    )
   )
 }
 
@@ -523,18 +549,27 @@ dta_dataset_summary_message <- function(n_targets,
 #' @param total_undelivered Integer. How many of `total_unchecked` are whole
 #'   datasets with nothing bound. Named separately in the line because "1 target
 #'   was not checked" says nothing about which target, and there is none.
+#' @param total_count_errors Integer. Datasets whose supplied file count lies
+#'   outside the bounds their handlers declare. Fails the run on its own.
 #' @return A list of `severity` (`"danger"`, `"warning"` or `"success"`) and
 #'   `text`.
 #' @keywords internal
 dta_overall_summary_message <- function(total_invalid,
                                         total_import_errors,
                                         total_unchecked,
-                                        total_undelivered = 0) {
+                                        total_undelivered = 0,
+                                        total_count_errors = 0L) {
   unchecked_tail <- if (total_unchecked > 0) {
     paste0("; ", dta_count_noun(total_unchecked, "target", "targets"), " not checked")
   } else {
     ""
   }
+  count_phrase <- paste0(
+    dta_count_noun(total_count_errors, "dataset", "datasets"),
+    " with a file count outside the declared bounds"
+  )
+  # Named alongside the other failures, not dropped behind them.
+  count_tail <- if (total_count_errors > 0) paste0("; ", count_phrase) else ""
 
   if (total_invalid > 0) {
     return(list(
@@ -542,7 +577,7 @@ dta_overall_summary_message <- function(total_invalid,
       text = paste0(
         "Validation FAILED: ",
         dta_count_noun(total_invalid, "table", "tables"),
-        " with validation errors", unchecked_tail
+        " with validation errors", count_tail, unchecked_tail
       )
     ))
   }
@@ -553,8 +588,15 @@ dta_overall_summary_message <- function(total_invalid,
       text = paste0(
         "Validation FAILED: ",
         dta_count_noun(total_import_errors, "value", "values"),
-        " could not be imported in the declared type", unchecked_tail
+        " could not be imported in the declared type", count_tail, unchecked_tail
       )
+    ))
+  }
+
+  if (total_count_errors > 0) {
+    return(list(
+      severity = "danger",
+      text = paste0("Validation FAILED: ", count_phrase, unchecked_tail)
     ))
   }
 
@@ -721,10 +763,16 @@ dta_emit_summary_message <- function(summary_message) {
 #'   \describe{
 #'     \item{\code{"last_validation_summary"}}{data.frame with one row per
 #'       dataset and columns dataset, n_targets, n_validated, n_valid,
-#'       n_invalid, n_skipped, n_unchecked, n_undelivered, n_import_errors.
+#'       n_invalid, n_skipped, n_unchecked, n_undelivered, n_file_count_errors,
+#'       n_import_errors.
 #'       \code{n_undelivered} is 1 for a dataset that holds no target at all -
 #'       it has no unchecked target to count, yet nothing about it was
-#'       checked.}
+#'       checked. \code{n_file_count_errors} is 1 for a dataset whose supplied
+#'       file count is outside its declared bounds; it sits before
+#'       \code{n_import_errors} in the frame.}
+#'     \item{\code{"last_file_count_findings"}}{data.frame with columns dataset,
+#'       n_supplied, min, max, message; one row per dataset whose file count is
+#'       outside its declared bounds, zero rows when none.}
 #'     \item{\code{"last_metadata_summary"}}{one-row data.frame for the metadata
 #'       axis, with columns scope, status, import_valid, n_import_errors, fields,
 #'       ok. Metadata belongs to the \code{DTA} itself rather than to any
@@ -733,8 +781,9 @@ dta_emit_summary_message <- function(summary_message) {
 #'     \item{\code{"last_validation_ok"}}{single logical, \code{TRUE} only when
 #'       no dataset is invalid, no table has an import error, the metadata
 #'       imported cleanly, no target -- e.g. a table checked against zero
-#'       column specs -- was left unchecked, and every dataset had something to
-#'       check in the first place.}
+#'       column specs -- was left unchecked, every dataset had something to
+#'       check in the first place, and no tabular dataset holds a number of
+#'       files outside the bounds its handlers declare.}
 #'     \item{\code{"benchmark"}}{Present only when \code{benchmark = TRUE}. A
 #'       one-row data.frame of runtime/memory metrics; see
 #'       \code{\link{validation_benchmark}}. \code{rows} is \code{NA} at this
@@ -755,6 +804,16 @@ dta_emit_summary_message <- function(summary_message) {
 #' the same "Validation PASSED" banner would print over a run that checked
 #' nothing at all; such targets are instead tallied as \code{n_unchecked} and
 #' surfaced as "Validation INCOMPLETE".
+#'
+#' The number of files supplied to a tabular dataset (its number of tables) is
+#' compared with the bounds its file handlers declare, taken as the dataset-wide
+#' SUM of the handlers' minima and maxima (a handler without a maximum makes the
+#' maximum unbounded), not handler by handler. A missing bound counts as no
+#' bound on that side. A count outside them signals a warning of class
+#' \code{dta_file_count_mismatch}, fails the run (\code{last_validation_ok} is
+#' \code{FALSE}) and is listed in the \code{"last_file_count_findings"}
+#' attribute. This applies only to a DTA-level check, not to a dataset checked
+#' alone, and a dataset with no handlers or no tables is not judged.
 #' @examples
 #' dta <- create_example_DTA()
 #' # Check all datasets
@@ -841,6 +900,7 @@ method(check, DTA) <- function(
   }
 
   summary_rows <- list()
+  count_findings <- list()
 
   for (ds_name in target_datasets) {
     ds <- x@datasets[[ds_name]]
@@ -885,6 +945,22 @@ method(check, DTA) <- function(
     )
     x@datasets[[ds_name]] <- ds
 
+    # File count against the handlers' declared bounds. Only meaningful here:
+    # a dataset checked alone never reaches this code. Signalled as a warning
+    # (also under quiet, which governs printing only); the loop carries on.
+    finding <- dta_tabular_file_count_finding(ds)
+    if (!is.null(finding)) {
+      count_findings[[length(count_findings) + 1]] <- finding
+      msg <- finding$message
+      if (!isTRUE(quiet)) {
+        cli::cli_alert_danger("{msg}")
+      }
+      cli::cli_warn(
+        c("File count does not match the specification.", x = "{msg}"),
+        class = c("dta_file_count_mismatch", "dta_validation_finding")
+      )
+    }
+
     # Get validation summary for this dataset
     val_status <- validation_status(ds)
     n_targets <- nrow(val_status)
@@ -919,6 +995,7 @@ method(check, DTA) <- function(
       n_skipped = n_skipped,
       n_unchecked = n_unchecked,
       n_undelivered = n_undelivered,
+      n_file_count_errors = as.integer(!is.null(finding)),
       n_import_errors = n_import_errors,
       stringsAsFactors = FALSE
     )
@@ -931,7 +1008,8 @@ method(check, DTA) <- function(
         n_valid = n_valid,
         n_invalid = n_invalid,
         n_unchecked = n_unchecked,
-        n_undelivered = n_undelivered
+        n_undelivered = n_undelivered,
+        n_count_errors = as.integer(!is.null(finding))
       ))
     }
   }
@@ -994,7 +1072,9 @@ method(check, DTA) <- function(
   # `overall_ok` FALSE for the same reason.
   total_undelivered <- sum(summary_df$n_undelivered, na.rm = TRUE)
   total_unchecked <- sum(summary_df$n_unchecked, na.rm = TRUE) + total_undelivered
-  overall_ok <- total_invalid == 0 && total_import_errors == 0 && total_unchecked == 0
+  total_count_errors <- sum(summary_df$n_file_count_errors, na.rm = TRUE)
+  overall_ok <- total_invalid == 0 && total_import_errors == 0 &&
+    total_unchecked == 0 && total_count_errors == 0
 
   if (!isTRUE(quiet)) {
     cli::cli_rule("Validation Summary")
@@ -1002,7 +1082,8 @@ method(check, DTA) <- function(
       total_invalid = total_invalid,
       total_import_errors = total_import_errors,
       total_unchecked = total_unchecked,
-      total_undelivered = total_undelivered
+      total_undelivered = total_undelivered,
+      total_count_errors = total_count_errors
     ))
     if (total_invalid > 0 || total_import_errors > 0) {
       cli::cli_alert_info("Run {.fn explain_messages} on the checked object to see what failed and why.")
@@ -1012,6 +1093,23 @@ method(check, DTA) <- function(
   attr(x, "last_validation_summary") <- summary_df
   attr(x, "last_metadata_summary") <- metadata_summary
   attr(x, "last_validation_ok") <- overall_ok
+  attr(x, "last_file_count_findings") <- if (length(count_findings) == 0) {
+    data.frame(
+      dataset = character(0), n_supplied = integer(0),
+      min = numeric(0), max = numeric(0), message = character(0),
+      stringsAsFactors = FALSE
+    )
+  } else {
+    do.call(rbind, lapply(count_findings, function(f) {
+      data.frame(
+        dataset = as.character(f$dataset),
+        n_supplied = as.integer(f$n_supplied),
+        min = as.numeric(f$min), max = as.numeric(f$max),
+        message = f$message,
+        stringsAsFactors = FALSE
+      )
+    }))
+  }
 
   # rows = NA_real_: there is no cheap, trustworthy row total across every
   # dataset at this level, and a guess would be worse than reporting unknown.
@@ -1203,6 +1301,15 @@ dta_from_list_build <- function(x) {
     }
 
     # Create metadata object
+    # Named before do.call(): an unknown key makes R print its whole value into
+    # the "unused argument" error, which never returns for a YAML alias bomb.
+    unknown_md <- setdiff(names(x$metadata), names(formals(DTAMetaData)))
+    if (length(unknown_md) > 0L) {
+      cli_abort(
+        "Unknown metadata field{?s}: {.val {unknown_md}}.",
+        class = "dta_metadata_unknown_field"
+      )
+    }
     metadata <- do.call(DTAMetaData, x$metadata)
   }
 

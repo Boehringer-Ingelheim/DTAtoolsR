@@ -65,3 +65,4 @@ CHANGELOG.md
 ^app\.R$
 ^manifest\.json$
 ^\.dtatools-lib$
+^dts_metadata_coverage_overview_.*\.md$

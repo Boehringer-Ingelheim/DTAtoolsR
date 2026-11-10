@@ -449,7 +449,10 @@ method(labels, DTADataSetTabular) <- function(object, ...) {
 #'   (\code{"\\t"}).
 #' @param na Character. The string to use for missing values in the data. Default is "".
 #' @param row.names Logical. Write row names.
-#' @param quote Logical. Quote character and factor fields.
+#' @param quote Logical. Quote character and factor fields. With the default
+#'   \code{FALSE}, a table holding a value (or column name) that contains the
+#'   separator, a line break or a leading quote character is refused rather than
+#'   written as a file that cannot be read back; use \code{quote = TRUE}.
 #' @param overwrite Logical. Whether to overwrite the file if it exists. Default
 #'   is FALSE, so a call against an existing path aborts unless `overwrite =
 #'   TRUE` is passed explicitly.
@@ -548,6 +551,32 @@ write_table_to_file <- function(
   # passed anyway to say so explicitly. Once table_data is already a
   # data.frame, write.table()'s guard above is a no-op.
   table_data <- as.data.frame(table_data, check.names = FALSE)
+
+  # Unquoted output is only a table again if no cell or column name contains
+  # the separator, a line break or a quote: write.table() writes them raw, and
+  # the file then reads back with extra fields or rows -- or not at all -- while
+  # the checksum sidecar vouches for it.
+  if (identical(quote, FALSE)) {
+    texts <- c(
+      names(table_data),
+      unlist(lapply(table_data, function(col) {
+        if (is.character(col) || is.factor(col)) as.character(col)
+      }), use.names = FALSE)
+    )
+    texts <- texts[!is.na(texts)]
+    # A quote only breaks reading where it opens a field; mid-cell (`5" pipe`)
+    # it is literal. An empty `sep` separates nothing, so it cannot be contained.
+    breaks_file <- (nzchar(sep) & grepl(sep, texts, fixed = TRUE)) |
+      grepl("[\r\n]|^\"", texts)
+    if (any(breaks_file)) {
+      example <- utils::head(texts[breaks_file], 1L)
+      cli::cli_abort(c(
+        "The table cannot be written without quoting.",
+        "x" = "{sum(breaks_file)} value{?s} contain the separator, a line break or a leading quote character, e.g. {.val {example}}.",
+        "i" = "Call {.fn write_table_to_file} with {.code quote = TRUE}."
+      ))
+    }
+  }
 
   # Check if the file exists and handle overwrite
   if (file.exists(filename) && !overwrite) {
@@ -990,6 +1019,50 @@ dta_missing_table_files <- function(table) {
   files[!file.exists(files)]
 }
 
+# Whether a tabular dataset holds a number of files outside the bounds its
+# handlers declare. A tabular dataset keeps no file list of its own; each
+# `load_file()` binds one table, so the supplied count is `length(ds@tables)`.
+# NULL when there is nothing to judge (no handlers, no tables, not tabular) or
+# the count is within bounds; otherwise a list describing the mismatch.
+#' @keywords internal
+dta_tabular_file_count_finding <- function(ds) {
+  if (!inherits(ds, "DTAtools::DTADataSetTabular") ||
+    length(ds@files) == 0 ||
+    length(ds@tables) == 0) {
+    return(NULL)
+  }
+
+  n <- length(ds@tables)
+  # A bound that is missing, NaN or not a single number is no bound on that side
+  # (min -> 0, max -> Inf). `if (NA)` would otherwise abort the whole DTA check.
+  lo <- min_number_of_files(ds)
+  hi <- max_number_of_files(ds)
+  lo <- if (length(lo) != 1 || !is.numeric(lo) || is.na(lo)) 0 else lo
+  hi <- if (length(hi) != 1 || !is.numeric(hi) || is.na(hi)) Inf else hi
+  if (n >= lo && n <= hi) {
+    return(NULL)
+  }
+
+  fmt <- function(v) format(v, scientific = FALSE)
+  want <- if (lo == hi) {
+    fmt(lo)
+  } else if (is.infinite(hi)) {
+    paste0("at least ", fmt(lo))
+  } else {
+    paste0("between ", fmt(lo), " and ", fmt(hi))
+  }
+
+  list(
+    dataset = ds@id,
+    n_supplied = n,
+    min = lo,
+    max = hi,
+    message = paste0(
+      "Dataset '", ds@id, "' expects ", want, " file(s), got ", fmt(n), "."
+    )
+  )
+}
+
 # The status row of a table checked against zero column specs. There is nothing
 # to check it against, so it is neither valid nor invalid.
 #
@@ -1045,6 +1118,9 @@ dta_unspecified_validation_row <- function(table_name, target_type = "table") {
 #'   specification, \code{"unspecified"}; \code{ok} is \code{NA} for the last
 #'   two. A dataset with no tables yields a zero-row data.frame with the same
 #'   columns.
+#' @examples
+#' ds <- check(create_example_DTADataSetTabular(2))
+#' validation_status(ds)
 #' @usage validation_status(x, ...)
 #' @name validation_status
 #' @export
@@ -1122,6 +1198,9 @@ S7::method(validation_status, DTADataSetTabular) <- function(x, tables = NULL) {
 #' @return A list with detailed validation output, of class
 #'   \code{dta_validation_details}. Use \code{as.data.frame()} on it to get one
 #'   row per reported error.
+#' @examples
+#' ds <- check(create_example_DTADataSetTabular(2))
+#' validation_errors(ds, table = "tab1")
 #' @usage validation_errors(x, ...)
 #' @name validation_errors
 #' @export

@@ -204,6 +204,20 @@ dta_file_id_to_names <- function(all_names, tables = NULL) {
 #
 # Names are deduplicated; where a declared name collides with a delivered
 # key, the delivered entry wins (setdiff() drops it from the missing side).
+#
+# The declared file COUNT (`number_of_files`, `min_`/`max_number_of_files`) is
+# enforced here too: a handler whose delivered count falls outside its bounds
+# contributes one more undelivered-style target (path NA) carrying the reason.
+# Only pattern handlers are counted, as a whole (files matching ANY of their
+# patterns): a non-pattern handler names exact files, its bounds are forced to
+# 1, and presence is already the missing-name logic above. A handler with a
+# name still undelivered is not counted either -- that failure is reported
+# already -- and neither is a count of zero.
+#
+# The result carries a `messages` attribute (target key -> text) for the
+# targets whose report should say something other than "Expected file ... was
+# not delivered": count failures, and a pattern that matched nothing, whose
+# regex is not a file name.
 #' @keywords internal
 dta_file_dataset_targets <- function(x) {
   paths <- x@file_paths
@@ -226,14 +240,68 @@ dta_file_dataset_targets <- function(x) {
   }))
 
   missing_names <- setdiff(declared_names, names(delivered))
-  if (length(missing_names) > 0) {
-    missing <- stats::setNames(
-      rep(NA_character_, length(missing_names)),
-      missing_names
+  messages <- character()
+
+  pattern_names <- unlist(lapply(x@files, function(handler) {
+    if (isTRUE(handler@pattern)) handler@filename
+  }))
+  for (nm in intersect(missing_names, pattern_names)) {
+    messages[[nm]] <- paste0(
+      "Expected a file matching pattern '", nm, "' was not delivered."
     )
-    delivered <- c(delivered, missing)
   }
 
+  count_failures <- character()
+  if (length(paths) > 0) {
+    for (handler in x@files) {
+      if (!isTRUE(handler@pattern) || any(handler@filename %in% missing_names)) {
+        next
+      }
+      hit <- do.call(rbind, lapply(paths, function(p) {
+        m <- matches_filename(handler, basename(p))
+        m[is.na(m)] <- FALSE
+        m
+      }))
+      hit <- matrix(hit, nrow = length(paths))
+      counts <- sum(rowSums(hit) > 0)
+      labels <- paste(handler@filename, collapse = " | ")
+      lo <- handler@min_number_of_files
+      hi <- handler@max_number_of_files
+      for (i in seq_along(counts)) {
+        n <- counts[[i]]
+        if (n == 0 || (!(!is.null(lo) && n < lo) && !(!is.null(hi) && n > hi))) {
+          next
+        }
+        want <- if (!is.null(lo) && !is.null(hi) && lo == hi) {
+          as.character(lo)
+        } else if (!is.null(lo) && !is.null(hi)) {
+          paste0("between ", lo, " and ", hi)
+        } else if (!is.null(lo)) {
+          paste0("at least ", lo)
+        } else {
+          paste0("at most ", hi)
+        }
+        key <- labels[[i]]
+        if (key %in% c(names(delivered), names(count_failures))) {
+          key <- paste0(key, " (file count)")
+        }
+        count_failures[[key]] <- paste0(
+          "Expected ", want, " file(s) matching '", labels[[i]], "', got ", n, "."
+        )
+      }
+    }
+  }
+
+  extra <- c(
+    stats::setNames(rep(NA_character_, length(missing_names)), missing_names),
+    stats::setNames(rep(NA_character_, length(count_failures)), names(count_failures))
+  )
+  delivered <- c(delivered, extra)
+  messages <- c(messages, count_failures)
+
+  if (length(messages) > 0) {
+    attr(delivered, "messages") <- messages
+  }
   delivered
 }
 
@@ -630,6 +698,7 @@ S7::method(check, DTADataSetFile) <- function(
   # dta_file_target_keys() would try to treat every NA entry as a path.
   target_files <- dta_file_dataset_targets(x)
   target_keys <- names(target_files)
+  target_messages <- attr(target_files, "messages")
   selected_keys <- dta_file_id_to_names(target_keys, tables)
 
   # Entries for targets outside `tables` are carried over untouched, exactly as
@@ -637,6 +706,16 @@ S7::method(check, DTADataSetFile) <- function(
   # validation state of every target the caller did not ask for.
   validation_index <- x@validation_index
   validation_store <- x@validation_store
+
+  # A full check describes the dataset as it is NOW. An entry whose key is no
+  # longer a target -- the 'not delivered' row of a name or pattern that a file
+  # delivered since has satisfied, or a count failure that has been put right --
+  # would otherwise stay in the index for ever and fail the dataset.
+  if (is.null(tables)) {
+    stale <- setdiff(names(validation_index), target_keys)
+    validation_index[stale] <- NULL
+    validation_store[intersect(names(validation_store), stale)] <- NULL
+  }
   output_rows <- list()
 
   if (isTRUE(persist)) {
@@ -659,8 +738,15 @@ S7::method(check, DTADataSetFile) <- function(
     # stays undelivered, so the unchanged/force skip logic below still applies
     # instead of re-reporting "missing" as a fresh finding on every check().
     missing <- is.na(path)
+    missing_text <- if (missing && table_name %in% names(target_messages)) {
+      target_messages[[table_name]]
+    } else {
+      paste0("Expected file '", table_name, "' was not delivered.")
+    }
     file_hash <- if (missing) {
-      dta_hash_object(list(missing = table_name))
+      # The text is part of the identity: a count failure that moves from 1 to 2
+      # files is still a failure, but a different one.
+      dta_hash_object(list(missing = table_name, text = missing_text))
     } else {
       dta_file_fingerprint(path)
     }
@@ -698,7 +784,7 @@ S7::method(check, DTADataSetFile) <- function(
       # every other target exactly; only the message differs.
       validation_result <- list(
         ok = FALSE,
-        message = paste0("Expected file '", table_name, "' was not delivered.")
+        message = missing_text
       )
       details <- dta_file_validation_details(validation_result)
       validated_at <- Sys.time()

@@ -898,22 +898,21 @@ test_that("a stopped scan does not claim the axes it never finished are clean", 
   path <- vs_write_csv(data.frame(ID = ids, K = ks, stringsAsFactors = FALSE))
   on.exit(unlink(path), add = TRUE)
 
-  # With the Arrow uniqueness precompute (the default), the rule's verdict is
-  # reached over the WHOLE dataset before the batch loop, so even a stopped
-  # scan reports the far duplicate -- a complete answer, not a claim about
-  # batches never read.
+  # fail_fast skips the Arrow uniqueness precompute (a full extra pass would
+  # defeat stopping early), so the far duplicate is never seen: the rule axis
+  # is unknown, whatever the engine option says.
   quick <- validate_file_stream(
     specs, path,
     batch_rows = 5L, fail_fast = TRUE, verbose = FALSE
   )
 
   expect_true(isTRUE(attr(quick, "partial_scan")))
-  expect_false(quick$rules_valid)
-  expect_match(quick$rule_errors[[1]]$message, "1 duplicate row")
+  expect_true(is.na(quick$rules_valid))
   expect_false(quick$ok)
 
-  # On the per-batch fallback the duplicate sits past where the scan stopped,
-  # so the axis must report unknown -- not TRUE, and not FALSE.
+  # Kept as a guard, not as a second path: fail_fast skips the precompute, so
+  # this asserts the same thing as above. It pins that turning the Arrow
+  # uniqueness engine off cannot flip the stopped-scan verdict to TRUE/FALSE.
   withr::local_options(DTAtools.stream_arrow_unique = FALSE)
   quick_fallback <- validate_file_stream(
     specs, path,
@@ -1665,9 +1664,9 @@ test_that("row numbers in grouped messages are global and truncate identically",
   expect_match(streamed$message, "more)", fixed = TRUE)
 })
 
-test_that("scope = all is not satisfied vacuously by an empty group", {
-  # all(logical(0)) is TRUE, so a group that contributed no rows must not be
-  # allowed to satisfy an "all" scope by accident.
+test_that("scope = all fails a group that is only partly satisfied, in streaming as in memory", {
+  # Group A has one DONE and one OPEN row, so "all rows DONE" must fail; a
+  # genuinely empty group (all(logical(0)) is TRUE) is not exercised here.
   rule <- DTARuleGroupCondition(
     id = "grp_all",
     group_by = "SUBJ",
@@ -1685,6 +1684,7 @@ test_that("scope = all is not satisfied vacuously by an empty group", {
   )
 
   expected <- rule_check_group_condition(rule, table)
+  expect_false(expected$valid)
   for (batch_rows in c(1L, 2L)) {
     streamed <- vs_stream_rule(rule, table, batch_rows)
     expect_equal(streamed$valid, expected$valid, info = paste("batch", batch_rows))
@@ -3265,4 +3265,157 @@ test_that("typing switched off leaves every column as the text the reader read",
   expect_identical(both$arrow, both$in_r)
   expect_false(both$arrow$columnspec_valid)
   expect_equal(unique(both$arrow$columnspec_errors$full_error$keyword), "type")
+})
+
+test_that("a group IF whose value is unconvertible does not exempt its group, streamed or not", {
+  # `AGE greater 18` on "ninety" is indeterminate. As the IF side of a `requires`
+  # it must keep the row in scope (as col_condition does), so the group is held
+  # to its THEN -- the same verdict in the in-memory and the streamed route.
+  rule <- DTARuleGroupCondition(
+    id = "g", group_by = "SUBJ",
+    conditions = list(
+      old = list(AGE = list(greater = 18)),
+      flag = list(FLAG = list(equals = "Y"))
+    ),
+    constraints = list(list(type = "requires", `if` = "old", then = "flag"))
+  )
+  specs <- vc_specs(
+    list(
+      DTAColumnSpec(id = "SUBJ", type = "SAS Char"),
+      DTAColumnSpec(id = "AGE"),
+      DTAColumnSpec(id = "FLAG", type = "SAS Char")
+    ),
+    rules = list(rule)
+  )
+  table <- data.frame(
+    SUBJ = c("S1", "S1"), AGE = c("ninety", "5"), FLAG = c("N", "N"),
+    stringsAsFactors = FALSE
+  )
+
+  eager <- rule_check_group_condition(rule, table)
+  expect_false(eager$valid)
+  expect_match(eager$message, "In group [SUBJ=S1]", fixed = TRUE)
+  for (batch_rows in c(1L, 100L)) {
+    res <- dta_validate_table_stream(specs, vs_reader(table, batch_rows), verbose = FALSE)
+    expect_false(res$rules_valid, info = batch_rows)
+    # The streamed verdict is the eager one, down to the message and its group.
+    expect_identical(
+      vapply(res$rule_errors, function(e) e$message, character(1)),
+      eager$message,
+      info = batch_rows
+    )
+  }
+})
+
+# ---- group rules on a zero-row source (TST-11) -------------------------------
+
+vs_zero_row_group_rule <- function(scope) {
+  DTARuleGroupCondition(
+    id = paste0("grp_zero_", scope),
+    group_by = "SUBJ",
+    conditions = list(
+      failed = list(REASND = list(empty = FALSE)),
+      done = list(STAT = list(equals = "DONE"))
+    ),
+    constraints = list(
+      list(
+        type = "mutually_exclusive", left = "failed", right = "done",
+        left_scope = scope, right_scope = scope
+      ),
+      list(
+        type = "requires", `if` = "failed", then = "done",
+        if_scope = scope, then_scope = scope
+      )
+    )
+  )
+}
+
+test_that("a zero-row source gives a group rule the same verdict as the materialising path", {
+  table <- data.frame(
+    SUBJ = character(), REASND = character(), STAT = character(),
+    stringsAsFactors = FALSE
+  )
+  for (scope in c("any", "all")) {
+    rule <- vs_zero_row_group_rule(scope)
+    expected <- rule_check_group_condition(rule, table)
+    expect_true(expected$valid, info = scope)
+
+    for (batch_rows in c(1L, 100L)) {
+      streamed <- vs_stream_rule(rule, table, batch_rows)
+      expect_equal(streamed$valid, expected$valid, info = paste(scope, batch_rows))
+      expect_equal(streamed$message, expected$message, info = paste(scope, batch_rows))
+    }
+  }
+})
+
+test_that("empty leading batches do not disturb a group rule's verdict", {
+  rule <- vs_zero_row_group_rule("any")
+  empty <- data.frame(
+    SUBJ = character(), REASND = character(), STAT = character(),
+    stringsAsFactors = FALSE
+  )
+  full <- data.frame(
+    SUBJ = c("A", "A"),
+    REASND = c("BROKEN", NA_character_),
+    STAT = c(NA_character_, "DONE"),
+    stringsAsFactors = FALSE
+  )
+  expected <- rule_check_group_condition(rule, full)
+  expect_false(expected$valid)
+
+  state <- dta_rule_stream_init(rule)
+  dta_rule_stream_update(state, rule, empty)
+  dta_rule_stream_update(state, rule, empty)
+  dta_rule_stream_update(state, rule, full)
+  dta_rule_stream_update(state, rule, empty)
+  streamed <- dta_rule_stream_finalise(state, rule)
+
+  expect_equal(streamed$valid, expected$valid)
+  expect_equal(streamed$message, expected$message)
+})
+
+test_that("a missing grouping column fails the streamed group rule instead of aborting", {
+  # Non-empty source: an empty one may yield no batches at all, in which case
+  # no batch ever carries the column check (see the next test).
+  rule <- vs_zero_row_group_rule("any")
+  table <- data.frame(REASND = "x", STAT = "DONE", stringsAsFactors = FALSE)
+
+  expect_error(rule_check_group_condition(rule, table), class = "dta_rule_not_applicable")
+
+  streamed <- vs_stream_rule(rule, table, batch_rows = 1L)
+  expect_false(streamed$valid)
+  expect_match(streamed$message, "could not be evaluated", fixed = TRUE)
+  expect_match(streamed$message, "SUBJ", fixed = TRUE)
+})
+
+test_that("a zero-row source lacking the grouping column agrees with the materialising path", {
+  # Through the real driver, as both production entry points call it: a source
+  # that yields no batches never reaches dta_group_stream_update(), so the
+  # driver replays the rules once against an empty table carrying the source's
+  # real column names (`known_columns`).
+  rule <- vs_zero_row_group_rule("any")
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "SUBJ", type = "SAS Char", length = 3),
+    DTAColumnSpec(id = "REASND", type = "SAS Char", length = 8),
+    DTAColumnSpec(id = "STAT", type = "SAS Char", length = 8)
+  ), rules = list(rule))
+  table <- data.frame(REASND = character(), STAT = character(), stringsAsFactors = FALSE)
+
+  expect_error(rule_check_group_condition(rule, table), class = "dta_rule_not_applicable")
+  eager <- validate_table_detailed(specs = specs, table = table, verbose = FALSE)
+  expect_false(eager$rules_valid)
+
+  for (batch_rows in c(1L, 100L)) {
+    streamed <- dta_validate_table_stream(
+      specs, vs_reader(table, batch_rows),
+      verbose = FALSE, coerce = FALSE, known_columns = names(table)
+    )
+    expect_false(streamed$rules_valid, info = batch_rows)
+    expect_equal(
+      vapply(streamed$rule_errors, function(e) e$message, character(1)),
+      vapply(eager$rule_errors, function(e) e$message, character(1)),
+      info = batch_rows
+    )
+    expect_match(streamed$rule_errors[[1]]$message, "could not be evaluated", fixed = TRUE)
+  }
 })

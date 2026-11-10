@@ -16,21 +16,6 @@ skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
 
-app_server_dir <- function() .shiny_app_dir()
-
-# A shiny fileInput value for a bundled fixture (same shape as
-# test-shinyapp-server.R's app_file_input(); redefined here rather than
-# shared, because testthat sources test-*.R files in alphabetical order and
-# "export" precedes "server" -- relying on the other file's copy would work
-# only by accident of run order).
-app_file_input <- function(filename) {
-  path <- app_fixture_path(filename)
-  data.frame(
-    name = filename, size = file.size(path), type = "", datapath = path,
-    stringsAsFactors = FALSE
-  )
-}
-
 test_that("the Word export download produces a real .docx with the document's own content", {
   # output$dl_docx's whole content function is `dta_export(export_dta(), file,
   # "docx")`, gated only on `req(rv$dta)` -- no active dataset, no upload, no
@@ -72,6 +57,23 @@ test_that("the validation-messages table renders the empty state before a check"
     expect_match(out, '"dom":"t"', fixed = TRUE)
     expect_no_match(out, '"dom":"tp"', fixed = TRUE)
   })
+})
+
+test_that("the messages dock bar is keyboard-operable and announces its state", {
+  # The bar is a div that holds real buttons (downloads), so it cannot be a
+  # <button> itself: it must carry the button role, be focusable, and handle
+  # Enter/Space, with aria-expanded kept in sync by the toggle script.
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    html <- paste(output$floating_msgs$html, collapse = "\n")
+    expect_match(html, 'class="msgs-dock-bar"[^>]*role="button"')
+    expect_match(html, 'class="msgs-dock-bar"[^>]*tabindex="0"')
+    expect_match(html, 'class="msgs-dock-bar"[^>]*aria-expanded="false"')
+    expect_match(html, 'class="msgs-dock-bar"[^>]*onkeydown="DTA_msgsDockKey\\(event\\)"')
+  })
+  # The toggle script lives in app.R itself, not in R/, so read it as text.
+  src <- paste(readLines(file.path(.shiny_app_dir(), "app.R"), warn = FALSE), collapse = "\n")
+  expect_match(src, "setAttribute('aria-expanded'", fixed = TRUE)
 })
 
 test_that("the validation-messages table renders genuine rows for a failing check", {

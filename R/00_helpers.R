@@ -555,6 +555,16 @@ DTAColumnSpecStructureFactory <- function(
     format_info$prefix
   }
 
+  if (is.null(backend)) {
+    cli_abort(
+      c(
+        "Cannot tell which backend the column structure belongs to.",
+        "i" = "Give 'type' or 'format' a backend prefix, e.g. {.val SAS Char}; 'length' alone is not enough."
+      ),
+      class = "dta_spec_no_backend"
+    )
+  }
+
   switch(backend,
     SAS = DTAtools::DTAColumnSpecStructureSAS(
       type = type_info[["rest"]],

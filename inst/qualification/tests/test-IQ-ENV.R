@@ -249,6 +249,16 @@ test_that("IQ-ENV-016 | installed inst/ files match the baseline sha256 manifest
   }
 
   lines <- readLines(manifest_path, warn = FALSE)
+  # The manifest names the algorithm it was written with in its header. Hash
+  # with that one: an R without sha256sum (< 4.5) must not compare md5 against
+  # sha256 and report every file as altered.
+  algo <- sub("^# ([a-z0-9]+) of .*$", "\\1", grep("^# [a-z0-9]+ of ", lines, value = TRUE)[1])
+  if (is.na(algo) || !algo %in% c("sha256", "md5")) {
+    testthat::skip("the baseline manifest header does not name its hash algorithm")
+  }
+  if (identical(algo, "sha256") && !qual_has_sha256()) {
+    testthat::skip("the baseline manifest is sha256 and this R (< 4.5) has no tools::sha256sum")
+  }
   lines <- lines[!startsWith(lines, "#") & nzchar(lines)]
   expected_hash <- sub("  .*$", "", lines)
   rel_path <- sub("^[0-9a-f]+  ", "", lines)
@@ -259,7 +269,7 @@ test_that("IQ-ENV-016 | installed inst/ files match the baseline sha256 manifest
 
   present <- nzchar(resolved)
   actual_hash <- rep(NA_character_, length(resolved))
-  actual_hash[present] <- vapply(resolved[present], qual_hash_one, character(1))
+  actual_hash[present] <- vapply(resolved[present], qual_hash_one, character(1), algo = algo)
   mismatched <- rel_path[present][expected_hash[present] != actual_hash[present]]
   qa_step(
     sprintf("all %d manifest-listed files under inst/ match their recorded hash", sum(present)),
@@ -295,7 +305,7 @@ test_that("IQ-ENV-019 | at least one vignette is installed | REQ-ENV-019", {
   qa_check(sprintf("%d vignette(s) are installed", n), n > 0)
 })
 
-test_that("IQ-ENV-020 | documented package options are in force at their defaults | REQ-ENV-020", {
+test_that("IQ-ENV-020 | documented package options are in force at their defaults | REQ-ENV-020 | tags: white-box", {
   # Names and defaults pinned by reading every getOption("DTAtools....") call
   # under R/ directly (see REQ-ENV-020's source field for file:line), not
   # copied from documentation that could itself have drifted from the code.
@@ -314,10 +324,52 @@ test_that("IQ-ENV-020 | documented package options are in force at their default
     DTAtools.stream_arrow_unique = TRUE,
     DTAtools.progress_seconds = 30
   )
+  # The observed side is the default the installed package code itself
+  # supplies, not the pinned value: with the option unset, every
+  # getOption(<name>, <default>) call site in the package namespace (function
+  # bodies and argument defaults) is read and its default evaluated. A changed
+  # package default therefore no longer passes by echoing this test back.
+  ns <- asNamespace("DTAtools")
+  site_defaults <- function(name) {
+    found <- list()
+    walk <- function(e) {
+      if (is.call(e)) {
+        if (identical(e[[1]], quote(getOption)) && length(e) >= 3 &&
+          identical(e[[2]], name)) {
+          found[[length(found) + 1L]] <<- eval(e[[3]], ns)
+        }
+        # lapply, so an empty argument (x[1, ]) arrives as a missing one
+        lapply(as.list(e), function(el) if (!missing(el)) walk(el))
+      }
+    }
+    # Functions, plus the S7 methods registered on each generic (stored in
+    # nested environments hanging off the generic, not in the namespace).
+    visit <- function(obj) {
+      if (is.environment(obj)) {
+        return(lapply(mget(ls(obj, all.names = TRUE), obj), visit))
+      }
+      if (!is.function(obj)) {
+        return(invisible())
+      }
+      walk(body(obj))
+      lapply(as.list(formals(obj)), function(a) if (!missing(a)) walk(a))
+      if (is.environment(attr(obj, "methods"))) visit(attr(obj, "methods"))
+      invisible()
+    }
+    for (obj in mget(ls(ns, all.names = TRUE), ns, ifnotfound = list(NULL))) visit(obj)
+    found
+  }
   for (name in names(defaults)) {
+    withr::local_options(stats::setNames(list(NULL), name))
+    sites <- site_defaults(name)
+    qa_check(sprintf("%s has at least one getOption() site in the package", name), length(sites) > 0)
     qa_step(
       sprintf("%s is in force at its documented default", name),
-      defaults[[name]], getOption(name, defaults[[name]])
+      defaults[[name]], unique(sites)[[1]]
+    )
+    qa_step(
+      sprintf("%s has the same default at every call site", name),
+      1L, length(unique(sites))
     )
   }
 })

@@ -52,6 +52,9 @@
     var moreRows = tbody.querySelectorAll('tr.msg-more-row');
     moreRows.forEach(function (row) {
       row.hidden = true;
+      // Sorting flattens every group, so mark it expanded; otherwise a later
+      // applyFilters() re-caps the extra rows while this button stays hidden.
+      permanentlyExpandedGroups.add(row.dataset.group);
     });
   }
 

@@ -343,7 +343,7 @@ test_that("editing a dataset that does not exist fails with a message", {
   r <- set(app_fixture_dta(), "no_such_dataset", id = "whatever")
 
   expect_false(r$ok)
-  expect_match(r$error, "not found")
+  expect_match(r$error, "Dataset 'no_such_dataset' not found", fixed = TRUE)
 })
 
 # ---- `type` is not editable -------------------------------------------------

@@ -288,7 +288,10 @@ test_that("results(DTA) keeps one column set for real and stub datasets", {
   dta <- create_example_DTA()
   # The non-DTADataSet stub frame is populated, so a column mismatch with the
   # real frame makes the rbind error rather than forgive.
-  dta@datasets[["not_a_dataset"]] <- list()
+  # The @datasets validator now rejects a non-DTADataSet entry, so the stub can
+  # only arise from state that bypassed it; reproduce that with check = FALSE.
+  stub_datasets <- c(dta@datasets, list(not_a_dataset = list()))
+  S7::prop(dta, "datasets", check = FALSE) <- stub_datasets
 
   res <- results(dta)
   expect_true("n_import_errors" %in% names(res))

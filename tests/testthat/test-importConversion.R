@@ -1084,10 +1084,7 @@ ic_integer_literals <- function(per = 900L) {
 # batches built here are a few values long, so the threshold is lowered to 0
 # for the rest of this file to exercise the path itself; its own test below
 # pins the default.
-withr::local_options(
-  list(DTAtools.stream_arrow_numeric_min_rows = 0),
-  .local_envir = teardown_env()
-)
+withr::local_options(list(DTAtools.stream_arrow_numeric_min_rows = 0))
 
 ic_num_specs <- function(type) {
   make_specs(DTAColumnSpec(id = "VAL", type = type, nullable = TRUE))
