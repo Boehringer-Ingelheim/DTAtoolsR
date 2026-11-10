@@ -1,4 +1,4 @@
-# The SAS dataset (.sas7bdat) reader. REQ-FILE-032 .. REQ-FILE-038, with
+# The SAS dataset (.sas7bdat) reader. REQ-FILE-034 .. REQ-FILE-040, with
 # REQ-FILE-011, REQ-FILE-012 and REQ-VAL-031 touched on the way.
 #
 # Every expected value in this file is written down from SAS semantics or taken
@@ -111,7 +111,7 @@ fs_n_text <- function(bytes, text) {
 
 # ---- the handler --------------------------------------------------------------
 
-test_that("OQ-FILE-055 | a SAS dataset handler is built three ways, is not a tabular handler, and a tabular dataset accepts it | REQ-FILE-032", {
+test_that("OQ-FILE-057 | a SAS dataset handler is built three ways, is not a tabular handler, and a tabular dataset accepts it | REQ-FILE-034", {
   direct <- DTAFileSAS7BDAT(filename = "ae.sas7bdat")
   via_factory <- DTAFileFactory(type = "sas7bdat", filename = "ae.sas7bdat")
   via_yaml <- dta_file_handlers_from_list(list(type = "sas7bdat", filename = "ae.sas7bdat"))
@@ -163,7 +163,7 @@ test_that("OQ-FILE-055 | a SAS dataset handler is built three ways, is not a tab
 
 # ---- values as stored -----------------------------------------------------------
 
-test_that("OQ-FILE-056 | a SAS-written dataset reads back every observation and variable, names and values as stored | REQ-FILE-033", {
+test_that("OQ-FILE-058 | a SAS-written dataset reads back every observation and variable, names and values as stored | REQ-FILE-035", {
   path <- fs_fx("iris.sas7bdat")
   df <- as.data.frame(read_file(fs_handler("iris.sas7bdat"), path))
 
@@ -208,7 +208,7 @@ test_that("OQ-FILE-056 | a SAS-written dataset reads back every observation and 
   )
 })
 
-test_that("OQ-FILE-057 | blank is missing, trailing blanks are not part of a value, and leading blanks, zeros, non-ASCII text and 'NA' are kept | REQ-FILE-034", {
+test_that("OQ-FILE-059 | blank is missing, trailing blanks are not part of a value, and leading blanks, zeros, non-ASCII text and 'NA' are kept | REQ-FILE-036", {
   df <- as.data.frame(read_file(fs_handler("delivery.sas7bdat"), fs_fx("delivery.sas7bdat")))
 
   qa_step(
@@ -233,7 +233,7 @@ test_that("OQ-FILE-057 | blank is missing, trailing blanks are not part of a val
 
 # ---- dates, datetimes and times --------------------------------------------------
 
-test_that("OQ-FILE-058 | SAS dates, datetimes and times read as display text under their format, as SAS numbers under a numeric type, and as ISO text otherwise | REQ-FILE-035", {
+test_that("OQ-FILE-060 | SAS dates, datetimes and times read as display text under their format, as SAS numbers under a numeric type, and as ISO text otherwise | REQ-FILE-037", {
   path <- fs_fx("delivery.sas7bdat")
 
   # Nothing declared: ISO 8601, with the missing row still missing.
@@ -324,7 +324,7 @@ test_that("OQ-FILE-058 | SAS dates, datetimes and times read as display text und
 
 # ---- type mismatch, and two pinned limitations -------------------------------------
 
-test_that("OQ-FILE-059 | a SAS dataset checks clean under its own description, a mistyped variable is a column-specification violation, and two limitations are pinned | REQ-FILE-033 REQ-FILE-036 REQ-VAL-031", {
+test_that("OQ-FILE-061 | a SAS dataset checks clean under its own description, a mistyped variable is a column-specification violation, and two limitations are pinned | REQ-FILE-035 REQ-FILE-038 REQ-VAL-031", {
   path <- fs_fx("iris.sas7bdat")
 
   qa_step(
@@ -421,7 +421,7 @@ test_that("OQ-FILE-059 | a SAS dataset checks clean under its own description, a
 
 # ---- memory only --------------------------------------------------------------------
 
-test_that("OQ-FILE-060 | a SAS dataset is held in memory under auto, and always and open_file are refused naming stream = never | REQ-FILE-037", {
+test_that("OQ-FILE-062 | a SAS dataset is held in memory under auto, and always and open_file are refused naming stream = never | REQ-FILE-039", {
   path <- fs_fx("iris.sas7bdat")
   # LIM-010: with a one-byte threshold every file is "large", which is the case
   # where a delimited file would be streamed and a SAS dataset cannot be.
@@ -479,7 +479,7 @@ test_that("OQ-FILE-060 | a SAS dataset is held in memory under auto, and always 
 
 # ---- files that are not datasets --------------------------------------------------------
 
-test_that("OQ-FILE-061 | a zero-byte or non-SAS file is refused with the path, and a dataset without observations reads as zero rows | REQ-FILE-038 REQ-FILE-012", {
+test_that("OQ-FILE-063 | a zero-byte or non-SAS file is refused with the path, and a dataset without observations reads as zero rows | REQ-FILE-040 REQ-FILE-012", {
   dir <- qa_tempdir()
   h <- fs_handler("ae.sas7bdat")
 
@@ -517,7 +517,7 @@ test_that("OQ-FILE-061 | a zero-byte or non-SAS file is refused with the path, a
 
 # ---- compression ----------------------------------------------------------------------------
 
-test_that("OQ-FILE-062 | a gzip-compressed SAS dataset matches the plain declaration and reads to the same table and verdict | REQ-FILE-011", {
+test_that("OQ-FILE-064 | a gzip-compressed SAS dataset matches the plain declaration and reads to the same table and verdict | REQ-FILE-011", {
   dir <- qa_tempdir()
   plain <- fs_fx("iris.sas7bdat")
   gz <- file.path(dir, "iris.sas7bdat.gz")

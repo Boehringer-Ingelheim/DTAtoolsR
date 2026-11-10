@@ -272,7 +272,7 @@ requirements:
       load_file(stream = ) at "never", "auto" and "always" shall reach an
       identical validation verdict for the same file and specification,
       differing only in when the file's bytes are read. A SAS dataset handler
-      has no lazy reader and is covered by REQ-FILE-037.
+      has no lazy reader and is covered by REQ-FILE-039.
     risk: high
     category: functional
     covers: [load_file, check]
@@ -396,7 +396,7 @@ requirements:
 
   # ---- SAS datasets (.sas7bdat) ------------------------------------------------
 
-  - id: REQ-FILE-032
+  - id: REQ-FILE-034
     text: >
       DTAFileSAS7BDAT shall be constructible directly, through
       DTAFileFactory(type = "sas7bdat") and from a YAML file declaration
@@ -412,7 +412,7 @@ requirements:
       missing_values) applies to it. That is why it is a sibling of
       DTAFileTabular under DTAFile and not a child of it.
 
-  - id: REQ-FILE-033
+  - id: REQ-FILE-035
     text: >
       Reading a .sas7bdat file shall return every observation and every
       variable of the dataset. Variable names shall be returned exactly as
@@ -430,7 +430,7 @@ requirements:
       setosa, versic and virgin. The expected values in the tests are the iris
       data set and the bytes of the file, never the output of the reader.
 
-  - id: REQ-FILE-034
+  - id: REQ-FILE-036
     text: >
       In a character variable read from a .sas7bdat file a blank value shall
       be missing, and trailing blanks shall not be part of a value. Leading
@@ -449,7 +449,7 @@ requirements:
       delivery.sas7bdat is written by haven (no SAS-written file with these
       shapes is available) and its expected values are literals in the test.
 
-  - id: REQ-FILE-035
+  - id: REQ-FILE-037
     text: >
       A numeric variable that SAS stores as a date, datetime or time shall be
       read as follows. When the column declares the matching type (SAS Date,
@@ -479,7 +479,7 @@ requirements:
       A date stored with no SAS date format arrives as a plain number and stays
       one, so declaring it SAS Date fails with a type violation.
 
-  - id: REQ-FILE-036
+  - id: REQ-FILE-038
     text: >
       A number read from a .sas7bdat column that is declared SAS Char, and a
       number with a fraction read from a column declared SAS Int, shall each be
@@ -504,12 +504,12 @@ requirements:
       violation as well. Text read from a SAS dataset under a declared SAS Num
       or SAS Int is the exception to the rule above: it is parsed as text from
       a delimited file is, and a value that does not parse is an import error,
-      not a column-specification error. OQ-FILE-059 pins it on the SUBJID
+      not a column-specification error. OQ-FILE-061 pins it on the SUBJID
       text of delivery.sas7bdat: "007" becomes 7, the empty value stays
       missing, and the four values that are not numbers are four import
       errors.
 
-  - id: REQ-FILE-037
+  - id: REQ-FILE-039
     text: >
       A .sas7bdat file shall always be read into memory. load_file(stream =
       "auto") shall hold an in-memory table whatever the file size and shall
@@ -526,7 +526,7 @@ requirements:
       session-wide options(DTAtools.stream = "always") makes SAS loads fail
       until stream = "never" is passed.
 
-  - id: REQ-FILE-038
+  - id: REQ-FILE-040
     text: >
       A zero-byte file, or a file that is not a SAS dataset, offered to a
       DTAFileSAS7BDAT handler shall be refused with a condition of class

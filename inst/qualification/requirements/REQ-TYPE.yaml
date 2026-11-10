@@ -39,7 +39,7 @@ requirements:
     notes: >
       For a declared Int in delimited-text files the storage type is always R
       integer, so batching cannot change it. (A SAS dataset is never batched
-      and holds a numeric column declared Int as a double; see REQ-FILE-036.)
+      and holds a numeric column declared Int as a double; see REQ-FILE-038.)
       Each cell is judged alone; a value the declared type cannot hold is an
       import error (see REQ-TYPE-009).
 
@@ -128,7 +128,7 @@ requirements:
       A SAS dataset delivers its numbers directly rather than as text, and a
       numeric column declared Int is held there as an Arrow double, not an
       integer, so a fraction or an out-of-range value in it is a
-      column-specification type violation, not an import error (REQ-FILE-036);
+      column-specification type violation, not an import error (REQ-FILE-038);
       the verdict is the same, the axis counts and the storage type differ.
 
   # ---- typing at read versus typing in R --------------------------------------
