@@ -48,6 +48,7 @@ exports:
   - DTAFileCSV
   - DTAFileDelim
   - DTAFileFactory
+  - DTAFileSAS7BDAT
   - DTAFileTabular
   - DTAFileTSV
   - DTAMetaData

@@ -59,7 +59,9 @@ only ever asks whether the file arrived, is non-empty and can be opened.
 
 \code{extensions} is an optional allow-list of endings. It is an \strong{open}
 list rather than a fixed set of known formats, so a delivery of \code{.xpt},
-\code{.sas7bdat} or \code{.e2b} files needs no change to this package.
+\code{.sas7bcat} or \code{.e2b} files needs no change to this package. To validate the
+contents of a \code{.sas7bdat} file, use \code{\link{DTAFileSAS7BDAT}} in a tabular
+dataset instead.
 
 \describe{
 \item{\code{NULL} (the default)}{Any ending is accepted. This is what

@@ -324,14 +324,15 @@ method(print, DTAColumnSpecStructureSAS) <- function(x, ...) {
 # Input: the same format will read strings like "15AUG25" into a date value.
 
 # TIMEw.d
-# Time-of-day format. Output: prints time values as hh:mm:ss (with optional
-# fractional seconds if d > 0).
-#  For example, a SAS time value of 3661 seconds (1:01:01) with TIME8. displays
-# 01:01:01. TIME5. would show
-# 01:01 (hours:minutes). Input: can read times in hh:mm:ss form.
+# Time-of-day format. Output: prints time values as h:mm:ss (with optional
+# fractional seconds if d > 0); the hour is not zero-padded, so the leading
+# blank of a field wider than the text is trimmed.
+#  For example, a SAS time value of 3661 seconds with TIME8. displays
+# "1:01:01". TIME5. would show
+# "1:01" (hours:minutes). Input: can read times in hh:mm:ss form.
 
 # DATETIMEw.
 # Date-time format combining date and time. By default (e.g., DATETIME18.), it prints as ddMONyy:hh:mm:ss
 #  (or with year as yyyy if width allows).
-#  For example, a datetime value for 01-Oct-2025 14:30:00 with DATETIME18. -> 01OCT25:14:30 (with DATETIME20. -> 01OCT2025:14:30:00).
+#  For example, a datetime value for 01-Oct-2025 14:30:00 with DATETIME18. -> 01OCT25:14:30:00 (with DATETIME20. -> 01OCT2025:14:30:00).
 # These formats are useful for timestamp variables. (Corresponding informats like ANYDTDTM can read a wide range of datetime strings.)

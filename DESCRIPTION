@@ -38,7 +38,8 @@ Imports:
 	tibble,
 	officer,
 	xml2,
-	zip
+	zip,
+	haven (>= 2.5.2)
 Depends:
 	R (>= 4.1.0),
 	S7 (>= 0.2.2)
@@ -82,6 +83,7 @@ Collate:
     'DTAFileTabular-class.R'
     'DTAFileCSV-class.R'
     'DTAFileDelim-class.R'
+    'DTAFileSAS7BDAT-class.R'
     'DTAFileTSV-class.R'
     'DTAMetaData-class.R'
     'DTAMetaData-helpers.R'
@@ -113,6 +115,7 @@ Collate:
     'reportRendering.R'
     'rulePhrasing.R'
     'run_dta_app.R'
+    'sasTemporalText.R'
     'streamingScale.R'
     'streamingValidation.R'
     'templateGuide-collect.R'

@@ -656,7 +656,7 @@ NULL
 }
 
 #' Friendly, human-readable format label for a DTAFile object, used in the
-#' "Files" section table (e.g. CSV / TSV / Delimited).
+#' "Files" section table (e.g. CSV / TSV / Delimited / SAS dataset).
 #' @keywords internal
 .file_format_label <- function(f) {
   if (inherits(f, "DTAtools::DTAFileCSV")) {
@@ -667,6 +667,8 @@ NULL
     "Delimited"
   } else if (inherits(f, "DTAtools::DTAFileTabular")) {
     "Tabular"
+  } else if (inherits(f, "DTAtools::DTAFileSAS7BDAT")) {
+    "SAS dataset (.sas7bdat)"
   } else {
     "File"
   }

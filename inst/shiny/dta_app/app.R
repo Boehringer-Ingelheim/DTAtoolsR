@@ -3358,8 +3358,13 @@ server <- function(input, output, session) {
       )
       type_choices <- dta_handler_types(ds_type)
       # Labelled only where the bare token would not explain itself.
+      type_labels <- c(
+        any = "Any file (not parsed)",
+        sas7bdat = "SAS dataset (.sas7bdat)"
+      )
       names(type_choices) <- ifelse(
-        type_choices == "any", "Any file (not parsed)", type_choices
+        type_choices %in% names(type_labels),
+        type_labels[type_choices], type_choices
       )
       # With a single legal type there is nothing to choose, so the control is
       # shown READ-ONLY rather than removed: `input$file_type` still has to
@@ -3416,11 +3421,12 @@ server <- function(input, output, session) {
               )
             )
           ),
-          # How the file is READ. Only a parsed type has these, so the panel is
-          # the mirror of the endings panel above -- and an `any` handler's
-          # constructor would refuse either argument.
+          # How the file is READ. Only a delimited-text type has these, so the
+          # panel is the mirror of the endings panel above -- and neither an
+          # `any` nor a `sas7bdat` handler's constructor takes either argument
+          # (a SAS dataset declares its own encoding).
           conditionalPanel(
-            condition = "input.file_type != 'any'",
+            condition = "input.file_type != 'any' && input.file_type != 'sas7bdat'",
             layout_columns(
               col_widths = c(6, 6),
               selectizeInput("file_encoding", "File encoding",
@@ -3662,7 +3668,8 @@ server <- function(input, output, session) {
     # leaves a new one on the constructor defaults) so that editing a file name
     # cannot silently drop a `has_header` or a `quote` the user never saw, then
     # overwrite the two the form does own. dta_set_handler() drops whatever the
-    # chosen type's constructor will not take, so an `any` handler ignores both.
+    # chosen type's constructor will not take, so an `any` or a `sas7bdat`
+    # handler ignores both.
     # Each of the two is overwritten only when its control actually reported a
     # value: an input that was never rendered reads as NULL, and taking that as
     # "unticked" / "blank" would clear a setting the form never showed.

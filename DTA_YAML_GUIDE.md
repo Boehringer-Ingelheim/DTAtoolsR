@@ -134,7 +134,7 @@ current shape in new files.
 
 | Key | Notes |
 | --- | --- |
-| `type` | **required**: `csv`, `tsv` (for `tabular`), `any` (for `file`). |
+| `type` | **required**: `csv`, `tsv`, `sas7bdat` (for `tabular`), `any` (for `file`). |
 | `filename` | **required**. Literal name, or a regex if `pattern: true`. |
 | `pattern` | `true` → `filename` is a regex. Anchor it: `"^LAB_[0-9]{8}\\.csv$"`. |
 | `pattern_description` | Human wording of the regex (`LAB_<YYYYMMDD>.csv`). Always add it when `pattern: true`. |
@@ -149,6 +149,13 @@ current shape in new files.
 
 CSV is comma-separated, TSV tab-separated; `.gz` files are read transparently.
 
+`sas7bdat` reads a SAS dataset (the haven package does the decoding). It takes
+none of `encoding`, `has_header`, `quote`, `missing_values` and
+`newlines_in_values` — passing one to the factory fails with an unused-argument
+error — and the file is always read into memory, never streamed. A `sas7bdat`
+handler declared inside a `type: file` dataset is coerced to a reader-less `any`
+handler, since that dataset never parses its files.
+
 ---
 
 ## 4. `columns` (tabular datasets)
@@ -162,8 +169,8 @@ column and an undeclared extra column are both errors. Declare every column.
 | `label` | Short human label (≤ 40 chars, SAS-label style). |
 | `description` | What the value means, its unit, origin, derivation, and when it may be blank. |
 | `type` | `SAS Char`, `SAS Num` (decimal), `SAS Int` (whole number), `SAS Date`, `SAS Time`, `SAS DateTime`. Always prefixed `SAS `. |
-| `format` | Optional SAS format, prefixed `SAS `: `$w.` (Char), `w.` / `w.d` / `BESTw.` (Num), `w.` / `BESTw.` (Int), `DATEw.`, `TIMEw.`, `DATETIMEw.`. Must fit the type. Documentation only — it does **not** enforce width. |
-| `length` | Max length in characters (applies to text values). This is what enforces width. |
+| `format` | Optional SAS format, prefixed `SAS `: `$w.` (Char), `w.` / `w.d` / `BESTw.` (Num), `w.` / `BESTw.` (Int), `DATEw.`, `TIMEw.`, `DATETIMEw.`. Must fit the type. A declared format **is** checked: a value that cannot be displayed in it (too wide, too many decimals, not date/time display text) is reported. |
+| `length` | Max length in characters (applies to text values). Together with a declared `format`, this is what enforces width. |
 | `nullable` | `true` / `false`. **Always set it explicitly** — if omitted, missing values fail. |
 | `values` | Closed list of permitted values (controlled terminology). |
 | `pattern` | Regex every non-missing value must match (Perl syntax). **Unanchored by default — always wrap in `^…$`.** |
@@ -177,12 +184,18 @@ Constraints between keys:
 - `nullable: true` admits empty cells; with `values`, empty is allowed in addition to the list.
 
 What is enforced per value: type (non-numeric text in a Num/Int column is an
-import error; a decimal in an Int column fails), `length`, `values`, `pattern`,
-and missingness via `nullable`.
+import error; a decimal in an Int column fails), a declared `format`, `length`,
+`values`, `pattern`, and missingness via `nullable`.
 
 **`SAS Date`/`Time`/`DateTime` are stored as text and their shape is not checked
 by the type** — add a pattern, e.g. ISO 8601 date
 `"^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"`.
+
+For a `sas7bdat` delivery, a SAS date, datetime or time column arrives as the
+display text of its declared format (`15AUG2025` under `DATE9.`) and as ISO 8601
+text when no format is declared. Do **not** declare `length` on such a column:
+it is checked against that text, so the `length: 8` that PROC CONTENTS reports
+for the 8-byte numeric storage would fail every row.
 
 ### Making column specs meaningful
 

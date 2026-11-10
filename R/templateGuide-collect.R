@@ -1307,6 +1307,11 @@
 }
 
 .tgc_file_type <- function(f) {
+  # The other handlers read as their upper-cased class name (CSV, TSV, ANY);
+  # a SAS dataset uses the label the exported document uses.
+  if (inherits(f, "DTAtools::DTAFileSAS7BDAT")) {
+    return(.file_format_label(f))
+  }
   cls <- sub("^DTAtools::DTAFile", "", class(f)[[1]])
   toupper(cls)
 }

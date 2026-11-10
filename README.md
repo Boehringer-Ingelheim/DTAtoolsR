@@ -36,6 +36,8 @@ once installed).
 - Import/export DTA/DTS specifications from/to YAML and Word documents
 - Columns are read in the type the specification declares for them, so
   `"007"` in a text column stays `"007"`
+- Reads delimited text (CSV, TSV, any single-character separator, plain or
+  gzip-compressed) and SAS datasets (`.sas7bdat`, via the haven package)
 - Comprehensive validation of tabular data: type, format, nullability,
   allowed values, and regex patterns
 - Cross-column rule validation (`col_condition`, `col_range`,
@@ -182,7 +184,8 @@ DTA                              ← top-level agreement container
     |   |   |                        input types, manage file names,
     │   │   ├── DTAFileCSV           which can have patterns,
     |   |   ├── DTAFileTSV           number of files, etc ..
-    |   |   └── DTAFileDelim
+    |   |   ├── DTAFileDelim
+    |   |   └── DTAFileSAS7BDAT
     │   │       └── read_file()  → Arrow Table
     |   |
     │   ├── specs (DTAColumnSpecCollection)  ← column-level specs +
@@ -301,11 +304,88 @@ numbers, and `validate_file_stream()` still reads a compressed file in batches
 rather than expanding it into memory. An anchored filename pattern such as
 `^clinical_data\.csv$` matches the gzipped form too.
 
+### SAS datasets (.sas7bdat)
+
+A SAS dataset is declared like a delimited file, with `type: sas7bdat`, and
+validated against the same column specifications. The file is decoded by the
+haven package, which `DTAtools` depends on, so nothing extra has to be
+installed:
+
+```yaml
+datasets:
+  - id: adverse_events
+    type: tabular
+    files:
+      type: sas7bdat
+      filename: ae.sas7bdat
+    columns:
+      - id: USUBJID
+        type: SAS Char
+        nullable: false
+      - id: ASTDT
+        type: SAS Date
+        format: SAS DATE9.
+        nullable: true
+```
+
+```r
+dta <- read_dta_from_yaml("spec.yaml")
+dta <- load_file(dta, "adverse_events", file = "ae.sas7bdat")   # or ae.sas7bdat.gz
+dta <- check(dta, quiet = TRUE)
+results(dta)
+```
+
+What the reader hands to the validation, and what that means for a spec:
+
+- Values are checked as stored. A blank character value is missing; trailing
+  blanks are not part of a value (SAS pads them), but leading blanks, leading
+  zeros and non-ASCII characters are kept. The text `NA` is a value, unlike in
+  a CSV file, where it is read as missing.
+- Column names are exactly as stored, upper and lower case included. A file
+  with duplicate column names is refused.
+- SAS dates, datetimes and times are numbers in the file. A column carrying a
+  SAS date, datetime or time format arrives as the display text of the format
+  the specification declares (`15AUG2025` under `DATE9.`), or as ISO 8601 text
+  (`2025-08-15`, `2025-08-15T14:30:00`, `14:30:00`) when no matching format is
+  declared. Declared as any non-date type (`SAS Num`, `SAS Int`), the column
+  stays the SAS number itself: days (dates) or seconds (datetimes, times) since
+  1960-01-01. A date stored without a SAS date format cannot be told from any
+  other number, so it arrives as a number, and a `SAS Date` declaration then
+  fails.
+- Do not declare `length` on a SAS date, datetime or time column. It is checked
+  against the text above, and the `length: 8` that `PROC CONTENTS` reports for
+  the 8-byte numeric storage would fail every row.
+- A type that does not match the data (a numeric column declared `SAS Char`, a
+  fraction under `SAS Int`, a date column declared `SAS DateTime`) is a
+  column-spec type violation, not an import error: the file stores numbers as
+  numbers, so there is nothing to parse. The one exception is text in a column
+  declared `SAS Num` or `SAS Int`: that text is parsed, as in a CSV file, and a
+  value that does not parse is an import error. A column declared `SAS Int`
+  holds a double, so a whole number passes and a fraction, or a value outside
+  the 32-bit integer range, is a type violation.
+- Numeric values under a `w.d` display format are checked as stored, not
+  rounded to how SAS would display them.
+- The dataset is always read into memory, with about three times its size as the
+  peak. `stream = "auto"` reads it whatever its size and, when the size alone
+  would have streamed it, says so in a message (class
+  `dta_sas7bdat_in_memory`); `stream = "always"` is refused. A file near the
+  1 GB upload limit of the app can exhaust the memory of a server process.
+  `validate_file_stream()` and `cache_as_parquet()` are for delimited text
+  only and refuse a SAS dataset, pointing to `load_file()`.
+- A `.sas7bdat.gz` needs no separate decompression step, and `ae.sas7bdat` also
+  matches it. haven unpacks it to a temporary file in `tempdir()`, of the
+  uncompressed size, which is removed at garbage collection.
+- The format catalog (`.sas7bcat`) is not read. Ship it as a `type: file`
+  deliverable.
+
 ### Validating a file too large to load
 
 The workflow above reads the file into memory first. For a file larger than
 the memory available, that is not slow but impossible — so the file can be
 scanned in batches instead, never holding more than one batch.
+
+Streaming applies to delimited text only. A `.sas7bdat` file is always read into
+memory (see [SAS datasets](#sas-datasets-sas7bdat)).
 
 The ordinary way in is the `stream` argument on `load_file()`, which decides
 how the table is *held* once loaded:
@@ -481,9 +561,11 @@ ds_file <- load_file(ds_file, file = "report_2024.pdf", handler_index = 1)
 ds_file <- check(ds_file)
 ```
 
-`extensions` is an open list, so a delivery of `.xpt` or `.sas7bdat` files needs
-no change to the package. A file whose ending is not listed is refused as it is
-offered, rather than at validation time.
+`extensions` is an open list, so a delivery of `.xpt`, `.sas7bcat` or `.e2b`
+files needs no change to the package. A file whose ending is not listed is
+refused as it is offered, rather than at validation time. To validate the
+*contents* of a `.sas7bdat`, declare it with `type: sas7bdat` in a tabular
+dataset instead (see [SAS datasets](#sas-datasets-sas7bdat)).
 
 ### Building a full `DTA` object, mixing dataset types
 
@@ -1147,6 +1229,7 @@ row-level validation.
 | `DTAFileCSV`              | CSV file handler for `read_file()`                            |
 | `DTAFileTSV`              | TSV file handler for `read_file()`                            |
 | `DTAFileDelim`            | Generic delimited-text file handler for `read_file()`         |
+| `DTAFileSAS7BDAT`         | SAS dataset (`.sas7bdat`) handler, read via haven, in memory only |
 | `DTAFileAny`              | Handler for a file that is never parsed; optional `extensions` |
 
 ### Key Functions
