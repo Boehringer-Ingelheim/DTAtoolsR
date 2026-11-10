@@ -49,6 +49,14 @@ tool is qualified to enforce a specification, not to judge whether a
 specification is the right one. The interactive application's visual
 appearance.
 
+**SAS datasets.** The binary `.sas7bdat` format is decoded by the `haven`
+package (the ReadStat library inside it), a hard dependency since the SAS
+reader was added. Decoding is a dependency's job and out of scope as above, but
+the package's use of it is not: the suite checks what is made of the decoded
+values (names, blanks, dates and times, types) against a dataset written by SAS
+itself and against byte-level facts about the fixture files. A SAS dataset is
+read into memory only, which LIM-010 records.
+
 ## 3. Evidence and its properties
 
 Each run writes a bundle whose properties are the ones a regulated record needs.
@@ -188,7 +196,7 @@ A qualification describes one build of the software on one system. Repeat it
 when any of these changes:
 
 - the package version;
-- the R minor version (4.5 to 4.6, say), or the major version of Arrow;
+- the R minor version (4.5 to 4.6, say), or the major version of Arrow or of haven;
 - the operating system, or the deployment target the package is installed onto;
 - any dependency that fails its declared minimum after an environment change;
 - a defect is fixed that was reproduced by the previous run, since its register

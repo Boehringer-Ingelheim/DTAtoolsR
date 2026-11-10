@@ -1,0 +1,41 @@
+iris.sas7bdat in this directory is an unmodified copy of the example file
+shipped with the haven R package (system.file("examples", "iris.sas7bdat",
+package = "haven"); 131072 bytes), https://github.com/tidyverse/haven
+
+Provenance: written by SAS 9.04.01M2 on X64_8PRO. Its four numeric columns
+(Sepal_Length, Sepal_Width, Petal_Length, Petal_Width) are bit-identical to the
+first four columns of datasets::iris; Species is stored as $6, so the values
+are "setosa", "versic" and "virgin".
+
+haven is distributed under the MIT licence. The licence file installed with
+haven reads:
+
+    YEAR: 2023
+    COPYRIGHT HOLDER: haven authors
+
+which stands for the standard MIT licence text:
+
+    MIT License
+
+    Copyright (c) 2023 haven authors
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+delivery.sas7bdat and empty.sas7bdat are not SAS-written; they are produced by
+.github/scripts/build_sas7bdat_fixtures.R.

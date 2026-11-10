@@ -255,7 +255,7 @@ implement the two kinds of deliverable found in agreements:
 delivered tables as Arrow Tables; `DTADataSetFile` checks only that declared
 files arrived, are non-empty, and are readable — for PDFs, archives, and raw
 instrument output that are never parsed. File handlers (`DTAFileCSV`,
-`DTAFileTSV`, `DTAFileDelim`, `DTAFileAny`) encapsulate delivery-name
+`DTAFileTSV`, `DTAFileDelim`, `DTAFileSAS7BDAT`, `DTAFileAny`) encapsulate delivery-name
 matching — including filename regular expressions, expected file counts, and
 transparent acceptance of gzip-compressed uploads — and reading.
 

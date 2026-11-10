@@ -30,8 +30,9 @@ for import issues later, at scan time, in \code{check()}.}
 
 \item{files}{A list of DTAFile objects specifying input file information.
 Every handler must inherit \code{DTAFileTabular} (for example
-\code{DTAFileCSV} or \code{DTAFileTSV}), because a tabular dataset parses
-its files; a reader-less handler is rejected.}
+\code{DTAFileCSV} or \code{DTAFileTSV}) or be a \code{DTAFileSAS7BDAT},
+because a tabular dataset parses its files; a reader-less handler is
+rejected.}
 
 \item{name}{Character or NULL. Human-readable name of the dataset, e.g.
 \code{"Demographics"}; shown in place of the \code{id} where one is set.}

@@ -1388,6 +1388,7 @@ dta_open_normalized_dataset <- function(
   na = NULL,
   handler = NULL
 ) {
+  dta_refuse_sas7bdat(path)
   settings <- dta_reader_parse_settings(handler)
 
   # Decided before the plan does any I/O, because it decides which file the
@@ -1597,4 +1598,28 @@ method(print_info, DTAFileTabular) <- function(x) {
   cli::cli_alert("Encoding: {x@encoding}")
 
   invisible(x)
+}
+
+#' @title Refuse a SAS Dataset Offered to a Delimited-Text Reader
+#' @description
+#' Arrow does not reject a `.sas7bdat` outright: it tries to parse the binary
+#' as delimited text and fails with an opaque "Is this a 'csv' file?" schema
+#' error. Catching the extension (with or without a `.gz`) trades that for a
+#' message that names the real cause, the way the `.zip` guard in
+#' `dta_check_readable_file()` does.
+#' @param path Character path.
+#' @return `NULL`, invisibly, when `path` is not a SAS dataset.
+#' @keywords internal
+dta_refuse_sas7bdat <- function(path) {
+  if (grepl("\\.sas7bdat(\\.gz)?$", path, ignore.case = TRUE)) {
+    cli::cli_abort(
+      c(
+        "{.path {path}} is a SAS dataset, which cannot be read as delimited text.",
+        "i" = "A SAS dataset is read into memory only; {.fn validate_file_stream} and {.fn cache_as_parquet} take delimited text.",
+        "i" = "Use {.fn load_file} or {.fn read_file} with a {.cls DTAFileSAS7BDAT} handler instead."
+      ),
+      class = "dta_sas7bdat_not_delimited"
+    )
+  }
+  invisible(NULL)
 }

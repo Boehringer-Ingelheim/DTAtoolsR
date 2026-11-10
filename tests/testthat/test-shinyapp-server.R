@@ -2267,3 +2267,39 @@ test_that("the dock download handlers refuse to write before a check", {
     expect_gt(length(readLines(csv, warn = FALSE)), 0)
   })
 })
+
+test_that("the handler form offers SAS datasets and saves one without reader settings", {
+  # Reading output$file_modal_body is the point (see the encoding test above):
+  # the type control is only in the markup if the form actually builds.
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+    session$setInputs(edit_files = 1)
+    session$setInputs(file_add = 1)
+
+    html <- ui_text(output$file_modal_body)
+    expect_match(html, "value=\"sas7bdat\"", fixed = TRUE)
+    expect_match(html, "SAS dataset (.sas7bdat)", fixed = TRUE)
+    # The reader-settings panel is hidden for a SAS dataset, as for `any`
+    # (quotes in the condition are HTML-escaped, so allow for either form).
+    expect_match(html, "file_type != .{1,6}sas7bdat")
+
+    # The panel is hidden client-side, but its controls keep their values; the
+    # save must not forward them to a constructor that refuses them.
+    session$setInputs(
+      file_filename = "ae.sas7bdat", file_type = "sas7bdat",
+      file_pattern = FALSE, file_encoding = "latin1",
+      file_newlines_in_values = TRUE
+    )
+    session$setInputs(file_save = 1)
+
+    expect_null(rv$file_msg)
+    expect_equal(rv$file_view, "list")
+    hs <- DTAtools::datasets(rv$dta, "clinical_data")@files
+    expect_length(hs, 2)
+    expect_s3_class(hs[[2]], "DTAtools::DTAFileSAS7BDAT")
+    expect_equal(hs[[2]]@filename, "ae.sas7bdat")
+  })
+})

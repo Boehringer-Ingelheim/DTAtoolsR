@@ -14,6 +14,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   error (class `dta_template_lint_error`) when a finding reaches `fail_on`.
   The CI assets written by `create_template_repo()` (GitHub Actions,
   Bitbucket Pipelines, Jenkins) now call it.
+- A SAS dataset (`.sas7bdat`) can be read as input data and validated against a
+  specification, like a CSV or TSV file. Declare it with the new
+  `DTAFileSAS7BDAT` handler (`type: sas7bdat` in YAML,
+  `DTAFileFactory(type = "sas7bdat", ...)`). Values are taken as stored: a blank
+  character value is missing, trailing blanks are not part of a value, the text
+  `NA` is a value, and column names are exact, case included. A SAS date,
+  datetime or time column arrives as the display text of the format the
+  specification declares for it (`15AUG2025`), as ISO 8601 text when no format
+  is declared, or as the SAS number (days or seconds since 1960-01-01) when the
+  column is declared with a non-date type such as `SAS Num` or `SAS Int`. A
+  number where the specification wants text, a fraction under `SAS Int`, or a
+  date of another kind than the declared one is reported as a column-spec
+  violation, not an import error; text in a column declared `SAS Num` or
+  `SAS Int` is parsed, and a value that does not parse is an import error. The
+  dataset is always read into memory: `stream = "auto"` reads it whatever its
+  size, with a message when the size alone would have streamed it, and
+  `stream = "always"` is refused. A `.sas7bdat.gz` needs no separate
+  decompression step, but haven unpacks it to a temporary file of the
+  uncompressed size in `tempdir()`. The `.sas7bcat` format catalog is not read;
+  ship it as a `type: file` deliverable.
+- The app's file editor offers `sas7bdat` as a file type for a tabular dataset.
 - `check()` on a `DTA` now enforces the file count its tabular datasets'
   handlers declare. The bound is the dataset-wide sum over all its handlers,
   not checked per handler. A dataset holding more or fewer tables than the
@@ -99,6 +120,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   tables and labels as the built-in layout, with "Yes" instead of "yes".
 - The app builds a PDF from the new Markdown with working table-of-contents
   links and line breaks inside table cells.
+- haven (>= 2.5.2) is now in `Imports`, so SAS datasets can be read wherever the
+  package is installed, the deployed app included.
 
 ### Fixed
 

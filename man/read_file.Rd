@@ -24,7 +24,9 @@ An Arrow Table containing the file's contents.
 }
 \description{
 Reads a data file using the parameters specified in a
-\code{DTAFile} object or one of its subclasses.
+\code{DTAFile} object or one of its subclasses. A delimited file is parsed
+by Arrow; a SAS dataset (\code{\link{DTAFileSAS7BDAT}}) is decoded by
+\pkg{haven}.
 }
 \section{Why the specs are handed to the reader}{
 

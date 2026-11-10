@@ -3,12 +3,12 @@
 \name{.file_format_label}
 \alias{.file_format_label}
 \title{Friendly, human-readable format label for a DTAFile object, used in the
-"Files" section table (e.g. CSV / TSV / Delimited).}
+"Files" section table (e.g. CSV / TSV / Delimited / SAS dataset).}
 \usage{
 .file_format_label(f)
 }
 \description{
 Friendly, human-readable format label for a DTAFile object, used in the
-"Files" section table (e.g. CSV / TSV / Delimited).
+"Files" section table (e.g. CSV / TSV / Delimited / SAS dataset).
 }
 \keyword{internal}

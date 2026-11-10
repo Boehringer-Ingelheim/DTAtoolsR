@@ -599,7 +599,7 @@
 
     <h3 id="section-1-1-h">📦 What is DTAtools?</h3>
     <p>
-      <strong>DTAtools</strong> is an R package that validates tabular data files (CSV or TSV) against a
+      <strong>DTAtools</strong> is an R package that validates tabular data files (CSV, TSV or SAS <code>.sas7bdat</code>) against a
       <em>Data Transfer Agreement specification</em> written in YAML — before you send the data to a partner,
       a regulator, or a data warehouse. Think of it as a spell-checker for your clinical or study data:
       it reads your spec, reads your data, and tells you exactly what's wrong and where.
@@ -674,7 +674,7 @@ library(DTAtools)</code></pre>
       <div class="step-connector">↓</div>
       <div class="step">
         <div class="step-num">2</div>
-        <div class="step-body"><strong>Load your data file</strong> — attach a CSV or TSV file to the dataset defined in your spec</div>
+        <div class="step-body"><strong>Load your data file</strong> — attach a CSV, TSV or SAS <code>.sas7bdat</code> file to the dataset defined in your spec</div>
       </div>
       <div class="step-connector">↓</div>
       <div class="step">
@@ -1825,7 +1825,7 @@ datasets:
     type: tabular
     files:
       filename: "my_data.csv" # or a regex pattern
-      type: csv               # csv or tsv
+      type: csv               # csv, tsv or sas7bdat
     columns:
       - id: COLUMN_NAME       # must match exact CSV header
         type: SAS Char        # SAS Char / SAS Num / SAS Int / SAS Date

@@ -602,7 +602,7 @@ Example of a column bound to a vocabulary:
 ### File handlers and non-tabular deliverables
 
 Tabular dataset `files:` describes the expected file or files. A single handler can be a mapping; multiple handlers are represented as a list of
-mappings. The supported handler types are `csv`, `tsv`, and `any`.
+mappings. The supported handler types are `csv`, `tsv`, `sas7bdat`, and `any`.
 
 ```yaml
 files:
@@ -626,7 +626,7 @@ dataset:
 ```
 
 File handlers describe expected deliverables; they are not extra template kinds. Use the file type values recognized by the package rather than
-inventing `xlsx`, `sas7bdat`, or other handler names.
+inventing `xlsx`, `xpt`, or other handler names.
 
 ### Dataset-template options
 
