@@ -776,6 +776,35 @@ test_that("OQ-TMPL-078 | an invalid document name or abbreviation in dta-app.yam
   qa_step("a valid pair of lists adds no rows", 0L, nrow(validate_template(ok)))
 })
 
+test_that("OQ-TMPL-115 | an invalid header_tag label or colour in dta-app.yaml is app_config_invalid naming its key | REQ-TMPL-037", {
+  lib <- file.path(qa_tempdir(), "taglib")
+  dir.create(file.path(lib, "templates"), recursive = TRUE)
+  file.copy(tmpl_fixture("appconfig", "invalid", "templates", "t.dta-template.yaml"), file.path(lib, "templates"))
+  writeLines(c(
+    "kind: dta_app_config",
+    "header_tag:",
+    paste0("  label: ", strrep("G", 33L)), # one over the 32-character limit
+    "  color: red"
+  ), file.path(lib, "dta-app.yaml"))
+  result <- validate_template(lib)
+  rows <- result[result$code == "app_config_invalid", , drop = FALSE]
+  qa_step("one row per rejected value", 2L, nrow(rows))
+  qa_step("at severity error", "error", unique(rows$severity))
+  qa_check("naming header_tag.label", any(grepl("header_tag.label", rows$message, fixed = TRUE)))
+  qa_check("naming header_tag.color", any(grepl("header_tag.color", rows$message, fixed = TRUE)))
+
+  ok <- file.path(qa_tempdir(), "taglib_ok")
+  dir.create(file.path(ok, "templates"), recursive = TRUE)
+  file.copy(tmpl_fixture("appconfig", "invalid", "templates", "t.dta-template.yaml"), file.path(ok, "templates"))
+  writeLines(c(
+    "kind: dta_app_config",
+    "header_tag:",
+    paste0("  label: ", strrep("G", 32L)), # exactly at the limit
+    '  color: "#C0392B"'
+  ), file.path(ok, "dta-app.yaml"))
+  qa_step("a label of exactly 32 characters and a hex colour add no rows", 0L, nrow(validate_template(ok)))
+})
+
 # ---- REQ-TMPL-031 / REQ-TMPL-037 / REQ-TMPL-042: the layout codes ----------
 
 test_that("OQ-TMPL-100 | a template in the wrong folder is template_misplaced and invisible, a single file is not placed | REQ-TMPL-031", {

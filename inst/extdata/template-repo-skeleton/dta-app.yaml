@@ -48,6 +48,14 @@ kind: dta_app_config
 #   landing_headline: Check a data transfer against its specification.  # Large headline on the start page.
 #   landing_lede: Open a DTA or DTS YAML file, load the data files it expects, run the checks, and export the agreement.  # Paragraph under the headline.
 
+# --- header_tag: a label beside the app title, on every page ------------------
+# For example the deployment's status: GxP, non-GxP, GcP, Non-GcP, or any text
+# of at most 32 characters. The colour fills the label (quote it, as under
+# colors:); the text colour is chosen automatically to stay readable.
+# header_tag:
+#   label: ""                 # Text of the tag, for example GxP; "" shows no tag.
+#   color: "#C0392B"          # Example fill, quoted #RGB or #RRGGBB. Leave the line out for the brand bar's neutral pill (an empty color: is an error).
+
 # --- colors: hex colours only ------------------------------------------------
 # ALWAYS put colours in quotes. An unquoted #00625B is a YAML comment, so the
 # value would silently become empty. Only #RGB or #RRGGBB are accepted.

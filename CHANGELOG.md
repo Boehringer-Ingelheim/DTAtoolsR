@@ -23,6 +23,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   attribute, sets `last_validation_ok` to `FALSE`, is named in the console
   summary alongside other failures, and turns the HTML validation report's
   overview and messages to failed. A dataset checked on its own is unaffected.
+- `dta-app.yaml` gains `header_tag:`. `label` (plain text, at most 32
+  characters) is shown as a pill beside the app title on every page, the start
+  page included; `color` (a quoted hex value) fills it, with an automatically
+  chosen text colour that meets WCAG AA contrast. Use it to mark a deployment,
+  for example `GxP` or `non-GxP`. No label shows nothing, and bad values are
+  reported by `validate_template()` as `app_config_invalid`.
 
 ### Changed
 

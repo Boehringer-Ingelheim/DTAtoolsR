@@ -319,6 +319,9 @@ organisation:
 branding:
   app_title: DTA Viewer
   logo: logo.png          # a file beside dta-app.yaml, at most 1 MB
+header_tag:
+  label: GxP
+  color: "#C0392B"
 colors:
   primary: "#1F4E79"      # always quote a hex colour: a bare # starts a comment
   primary_dark: "#12304D"
@@ -357,6 +360,11 @@ so they start with `export-templates/`. A non-`.docx` file in `export-templates/
 documents (for example `DTS` instead of `DTA`); the name becomes the main title
 of every export, with the document's own title beneath it, and the organisation
 appears on the front page and in the running header.
+
+`header_tag.label` puts a short label such as `GxP` beside the app title on
+every page of the app; `header_tag.color` fills it, and the text colour is
+picked for contrast automatically. The tag is not added to exports or the
+browser tab title.
 
 Links must be `http`, `https` or `mailto` URLs. The logo and Word templates are
 files in the library, named by a path relative to `dta-app.yaml` that must not

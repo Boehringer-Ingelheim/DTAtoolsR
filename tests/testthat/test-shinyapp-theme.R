@@ -293,3 +293,61 @@ test_that("nodata_border and unknown are configurable colours, validated like th
   expect_identical(res$problems$key, "colors.unknown")
   expect_match(as.character(app_fn("bi_css")(res$config$colors)), "--bi-warn-border: #112233;", fixed = TRUE)
 })
+
+# ---- Header tag: text colour and stylesheet -----------------------------------
+
+# WCAG 2.x contrast ratio of two #RRGGBB colours, written out independently of
+# the app (strtoi, not col2rgb; the 0.03928 threshold of WCAG 2.0).
+wcag_ratio <- function(a, b) {
+  lum <- function(hex) {
+    v <- strtoi(substring(hex, c(2, 4, 6), c(3, 5, 7)), 16L) / 255
+    v <- ifelse(v <= 0.03928, v / 12.92, ((v + 0.055) / 1.055)^2.4)
+    sum(v * c(0.2126, 0.7152, 0.0722))
+  }
+  la <- lum(a)
+  lb <- lum(b)
+  (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+}
+
+test_that("bi_ink_on picks white, then the stock ink, then black, by WCAG AA", {
+  f <- app_fn("bi_ink_on")
+  # White reaches 4.5:1 (hand-derived: #C0392B about 5.4:1).
+  expect_identical(f("#C0392B"), "#FFFFFF")
+  expect_identical(f("#003D38"), "#FFFFFF")
+  # Light fills: white fails, the stock ink #1A2B2A reaches 4.5:1.
+  expect_identical(f("#FFD700"), "#1A2B2A")
+  expect_identical(f("#FFF"), "#1A2B2A")
+  # Mid tones: neither white (about 3.5:1) nor the stock ink (about 4.3:1)
+  # reaches 4.5:1 on #C77700, so black.
+  expect_identical(f("#C77700"), "#000000")
+  expect_identical(f("#808080"), "#000000")
+  # The dark ink is a parameter.
+  expect_identical(f("#FFD700", dark = "#112233"), "#112233")
+})
+
+test_that("bi_ink_on reaches 4.5:1 on every fill of a 6x6x6 colour cube", {
+  steps <- seq(0, 255, by = 51)
+  cube <- expand.grid(r = steps, g = steps, b = steps)
+  fills <- sprintf("#%02X%02X%02X", cube$r, cube$g, cube$b)
+  expect_length(fills, 216)
+
+  f <- app_fn("bi_ink_on")
+  for (fill in fills) {
+    ink <- f(fill)
+    expect_gte(wcag_ratio(fill, ink), 4.5, label = paste(fill, "with", ink))
+  }
+})
+
+test_that("bi_css defines the header tag pill, with colours from custom properties and no hover rule", {
+  skip_if_not_installed("bslib")
+  txt <- as.character(app_fn("bi_css")())
+
+  expect_match(txt, ".app-brandbar .brand-tag {", fixed = TRUE)
+  expect_match(txt, "background: var(--tag-bg, rgba(255,255,255,.2));", fixed = TRUE)
+  expect_match(txt, "color: var(--tag-fg, #fff);", fixed = TRUE)
+  expect_match(txt, "border: 1px solid var(--tag-border, rgba(255,255,255,.5));", fixed = TRUE)
+  # A long label wraps on a phone instead of scrolling the bar sideways.
+  expect_match(txt, ".app-brandbar .brand-tag { white-space: normal; }", fixed = TRUE)
+  # A label, not a control: nothing hoverable beside the interactive pills.
+  expect_no_match(txt, ".brand-tag:hover", fixed = TRUE)
+})

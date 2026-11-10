@@ -460,3 +460,27 @@ requirements:
       an unknown-condition error. PINNED STRUCTURALLY: the application harness
       has no browser, so the test records the selector updates the server
       sends instead of reading a rendered dropdown.
+
+  - id: REQ-APP-032
+    text: >
+      When header_tag.label is set in the application configuration, the brand
+      bar shown above every page shall show that label, HTML-escaped, beside
+      the application title. When header_tag.color is set, the label shall be
+      drawn on that colour with a text colour whose WCAG 2.x contrast ratio
+      against it is at least 4.5:1. When no label is set the brand bar shall
+      show no tag.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      inst/shiny/dta_app/R/ui_components.R (header_tag_ui, brandbar_ui);
+      inst/shiny/dta_app/R/theme.R (bi_ink_on);
+      inst/shiny/dta_app/app.R (ui_page);
+      inst/extdata/template-repo-skeleton/README.md (section header_tag)
+    notes: >
+      The tag states a deployment's regulatory status (for example GxP), so a
+      label that is missing, unescaped or unreadable on its colour misleads the
+      reader of every page. PINNED STRUCTURALLY, like REQ-APP-013: the brand
+      bar is static page chrome outside the server function, which
+      shiny::testServer() never renders, so the test renders the UI function
+      itself and reads the HTML.

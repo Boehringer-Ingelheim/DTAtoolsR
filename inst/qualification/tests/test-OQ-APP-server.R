@@ -1,4 +1,4 @@
-# The application's server logic. REQ-APP-001 .. REQ-APP-013, REQ-APP-026 and REQ-APP-027 .. REQ-APP-030.
+# The application's server logic. REQ-APP-001 .. REQ-APP-013, REQ-APP-026 and REQ-APP-027 .. REQ-APP-032.
 #
 # A user of the application never sees check()'s return value. They see a
 # coloured status against a dataset name and act on it, so a difference between
@@ -880,4 +880,62 @@ test_that("OQ-APP-040 | a group-condition name whose row was removed is no longe
         grepl('value="c1_kept"', html, fixed = TRUE)
     )
   })
+})
+
+test_that("OQ-APP-041 | the brand bar shows the header tag escaped beside the title, in a text colour readable on its fill | REQ-APP-032 | tags: white-box", {
+  qapp_skip_unless_app_installed()
+
+  # Pinned structurally, like the double-click guard: the brand bar is static
+  # page chrome outside the server function, which testServer() never renders,
+  # so the UI function is rendered here and its HTML read.
+  render_bar <- function(label, color = NULL) {
+    cfg <- qapp_fn("dta_app_config_defaults")()
+    cfg$header_tag <- list(label = label, color = color)
+    paste(as.character(qapp_fn("brandbar_ui")(cfg)), collapse = "")
+  }
+
+  # WCAG 2.x relative luminance and contrast ratio, written out here from the
+  # definition (sRGB channel linearisation, weights 0.2126 / 0.7152 / 0.0722,
+  # ratio (L1 + 0.05) / (L2 + 0.05)) so the expectation does not come from the
+  # application's own helper. Six-digit hex only.
+  luminance <- function(hex) {
+    ch <- strtoi(substring(hex, c(2L, 4L, 6L), c(3L, 5L, 7L)), 16L) / 255
+    lin <- ifelse(ch <= 0.04045, ch / 12.92, ((ch + 0.055) / 1.055)^2.4)
+    sum(lin * c(0.2126, 0.7152, 0.0722))
+  }
+  contrast <- function(a, b) {
+    la <- luminance(a)
+    lb <- luminance(b)
+    (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+  }
+
+  qa_step("no label, no tag", FALSE, grepl("brand-tag", render_bar(""), fixed = TRUE))
+  qa_step(
+    "a colour without a label, no tag",
+    FALSE, grepl("brand-tag", render_bar("", "#C0392B"), fixed = TRUE)
+  )
+
+  html <- render_bar("<GxP>")
+  qa_check(
+    "the label is escaped text",
+    grepl("&lt;GxP&gt;", html, fixed = TRUE) && !grepl("<GxP>", html, fixed = TRUE)
+  )
+  qa_check(
+    "and sits in the title line, after the application title",
+    grepl('<div class="brand-title">[^<]*<span class="brand-tag"[^>]*>&lt;GxP&gt;</span>', html)
+  )
+
+  for (fill in c("#C0392B", "#FFD700", "#808080", "#003D38", "#FFFFFF")) {
+    html <- render_bar("GxP", fill)
+    qa_check(
+      paste("the fill", fill, "is applied"),
+      grepl(paste0("--tag-bg: ", fill, ";"), html, fixed = TRUE)
+    )
+    fg <- regmatches(html, gregexpr("(?<=--tag-fg: )#[0-9A-Fa-f]{6}", html, perl = TRUE))[[1]]
+    qa_step(paste("exactly one text colour is set on", fill), 1L, length(fg))
+    qa_check(
+      paste("the text colour reaches 4.5:1 on", fill),
+      length(fg) == 1L && contrast(fill, fg) >= 4.5
+    )
+  }
 })

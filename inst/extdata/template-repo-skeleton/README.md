@@ -1213,6 +1213,9 @@ organisation:
   unit: Data Management
 branding:
   logo: logo.png
+header_tag:
+  label: GxP
+  color: "#C0392B"
 colors:
   primary: "#1F4E79"
 links:
@@ -1261,6 +1264,13 @@ Both are plain text. The organisation (`organisation.name`, `organisation.unit`)
 | `logo_alt` | `<app_title> logo` | Alternative text for the logo. |
 | `landing_headline` | the stock headline | Heading on the start page. |
 | `landing_lede` | the stock paragraph | Paragraph under the heading on the start page. |
+
+`header_tag`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `label` | empty | Short text shown beside the app title on every page, the start page included, for example `GxP`, `non-GxP`, `GcP` or `Non-GcP`. One line, at most 32 characters. Empty shows no tag. Shown in the app only; it is not added to exports or the browser tab title. |
+| `color` | none | Fill colour of the tag, a quoted hex value, `#RGB` or `#RRGGBB`. The text colour is chosen automatically to meet WCAG AA contrast (4.5:1). Without a colour the tag uses the brand bar's neutral pill; leave the key out for that, since an empty `color:` is an error. |
 
 `colors` takes a quoted hex value, `#RGB` or `#RRGGBB`, for each of the keys below. The default is the stock DTAtools scheme.
 
