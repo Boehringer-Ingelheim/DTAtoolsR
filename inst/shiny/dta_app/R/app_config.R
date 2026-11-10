@@ -3,8 +3,8 @@
 #
 # A template library is already the per-deployment unit (it is what
 # DTATOOLS_TEMPLATE_SOURCES points at), so it also carries that deployment's
-# look and feature set: owner, title, logo, colours, links, which start
-# buttons / tabs / exports are offered, and its own Word templates. With no
+# look and feature set: owner, title, logo, a header tag, colours, links, which
+# start buttons / tabs / exports are offered, and its own Word templates. With no
 # file the defaults reproduce the stock app -- except that the organisation is
 # deliberately empty, so no organisation name appears unless a library sets one.
 #
@@ -13,7 +13,8 @@
 # dangerous places: HTML attributes (links, logo) and a CSS sprintf() (colours).
 # So every value is validated HERE, once, and a bad value falls back to that
 # key's default rather than being passed on:
-#   * colours must be #RGB / #RRGGBB -- the guard against CSS injection;
+#   * colours, including header_tag.color (which goes into a style attribute),
+#     must be #RGB / #RRGGBB -- the guard against CSS injection;
 #   * links must be http(s)/mailto and free of whitespace, quotes and <>;
 #   * the logo and Word templates must be relative paths that resolve (after
 #     normalizePath, so symlinks count) inside the config's own directory --
@@ -57,6 +58,9 @@ dta_app_config_defaults <- function() {
       landing_headline = "Check a data transfer against its specification.",
       landing_lede = "Open a DTA or DTS YAML file, load the data files it expects, run the checks, and export the agreement."
     ),
+    # A label pill beside the app title in the brand bar, e.g. "GxP". "" shows
+    # none; a NULL colour keeps the brand bar's own neutral pill look.
+    header_tag = list(label = "", color = NULL),
     colors = c(
       primary = "#00625B",
       primary_dark = "#003D38",
@@ -144,6 +148,14 @@ dta_app_config_defaults <- function() {
   } else {
     .cfg_bad("must be a quoted hex colour such as \"#00625B\" (an unquoted # starts a YAML comment).")
   }
+}
+
+# The header tag: one line (see .cfg_line) of at most 32 characters, so it
+# stays a short pill beside the title; "" means no tag. Never truncated: a
+# cut-down status label could say something else.
+.cfg_tag_label <- function(v) {
+  r <- .cfg_line(v)
+  if (r$ok && nchar(r$value) > 32) .cfg_bad("must be at most 32 characters.") else r
 }
 
 # `false` / null hide the link; anything else must be a plain http(s)/mailto URL.
@@ -318,7 +330,7 @@ parse_dta_app_config <- function(path) {
     }
   }
 
-  top <- c("kind", "organisation", "document", "branding", "colors", "links", "features", "exports")
+  top <- c("kind", "organisation", "document", "branding", "header_tag", "colors", "links", "features", "exports")
   for (u in setdiff(names(raw), top)) {
     add("warning", u, "is not a known setting and is ignored.", type = "unknown_key")
   }
@@ -357,6 +369,11 @@ parse_dta_app_config <- function(path) {
   br_checks <- stats::setNames(lapply(br_keys, function(k) .cfg_str), br_keys)
   br_checks$logo <- .cfg_logo(base)
   fill("branding", br, br_checks)
+
+  # null_ok: an unquoted #hex is a YAML comment, so `color: #C0392B` arrives as
+  # null and must be reported, exactly as under colors:.
+  ht <- section(raw[["header_tag"]], "header_tag", c("label", "color"))
+  fill("header_tag", ht, list(label = .cfg_tag_label, color = .cfg_color), null_ok = "color")
 
   col_keys <- names(cfg$colors)
   col <- section(raw[["colors"]], "colors", col_keys)

@@ -840,7 +840,7 @@ flat and mixed-`templates/` layouts are no longer read, and the scaffolded
 `README.md` explains how to reorganise an existing repository.
 
 The optional `dta-app.yaml` at the repository root customises the app that serves the library:
-organisation, title, logo, colours, links, which features and export formats are
+organisation, title, logo, colours, a header tag such as `GxP` beside the title, links, which features and export formats are
 offered (including a read-only mode). Every `.docx` in `export-templates/` with a `{PLACEHOLDER}` marker is
 offered automatically as a Word export template. With no
 file the app looks as before, except that no organisation name is shown until you

@@ -693,12 +693,14 @@ requirements:
     text: >
       A library's app configuration file (dta-app.yaml or dta-app.yml, directly
       in the library root) shall not be treated as a template. When it holds a
-      value the app would reject -- a colour that is not a #RGB or #RRGGBB hex
-      value, a link that is not an http(s) or mailto URL, a missing logo or
-      Word template file, a path that leaves the library folder, a
-      document.name or document.abbreviation that is not one to three
-      non-empty strings (an abbreviation of at most 12 characters each, and
-      the same number of entries as the name when both are lists), a feature
+      value the app would reject -- a colour (under colors or header_tag.color)
+      that is not a #RGB or #RRGGBB hex value, a link that is not an http(s)
+      or mailto URL, a missing logo or Word template file, a path that leaves
+      the library folder, a document.name or document.abbreviation that is
+      not one to three non-empty strings (an abbreviation of at most 12
+      characters each, and the same number of entries as the name when both
+      are lists), a header_tag.label that is not a single string of at most
+      32 characters once its whitespace is collapsed, a feature
       flag such as features.raw_yaml_editable that is not true or false, a
       wrong kind or YAML that does not parse -- validate_template() shall report
       app_config_invalid at severity "error", one row per rejected value naming
