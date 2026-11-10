@@ -197,3 +197,110 @@ app_source <- function(file) {
     collapse = "\n"
   )
 }
+
+# ---- Helpers shared by the test-shinyapp-*.R files ---------------------------
+
+# Path of `filename` inside library root `root`, routed by its kind suffix:
+# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
+# for everything else (creation and dataset templates, and the plain data
+# files that sit beside them, which resolve relative to the template).
+# Creates the folder, so a fixture can write straight to the returned path.
+lib_path <- function(root, filename) {
+  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
+    "parties"
+  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
+    "vocabulary"
+  } else {
+    "templates"
+  }
+  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
+  file.path(root, sub, filename)
+}
+
+# The app directory testServer() runs.
+app_server_dir <- function() .shiny_app_dir()
+
+# A shiny fileInput value for a bundled fixture.
+#
+# fileInput() hands the server a one-row data.frame; the upload observers read
+# `datapath` and `name` off it, so the fixture has to be presented the same way.
+app_file_input <- function(filename) {
+  path <- app_fixture_path(filename)
+  data.frame(
+    name = filename,
+    size = file.size(path),
+    type = "",
+    datapath = path,
+    stringsAsFactors = FALSE
+  )
+}
+
+# Load the fixture DTA into a running server, ready to edit.
+load_fixture <- function(session) {
+  session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+}
+
+# The app autosaves to a path in tempdir() keyed to the browser id reported by
+# the client (input$dta_client_id), and offers to restore it on start-up. A file
+# left by an earlier test would put the next server into "previous session
+# available" state, so every test clears them before starting. (Clearing up
+# front, rather than after, is what actually guarantees isolation -- and it stays
+# correct no matter what order testthat runs these in. The files themselves die
+# with tempdir() at the end of the session.)
+#
+# testServer() reports no browser id unless a test sets one, so a server under
+# test writes nothing at all by default; this sweep covers the tests that do set
+# one, and any file left by an older build under the pre-2.x fixed name.
+clean_session_file <- function() {
+  f <- list.files(tempdir(),
+    pattern = "^dtatools_app_session.*\\.rds$",
+    full.names = TRUE
+  )
+  unlink(f, force = TRUE)
+  invisible(f)
+}
+
+# The rendered HTML of a renderUI output, as one string.
+#
+# renderUI yields list(html=, deps=); NULL from the render function leaves no
+# html at all, so collapse both shapes to a plain string. A renderUI output is
+# never evaluated unless a test reads it, so anything asserted about a UI gate
+# has to go through here.
+ui_text <- function(out) {
+  if (is.null(out) || is.null(out$html)) "" else paste(as.character(out$html), collapse = "")
+}
+
+# Flatten a static tag / renderUI() result to text, so it can be asserted on.
+render_html <- function(tag) {
+  paste(as.character(tag), collapse = "\n")
+}
+
+# cli wraps a long condition message across lines at the console width, which
+# breaks a naive substring/regexp match the moment the wrap lands inside the
+# very text being asserted on. Collapsing whitespace before matching keeps the
+# assertion about the MESSAGE CONTENT rather than about where cli happened to
+# wrap it.
+flat_message <- function(x) gsub("\\s+", " ", x)
+
+# Clear every DTATOOLS_TEMPLATE_* variable for the duration of each test.
+# WHY: a developer machine with DTATOOLS_TEMPLATE_SOURCES exported would flip
+# the app into private-only mode and fail unrelated tests confusingly.
+local_clean_template_env <- function(..., .local_envir = parent.frame()) {
+  withr::local_envvar(
+    c(
+      DTATOOLS_TEMPLATE_SOURCES = NA,
+      DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = NA,
+      DTATOOLS_TEMPLATE_REFRESH_SECONDS = NA,
+      DTATOOLS_TEMPLATE_CACHE_DIR = NA,
+      DTATOOLS_TEMPLATE_GIT_TOKEN = NA,
+      DTATOOLS_TEMPLATE_GIT_USER = NA,
+      DTATOOLS_TEMPLATE_GIT_AUTH = NA,
+      ...
+    ),
+    .local_envir = .local_envir
+  )
+  withr::local_options(
+    list(DTAtools.template_dir = NULL),
+    .local_envir = .local_envir
+  )
+}

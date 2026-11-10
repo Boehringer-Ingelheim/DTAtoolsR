@@ -117,7 +117,13 @@ max_number_of_files <- new_generic("max_number_of_files", "x")
 #' @name max_number_of_files
 #' @export
 method(max_number_of_files, DTADataSet) <- function(x, ...) {
-  sum(unlist(sapply(x@files, max_number_of_files)))
+  bounds <- lapply(x@files, max_number_of_files)
+  # A handler without a maximum is unbounded; dropping its NULL from the sum
+  # made a dataset that accepts any number of files report a maximum of 0.
+  if (any(vapply(bounds, is.null, logical(1)))) {
+    return(Inf)
+  }
+  sum(unlist(bounds))
 }
 
 
@@ -199,7 +205,11 @@ method(print_info, DTADataSet) <- function(x) {
     entry_label <- if (length(x@files) == 1) "entry" else "entries"
     file_label_min <- if (min_number_of_files == 1) "file" else "files"
     file_label_max <- if (max_number_of_files == 1) "file" else "files"
-    if (min_number_of_files == max_number_of_files) {
+    if (is.infinite(max_number_of_files)) {
+      alert_message <- str_glue(
+        "Files: {length(x@files)} {entry_label} with a total of {min_number_of_files} or more files"
+      )
+    } else if (min_number_of_files == max_number_of_files) {
       alert_message <- str_glue(
         "Files: {length(x@files)} {entry_label} with a total of {min_number_of_files} {file_label_min}"
       )
@@ -228,6 +238,8 @@ method(print_short_info, DTADataSet) <- function(x, ...) {
   max_n <- max_number_of_files(x)
   if (max_n == 0) {
     file_info <- "0 files"
+  } else if (is.infinite(max_n)) {
+    file_info <- str_glue("{min_n} or more files")
   } else if (min_n == max_n) {
     if (min_n == 1) {
       file_info <- "1 file"
@@ -372,9 +384,8 @@ files <- new_generic("files", "x")
 method(files, DTADataSet) <- function(x, name = NULL) {
   if (
     !is.null(name) &&
-      !is.character(name) &&
-      !is.numeric(name) &&
-      length(name) != 1
+      (!(is.character(name) || is.numeric(name)) ||
+        (length(name) != 1 && !is.character(name)))
   ) {
     cli_abort(
       "'name' must be a single character vector, single numeric index or NULL."
@@ -396,6 +407,13 @@ method(files, DTADataSet) <- function(x, name = NULL) {
   missing <- setdiff(name, names(all_files))
   if (length(missing) > 0) {
     cli_abort("The following file{?s} not found: {.field {missing}}")
+  }
+
+  # Several names, all present: `[[` would index recursively into the first.
+  if (length(name) != 1) {
+    cli_abort(
+      "'name' must be a single character vector, single numeric index or NULL."
+    )
   }
 
   return(all_files[[name]])

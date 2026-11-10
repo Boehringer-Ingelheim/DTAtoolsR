@@ -740,7 +740,14 @@ test_that("the bundled clinical template renders the dataset section from plain 
   out <- tempfile(fileext = ".docx")
   on.exit(unlink(out, force = TRUE), add = TRUE)
 
-  write_dta(dta, file = out, template = tmpl, overwrite = TRUE, quiet = TRUE)
+  # {YAML_EMBEDDED} is in the bundled template (.github/scripts/build_clinical_template.R)
+  # but is filled only by the Shiny app's export, so plain R leaves it unfilled
+  # and the renderer says so. Asserted, so the suite stays warning-free.
+  expect_warning(
+    write_dta(dta, file = out, template = tmpl, overwrite = TRUE, quiet = TRUE),
+    "{YAML_EMBEDDED}",
+    fixed = TRUE
+  )
 
   txt <- .docx_text(out)
   ids <- vapply(dta@datasets[[1]]@specs@columns, function(spec) spec@id, character(1))

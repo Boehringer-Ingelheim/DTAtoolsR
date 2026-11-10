@@ -10,7 +10,8 @@ dta_dataset_summary_message(
   n_valid,
   n_invalid,
   n_unchecked,
-  n_undelivered = 0
+  n_undelivered = 0,
+  n_count_errors = 0L
 )
 }
 \arguments{
@@ -29,6 +30,10 @@ otherwise. A dataset with nothing bound has no target to be unchecked, so
 \code{n_unchecked} is zero for it and every branch below would read it as a
 clean run over an empty world -- the same "certificate covering zero
 checks" the unchecked tally exists to prevent, one level up.}
+
+\item{n_count_errors}{Integer. 1 when the dataset's supplied file count lies
+outside the bounds its handlers declare. Named in the line (never a green
+"all valid" over it), alongside any failure or unchecked targets.}
 }
 \value{
 A list of \code{severity} (\code{"danger"}, \code{"warning"} or \code{"success"}) and

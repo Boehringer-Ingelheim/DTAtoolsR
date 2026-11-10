@@ -171,7 +171,10 @@ write_dta <- function(
       output = target_docx,
       variables = template_variables,
       quiet = TRUE,
-      fallback = FALSE
+      fallback = FALSE,
+      # write_dta() has already refused an existing `file`; a pdf's docx is a
+      # fresh tempfile() name.
+      overwrite = TRUE
     )
     if (format == "pdf") {
       .convert_docx_to_pdf(target_docx, file)
@@ -993,6 +996,19 @@ dta_pdf_backend <- function() {
   )
 }
 
+#' Shell-safe `-env:UserInstallation=` argument for a LibreOffice profile dir
+#'
+#' `system2()` does not quote its arguments, so the file URL is
+#' percent-encoded (spaces, `#`, `%`, ...) and the whole argument quoted.
+#' @param profile_dir Character. Profile directory.
+#' @keywords internal
+.soffice_profile_arg <- function(profile_dir) {
+  path <- gsub("^/+", "", normalizePath(profile_dir, winslash = "/", mustWork = FALSE))
+  enc <- gsub("%2F", "/", utils::URLencode(path, reserved = TRUE), fixed = TRUE)
+  enc <- gsub("%3A", ":", enc, fixed = TRUE)
+  shQuote(paste0("-env:UserInstallation=file:///", enc))
+}
+
 #' Run the LibreOffice DOCX -> PDF conversion
 #'
 #' Converts in a private profile directory (`-env:UserInstallation`) so a
@@ -1013,10 +1029,7 @@ dta_pdf_backend <- function() {
   suppressWarnings(system2(
     soffice,
     c(
-      paste0(
-        "-env:UserInstallation=file:///",
-        gsub("^/+", "", gsub("\\\\", "/", normalizePath(profile_dir, winslash = "/", mustWork = FALSE)))
-      ),
+      .soffice_profile_arg(profile_dir),
       "--headless", "--norestore", "--convert-to", "pdf",
       "--outdir", shQuote(normalizePath(out_dir, winslash = "/", mustWork = TRUE)),
       shQuote(normalizePath(docx_file, winslash = "/", mustWork = TRUE))

@@ -102,8 +102,8 @@ bounds the buffer and has no effect on the copy.
 
 The wide encodings (UTF-16, UTF-32, UCS-2, UCS-4) are the exception: their
 characters can contain a newline byte, so the file cannot be converted in
-blocks cut at newlines and \code{\link{open_file}()} refuses it, naming
-\code{stream = "never"} as the way to read it. A name this platform's
+blocks cut at newlines and \code{\link{open_file}()} refuses it, asking for
+the file to be converted to UTF-8 first. A name this platform's
 \code{\link[base]{iconv}()} does not know (\code{"latin-1"} for
 \code{"latin1"}, say) is refused too, before the file is opened.}
 }

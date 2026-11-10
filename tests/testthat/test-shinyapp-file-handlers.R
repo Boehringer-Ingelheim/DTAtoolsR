@@ -194,7 +194,7 @@ test_that("dta_set_handler rejects an index that is not there", {
   )
 
   expect_false(res$ok)
-  expect_match(res$error, "not found")
+  expect_match(res$error, "File handler not found.", fixed = TRUE)
 })
 
 # ---- Removing and reordering ------------------------------------------------
@@ -234,7 +234,7 @@ test_that("dta_remove_handler rejects an index that is not there", {
   res <- fn(app_fixture_dta(), "clinical_data", 2)
 
   expect_false(res$ok)
-  expect_match(res$error, "not found")
+  expect_match(res$error, "File handler not found.", fixed = TRUE)
 })
 
 test_that("dta_move_handler swaps neighbours and stops at both ends", {
@@ -982,4 +982,28 @@ test_that("reader settings a type cannot take are dropped, not forwarded", {
     handlers_fn(datasets(res$value, "reports"))[[1]],
     "DTAtools::DTAFileAny"
   )
+})
+
+# ---- YAML alias bomb ---------------------------------------------------------
+
+test_that("dta_read_yaml rejects an alias bomb quickly instead of freezing", {
+  # Nine-fold nested aliases: a few hundred bytes that expand to 9^9 values.
+  lines <- "a0: &a0 [x, x, x, x, x, x, x, x, x]"
+  for (i in 1:9) {
+    refs <- paste(rep(sprintf("*a%d", i - 1), 9), collapse = ", ")
+    lines <- c(lines, sprintf("a%d: &a%d [%s]", i, i, refs))
+  }
+  path <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(c(lines, "metadata: {}"), path)
+
+  elapsed <- system.time(res <- app_fn("dta_read_yaml")(path))[["elapsed"]]
+
+  expect_false(res$ok)
+  expect_match(res$error, "too large once its anchors/aliases are expanded", fixed = TRUE)
+  expect_lt(elapsed, 5)
+})
+
+test_that("dta_read_yaml still reads an ordinary document", {
+  path <- app_fixture_path("clinical_dta.yaml")
+  expect_true(app_fn("dta_read_yaml")(path)$ok)
 })

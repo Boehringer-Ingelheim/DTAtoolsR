@@ -143,3 +143,34 @@ requirements:
       traceability matrix would contradict the deviation section of the same
       report. A reviewer who signs off from the matrix must see the defect
       where the requirement is listed.
+
+  - id: REQ-CORE-012
+    text: >
+      The filter argument of run_qualification() shall be a regular expression
+      matched against the whole test name, which is the test file name without
+      its "test-" prefix and ".R" suffix, so that an anchored filter such as
+      "^OQ-A" selects only the files whose name begins with OQ-A, "OQ-B$"
+      only the file whose name ends with OQ-B, and a name that merely contains
+      the pattern elsewhere or continues beyond an end anchor is not selected.
+    risk: medium
+    category: functional
+    covers: [run_qualification]
+    source: R/qualification.R (qual_stage_files, qual_run_stage); CHANGELOG [Unreleased], Changed
+    notes: >
+      A fragment match let "IQ-ENV-01" select IQ-ENV-010 to -019, so a run
+      meant to cover one test file covered others and was still recorded as
+      the run of that one.
+
+  - id: REQ-CORE-013
+    text: >
+      run_qualification() shall abort, before producing a verdict, when its
+      filter matches no test file in any of the stages run, naming the filter
+      in the message and leaving no evidence bundle behind in the output
+      directory.
+    risk: medium
+    category: integrity
+    covers: [run_qualification]
+    source: R/qualification.R (run_qualification)
+    notes: >
+      A mistyped filter selects nothing, and a run of nothing would otherwise
+      end with no failing test and read as a pass.

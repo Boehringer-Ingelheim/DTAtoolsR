@@ -2,7 +2,7 @@
 % Please edit documentation in R/DTAFileTabular-class.R
 \name{dta_last_newline}
 \alias{dta_last_newline}
-\title{The Last Newline Byte in a Block}
+\title{The Last Line-Break Byte in a Block}
 \usage{
 dta_last_newline(bytes)
 }
@@ -10,7 +10,11 @@ dta_last_newline(bytes)
 \item{bytes}{A raw vector.}
 }
 \value{
-The index of the last \code{0x0A}, or \code{NA_integer_} when there is none.
+The index of the last \code{0x0A} or \code{0x0D}, or \code{NA_integer_} when there
+is none. A lone CR (an old-Mac file) is a line end too: cutting there
+cannot split a character in any ASCII-compatible encoding, and without it a
+CR-only file never has a cut. A CRLF split between blocks is harmless, as
+the copy is byte-faithful.
 }
 \description{
 Where \code{\link[=dta_transcode_to_utf8]{dta_transcode_to_utf8()}} cuts a block so that no line is split. The

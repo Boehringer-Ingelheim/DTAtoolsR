@@ -43,7 +43,10 @@ write_table_to_file(
 \item{overwrite}{Logical. Whether to overwrite the file if it exists. Default
 is FALSE, so a call against an existing path aborts unless \code{overwrite = TRUE} is passed explicitly.}
 
-\item{quote}{Logical. Quote character and factor fields.}
+\item{quote}{Logical. Quote character and factor fields. With the default
+\code{FALSE}, a table holding a value (or column name) that contains the
+separator, a line break or a leading quote character is refused rather than
+written as a file that cannot be read back; use \code{quote = TRUE}.}
 
 \item{compression}{Character. Compression method, either "none" or "gzip". Default is "none".}
 

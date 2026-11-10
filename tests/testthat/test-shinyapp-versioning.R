@@ -8,10 +8,6 @@
 # enable_edit_mode/create_new_version/create_new_document observers for
 # how each route past that either bumps the version or edits it in place.
 
-render_html <- function(tag) {
-  paste(as.character(tag), collapse = "\n")
-}
-
 # ---- Pure: dta_next_version() -----------------------------------------------
 
 test_that("dta_next_version() suggests a MINOR bump for a dotted-integer scheme, and \"\" otherwise", {
@@ -435,28 +431,6 @@ skip_if_not_installed("shiny")
 skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
-
-app_server_dir <- function() .shiny_app_dir()
-
-app_file_input <- function(filename) {
-  path <- app_fixture_path(filename)
-  data.frame(
-    name = filename, size = file.size(path), type = "",
-    datapath = path, stringsAsFactors = FALSE
-  )
-}
-
-clean_session_file <- function() {
-  f <- list.files(tempdir(),
-    pattern = "^dtatools_app_session.*\\.rds$", full.names = TRUE
-  )
-  unlink(f, force = TRUE)
-  invisible(f)
-}
-
-load_fixture <- function(session) {
-  session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
-}
 
 test_that("loading the fixture leaves the document locked, and a pending edit-mode request from before the load changes nothing", {
   # enter_edit_mode() drives enable_edit_mode, whose observer req()s

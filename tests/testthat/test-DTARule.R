@@ -159,3 +159,95 @@ test_that("print() of a column-condition rule names the columns and keeps the op
   # Notes on missing values are left to the full description.
   expect_false(grepl("Missing values", out, fixed = TRUE))
 })
+
+# ---- review fixes ----------------------------------------------------------
+
+test_that("rule ids must be a single, non-missing, non-empty string without whitespace", {
+  # Only the DTARule parent validator checks the id; every subclass inherits it,
+  # on construction and on property assignment alike.
+  ctors <- list(
+    DTARule = function(id) DTARule(id = id, type = "col_unique", description = NULL),
+    DTARuleColUnique = function(id) DTARuleColUnique(id = id, columns = "X"),
+    DTARuleColRange = function(id) DTARuleColRange(id = id, columns = "X", min = 0, max = 1),
+    DTARuleColCondition = function(id) {
+      DTARuleColCondition(id = id, condition = list(A = list(greater = 0)), then = list(B = list(equals = "x")))
+    },
+    DTARuleGroupCondition = function(id) {
+      DTARuleGroupCondition(
+        id = id, group_by = "G",
+        conditions = list(a = list(A = list(equals = "x"))),
+        constraints = list(list(type = "requires", `if` = "a", then = "a"))
+      )
+    }
+  )
+  bad_ids <- list("", NA_character_, character(0), c("A", "B"), "A B", "A\tB")
+  for (cls in names(ctors)) {
+    make <- ctors[[cls]]
+    # A valid id constructs, so the failures below are about the id alone.
+    rule <- make("ok_id")
+    for (bad in bad_ids) {
+      info <- paste(cls, deparse(bad))
+      expect_error(make(bad), class = "dta_rule_invalid_id", info = info)
+      expect_error(
+        rule@id <- bad,
+        class = "dta_rule_invalid_id",
+        info = paste("@<-", info)
+      )
+    }
+    # The message names the problem in the package's own words.
+    expect_error(make(""), regexp = "single, non-missing, non-empty string", class = "dta_rule_invalid_id", info = cls)
+    expect_error(make("A B"), regexp = "cannot have whitespaces", class = "dta_rule_invalid_id", info = cls)
+    expect_error(rule@id <- "A B", regexp = "cannot have whitespaces", class = "dta_rule_invalid_id", info = cls)
+    # A rejected assignment leaves the rule unchanged.
+    expect_identical(rule@id, "ok_id", info = cls)
+  }
+})
+
+test_that("a col_range rule needs single, non-missing bounds", {
+  expect_error(
+    DTARuleColRange(id = "r", columns = "A", min = NA_real_, max = 5),
+    class = "dta_rule_invalid_range"
+  )
+  expect_error(
+    DTARuleColRange(id = "r", columns = "A", min = c(1, 2), max = 5),
+    class = "dta_rule_invalid_range"
+  )
+})
+
+test_that("check() on a concrete rule says it is not implemented instead of returning NULL", {
+  tab <- arrow::arrow_table(A = 1:3)
+  rules <- list(
+    DTARuleColRange(id = "r1", columns = "A", min = 0, max = 5),
+    DTARuleColUnique(id = "r2", columns = "A"),
+    DTARuleColCondition(id = "r3", condition = list(A = list(greater = 0)), then = list(B = list(equals = "x"))),
+    DTARuleGroupCondition(
+      id = "r4", group_by = "A",
+      conditions = list(a = list(A = list(equals = 1))),
+      constraints = list(list(type = "requires", `if` = "a", then = "a"))
+    )
+  )
+  for (rule in rules) {
+    expect_error(check(rule, tab), class = "dta_rule_check_not_implemented")
+  }
+})
+
+test_that("a col_range rule naming several columns is rejected at construction", {
+  expect_error(
+    DTARuleColRange(id = "r", columns = c("A", "B"), min = 0, max = 5),
+    class = "dta_rule_range_columns"
+  )
+
+  # Assigning a second column to a valid rule is refused the same way.
+  rule <- DTARuleColRange(id = "r", columns = "A", min = 0, max = 5)
+  expect_error(
+    S7::prop(rule, "columns") <- c("A", "B"),
+    class = "dta_rule_range_columns"
+  )
+
+  # The evaluator keeps its own guard for a rule that bypassed validation.
+  S7::prop(rule, "columns", check = FALSE) <- c("A", "B")
+  expect_error(
+    rule_check_range(rule, data.frame(A = 1, B = 2)),
+    class = "dta_rule_range_columns"
+  )
+})

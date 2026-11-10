@@ -29,3 +29,7 @@ columns.
 \description{
 Returns a compact status table for validated tables.
 }
+\examples{
+ds <- check(create_example_DTADataSetTabular(2))
+validation_status(ds)
+}

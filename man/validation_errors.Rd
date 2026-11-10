@@ -24,3 +24,7 @@ row per reported error.
 Returns detailed validation output for one table, either from in-memory
 store or from persisted artifact.
 }
+\examples{
+ds <- check(create_example_DTADataSetTabular(2))
+validation_errors(ds, table = "tab1")
+}

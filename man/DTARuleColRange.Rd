@@ -19,7 +19,7 @@ DTARuleColRange(
 \item{columns}{Character. The single column the range applies to. The
 property is a character vector for consistency with the other rule
 classes, but a range rule must name exactly one column; more than one is
-an error when the rule is evaluated.}
+an error (class \code{dta_rule_range_columns}) when the rule is constructed.}
 
 \item{range}{Numeric vector or list of length 2 (lower, upper). Legacy
 argument for range checks; it is used only when both \code{min} and

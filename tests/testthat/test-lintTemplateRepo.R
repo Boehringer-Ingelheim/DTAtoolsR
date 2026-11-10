@@ -32,7 +32,7 @@ test_that("a fresh scaffold and the bundled library lint clean, with the full co
   expect_identical(names(res), lint_columns)
 
   lib <- system.file("extdata", "library", package = "DTAtools")
-  skip_if(!nzchar(lib))
+  expect_true(nzchar(lib), info = "bundled extdata/library missing")
   res <- lint_quiet(lib, fail_on = "warning")
   expect_equal(nrow(res), 0L)
   expect_identical(names(res), lint_columns)
@@ -130,13 +130,16 @@ test_that("fail_on selects the severity that aborts", {
 
 test_that("bad arguments abort with a cli error", {
   dir <- lint_scaffold()
-  expect_error(lint_template_repo(file.path(dir, "no-such-dir")), class = "rlang_error")
+  not_dir <- "must be an existing directory"
+  one_of <- "must be one of"
+  expect_error(lint_template_repo(file.path(dir, "no-such-dir")), not_dir, fixed = TRUE, class = "rlang_error")
   expect_error(
     lint_template_repo(file.path(dir, "dta-app.yaml")),
-    class = "rlang_error"
+    not_dir,
+    fixed = TRUE, class = "rlang_error"
   )
-  expect_error(lint_template_repo(dir, fail_on = "bogus"), class = "rlang_error")
-  expect_error(lint_template_repo(dir, fail_on = c("error", "warning")), class = "rlang_error")
+  expect_error(lint_template_repo(dir, fail_on = "bogus"), one_of, fixed = TRUE, class = "rlang_error")
+  expect_error(lint_template_repo(dir, fail_on = c("error", "warning")), one_of, fixed = TRUE, class = "rlang_error")
 })
 
 test_that("the report names each finding and says when there are none", {

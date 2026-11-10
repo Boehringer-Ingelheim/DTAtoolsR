@@ -6,7 +6,7 @@
 
 testthat::test_that("R sources use only ASCII outside comments", {
   files <- source_r_files("[.][RrSsq]$")
-  testthat::skip_if(length(files) == 0, "package source not available")
+  skip_if_no_source_tree("package source not available")
 
   # Comments are exempt (R CMD check tolerates them), so the file is parsed and
   # only non-COMMENT tokens are inspected. Working on tokens rather than raw

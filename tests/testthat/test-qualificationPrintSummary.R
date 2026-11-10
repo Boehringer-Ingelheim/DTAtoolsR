@@ -10,8 +10,9 @@
 # destructuring without running the full qualification suite.
 #
 # Both methods render mostly through cli, which by default writes to the
-# message stream, not stdout -- capture.output(..., type = "message") is the
-# convention already used elsewhere in this suite for cli-based print methods.
+# message stream, not stdout -- capturing with sink(type = "message") is not
+# reliable under a full-suite run, so cli::cli_fmt() is used, as it is
+# elsewhere in this suite for cli-based print methods.
 # Exact glyphs (bullets, checkmarks, rule lines) depend on the terminal's
 # unicode/colour support, so assertions match fixed substrings of the text
 # content instead of whole lines.
@@ -46,7 +47,7 @@ qual_mock <- structure(
 )
 
 test_that("print.dta_qualification() reports verdict, run, per-stage counts and meta-check failures", {
-  out <- paste(capture.output(print(qual_mock), type = "message"), collapse = "\n")
+  out <- paste(cli::cli_fmt(print(qual_mock)), collapse = "\n")
 
   expect_match(out, "PASS", fixed = TRUE)
   expect_match(out, "Q-2026-001", fixed = TRUE)
@@ -60,7 +61,7 @@ test_that("print.dta_qualification() reports verdict, run, per-stage counts and 
 test_that("print.dta_qualification() reports success rather than a warning when every meta-check passes", {
   clean <- qual_mock
   clean$meta_checks <- data.frame(ok = c(TRUE, TRUE), stringsAsFactors = FALSE)
-  out <- paste(capture.output(print(clean), type = "message"), collapse = "\n")
+  out <- paste(cli::cli_fmt(print(clean)), collapse = "\n")
 
   expect_false(grepl("meta-consistency", out, fixed = TRUE))
 })
@@ -69,12 +70,12 @@ test_that("summary.dta_qualification() returns the per-stage summary and lists f
   # summary()'s own print(per_stage) call writes to stdout, not the message
   # stream (it is a plain data.frame print, not cli); wrap the whole thing in
   # an outer output capture so that leaks into the test run's console rather
-  # than the assertions, while the inner capture -- type = "message" -- still
+  # than the assertions, while the inner cli_fmt() capture still
   # gets the cli-rendered "Test cases not passing" section.
   msgs <- character()
   result <- NULL
   invisible(capture.output(
-    msgs <- capture.output(result <- summary(qual_mock), type = "message"),
+    msgs <- cli::cli_fmt(result <- summary(qual_mock)),
     type = "output"
   ))
   out <- paste(msgs, collapse = "\n")
@@ -97,7 +98,7 @@ test_that("summary.dta_qualification() prints a brace-bearing expectation messag
   braced$expectations$message[[1]] <- "template used {DTA_TITLE} but none was defined"
   msgs <- character()
   invisible(capture.output(
-    msgs <- capture.output(summary(braced), type = "message"),
+    msgs <- cli::cli_fmt(summary(braced)),
     type = "output"
   ))
   out <- paste(msgs, collapse = "\n")
@@ -110,7 +111,7 @@ test_that("summary.dta_qualification() omits the failing-cases section when ever
   clean$tests$status <- "pass"
   msgs <- character()
   invisible(capture.output(
-    msgs <- capture.output(summary(clean), type = "message"),
+    msgs <- cli::cli_fmt(summary(clean)),
     type = "output"
   ))
   out <- paste(msgs, collapse = "\n")

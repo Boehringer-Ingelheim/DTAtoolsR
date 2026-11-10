@@ -4,26 +4,6 @@
 # that is not rendered can still be driven over the websocket.
 #
 # testServer() sources the app directory afresh, so the app gets its own config
-# Local copies of the small helpers test-shinyapp-server.R defines for itself
-# (each test file runs in its own environment).
-app_server_dir <- function() .shiny_app_dir()
-
-app_file_input <- function(filename) {
-  path <- app_fixture_path(filename)
-  data.frame(
-    name = filename, size = file.size(path), type = "", datapath = path,
-    stringsAsFactors = FALSE
-  )
-}
-
-clean_session_file <- function() {
-  unlink(list.files(tempdir(), pattern = "^dtatools_app_session.*\\.rds$", full.names = TRUE), force = TRUE)
-}
-
-ui_text <- function(out) {
-  if (is.null(out) || is.null(out$html)) "" else paste(as.character(out$html), collapse = "")
-}
-
 # cache; pointing DTATOOLS_TEMPLATE_SOURCES at a temp library before the call is
 # enough, no invalidation needed.
 

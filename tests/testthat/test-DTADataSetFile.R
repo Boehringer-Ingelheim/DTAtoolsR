@@ -599,9 +599,22 @@ test_that("handler_index resolves a character index numerically, not via string 
 test_that("handler_index aborts on NULL, NA, or a length-2 value", {
   handlers <- list(DTAFileAny(filename = "a.txt"), DTAFileAny(filename = "b.txt"))
 
-  expect_error(dta_resolve_file_handler_index(NULL, handlers), class = "rlang_error")
-  expect_error(dta_resolve_file_handler_index(NA, handlers), class = "rlang_error")
-  expect_error(dta_resolve_file_handler_index(c(1, 2), handlers), class = "rlang_error")
+  abort_text <- "must be a single, non-missing character or numeric value"
+  expect_error(
+    dta_resolve_file_handler_index(NULL, handlers),
+    abort_text,
+    fixed = TRUE, class = "rlang_error"
+  )
+  expect_error(
+    dta_resolve_file_handler_index(NA, handlers),
+    abort_text,
+    fixed = TRUE, class = "rlang_error"
+  )
+  expect_error(
+    dta_resolve_file_handler_index(c(1, 2), handlers),
+    abort_text,
+    fixed = TRUE, class = "rlang_error"
+  )
 })
 
 # ---------------------------------------------------------------------------
@@ -724,4 +737,80 @@ test_that("a restored dataset whose artifact directory is gone can still be used
     },
     "single directory path"
   )
+})
+
+# ---- stale 'not delivered' rows and declared file counts --------------------
+
+delivery_dir_for_counts <- function() {
+  dir <- tempfile("delivery")
+  dir.create(dir)
+  dir
+}
+
+touch_delivery <- function(dir, name) {
+  path <- file.path(dir, name)
+  writeLines("x", path)
+  path
+}
+
+test_that("a pattern's 'not delivered' row disappears once a file satisfies it", {
+  dir <- delivery_dir_for_counts()
+  ds <- DTADataSetFile(
+    id = "r",
+    files = list(DTAFileAny("^report_.*[.]pdf$", pattern = TRUE))
+  )
+  ds <- check(ds, quiet = TRUE, persist = FALSE)
+  status <- validation_status(ds)
+  expect_identical(status$table, "^report_.*[.]pdf$")
+  expect_false(status$ok)
+  # A regex is not a file name, and the message must not say it is.
+  expect_match(messages(ds)$message, "matching pattern", fixed = TRUE)
+
+  ds <- load_file(ds, file = touch_delivery(dir, "report_1.pdf"))
+  ds <- check(ds, quiet = TRUE, persist = FALSE)
+  status <- validation_status(ds)
+  expect_identical(status$table, "report_1.pdf")
+  expect_true(all(status$ok))
+  expect_identical(names(ds@validation_index), "report_1.pdf")
+})
+
+test_that("min and max number of files are enforced against the delivery", {
+  dir <- delivery_dir_for_counts()
+  handler <- DTAFileAny(
+    "^report_.*[.]pdf$",
+    pattern = TRUE,
+    min_number_of_files = 3,
+    max_number_of_files = 3
+  )
+  ds <- DTADataSetFile(id = "r", files = list(handler))
+  ds <- load_file(ds, file = touch_delivery(dir, "report_1.pdf"))
+  ds <- check(ds, quiet = TRUE, persist = FALSE)
+
+  status <- validation_status(ds)
+  expect_false(all(status$ok))
+  expect_match(messages(ds)$message, "Expected 3 file(s)", fixed = TRUE)
+  expect_match(messages(ds)$message, "got 1", fixed = TRUE)
+
+  ds <- load_file(ds, file = touch_delivery(dir, "report_2.pdf"))
+  ds <- load_file(ds, file = touch_delivery(dir, "report_3.pdf"))
+  ds <- check(ds, quiet = TRUE, persist = FALSE)
+  expect_true(all(validation_status(ds)$ok))
+  expect_identical(nrow(validation_status(ds)), 3L)
+
+  # Over the maximum fails too, and with a message naming the count.
+  ds <- load_file(ds, file = touch_delivery(dir, "report_4.pdf"))
+  ds <- check(ds, quiet = TRUE, persist = FALSE)
+  expect_false(all(validation_status(ds)$ok))
+  expect_match(messages(ds)$message, "got 4", fixed = TRUE)
+})
+
+test_that("an open-ended minimum fails only below it", {
+  dir <- delivery_dir_for_counts()
+  handler <- DTAFileAny("^r_.*[.]txt$", pattern = TRUE, min_number_of_files = 2)
+  ds <- DTADataSetFile(id = "r", files = list(handler))
+  ds <- load_file(ds, file = touch_delivery(dir, "r_1.txt"))
+  expect_false(all(validation_status(check(ds, quiet = TRUE, persist = FALSE))$ok))
+  ds <- load_file(ds, file = touch_delivery(dir, "r_2.txt"))
+  ds <- load_file(ds, file = touch_delivery(dir, "r_3.txt"))
+  expect_true(all(validation_status(check(ds, quiet = TRUE, persist = FALSE))$ok))
 })
