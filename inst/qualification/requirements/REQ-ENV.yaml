@@ -226,7 +226,11 @@ requirements:
       R/importConversion.R:870 (DTAtools.stream_arrow_numeric default TRUE),
       R/importConversion.R:884 (DTAtools.stream_arrow_numeric_min_rows default 20000L),
       R/streamingScale.R:168 (DTAtools.stream_arrow_unique default TRUE),
-      R/streamingValidation.R:895 (DTAtools.progress_seconds default 30)
+      R/streamingValidation.R:895 (DTAtools.progress_seconds default 30),
+      R/containerFiles.R:14 (DTAtools.container_max_members default 10000L),
+      R/containerFiles.R:15 (DTAtools.container_max_bytes default 1e13),
+      R/containerFiles.R:16 (DTAtools.container_max_member_bytes default 1e13),
+      R/containerFiles.R:17 (DTAtools.container_max_ratio default 1100)
     covers: [run_qualification]
 
   - id: REQ-ENV-021

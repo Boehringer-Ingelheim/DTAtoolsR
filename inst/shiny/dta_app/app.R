@@ -989,6 +989,15 @@ server <- function(input, output, session) {
   try(dta_sweep_session_files(), silent = TRUE)
   session$onSessionEnded(function() {
     unlink(owned$export, force = TRUE)
+    # Restore re-reads file datasets from their files; tables come back from the
+    # autosave's own Arrow copies (dta_restore_session(), dta_table_store()). So
+    # only the extracted files a file dataset uses are kept for "Restore previous session".
+    keep <- dta_file_dataset_uploads(isolate(rv$dta), isolate(rv$uploads))
+    dta_delivery_cleanup(owned$upload, keep)
+    # A delivery still waiting in the Replace dialog: its staged copies go too
+    # (its extraction is under a delivery directory no record names).
+    pending <- isolate(rv$pending_upload)$delivery
+    if (!is.null(pending)) unlink(dirname(pending$copies), recursive = TRUE)
     if (exists(session$token, envir = .dta_live_session_paths, inherits = FALSE)) {
       rm(list = session$token, envir = .dta_live_session_paths)
     }
@@ -1031,12 +1040,13 @@ server <- function(input, output, session) {
       ds <- dta_get_dataset(dta, names_ds[i])
       handlers <- lapply(dta_handlers(ds), function(h) {
         list(
-          expected = handler_expected(h),
-          hint     = handler_hint(h),
-          count    = handler_count_label(h),
-          min      = handler_min(h),
-          max      = handler_max(h),
-          pattern  = handler_is_pattern(h)
+          expected  = handler_expected(h),
+          hint      = handler_hint(h),
+          count     = handler_count_label(h),
+          min       = handler_min(h),
+          max       = handler_max(h),
+          pattern   = handler_is_pattern(h),
+          container = handler_container(h)
         )
       })
       list(
@@ -2453,6 +2463,26 @@ server <- function(input, output, session) {
     h <- handlers[[hi]]
     key <- paste0(dsname, "||", hi)
 
+    # A drop holding a .zip / .xpt is a delivery: ALL of its files are routed
+    # across the whole document by load_delivery(), which also binds an archive
+    # an entry names and opens one an entry declares as a container.
+    if (any(dta_is_container_name(fileinfo$name))) {
+      handle_delivery(fileinfo)
+      session$sendCustomMessage("dta_reset_fileinput", sprintf("up_%d_%d", ds_idx, hi))
+      return()
+    }
+    # G3b -- an entry that declares a container takes no loose file (every file
+    # left here is loose).
+    ct <- handler_container(h)
+    if (nzchar(ct)) {
+      showNotification(sprintf(
+        "No files added to '%s'. Rejected %d: %s", dsname, nrow(fileinfo),
+        paste(sprintf("'%s' (expected inside %s; drop the archive)", fileinfo$name, ct), collapse = "; ")
+      ), type = "warning", duration = 10)
+      session$sendCustomMessage("dta_reset_fileinput", sprintf("up_%d_%d", ds_idx, hi))
+      return()
+    }
+
     # A dropped file will occupy a table named after it (for tabular datasets,
     # dta_bound_item_name() strips the extension (a gz suffix first); for file
     # datasets, the basename with
@@ -2578,6 +2608,9 @@ server <- function(input, output, session) {
       cur <- up[[key]] %||% list()
       up[[key]] <- c(cur, loaded_recs)
       rv$uploads <- up
+      # A delivery's extracted file this upload just replaced is named by no
+      # record any more.
+      dta_delivery_cleanup(owned$upload, rv$uploads)
       st <- rv$status
       st[[dsname]] <- "pending"
       rv$status <- st
@@ -2621,6 +2654,117 @@ server <- function(input, output, session) {
     # Clear the fileInput's text field so the control reads empty and is ready
     # for the next drop (runs whether files were accepted or rejected).
     session$sendCustomMessage("dta_reset_fileinput", sprintf("up_%d_%d", ds_idx, hi))
+  }
+
+  # A drop that holds a .zip / .xpt: load it whole into a COPY of the document
+  # (load_delivery() routes every file across all datasets), then either commit
+  # it or, when it would replace tables already loaded, ask once first. The
+  # copy waits in rv$pending_upload$delivery until Replace commits it or Cancel
+  # deletes its extraction directory.
+  handle_delivery <- function(fileinfo) {
+    sz <- suppressWarnings(as.numeric(fileinfo$size))
+    ok <- !is.na(sz) & sz > 0
+    if (!any(ok)) {
+      showNotification("The delivery is empty or was not transferred completely.", type = "error")
+      return(invisible())
+    }
+    if (any(!ok)) {
+      showNotification(sprintf(
+        "Not loaded (empty or not transferred completely): %s",
+        paste(fileinfo$name[!ok], collapse = ", ")
+      ), type = "warning", duration = 10)
+    }
+    fileinfo <- fileinfo[ok, , drop = FALSE]
+    # Extracted files no record names any more go first, so the budget below
+    # counts only what is in use, and "remove or discard, then drop again" works.
+    dta_delivery_cleanup(owned$upload, rv$uploads)
+    held <- dta_session_delivery_bytes(owned$upload)
+    left <- dta_session_delivery_budget() - held
+    if (left <= 0) {
+      showNotification(
+        "This session already holds the maximum of extracted deliveries; remove or discard files loaded from a delivery and drop again, or use Start over.",
+        type = "error", duration = 10
+      )
+      return(invisible())
+    }
+    staged <- vapply(seq_len(nrow(fileinfo)), function(r) {
+      s <- dta_stage_upload(fileinfo$datapath[r], fileinfo$name[r])
+      if (!identical(s, fileinfo$datapath[r])) own("upload", dirname(s))
+      s
+    }, character(1))
+    copies <- staged[staged != fileinfo$datapath] # our own staged copies, never Shiny's upload file
+    exdir <- tempfile("dta_upload_delivery_")
+    own("upload", exdir)
+    res <- withProgress(
+      message = "Opening the delivery\u2026", value = 0.3,
+      dta_load_delivery(rv$dta, staged, exdir, left, held)
+    )
+    if (!isTRUE(res$ok)) {
+      unlink(c(exdir, dirname(copies)), recursive = TRUE)
+      showNotification(paste("Delivery not loaded:", dta_app_reason(res$error, isTRUE(res$budget_limited))), type = "error", duration = 10)
+      return(invisible())
+    }
+    d <- list(
+      value = res$value, plan = attr(res$value, "last_delivery"), exdir = exdir,
+      missing = res$missing, copies = copies, budget_limited = isTRUE(res$budget_limited)
+    )
+    replaced <- dta_delivery_replaced(rv$dta, d$plan)
+    d$n_replaced <- nrow(replaced)
+    if (nrow(replaced) > 0) {
+      rv$pending_upload <- list(delivery = d)
+      showModal(modalDialog(
+        title = "Replace loaded files?",
+        tags$p("This delivery replaces files that are already loaded:"),
+        tags$ul(lapply(seq_len(nrow(replaced)), function(i) {
+          tags$li(tags$code(replaced$item[i]), sprintf(" (dataset '%s')", replaced$dataset[i]))
+        })),
+        tags$p("The replaced tables will be marked as not validated."),
+        footer = tagList(
+          actionButton("cancel_overwrite", "Cancel"),
+          actionButton("confirm_overwrite", "Replace", class = "btn btn-warning")
+        ),
+        easyClose = FALSE
+      ))
+      return(invisible())
+    }
+    commit_delivery(d)
+  }
+
+  # Make a loaded delivery the document: assign it, record which file filled
+  # which slot (with the archive it came from and the extracted path the cleanup
+  # and the session budget work on), reset the status of every dataset it
+  # touched, and tell the user once.
+  commit_delivery <- function(d) {
+    rv$dta <- d$value
+    loaded <- d$plan[d$plan$status == "loaded", , drop = FALSE]
+    up <- rv$uploads
+    for (i in seq_len(nrow(loaded))) {
+      ds <- loaded$dataset[i]
+      tbl <- loaded$item[i]
+      keys <- as.character(names(up))
+      for (k in keys[startsWith(keys, paste0(ds, "||"))]) {
+        up[[k]] <- Filter(function(x) !identical(x$table %||% "", tbl), up[[k]])
+      }
+      key <- paste0(ds, "||", loaded$handler[i])
+      from <- !is.na(loaded$container[i])
+      up[[key]] <- c(up[[key]] %||% list(), list(list(
+        file = loaded$name[i], table = tbl,
+        container = if (from) loaded$container[i],
+        path = if (from) loaded$path[i]
+      )))
+    }
+    rv$uploads <- up
+    st <- rv$status
+    for (ds in unique(loaded$dataset)) st[[ds]] <- "pending"
+    rv$status <- st
+    # Staged copies not bound as files (an opened archive), then every
+    # extracted file no record names any more: the files this delivery
+    # replaced, and whatever an earlier removal could not delete.
+    unlink(dirname(setdiff(d$copies, loaded$path)), recursive = TRUE)
+    dta_delivery_cleanup(owned$upload, up)
+    autosave()
+    note <- dta_delivery_note(d$plan, d$n_replaced, d$missing, d$budget_limited)
+    showNotification(note$text, type = note$type, duration = if (identical(note$type, "message")) 5 else 10)
   }
 
   # Open a modal listing the bundled example files (inst/extdata). The chosen
@@ -2718,11 +2862,16 @@ server <- function(input, output, session) {
     pu <- rv$pending_upload
     rv$pending_upload <- NULL
     removeModal()
-    if (!is.null(pu)) handle_upload(pu$ds_idx, pu$hi, pu$fileinfo, overwrite = TRUE)
+    if (is.null(pu)) {
+      return()
+    }
+    if (!is.null(pu$delivery)) commit_delivery(pu$delivery) else handle_upload(pu$ds_idx, pu$hi, pu$fileinfo, overwrite = TRUE)
   })
   observeEvent(input$cancel_overwrite, {
+    pu <- rv$pending_upload
     rv$pending_upload <- NULL
     removeModal()
+    if (!is.null(pu$delivery)) unlink(c(pu$delivery$exdir, dirname(pu$delivery$copies)), recursive = TRUE)
   })
 
   # Confirm the example-file modal: load the chosen file into the target slot.
@@ -2750,6 +2899,7 @@ server <- function(input, output, session) {
     up <- rv$uploads
     up[[key]] <- Filter(function(x) !identical(x$table, table), up[[key]] %||% list())
     rv$uploads <- up
+    dta_delivery_cleanup(owned$upload, rv$uploads)
     cnt <- dta_dataset_content_count(dta_get_dataset(rv$dta, dsname))
     st <- rv$status
     st[[dsname]] <- if (cnt == 0) "nodata" else "pending"
@@ -2811,6 +2961,7 @@ server <- function(input, output, session) {
       pref <- paste0(rv$active, "||")
       for (k in names(up)) if (startsWith(k, pref)) up[[k]] <- list()
       rv$uploads <- up
+      dta_delivery_cleanup(owned$upload, rv$uploads)
       st <- rv$status
       st[[rv$active]] <- "nodata"
       rv$status <- st
@@ -3360,7 +3511,8 @@ server <- function(input, output, session) {
       # Labelled only where the bare token would not explain itself.
       type_labels <- c(
         any = "Any file (not parsed)",
-        sas7bdat = "SAS dataset (.sas7bdat)"
+        sas7bdat = "SAS dataset (.sas7bdat)",
+        xpt = "SAS transport (.xpt)"
       )
       names(type_choices) <- ifelse(
         type_choices %in% names(type_labels),
@@ -3406,6 +3558,13 @@ server <- function(input, output, session) {
               )
             )
           },
+          textInput("file_container", "Delivered inside (optional)",
+            value = g("container"), width = "100%", placeholder = "sdtm.zip"
+          ),
+          div(class = "msg-hint", style = "margin:-8px 0 10px;", paste(
+            "The .zip or .xpt this file arrives in, e.g. sdtm.zip or sdtm_*.zip",
+            "(* = any text; letter case must match). Leave blank if it may arrive loose or in any .zip/.xpt."
+          )),
           conditionalPanel(
             condition = "input.file_type == 'any'",
             textInput("file_extensions", "Allowed file endings (optional)",
@@ -3423,10 +3582,10 @@ server <- function(input, output, session) {
           ),
           # How the file is READ. Only a delimited-text type has these, so the
           # panel is the mirror of the endings panel above -- and neither an
-          # `any` nor a `sas7bdat` handler's constructor takes either argument
-          # (a SAS dataset declares its own encoding).
+          # `any`, a `sas7bdat` nor an `xpt` handler's constructor takes either
+          # argument (a SAS dataset declares its own encoding).
           conditionalPanel(
-            condition = "input.file_type != 'any' && input.file_type != 'sas7bdat'",
+            condition = "input.file_type != 'any' && input.file_type != 'sas7bdat' && input.file_type != 'xpt'",
             layout_columns(
               col_widths = c(6, 6),
               selectizeInput("file_encoding", "File encoding",
@@ -3530,8 +3689,9 @@ server <- function(input, output, session) {
     ov <- dta_handlers_overview(isolate(rv$dta), ed)
     if (is.null(ov) || nrow(ov) == 0) {
       ov <- data.frame(
-        filename = character(0), type = character(0), pattern = character(0),
-        files = character(0), endings = character(0), description = character(0),
+        filename = character(0), type = character(0), container = character(0),
+        pattern = character(0), files = character(0), endings = character(0),
+        description = character(0),
         stringsAsFactors = FALSE
       )
     }
@@ -3696,6 +3856,10 @@ server <- function(input, output, session) {
       info = input$file_info,
       extensions = input$file_extensions,
       reader_settings = reader,
+      # A control that never rendered reads as NULL, and taking that as blank
+      # would clear a container the form never showed; an explicitly emptied
+      # field ("") does clear it.
+      container = input$file_container %||% (isolate(rv$file_prefill)$container %||% ""),
       # The dataset decides which types are on offer, so it has to decide which
       # ones validate too -- otherwise the form could offer `any` and the save
       # would reject it.
@@ -8077,6 +8241,7 @@ server <- function(input, output, session) {
           class = "loaded-file-row",
           tags$span(class = paste("file-status", icls), title = ttl, icon_ch),
           tags$span(class = "file-name", rec$file),
+          if (!is.null(rec$container)) tags$span(class = "file-table", paste0("from ", rec$container)),
           if (!identical(s$type, "file")) {
             tags$span(
               class = "file-table", title = "Table name",
@@ -8241,10 +8406,18 @@ server <- function(input, output, session) {
         upid <- sprintf("up_%d_%d", ds_idx, hi)
         exid <- sprintf("expick_%d_%d", ds_idx, hi)
         multiple <- isTRUE(!is.na(h$max) && h$max > 1)
+        # An entry that declares a container takes the archive, not a loose file.
+        in_container <- nzchar(h$container %||% "")
         up_ctrl <- div(
           class = "dropzone",
           fileInput(upid,
-            label = if (multiple) "Drop or choose file(s)" else "Drop or choose a file",
+            label = if (in_container) {
+              "Drop the .zip / .xpt it arrives in, or browse"
+            } else if (multiple) {
+              "Drop or choose file(s)"
+            } else {
+              "Drop or choose a file"
+            },
             multiple = multiple
           )
         )
@@ -8254,7 +8427,8 @@ server <- function(input, output, session) {
             div(
               tags$strong("Expected: "),
               tags$span(class = "slot-expected", h$expected),
-              tags$span(class = "slot-count", h$count)
+              tags$span(class = "slot-count", h$count),
+              if (in_container) tags$span(class = "slot-count", paste0("in ", h$container))
             )
           ),
           card_body(
@@ -8316,7 +8490,7 @@ server <- function(input, output, session) {
       # tags$h5("Expected files"),
       div(
         class = "msg-hint", style = "margin:-4px 0 10px;",
-        "Drop each required file below. Loaded files appear underneath."
+        "Drop each required file below, or a whole .zip / .xpt delivery: its files are matched to every dataset by name. Loaded files appear underneath, with the archive each came from; for a table read into memory, validation results name the dataset and table, not the archive."
       ),
       slots,
       card(
@@ -8550,6 +8724,11 @@ server <- function(input, output, session) {
         recs
       }
     })
+    # The extracted files a restored file dataset re-reads belong to this
+    # session again: the retention sweep spares what a live session owns, and
+    # cleanup and the budget only look at owned directories.
+    roots <- dta_delivery_roots(rv$uploads)
+    if (length(roots) > 0) own("upload", roots)
     restored_names <- dta_dataset_names(restored)
     rv$status <- saved$status %||% stats::setNames(
       rep("pending", length(restored_names)),

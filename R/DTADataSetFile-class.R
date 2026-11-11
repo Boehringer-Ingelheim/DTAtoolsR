@@ -80,7 +80,8 @@ DTADataSetFile <- S7::new_class(
         number_of_files = NULL,
         min_number_of_files = tryCatch(h@min_number_of_files, error = function(e) NULL),
         max_number_of_files = tryCatch(h@max_number_of_files, error = function(e) NULL),
-        info = tryCatch(h@info, error = function(e) NULL)
+        info = tryCatch(h@info, error = function(e) NULL),
+        container = dta_handler_container(h)
       )
     })
 
@@ -248,6 +249,22 @@ dta_file_dataset_targets <- function(x) {
   for (nm in intersect(missing_names, pattern_names)) {
     messages[[nm]] <- paste0(
       "Expected a file matching pattern '", nm, "' was not delivered."
+    )
+  }
+
+  # A declared name that is missing, and whose handler says which container it
+  # arrives inside, names that container in the report (name = declared file
+  # name, value = container).
+  container_of <- unlist(lapply(x@files, function(handler) {
+    container <- dta_handler_container(handler)
+    if (isTRUE(handler@pattern) || is.null(container)) {
+      return(NULL)
+    }
+    stats::setNames(rep(container, length(handler@filename)), handler@filename)
+  }))
+  for (nm in setdiff(intersect(missing_names, names(container_of)), pattern_names)) {
+    messages[[nm]] <- paste0(
+      "Expected file '", nm, "' was not delivered inside '", container_of[[nm]], "'."
     )
   }
 

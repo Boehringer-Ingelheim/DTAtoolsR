@@ -630,11 +630,11 @@ test_that("a .zip input is refused with a clear message", {
   handler <- DTAFileCSV(filename = "ss_refused.zip")
   expect_error(
     read_file(handler, path),
-    regexp = "zip archives are not supported"
+    regexp = "zip archives are not read by a file handler"
   )
   expect_error(
     open_file(handler, path),
-    regexp = "zip archives are not supported"
+    regexp = "zip archives are not read by a file handler"
   )
 })
 

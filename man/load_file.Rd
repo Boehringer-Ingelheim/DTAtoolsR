@@ -107,11 +107,13 @@ by a fixed expansion estimate (4x) before the comparison, so a compressed
 table large enough to matter streams by default. Either explicit
 \code{stream} value still overrides the guess.
 
-A SAS dataset (\code{\link{DTAFileSAS7BDAT}}) has no lazy reader. With
+A SAS dataset (\code{\link{DTAFileSAS7BDAT}}) or SAS transport file
+(\code{\link{DTAFileXPT}}) has no lazy reader. With
 \code{"auto"} it is read into memory whatever its size, and a message of class
 \code{dta_sas7bdat_in_memory} says so when the size alone would have streamed
 it; \code{"always"} (or \code{TRUE}) is refused, naming
-\code{stream = "never"}.
+\code{stream = "never"}. To load a \code{.zip} or a SAS transport library,
+use \code{\link{load_delivery}()}.
 }
 
 \section{Options a streamed load is subject to}{

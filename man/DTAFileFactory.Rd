@@ -8,7 +8,7 @@ DTAFileFactory(type, ...)
 }
 \arguments{
 \item{type}{Character. File type, \code{"csv"}, \code{"tsv"},
-\code{"sas7bdat"} or \code{"any"}.}
+\code{"sas7bdat"}, \code{"xpt"} or \code{"any"}.}
 
 \item{...}{Additional arguments passed to the specific backend constructor.
 For \code{type = "any"} this includes the optional \code{extensions} restriction; see
@@ -22,7 +22,7 @@ Constructs a DTAFile object for a specified backend (e.g., SAS or R),
 based on the provided type and file path.
 
 \code{type} may name any format in either supported list: the readable formats a
-tabular dataset needs (\code{csv}, \code{tsv}, \code{sas7bdat}) or \code{any}, the reader-less
+tabular dataset needs (\code{csv}, \code{tsv}, \code{sas7bdat}, \code{xpt}) or \code{any}, the reader-less
 handler a \code{\link{DTADataSetFile}} uses for a deliverable that is never
 parsed. Which of those a given dataset will accept is enforced by the dataset
 itself -- \code{\link{DTADataSetTabular}} requires every handler to be
@@ -35,6 +35,9 @@ DTAFileFactory(type = "csv", filename = "clinical_data.csv")
 # A SAS dataset, read through the haven package.
 DTAFileFactory(type = "sas7bdat", filename = "ae.sas7bdat")
 
+# A SAS transport file, said to arrive inside a zip archive.
+DTAFileFactory(type = "xpt", filename = "ae.xpt", container = "sdtm.zip")
+
 # A deliverable that is never parsed, restricted to two endings.
 DTAFileFactory(
   type = "any",
@@ -46,5 +49,5 @@ DTAFileFactory(
 }
 \seealso{
 \code{\link{DTAFile}}, \code{\link{DTAFileAny}},
-\code{\link{DTAFileSAS7BDAT}}
+\code{\link{DTAFileSAS7BDAT}}, \code{\link{DTAFileXPT}}
 }

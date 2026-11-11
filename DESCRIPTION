@@ -38,7 +38,7 @@ Imports:
 	tibble,
 	officer,
 	xml2,
-	zip,
+	zip (>= 3.0.0),
 	haven (>= 2.5.2)
 Depends:
 	R (>= 4.1.0),
@@ -85,6 +85,7 @@ Collate:
     'DTAFileDelim-class.R'
     'DTAFileSAS7BDAT-class.R'
     'DTAFileTSV-class.R'
+    'DTAFileXPT-class.R'
     'DTAMetaData-class.R'
     'DTAMetaData-helpers.R'
     'DTARule-class.R'
@@ -96,6 +97,7 @@ Collate:
     'arrowCompute.R'
     'benchmarking.R'
     'columnSpecChecks.R'
+    'containerFiles.R'
     'createTemplateRepo.R'
     'documentBuilders.R'
     'documentData.R'
@@ -110,6 +112,7 @@ Collate:
     'formattingHelpers.R'
     'lintDTA.R'
     'lintTemplateRepo.R'
+    'loadDelivery.R'
     'qualification-report.R'
     'qualification.R'
     'reportRendering.R'

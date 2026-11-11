@@ -171,13 +171,21 @@
 # One row per expected file: name or pattern, match type, format, expected count
 # ("n", or "min to max" when they differ) and description (pattern description
 # plus the file's `info`). `files` is a list of DTAFile objects; zero rows when
-# it is empty.
+# it is empty. When at least one entry declares a container, a sixth column
+# "Delivered In" holds the container (or "") of every entry; otherwise the five
+# columns are exactly the same as without containers.
 .file_specs_df <- function(files) {
   columns <- c("File Name / Pattern", "Match Type", "Format", "Expected Count", "Description")
+  containers <- vapply(files, function(f) dta_handler_container(f) %||% "", character(1))
+  with_container <- any(nzchar(containers))
+  if (with_container) {
+    columns <- c(columns, "Delivered In")
+  }
   if (is.null(files) || length(files) == 0) {
     return(.empty_text_df(columns))
   }
-  rows <- lapply(files, function(f) {
+  rows <- lapply(seq_along(files), function(i) {
+    f <- files[[i]]
     min_n <- f@min_number_of_files %||% 0
     max_n <- f@max_number_of_files %||% 0
     match_type <- if (isTRUE(f@pattern)) "Regex pattern" else "Exact name"
@@ -191,7 +199,7 @@
       }
     }
 
-    data.frame(
+    row <- data.frame(
       `File Name / Pattern` = if (!is.null(f@filename)) paste(f@filename, collapse = ", ") else MISSING_VALUE_DISPLAY,
       `Match Type` = match_type,
       `Format` = .file_format_label(f),
@@ -203,6 +211,10 @@
       stringsAsFactors = FALSE,
       check.names = FALSE
     )
+    if (with_container) {
+      row[["Delivered In"]] <- containers[[i]]
+    }
+    row
   })
   .rbind_rows(rows, .empty_text_df(columns))
 }

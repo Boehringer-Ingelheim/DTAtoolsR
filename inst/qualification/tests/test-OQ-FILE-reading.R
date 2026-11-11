@@ -61,10 +61,13 @@ test_that("OQ-FILE-020 | a .zip file is refused immediately with an actionable m
 
   err_read <- tryCatch(read_file(DTAFileCSV(filename = "delivery.csv.zip"), p), error = function(e) e)
   qa_check("read_file() raises a condition for a .zip file", inherits(err_read, "condition"))
+  # REQ-FILE-010 still holds: the message names the reason and a supported
+  # alternative, which is now a delivery (the archive is loaded as a whole and
+  # each file inside it is matched to the specification).
   qa_step(
     "the message names the reason and a supported alternative, not an opaque parse failure",
     TRUE,
-    grepl(".zip archives are not supported.", conditionMessage(err_read), fixed = TRUE)
+    grepl(".zip archives are not read by a file handler.", conditionMessage(err_read), fixed = TRUE)
   )
 
   err_open <- tryCatch(open_file(DTAFileCSV(filename = "delivery.csv.zip"), p), error = function(e) e)

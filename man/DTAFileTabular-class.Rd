@@ -18,7 +18,8 @@ DTAFileTabular(
   has_header = TRUE,
   quote = "\\"",
   newlines_in_values = FALSE,
-  encoding = "UTF-8"
+  encoding = "UTF-8",
+  container = NULL
 )
 }
 \arguments{
@@ -106,6 +107,13 @@ blocks cut at newlines and \code{\link{open_file}()} refuses it, asking for
 the file to be converted to UTF-8 first. A name this platform's
 \code{\link[base]{iconv}()} does not know (\code{"latin-1"} for
 \code{"latin1"}, say) is refused too, before the file is opened.}
+
+\item{container}{Character or \code{NULL}; the name of the \code{.zip}
+archive or \code{.xpt} SAS transport file this file arrives inside.
+\code{*} matches any text and \code{?} one character
+(\code{"sdtm_*.zip"}); the name is matched as a whole, independently of
+\code{pattern}. \code{NULL} (the default) accepts the file loose or inside
+any container. Only \code{\link{load_delivery}()} consults it.}
 }
 \value{
 An object of class \code{DTAFileTabular}.

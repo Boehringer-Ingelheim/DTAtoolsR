@@ -602,12 +602,23 @@ Example of a column bound to a vocabulary:
 ### File handlers and non-tabular deliverables
 
 Tabular dataset `files:` describes the expected file or files. A single handler can be a mapping; multiple handlers are represented as a list of
-mappings. The supported handler types are `csv`, `tsv`, `sas7bdat`, and `any`.
+mappings. The supported handler types are `csv`, `tsv`, `sas7bdat`, `xpt`, and `any`.
 
 ```yaml
 files:
   filename: starter_data.tsv
   type: tsv
+```
+
+A file entry may also say which `.zip` archive or SAS transport library (`.xpt`) its file arrives inside, with `container:`. It is optional: leave it
+out and the file is accepted loose or inside any container. `*` matches any run of characters and `?` one character (`sdtm_*.zip`), and letter case
+must match. Quote a value that starts with `*` or contains ` #`. Only `load_delivery()` consults it.
+
+```yaml
+files:
+  filename: ae.csv
+  type: csv
+  container: sdtm.zip
 ```
 
 A non-tabular deliverable is represented by a dataset with `type: file` and one or more file handlers. `any` is the general file handler; it can
@@ -626,7 +637,7 @@ dataset:
 ```
 
 File handlers describe expected deliverables; they are not extra template kinds. Use the file type values recognized by the package rather than
-inventing `xlsx`, `xpt`, or other handler names.
+inventing `xlsx` or other handler names.
 
 ### Dataset-template options
 

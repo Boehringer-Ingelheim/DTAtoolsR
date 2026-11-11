@@ -79,6 +79,12 @@
 #'   the file to be converted to UTF-8 first. A name this platform's
 #'   \code{\link[base]{iconv}()} does not know (\code{"latin-1"} for
 #'   \code{"latin1"}, say) is refused too, before the file is opened.
+#' @param container Character or \code{NULL}; the name of the \code{.zip}
+#'   archive or \code{.xpt} SAS transport file this file arrives inside.
+#'   \code{*} matches any text and \code{?} one character
+#'   (\code{"sdtm_*.zip"}); the name is matched as a whole, independently of
+#'   \code{pattern}. \code{NULL} (the default) accepts the file loose or inside
+#'   any container. Only \code{\link{load_delivery}()} consults it.
 #'
 #' @name DTAFileTabular-class
 #' @return An object of class \code{DTAFileTabular}.
@@ -106,7 +112,8 @@ DTAFileTabular <- S7::new_class(
     has_header = TRUE,
     quote = '"',
     newlines_in_values = FALSE,
-    encoding = "UTF-8"
+    encoding = "UTF-8",
+    container = NULL
   ) {
     new_object(
       .parent = DTAFile(
@@ -116,7 +123,8 @@ DTAFileTabular <- S7::new_class(
         max_number_of_files = max_number_of_files,
         info = info,
         pattern = pattern,
-        pattern_description = pattern_description
+        pattern_description = pattern_description,
+        container = container
       ),
       sep = sep,
       has_header = has_header,
@@ -1600,23 +1608,23 @@ method(print_info, DTAFileTabular) <- function(x) {
   invisible(x)
 }
 
-#' @title Refuse a SAS Dataset Offered to a Delimited-Text Reader
+#' @title Refuse a SAS Dataset or Transport File Offered to a Delimited-Text Reader
 #' @description
-#' Arrow does not reject a `.sas7bdat` outright: it tries to parse the binary
-#' as delimited text and fails with an opaque "Is this a 'csv' file?" schema
-#' error. Catching the extension (with or without a `.gz`) trades that for a
-#' message that names the real cause, the way the `.zip` guard in
+#' Arrow does not reject a `.sas7bdat` or `.xpt` outright: it tries to parse the
+#' binary as delimited text and fails with an opaque "Is this a 'csv' file?"
+#' schema error. Catching the extension (with or without a `.gz`) trades that
+#' for a message that names the real cause, the way the `.zip` guard in
 #' `dta_check_readable_file()` does.
 #' @param path Character path.
-#' @return `NULL`, invisibly, when `path` is not a SAS dataset.
+#' @return `NULL`, invisibly, when `path` is not a SAS dataset or transport file.
 #' @keywords internal
 dta_refuse_sas7bdat <- function(path) {
-  if (grepl("\\.sas7bdat(\\.gz)?$", path, ignore.case = TRUE)) {
+  if (grepl("\\.(sas7bdat|xpt)(\\.gz)?$", path, ignore.case = TRUE)) {
     cli::cli_abort(
       c(
-        "{.path {path}} is a SAS dataset, which cannot be read as delimited text.",
-        "i" = "A SAS dataset is read into memory only; {.fn validate_file_stream} and {.fn cache_as_parquet} take delimited text.",
-        "i" = "Use {.fn load_file} or {.fn read_file} with a {.cls DTAFileSAS7BDAT} handler instead."
+        "{.path {path}} is a SAS dataset or transport file, which cannot be read as delimited text.",
+        "i" = "A SAS dataset or transport file is read into memory only; {.fn validate_file_stream} and {.fn cache_as_parquet} take delimited text.",
+        "i" = "Use {.fn load_file} or {.fn read_file} with a {.cls DTAFileSAS7BDAT} or {.cls DTAFileXPT} handler instead."
       ),
       class = "dta_sas7bdat_not_delimited"
     )

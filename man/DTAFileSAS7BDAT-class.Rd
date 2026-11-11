@@ -12,7 +12,8 @@ DTAFileSAS7BDAT(
   number_of_files = NULL,
   min_number_of_files = NULL,
   max_number_of_files = NULL,
-  info = NULL
+  info = NULL,
+  container = NULL
 )
 }
 \arguments{
@@ -39,6 +40,13 @@ expected.}
 
 \item{info}{Character, list or \code{NULL}; free-text description of the
 file.}
+
+\item{container}{Character or \code{NULL}; the name of the \code{.zip}
+archive or \code{.xpt} SAS transport file this file arrives inside.
+\code{*} matches any text and \code{?} one character
+(\code{"sdtm_*.zip"}); the name is matched as a whole, independently of
+\code{pattern}. \code{NULL} (the default) accepts the file loose or inside
+any container. Only \code{\link{load_delivery}()} consults it.}
 }
 \value{
 An object of class \code{DTAFileSAS7BDAT}.

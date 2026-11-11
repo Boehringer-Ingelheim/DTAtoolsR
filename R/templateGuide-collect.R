@@ -1308,7 +1308,8 @@
 
 .tgc_file_type <- function(f) {
   # The other handlers read as their upper-cased class name (CSV, TSV, ANY);
-  # a SAS dataset uses the label the exported document uses.
+  # a SAS dataset or SAS transport file (which inherits from it) uses the label
+  # the exported document uses.
   if (inherits(f, "DTAtools::DTAFileSAS7BDAT")) {
     return(.file_format_label(f))
   }
@@ -1323,12 +1324,19 @@
     shown <- if (isTRUE(f@pattern)) .tgc_chr(f@pattern_description) else ""
     if (nzchar(shown)) shown else .tgc_chr(f@filename)
   }, character(1))
-  kv <- list(
-    .tgc_join(names_),
-    .tgc_join(unique(vapply(files, .tgc_file_type, character(1))), ", "),
-    as.character(n_cols), as.character(n_rules)
+  cts <- unique(unlist(lapply(files, dta_handler_container)))
+  kv <- c(
+    list(
+      .tgc_join(names_),
+      .tgc_join(unique(vapply(files, .tgc_file_type, character(1))), ", ")
+    ),
+    if (length(cts) > 0) list(paste(cts, collapse = ", ")),
+    list(as.character(n_cols), as.character(n_rules))
   )
-  names(kv) <- c(if (pattern) "File name pattern" else "File name", "File type", "Columns", "Rules")
+  names(kv) <- c(
+    if (pattern) "File name pattern" else "File name", "File type",
+    if (length(cts) > 0) "Delivered in", "Columns", "Rules"
+  )
   do.call(.tgc_kv, kv)
 }
 

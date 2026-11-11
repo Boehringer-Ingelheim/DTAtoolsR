@@ -599,7 +599,7 @@
 
     <h3 id="section-1-1-h">📦 What is DTAtools?</h3>
     <p>
-      <strong>DTAtools</strong> is an R package that validates tabular data files (CSV, TSV or SAS <code>.sas7bdat</code>) against a
+      <strong>DTAtools</strong> is an R package that validates tabular data files (CSV, TSV, SAS <code>.sas7bdat</code> or <code>.xpt</code>), delivered loose, in <code>.zip</code> archives or in SAS transport libraries, against a
       <em>Data Transfer Agreement specification</em> written in YAML — before you send the data to a partner,
       a regulator, or a data warehouse. Think of it as a spell-checker for your clinical or study data:
       it reads your spec, reads your data, and tells you exactly what's wrong and where.
@@ -674,7 +674,7 @@ library(DTAtools)</code></pre>
       <div class="step-connector">↓</div>
       <div class="step">
         <div class="step-num">2</div>
-        <div class="step-body"><strong>Load your data file</strong> — attach a CSV, TSV or SAS <code>.sas7bdat</code> file to the dataset defined in your spec</div>
+        <div class="step-body"><strong>Load your data file</strong> — attach a CSV, TSV or SAS <code>.sas7bdat</code> file, a SAS <code>.xpt</code> file, or a whole <code>.zip</code> / <code>.xpt</code> delivery to the dataset defined in your spec</div>
       </div>
       <div class="step-connector">↓</div>
       <div class="step">
@@ -1734,6 +1734,11 @@ validate_file_stream(specs, "transfer.csv", on_missing_column = "stop")</code></
             <td>Updated DTA / dataset</td>
           </tr>
           <tr>
+            <td class="cheat-fn">load_delivery(dta, files)</td>
+            <td>Load loose files, a .zip or a SAS transport library into every dataset they belong to</td>
+            <td>Updated DTA / dataset</td>
+          </tr>
+          <tr>
             <td class="cheat-fn">open_file(handler, file)</td>
             <td>Open a file lazily as an Arrow Dataset (counterpart of <code>read_file()</code>)</td>
             <td>arrow Dataset</td>
@@ -1825,7 +1830,7 @@ datasets:
     type: tabular
     files:
       filename: "my_data.csv" # or a regex pattern
-      type: csv               # csv, tsv or sas7bdat
+      type: csv               # csv, tsv, sas7bdat or xpt
     columns:
       - id: COLUMN_NAME       # must match exact CSV header
         type: SAS Char        # SAS Char / SAS Num / SAS Int / SAS Date

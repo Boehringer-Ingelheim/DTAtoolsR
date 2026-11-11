@@ -57,6 +57,16 @@ values (names, blanks, dates and times, types) against a dataset written by SAS
 itself and against byte-level facts about the fixture files. A SAS dataset is
 read into memory only, which LIM-010 records.
 
+**Container deliveries.** A delivery may be a `.zip` archive or a SAS
+transport (`.xpt`) library holding several datasets. `load_delivery()` lists
+the archive with the `zip` package, refuses unsafe, encrypted, duplicated
+and oversized content before extracting anything, extracts each needed file
+on its own, and splits a transport library into single-dataset files that
+haven then reads. Area CONT checks the refusals against hostile fixtures, the
+split byte for byte, truncated libraries, and that a file inside a container
+is validated exactly as the same file delivered loose. Decompression itself
+is the `zip` package's job and out of scope, as decoding is for haven.
+
 ## 3. Evidence and its properties
 
 Each run writes a bundle whose properties are the ones a regulated record needs.

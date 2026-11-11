@@ -132,7 +132,7 @@ test_that("a SAS handler matches the compressed name of the file it declares", {
 })
 
 test_that("the SAS handler type is listed by the factory error", {
-  err <- tryCatch(DTAFileFactory(type = "xpt", filename = "a.xpt"), error = function(e) e)
+  err <- tryCatch(DTAFileFactory(type = "zip", filename = "a.zip"), error = function(e) e)
   expect_s3_class(err, "error")
   expect_match(flat_message(err), "sas7bdat", fixed = TRUE)
 })

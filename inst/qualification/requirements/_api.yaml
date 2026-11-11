@@ -51,6 +51,7 @@ exports:
   - DTAFileSAS7BDAT
   - DTAFileTabular
   - DTAFileTSV
+  - DTAFileXPT
   - DTAMetaData
   - DTARule
   - DTARuleColCondition
@@ -75,6 +76,7 @@ exports:
   - labels
   - lint_dta
   - lint_template_repo
+  - load_delivery
   - load_file
   - matches_filename
   - max_number_of_files

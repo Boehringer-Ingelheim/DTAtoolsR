@@ -7,13 +7,13 @@ that the copy installed on a particular machine behaves as specified**.
 It ships inside the package, so it is available wherever the package is
 installed, including a server you cannot check out a git repository onto.
 
-It covers every exported function of the package, across fifteen functional
+It covers every exported function of the package, across sixteen functional
 areas: the runner itself, the installed environment, specifications, declared
-types, the validation engine, rules, file handlers, streaming, metadata,
-templates and controlled vocabulary, export, the standalone report, the
-application, robustness, and end-to-end behaviour at scale. Run
-`qualification_requirements()` for the current list, and the report's
-traceability matrix for what verified each of them on a given run.
+types, the validation engine, rules, file handlers, container deliveries,
+streaming, metadata, templates and controlled vocabulary, export, the
+standalone report, the application, robustness, and end-to-end behaviour at
+scale. Run `qualification_requirements()` for the current list, and the
+report's traceability matrix for what verified each of them on a given run.
 
 ## Running it
 

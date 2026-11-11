@@ -33,6 +33,12 @@
 #'   a line break. Default \code{FALSE}. See \code{\link{DTAFileTabular}}.
 #' @param encoding Character; the file's character encoding. Default
 #'   \code{"UTF-8"}. See \code{\link{DTAFileTabular}}.
+#' @param container Character or \code{NULL}; the name of the \code{.zip}
+#'   archive or \code{.xpt} SAS transport file this file arrives inside.
+#'   \code{*} matches any text and \code{?} one character
+#'   (\code{"sdtm_*.zip"}); the name is matched as a whole, independently of
+#'   \code{pattern}. \code{NULL} (the default) accepts the file loose or inside
+#'   any container. Only \code{\link{load_delivery}()} consults it.
 #'
 #' @return An object of class \code{DTAFileTSV}.
 #' @name DTAFileTSV-class
@@ -57,7 +63,8 @@ DTAFileTSV <- S7::new_class(
     quote = '"',
     missing_values = "",
     newlines_in_values = FALSE,
-    encoding = "UTF-8"
+    encoding = "UTF-8",
+    container = NULL
   ) {
     new_object(
       DTAFileTabular(
@@ -73,7 +80,8 @@ DTAFileTSV <- S7::new_class(
         sep = "\t",
         missing_values = missing_values,
         newlines_in_values = newlines_in_values,
-        encoding = encoding
+        encoding = encoding,
+        container = container
       )
     )
   }

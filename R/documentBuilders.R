@@ -610,6 +610,7 @@ NULL
   ft <- flextable::width(ft, j = 3, width = 0.9)
   ft <- flextable::width(ft, j = 4, width = 1.0)
   ft <- flextable::width(ft, j = 5, width = 2.5)
+  if (ncol(file_data) >= 6) ft <- flextable::width(ft, j = 6, width = 1.2)
   ft <- .fit_table_width(.style_table(ft, center_cols = c(2, 3, 4)), width)
 
   ft
@@ -656,10 +657,13 @@ NULL
 }
 
 #' Friendly, human-readable format label for a DTAFile object, used in the
-#' "Files" section table (e.g. CSV / TSV / Delimited / SAS dataset).
+#' "Files" section table (e.g. CSV / TSV / Delimited / SAS transport / SAS
+#' dataset).
 #' @keywords internal
 .file_format_label <- function(f) {
-  if (inherits(f, "DTAtools::DTAFileCSV")) {
+  if (inherits(f, "DTAtools::DTAFileXPT")) {
+    "SAS transport (.xpt)"
+  } else if (inherits(f, "DTAtools::DTAFileCSV")) {
     "CSV"
   } else if (inherits(f, "DTAtools::DTAFileTSV")) {
     "TSV"

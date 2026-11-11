@@ -87,6 +87,12 @@
 #'   expected.
 #' @param info Character, list or \code{NULL}; free-text description of the
 #'   file.
+#' @param container Character or \code{NULL}; the name of the \code{.zip}
+#'   archive or \code{.xpt} SAS transport file this file arrives inside.
+#'   \code{*} matches any text and \code{?} one character
+#'   (\code{"sdtm_*.zip"}); the name is matched as a whole, independently of
+#'   \code{pattern}. \code{NULL} (the default) accepts the file loose or inside
+#'   any container. Only \code{\link{load_delivery}()} consults it.
 #'
 #' @name DTAFileSAS7BDAT-class
 #' @return An object of class \code{DTAFileSAS7BDAT}.
@@ -116,7 +122,8 @@ DTAFileSAS7BDAT <- S7::new_class(
     number_of_files = NULL,
     min_number_of_files = NULL,
     max_number_of_files = NULL,
-    info = NULL
+    info = NULL,
+    container = NULL
   ) {
     new_object(
       .parent = DTAFile(
@@ -126,7 +133,8 @@ DTAFileSAS7BDAT <- S7::new_class(
         max_number_of_files = max_number_of_files,
         info = info,
         pattern = pattern,
-        pattern_description = pattern_description
+        pattern_description = pattern_description,
+        container = container
       )
     )
   }

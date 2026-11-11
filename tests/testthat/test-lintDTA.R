@@ -484,3 +484,110 @@ test_that("a rule operand finding names the condition value, not 'values'", {
   expect_match(out$message, "condition value '2.5' is not a valid Int", fixed = TRUE)
   expect_no_match(out$message, "values '2.5'", fixed = TRUE)
 })
+
+# ---- file entries: container and unknown keys ----------------------------------
+
+# The one-dataset document of the container tests, with a chosen `container:`
+# line (written exactly as it should appear in the YAML).
+container_yaml_lines <- function(container_line) {
+  c(
+    "metadata:", "  title: T", "  version: '1'",
+    "datasets:",
+    "  - id: ae", "    type: tabular", "    files:",
+    "      type: csv", "      filename: ae.csv",
+    paste0("      ", container_line)
+  )
+}
+
+test_that("file_container_invalid flags a container that is not a .zip or .xpt", {
+  out <- lint_dta(list(datasets = list(list(
+    id = "ae", type = "tabular",
+    files = list(type = "csv", filename = "ae.csv", container = "sdtm.tar")
+  ))))
+  expect_identical(nrow(out), 1L)
+  expect_identical(out$code, "file_container_invalid")
+  expect_identical(out$severity, "error")
+  expect_identical(out$dataset, "ae")
+  expect_identical(out$object, "file")
+  expect_identical(out$id, "ae.csv")
+  expect_identical(
+    out$message,
+    "The container 'sdtm.tar' must name a .zip archive or a .xpt SAS transport file."
+  )
+})
+
+test_that("valid containers lint clean", {
+  out <- lint_dta(list(datasets = list(list(
+    id = "ae", type = "tabular",
+    files = list(
+      list(type = "csv", filename = "ae.csv", container = "sdtm_*.zip"),
+      list(type = "csv", filename = "dm.csv")
+    )
+  ))))
+  expect_false(any(startsWith(out$code, "file_")))
+})
+
+test_that("file datasets are linted as well", {
+  out <- lint_dta(list(datasets = list(list(
+    id = "define", type = "file",
+    files = list(type = "any", filename = "define.xml", container = "x.tar")
+  ))))
+  expect_identical(out$code, "file_container_invalid")
+})
+
+test_that("read_dta_from_yaml stops on an invalid container", {
+  p <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(container_yaml_lines("container: deliveries/sdtm.zip"), p)
+  expect_error(read_dta_from_yaml(p), class = "dta_lint_error")
+})
+
+test_that("a misspelt file key is named", {
+  out <- lint_dta(list(datasets = list(list(
+    id = "ae", type = "tabular",
+    files = list(type = "csv", filename = "ae.csv", contianer = "sdtm.zip")
+  ))))
+  expect_identical(nrow(out), 1L)
+  expect_identical(out$code, "file_field_unknown")
+  expect_identical(out$message, "Unknown file field(s): 'contianer'.")
+})
+
+test_that("a container on the dataset is pointed to its place", {
+  out <- lint_dta(list(datasets = list(list(
+    id = "ae", type = "tabular", container = "sdtm.zip",
+    files = list(type = "csv", filename = "ae.csv")
+  ))))
+  expect_identical(nrow(out), 1L)
+  expect_identical(out$code, "file_container_misplaced")
+  expect_identical(
+    out$message,
+    "'container' belongs to a file entry: write it under 'files:'."
+  )
+})
+
+test_that("every bundled specification still lints without file findings", {
+  specs <- list.files(
+    system.file("extdata", package = "DTAtools"),
+    pattern = "\\.ya?ml$", full.names = TRUE, recursive = TRUE
+  )
+  expect_gt(length(specs), 0L)
+  for (f in specs) {
+    out <- lint_dta(f)
+    expect_false(any(startsWith(out$code, "file_")), info = f)
+  }
+})
+
+test_that("an unquoted value starting with * is explained", {
+  p <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(container_yaml_lines("container: *_SDTM.zip"), p)
+  out <- lint_dta(p)
+  hit <- out[out$code == "yaml_unreadable", ]
+  expect_identical(nrow(hit), 1L)
+  expect_match(hit$message, "must be quoted", fixed = TRUE)
+})
+
+test_that("a container value with braces is shown as written", {
+  p <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(container_yaml_lines('container: "{1+1}.tar"'), p)
+  e <- expect_error(read_dta_from_yaml(p), class = "dta_lint_error")
+  expect_match(conditionMessage(e), "{1+1}", fixed = TRUE)
+})
