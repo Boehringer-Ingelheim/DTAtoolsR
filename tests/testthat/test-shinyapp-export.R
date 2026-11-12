@@ -1570,7 +1570,7 @@ test_that("dta_md_split_cells costs time in proportion to the row", {
   # column), ASCII and not: character offsets in UTF-8 were quadratic on their own.
   one_cell <- function(n) paste0("| ", strrep("x", n), " |")
   many <- function(n) paste0("| ", paste(rep("v", n / 2), collapse = " | "), " |")
-  many_utf8 <- function(n) paste0("| ", paste(rep("é", n / 2), collapse = " | "), " |")
+  many_utf8 <- function(n) paste0("| ", paste(rep("\u00e9", n / 2), collapse = " | "), " |")
   # Windows timers tick at ~10 ms, so one call is too short to measure: time 20
   # calls together, and take the median of three such measurements.
   med <- function(row) {

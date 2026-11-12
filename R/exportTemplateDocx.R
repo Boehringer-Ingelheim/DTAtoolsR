@@ -1290,7 +1290,7 @@ dta_template_placeholders <- function(dta = NULL) {
   # Vertical tab / form feed read as line breaks; every other C0 control is
   # forbidden in XML 1.0 and would make the part unparseable, so drop it.
   text <- gsub("[\v\f]", "\n", text, perl = TRUE)
-  text <- gsub("[\x01-\x08\x0E-\x1F￾￿]", "", text, perl = TRUE)
+  text <- gsub(paste0("[\x01-\x08\x0E-\x1F", "\uFFFE\uFFFF", "]"), "", text, perl = TRUE)
 
   marks <- gregexpr("[\n\t]", text, perl = TRUE)[[1]]
   if (length(marks) == 1L && marks[[1]] == -1L) {

@@ -109,7 +109,7 @@ NULL
 .xml_safe_text <- function(text) {
   text <- gsub("[\v\f]", "\n", text, perl = TRUE)
   # U+FFFE and U+FFFF are not XML characters either.
-  gsub("[\x01-\x08\x0E-\x1F￾￿]", "", text, perl = TRUE)
+  gsub(paste0("[\x01-\x08\x0E-\x1F", "\uFFFE\uFFFF", "]"), "", text, perl = TRUE)
 }
 
 #' `.xml_safe_text()` applied to every piece of text inside an object about to
@@ -124,7 +124,7 @@ NULL
     return(x)
   }
   if (is.character(x)) {
-    if (!isTRUE(any(grepl("[\x01-\x08\x0B\x0C\x0E-\x1F￾￿]", x, perl = TRUE)))) {
+    if (!isTRUE(any(grepl(paste0("[\x01-\x08\x0B\x0C\x0E-\x1F", "\uFFFE\uFFFF", "]"), x, perl = TRUE)))) {
       return(x)
     }
     x[] <- .xml_safe_text(x) # x[] keeps names and other attributes
