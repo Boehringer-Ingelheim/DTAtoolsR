@@ -5,57 +5,6 @@
 # app_env()/app_fn() harness in helper-shinyapp.R (see that file for why the
 # app's helper files must be sourced into a private environment for testing).
 
-# Path of `filename` inside library root `root`, routed by its kind suffix:
-# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
-# for everything else (creation and dataset templates, and the plain data
-# files that sit beside them, which resolve relative to the template).
-# Creates the folder, so a fixture can write straight to the returned path.
-lib_path <- function(root, filename) {
-  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
-    "parties"
-  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
-    "vocabulary"
-  } else {
-    "templates"
-  }
-  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
-  file.path(root, sub, filename)
-}
-
-# Local copy of the isolation helper defined in test-shinyapp-template-
-# sources.R -- deliberately duplicated rather than shared, per that file's own
-# guidance, so this file does not depend on another test file's internals.
-# Every DTATOOLS_TEMPLATE_* variable is cleared for the duration of each test:
-# a developer machine with DTATOOLS_TEMPLATE_SOURCES exported would flip the
-# app into private-only mode and fail unrelated tests confusingly.
-local_clean_template_env <- function(..., .local_envir = parent.frame()) {
-  withr::local_envvar(
-    c(
-      DTATOOLS_TEMPLATE_SOURCES = NA,
-      DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = NA,
-      DTATOOLS_TEMPLATE_REFRESH_SECONDS = NA,
-      DTATOOLS_TEMPLATE_CACHE_DIR = NA,
-      DTATOOLS_TEMPLATE_GIT_TOKEN = NA,
-      DTATOOLS_TEMPLATE_GIT_USER = NA,
-      DTATOOLS_TEMPLATE_GIT_AUTH = NA,
-      ...
-    ),
-    .local_envir = .local_envir
-  )
-  withr::local_options(
-    list(DTAtools.template_dir = NULL),
-    .local_envir = .local_envir
-  )
-}
-
-# cli wraps a long condition message across lines at the console width, which
-# breaks a naive substring/regexp match the moment the wrap lands inside the
-# very text being asserted on. Collapsing whitespace before matching keeps the
-# assertion about the MESSAGE CONTENT rather than about where cli happened to
-# wrap it. Copied from test-shinyapp-template-inherit.R for the same reason
-# local_clean_template_env() is copied rather than shared.
-flat_message <- function(x) gsub("\\s+", " ", x)
-
 # ---- Fixture family ----------------------------------------------------------
 #
 # One dataset template (gf_dt), one abstract parent creation template
@@ -1195,4 +1144,23 @@ test_that("a reference to a file that was left outside its kind folder does not 
   expect_false("stray_party" %in% idx$id)
   expect_true("supplier_acme" %in% idx$id)
   expect_null(app_fn("template_index_resolver")(idx)("stray_party"))
+})
+
+test_that("a misplaced file is reported under a repository folder with a non-ASCII name", {
+  # list.files() returns native-encoded names; a radix sort refuses a
+  # non-ASCII one unless it is made UTF-8 first.
+  root <- file.path(withr::local_tempdir(), "J\u00fcrgen_repo")
+  dir.create(root)
+  setup_fixture(root)
+  writeLines(
+    c("kind: dta_party_profile", "id: stray_party", 'version: "1.0"', "role: supplier", "label: Stray"),
+    file.path(root, "templates", "stray_party.dta-party.yaml")
+  )
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+
+  expect_warning(idx <- app_fn("build_template_index")(), "belongs in parties/")
+  expect_true("supplier_acme" %in% idx$id)
+  expect_false("stray_party" %in% idx$id)
 })

@@ -201,6 +201,8 @@ set_dta_compute_threads <- function(n = NULL) {
       !is.numeric(n) ||
         length(n) != 1L ||
         is.na(n) ||
+        !is.finite(n) ||
+        n > .Machine$integer.max ||
         n != as.integer(n) ||
         n <= 0
     ) {

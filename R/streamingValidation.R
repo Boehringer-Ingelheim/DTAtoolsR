@@ -736,7 +736,9 @@ collect_full_errors <- function(details, axis = c("columnspec", "import", "impor
 
   parts <- unlist(
     lapply(existing, function(d) {
-      sort(list.files(d, pattern = "^part-\\d+\\.rds$", full.names = TRUE), method = "radix")
+      # enc2utf8(): a radix sort refuses a native-encoded non-ASCII string, and
+      # tempdir() holds the user name (C:/Users/J\u00fcrgen/...).
+      sort(enc2utf8(list.files(d, pattern = "^part-\\d+\\.rds$", full.names = TRUE)), method = "radix")
     }),
     use.names = FALSE
   )
@@ -1327,11 +1329,30 @@ dta_validate_table_stream <- function(specs,
       function(i) dta_rule_stream_finalise(states[[i]], rules_list[[i]])
     )
     details$n_rule_errors <- length(details$rule_errors)
-    details$rules_valid <- if (length(details$rule_errors) > 0) FALSE else NA
+    # A precomputed verdict covered the whole source, so a PASS is as settled as
+    # a failure: it stays in rule_results, and when every rule is such a pass
+    # the axis is TRUE rather than NA.
+    pre_ok <- vapply(
+      states,
+      function(s) identical(s$kind, "precomputed") && isTRUE(s$result$valid),
+      logical(1)
+    )
+    details$rules_valid <- if (length(details$rule_errors) > 0) {
+      FALSE
+    } else if (length(states) > 0 && all(pre_ok)) {
+      TRUE
+    } else {
+      NA
+    }
     details$import_valid <- if (n_import_errors > 0L) FALSE else NA
-    # Only rules whose failure is certain are reported. Their failures are
-    # real; the silence of the others is not evidence.
-    details$rule_results <- details$rule_errors
+    # Only rules whose verdict is certain are reported. The silence of the
+    # others is not evidence.
+    details$rule_results <- lapply(
+      which(certain | pre_ok),
+      function(i) dta_rule_stream_finalise(states[[i]], rules_list[[i]])
+    )
+    # The columnspec axis is unsettled too: an unread row could still break it.
+    details$columnspec_valid <- if (has_columnspec_errors) FALSE else NA
     attr(details, "partial_scan") <- TRUE
   }
 
@@ -1496,6 +1517,7 @@ dta_group_stream_init <- function(rule) {
   # converts the whole S7 object to a list per call) on every batch.
   state$group_by <- rule_get_slot(rule, "group_by")
   state$conditions <- rule_get_slot(rule, "conditions")
+  state$if_only <- dta_group_if_only_conditions(rule_get_slot(rule, "constraints"))
 
   # One vector (or, for the row-number heads, one matrix) per condition, by
   # id. false counts are deliberately not stored: they are DERIVED at read
@@ -1632,6 +1654,11 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L, numeric_ca
         )
       }
     )
+    # Same scope rule as rule_check_group_condition(): an IF-only condition
+    # keeps unconvertible rows in scope so bad data cannot exempt its group.
+    if (cond_name %in% state$if_only) {
+      mask <- dta_condition_in_scope(spec, df, mask, numeric_cache)
+    }
     mask %in% TRUE
   })
   names(cond_hit) <- state$condition_names
@@ -2282,7 +2309,7 @@ dta_validate_any_table <- function(specs,
   # the whole source before the batch scan -- the distinct keys then live in
   # the C++ engine instead of an R hash that grows with key cardinality.
   # Never for a reader: it is consumable, and the precompute would spend it.
-  precomputed <- if (inherits(table, "RecordBatchReader")) {
+  precomputed <- if (inherits(table, "RecordBatchReader") || isTRUE(fail_fast)) {
     list()
   } else {
     dta_stream_unique_precompute(specs, table, rules_list)
@@ -2887,7 +2914,13 @@ validate_file_stream <- function(specs,
   # Eligible uniqueness rules are answered by Arrow's grouped aggregation
   # before the batch scan (see dta_stream_unique_precompute()); the batch loop
   # then skips them entirely.
-  precomputed <- dta_stream_unique_precompute(specs, dataset, rules_list)
+  # Skipped under fail_fast: it is a full extra pass over the key columns, and
+  # the per-batch accumulator can stop at the first duplicate instead.
+  precomputed <- if (isTRUE(fail_fast)) {
+    list()
+  } else {
+    dta_stream_unique_precompute(specs, dataset, rules_list)
+  }
 
   # Projection pushes "which columns does validation read" into the scan:
   # unused columns are never parsed, converted, or materialised into R. The

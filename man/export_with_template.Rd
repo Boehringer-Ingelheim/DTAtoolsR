@@ -10,7 +10,8 @@ export_with_template(
   output,
   variables = NULL,
   quiet = FALSE,
-  fallback = TRUE
+  fallback = TRUE,
+  overwrite = FALSE
 )
 }
 \arguments{
@@ -30,6 +31,9 @@ fall back to the standard programmatic document produced by \code{\link[=write_d
 The substitution is signalled as a \strong{warning} condition (unless \code{quiet = TRUE}), so it can be trapped programmatically with
 \code{withCallingHandlers(warning = )}. If \code{FALSE}, a failure is raised as an
 error.}
+
+\item{overwrite}{Logical. Whether to replace an existing \code{output} file.
+Default: \code{FALSE}, so a call against an existing path aborts.}
 }
 \value{
 Invisibly returns the \code{output} path.
@@ -109,15 +113,10 @@ explicit \code{{COLUMN_SPECS:NAME}} is left as written. A
 malformed marker -- unclosed, unopened, or not alone in its paragraph
 -- is left in place and reported alongside unrendered blocks. A dataset
 value that happens to spell a \emph{block} placeholder renders as the text it
-is, not as that block. The same is not yet true of an \emph{inline}
-placeholder: a value spelling one is substituted again by the pass that
-follows region expansion, so a dataset described as
-\code{"Title is {DTA_TITLE}"} comes out with the title resolved. That is a
-known defect (DEV-016 in \code{inst/qualification/deviations.yaml}), not a
-documented behaviour to rely on -- the two passes are separated by a
-write and a re-read of the document, and only a token's spelling
-survives that, which identifies a block paragraph but not an inline
-placeholder inside a sentence.}
+is, not as that block. The same holds for an \emph{inline} placeholder: a
+dataset described as \code{"Title is {DTA_TITLE}"} renders that text
+literally, without the title being resolved a second time (this was
+DEV-016 in \code{inst/qualification/deviations.yaml}, now closed).}
 }
 
 Additional or overriding values can be supplied through \code{variables}; names

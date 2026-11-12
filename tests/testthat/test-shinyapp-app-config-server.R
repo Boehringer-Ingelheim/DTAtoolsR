@@ -4,26 +4,6 @@
 # that is not rendered can still be driven over the websocket.
 #
 # testServer() sources the app directory afresh, so the app gets its own config
-# Local copies of the small helpers test-shinyapp-server.R defines for itself
-# (each test file runs in its own environment).
-app_server_dir <- function() .shiny_app_dir()
-
-app_file_input <- function(filename) {
-  path <- app_fixture_path(filename)
-  data.frame(
-    name = filename, size = file.size(path), type = "", datapath = path,
-    stringsAsFactors = FALSE
-  )
-}
-
-clean_session_file <- function() {
-  unlink(list.files(tempdir(), pattern = "^dtatools_app_session.*\\.rds$", full.names = TRUE), force = TRUE)
-}
-
-ui_text <- function(out) {
-  if (is.null(out) || is.null(out$html)) "" else paste(as.character(out$html), collapse = "")
-}
-
 # cache; pointing DTATOOLS_TEMPLATE_SOURCES at a temp library before the call is
 # enough, no invalidation needed.
 
@@ -89,6 +69,65 @@ test_that("brandbar_ui drops a link set to false and escapes text from the confi
   expect_no_match(html, ">About<", fixed = TRUE)
   expect_no_match(html, "<script>", fixed = TRUE)
   expect_match(html, "&lt;script&gt;alert(1)&lt;/script&gt;", fixed = TRUE)
+})
+
+# ---- Header tag ---------------------------------------------------------------
+
+# The brand bar for a config whose header_tag is set to `label` / `color`.
+brandbar_with_tag <- function(label = "", color = NULL) {
+  cfg <- app_fn("dta_app_config_defaults")()
+  cfg$header_tag$label <- label
+  cfg$header_tag$color <- color
+  as.character(app_fn("brandbar_ui")(cfg))
+}
+
+test_that("brandbar_ui shows no tag without a label, whatever the colour", {
+  expect_no_match(as.character(app_fn("brandbar_ui")()), "brand-tag", fixed = TRUE)
+  expect_no_match(brandbar_with_tag("", "#C0392B"), "brand-tag", fixed = TRUE)
+})
+
+test_that("brandbar_ui puts the header tag after the title, as escaped text", {
+  html <- brandbar_with_tag("GxP")
+  expect_match(html, '<span class="brand-tag">GxP</span>', fixed = TRUE)
+  expect_match(
+    html,
+    '<div class="brand-title">\\s*DTAtools\\s*<span class="brand-tag">GxP</span>'
+  )
+
+  hostile <- brandbar_with_tag("<b>GxP</b>")
+  expect_match(hostile, "&lt;b&gt;GxP&lt;/b&gt;", fixed = TRUE)
+  expect_no_match(hostile, "<b>GxP", fixed = TRUE)
+})
+
+test_that("the header tag colour fills the label and gets a text colour chosen for contrast", {
+  # Text colours are the WCAG-derived ones: white where it reaches 4.5:1
+  # (#C0392B is about 5.4:1), the stock ink where it does not (#FFD700).
+  red <- brandbar_with_tag("GxP", "#C0392B")
+  expect_match(red, 'style="--tag-bg: #C0392B; --tag-fg: #FFFFFF; --tag-border: rgba(255,255,255,.3);"', fixed = TRUE)
+
+  gold <- brandbar_with_tag("GxP", "#FFD700")
+  expect_match(gold, "--tag-bg: #FFD700;", fixed = TRUE)
+  expect_match(gold, "--tag-fg: #1A2B2A;", fixed = TRUE)
+  # 0x1A, 0x2B, 0x2A: the outline is the dark text colour, not a white ring.
+  expect_match(gold, "--tag-border: rgba(26,43,42,.3);", fixed = TRUE)
+})
+
+test_that("a hand-set non-hex header tag colour is re-checked at render time and never reaches the page", {
+  html <- brandbar_with_tag("GxP", "red;}body{x:1")
+  expect_match(html, '<span class="brand-tag">GxP</span>', fixed = TRUE)
+  expect_no_match(html, "body{", fixed = TRUE)
+  expect_no_match(html, "--tag-bg", fixed = TRUE)
+})
+
+test_that("a header_tag parsed from dta-app.yaml reaches the rendered brand bar", {
+  f <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(c("header_tag:", "  label: Non-GxP", "  color: '#5B6B6A'"), f)
+  res <- app_fn("parse_dta_app_config")(f)
+  expect_identical(nrow(res$problems), 0L)
+
+  html <- as.character(app_fn("brandbar_ui")(res$config))
+  expect_match(html, ">Non-GxP</span>", fixed = TRUE)
+  expect_match(html, "--tag-bg: #5B6B6A;", fixed = TRUE)
 })
 
 test_that("app_footer_ui keeps the name and version, and shows the label and repository link only when set", {

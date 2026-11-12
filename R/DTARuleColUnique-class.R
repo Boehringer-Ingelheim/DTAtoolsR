@@ -65,9 +65,7 @@ DTARuleColUnique <- S7::new_class(
     columns = class_character
   ),
   validator = function(self) {
-    if (!is.null(self@id) && (length(self@id) != 1 || !is.character(self@id) || any(grepl("\\s", self@id)))) {
-      cli_abort("@id cannot have whitespaces and needs to be defined.")
-    }
+    # The id is validated once, by the DTARule parent validator S7 runs first.
 
     if (!identical(self@type, "col_unique")) {
       cli_abort("{.arg type} must be {.val col_unique}.")
@@ -128,13 +126,10 @@ create_example_DTARuleColUnique <- function(index = 1) {
 
 # check() method for DTARuleColUnique; documented at ?check (generic).
 method(check, DTARuleColUnique) <- function(x, tab) {
-  # nolint
-
-  if (!inherits(tab, "Table")) {
-    cli::cli_abort("The 'tab' argument must be an arrow Table.")
-  }
-
-  # TODO from here
+  cli::cli_abort(
+    "{.fn check} is not implemented for rules; use {.fn validate_table} on a table instead.",
+    class = "dta_rule_check_not_implemented"
+  )
 }
 
 #' @export

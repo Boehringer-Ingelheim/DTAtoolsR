@@ -69,21 +69,75 @@ test_that("an undeclared column is named as such, not as a missing value", {
   expect_equal(hit$actual, "(an undeclared column)")
 })
 
-test_that("rule messages use plain-text operators and show offending rows", {
+test_that("rule messages use the shared plain wording and show offending rows", {
   ds <- em_dataset()
   res_txt <- explain_capture(ds)
   res <- res_txt$result
 
-  range_row <- res[res$source == "rule" & grepl("AGE", res$should_be) &
-    grepl("between", res$should_be), ]
-  expect_equal(range_row$should_be[[1]], "Values in AGE must be between 18 and 70 (inclusive).")
+  range_row <- res[res$source == "rule" & grepl("column AGE must be a number", res$should_be, fixed = TRUE), ]
+  expect_equal(nrow(range_row), 1L)
+  expect_equal(
+    range_row$should_be[[1]],
+    "Every value in column AGE must be a number from 18 to 70, inclusive."
+  )
   # AGE 12 is the only value outside 18-70 in the data
   expect_match(range_row$actual[[1]], "12", fixed = TRUE)
-  expect_match(res_txt$text, "Adults only", fixed = TRUE)
+  # The author's text is a Purpose line; the notes follow the specification.
+  expect_match(res_txt$text, "Purpose: Adults only", fixed = TRUE)
+  expect_match(res_txt$text, "Missing values: Not checked.", fixed = TRUE)
 
-  cond_row <- res[res$source == "rule" & grepl("IF", res$should_be, fixed = TRUE), ]
-  expect_equal(cond_row$should_be[[1]], "IF SEX = F THEN AGE != 12 must hold.")
-  expect_false(any(grepl("&#|&gt;|&lt;", c(res$should_be, res$actual))))
+  cond_row <- res[res$source == "rule" & grepl("^When SEX", res$should_be), ]
+  expect_equal(nrow(cond_row), 1L)
+  expect_equal(
+    cond_row$should_be[[1]],
+    "When SEX is equal to \u201cF\u201d, AGE must not be equal to 12."
+  )
+  # Words only: no operator symbols, no entities, no code.
+  expect_false(any(grepl("&#|&gt;|&lt;|!=|>=|<=|`", c(res$should_be, res$actual))))
+  expect_false(grepl("`", res_txt$text, fixed = TRUE))
+})
+
+test_that("a grouped-condition message is explained with the shared wording", {
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      SUBJECT_ID = DTAColumnSpec(id = "SUBJECT_ID", type = "SAS Char", length = 20, nullable = FALSE),
+      VISIT = DTAColumnSpec(id = "VISIT", type = "SAS Char", length = 20, nullable = TRUE),
+      SEX = DTAColumnSpec(id = "SEX", type = "SAS Char", length = 20, nullable = TRUE)
+    ),
+    rules = list(DTARuleGroupCondition(
+      id = "visit_needs_sex", group_by = "SUBJECT_ID",
+      conditions = list(
+        c_visit = list(VISIT = list(empty = FALSE)),
+        c_sex = list(SEX = list(empty = FALSE))
+      ),
+      constraints = list(list(
+        id = "visit_requires_sex", type = "requires",
+        `if` = "c_visit", `then` = "c_sex", if_scope = "any", then_scope = "all"
+      ))
+    ))
+  )
+  path <- withr::local_tempfile(fileext = ".csv")
+  utils::write.csv(
+    data.frame(SUBJECT_ID = c("S1", "S1"), VISIT = c("V1", "V1"), SEX = c("F", "")),
+    path,
+    row.names = FALSE, na = ""
+  )
+  ds <- DTADataSetTabular(id = "em", specs = specs, files = list(DTAFileCSV(filename = basename(path))))
+  ds <- load_file(ds, file = path, handler_index = 1, stream = "never")
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+
+  res <- explain_capture(ds)$result
+  expect_equal(nrow(res), 1L)
+  expect_match(res$should_be, "Rows are grouped by the value in column SUBJECT_ID", fixed = TRUE)
+  expect_match(
+    res$should_be,
+    paste0(
+      "visit_requires_sex: If at least one row of a group meets condition c_visit, ",
+      "then every row of that group must meet condition c_sex."
+    ),
+    fixed = TRUE
+  )
+  expect_named(res, c("id", "dataset", "target", "source", "row", "column", "problem", "should_be", "actual"))
 })
 
 test_that("data values are shown literally: no escaping and no cli evaluation", {

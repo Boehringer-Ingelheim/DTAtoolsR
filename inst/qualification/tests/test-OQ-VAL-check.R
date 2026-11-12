@@ -412,3 +412,70 @@ test_that("OQ-VAL-038 | an unchanged table rebuilt from its own contents is not 
     unnamed$after[, counts]
   )
 })
+
+test_that("OQ-VAL-045 | a DTA check fails a tabular dataset whose file count is out of bounds | REQ-VAL-032", {
+  specs <- vc_id_specs()
+  frame <- function(tag) data.frame(ID = paste0(tag, c("1", "2")), stringsAsFactors = FALSE)
+  handler <- function(...) DTAFileCSV(filename = "x_.*[.]csv$", pattern = TRUE, ...)
+
+  # Declared bounds are 2..2 for `bad` (three tables supplied) and `good`
+  # (two supplied); `bare` declares no handler, `empty` holds no table.
+  bad <- DTADataSetTabular(
+    id = "bad", specs = specs, files = list(handler(number_of_files = 2)),
+    tables = list(a = frame("A"), b = frame("B"), c = frame("C"))
+  )
+  good <- DTADataSetTabular(
+    id = "good", specs = specs, files = list(handler(number_of_files = 2)),
+    tables = list(a = frame("A"), b = frame("B"))
+  )
+  bare <- DTADataSetTabular(
+    id = "bare", specs = specs,
+    tables = list(a = frame("A"), b = frame("B"), c = frame("C"))
+  )
+  empty <- DTADataSetTabular(id = "empty", specs = specs, files = list(handler(number_of_files = 2)))
+  meta <- DTAMetaData(title = "File count", version = "1.0")
+
+  collect <- function(dta) {
+    classes <- character(0)
+    res <- withCallingHandlers(
+      check(dta, persist = FALSE, quiet = TRUE),
+      warning = function(w) {
+        classes <<- c(classes, class(w))
+        invokeRestart("muffleWarning")
+      }
+    )
+    list(res = res, flagged = "dta_file_count_mismatch" %in% classes)
+  }
+
+  # Three tables against a bound of two: flagged, reported, failed.
+  out <- collect(DTA(datasets = list(bad = bad, good = good), metadata = meta))
+  qa_check("the out-of-bounds dataset raises dta_file_count_mismatch", out$flagged)
+  qa_check("and the run is not valid", isFALSE(attr(out$res, "last_validation_ok")))
+  summ <- attr(out$res, "last_validation_summary")
+  qa_step(
+    "the summary counts one count error for `bad` and none for `good`",
+    c(1L, 0L),
+    c(summ$n_file_count_errors[summ$dataset == "bad"], summ$n_file_count_errors[summ$dataset == "good"])
+  )
+  found <- attr(out$res, "last_file_count_findings")
+  qa_step("exactly one dataset is listed in the findings", "bad", found$dataset)
+  qa_step("with the supplied count and the declared bounds", c(3, 2, 2), c(found$n_supplied, found$min, found$max))
+
+  # The same dataset in bounds, then the three exemptions.
+  ok <- collect(DTA(datasets = list(good = good), metadata = meta))
+  qa_check("two tables against a bound of two raise nothing", !ok$flagged)
+  qa_step("and leave the findings empty", 0L, nrow(attr(ok$res, "last_file_count_findings")))
+
+  qa_check("a dataset with no declared handler is not judged", !collect(DTA(datasets = list(bare = bare), metadata = meta))$flagged)
+  qa_check("a dataset with no tables is not judged", !collect(DTA(datasets = list(empty = empty), metadata = meta))$flagged)
+
+  solo <- character(0)
+  withCallingHandlers(
+    check(bad, persist = FALSE, quiet = TRUE),
+    warning = function(w) {
+      solo <<- c(solo, class(w))
+      invokeRestart("muffleWarning")
+    }
+  )
+  qa_check("a dataset checked on its own is not judged", !("dta_file_count_mismatch" %in% solo))
+})

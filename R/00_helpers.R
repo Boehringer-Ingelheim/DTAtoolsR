@@ -427,7 +427,7 @@ dta_resolve_stream_mode <- function(
 # validators, e.g. `DTADataSetTabular`'s, which requires every handler to
 # inherit from `DTAtools::DTAFileTabular` rather than checking against a type
 # string here.
-`__DTAtools_supported_file_types__` <- c("any", "csv", "tsv") # TODO: "sas7bdat", ..
+`__DTAtools_supported_file_types__` <- c("any", "csv", "tsv", "sas7bdat", "xpt")
 
 #' @title Validate an Object Against Its Specification
 #' @description
@@ -553,6 +553,16 @@ DTAColumnSpecStructureFactory <- function(
     type_info$prefix
   } else {
     format_info$prefix
+  }
+
+  if (is.null(backend)) {
+    cli_abort(
+      c(
+        "Cannot tell which backend the column structure belongs to.",
+        "i" = "Give 'type' or 'format' a backend prefix, e.g. {.val SAS Char}; 'length' alone is not enough."
+      ),
+      class = "dta_spec_no_backend"
+    )
   }
 
   switch(backend,
@@ -713,14 +723,15 @@ dta_file_handlers_from_list <- function(files) {
 #' based on the provided type and file path.
 #'
 #' `type` may name any format in either supported list: the readable formats a
-#' tabular dataset needs (`csv`, `tsv`) or `any`, the reader-less handler a
-#' \code{\link{DTADataSetFile}} uses for a deliverable that is never parsed.
-#' Which of those a given dataset will accept is enforced by the dataset itself
-#' -- \code{\link{DTADataSetTabular}} requires every handler to be readable --
-#' so this factory builds what it is asked for and the dataset has the final
-#' say.
+#' tabular dataset needs (`csv`, `tsv`, `sas7bdat`, `xpt`) or `any`, the reader-less
+#' handler a \code{\link{DTADataSetFile}} uses for a deliverable that is never
+#' parsed. Which of those a given dataset will accept is enforced by the dataset
+#' itself -- \code{\link{DTADataSetTabular}} requires every handler to be
+#' readable -- so this factory builds what it is asked for and the dataset has
+#' the final say.
 #'
-#' @param type Character. File type, \code{"csv"}, \code{"tsv"} or \code{"any"}.
+#' @param type Character. File type, \code{"csv"}, \code{"tsv"},
+#'   \code{"sas7bdat"}, \code{"xpt"} or \code{"any"}.
 #' @param ... Additional arguments passed to the specific backend constructor.
 #'   For `type = "any"` this includes the optional `extensions` restriction; see
 #'   \code{\link{DTAFileAny}}.
@@ -730,6 +741,12 @@ dta_file_handlers_from_list <- function(files) {
 #' @examples
 #' DTAFileFactory(type = "csv", filename = "clinical_data.csv")
 #'
+#' # A SAS dataset, read through the haven package.
+#' DTAFileFactory(type = "sas7bdat", filename = "ae.sas7bdat")
+#'
+#' # A SAS transport file, said to arrive inside a zip archive.
+#' DTAFileFactory(type = "xpt", filename = "ae.xpt", container = "sdtm.zip")
+#'
 #' # A deliverable that is never parsed, restricted to two endings.
 #' DTAFileFactory(
 #'   type = "any",
@@ -738,7 +755,8 @@ dta_file_handlers_from_list <- function(files) {
 #'   extensions = c("pdf", "zip")
 #' )
 #'
-#' @seealso \code{\link{DTAFile}}, \code{\link{DTAFileAny}}
+#' @seealso \code{\link{DTAFile}}, \code{\link{DTAFileAny}},
+#'   \code{\link{DTAFileSAS7BDAT}}, \code{\link{DTAFileXPT}}
 #' @export
 DTAFileFactory <- function(
   type,
@@ -750,7 +768,12 @@ DTAFileFactory <- function(
 
   if (!type %in% `__DTAtools_supported_file_types__`) {
     cli_abort(
-      "'type' '{type}' must be one of the supported file types: {str_flatten_comma(`__DTAtools_supported_file_types__`)}"
+      c(
+        "'type' '{type}' must be one of the supported file types: {str_flatten_comma(`__DTAtools_supported_file_types__`)}",
+        if (identical(type, "zip")) {
+          c("i" = "To say a file arrives inside a .zip, add {.code container: <name>.zip} to its entry.")
+        }
+      )
     )
   }
 
@@ -762,6 +785,12 @@ DTAFileFactory <- function(
       ...
     ),
     any = DTAFileAny(
+      ...
+    ),
+    sas7bdat = DTAFileSAS7BDAT(
+      ...
+    ),
+    xpt = DTAFileXPT(
       ...
     ),
     cli_abort("Filetype '{type}' not implemented.")

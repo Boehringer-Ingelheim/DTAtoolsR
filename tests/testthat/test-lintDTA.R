@@ -355,24 +355,124 @@ test_that("a list or file without datasets still builds an empty DTA, with warni
   expect_error(read_dta_from_yaml(path), class = "dta_lint_error")
 })
 
-test_that("numeric operators are wrong on Char columns only, not on Date/Time/DateTime", {
+test_that("numeric operators are wrong on Char and on Date/Time/DateTime, fine on untyped", {
+  # as_r_type() maps the three SAS date types to "character", so the engine
+  # runs their values through a strict number conversion and every numeric
+  # comparison is a false failure; lint must say so up front.
   temporal <- cols(
     list(id = "D", type = "SAS Date"), list(id = "T", type = "SAS Time"),
     list(id = "DT", type = "SAS DateTime"), list(id = "FREE")
   )
-  for (col in c("D", "T", "DT", "FREE")) {
-    out <- lint_rules(list(list(
+  one_rule <- function(col, bound = "2025-01-01") {
+    list(list(
       id = "r", type = "col_condition",
-      condition = stats::setNames(list(list(greater = 3)), col),
+      condition = stats::setNames(list(list(greater_equal = bound)), col),
       then = list(AGE = list(empty = FALSE))
-    )), columns = temporal)
-    expect_identical(nrow(out), 0L, info = col)
+    ))
   }
+  for (col in c("D", "T", "DT")) {
+    out <- lint_rules(one_rule(col), columns = temporal)
+    expect_identical(codes_of(out), "rule_condition_numeric_on_text", info = col)
+    expect_match(out$message, "read as text", info = col)
+    # A warning: the engine handles Date-class data correctly, so the spec must
+    # still construct (only character-ISO file reads fail).
+    expect_identical(out$severity, "warning", info = col)
+    expect_length(
+      specs_from_list(temporal, one_rule(col))@rules, 1L
+    )
+  }
+  # Char stays a hard error.
+  expect_identical(
+    lint_rules(list(list(
+      id = "r", type = "col_condition",
+      condition = list(NAME = list(greater = 3)), then = list(AGE = list(empty = FALSE))
+    )))$severity,
+    "error"
+  )
+  expect_identical(nrow(lint_rules(one_rule("FREE", 3), columns = temporal)), 0L)
   out <- lint_rules(list(list(
     id = "r", type = "col_condition",
     condition = list(NAME = list(greater = 3)), then = list(AGE = list(empty = FALSE))
   )), columns = temporal)
   expect_identical(codes_of(out), "rule_condition_numeric_on_text")
+})
+
+test_that("an unquoted YAML Y/N (logical) operand on a text column is an error", {
+  for (op in c("equals", "not_equals")) {
+    rule <- list(
+      id = "r", type = "col_condition",
+      condition = stats::setNames(list(stats::setNames(list(TRUE), op)), "NAME"),
+      then = list(AGE = list(empty = FALSE))
+    )
+    out <- lint_rules(list(rule))
+    expect_identical(codes_of(out), "rule_condition_value_unfit", info = op)
+    expect_match(out$message, "logical value", info = op)
+  }
+  # ...and the same text, read from YAML, is caught end to end.
+  path <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(c(
+    "columns:",
+    "  - {id: AESDTH, type: SAS Char}",
+    "  - {id: AESER, type: SAS Char}",
+    "rules:",
+    "  - id: r",
+    "    type: col_condition",
+    "    condition: {AESDTH: {equals: Y}}",
+    "    then: {AESER: {equals: N}}"
+  ), path)
+  expect_identical(codes_of(lint_dta(path)), c("rule_condition_value_unfit", "rule_condition_value_unfit"))
+})
+
+test_that("a logical operand is fine on a Bool column", {
+  out <- lint_rules(
+    list(list(
+      id = "r", type = "col_condition",
+      condition = list(FLAG = list(equals = TRUE)), then = list(AGE = list(empty = FALSE))
+    )),
+    columns = cols(list(id = "FLAG", type = "SAS Bool"))
+  )
+  expect_false("rule_condition_value_unfit" %in% out$code)
+})
+
+test_that("a numeric operand on a text column is reported (YAML dropped the zeros)", {
+  out <- lint_rules(list(list(
+    id = "r", type = "col_condition",
+    condition = list(NAME = list(equals = 1L)), then = list(AGE = list(empty = FALSE))
+  )))
+  expect_identical(codes_of(out), "rule_condition_value_unfit")
+  expect_match(out$message, "quote the value")
+  # A warning, not an error: `equals: 1` on text holding "1" is a working rule,
+  # so the spec must still construct.
+  expect_identical(out$severity, "warning")
+  specs <- specs_from_list(
+    cols(),
+    list(list(
+      id = "r", type = "col_condition",
+      condition = list(NAME = list(`in` = list(1L, 2L))), then = list(AGE = list(empty = FALSE))
+    ))
+  )
+  expect_length(specs@rules, 1L)
+})
+
+test_that("an unknown metadata key is named without printing its value (alias bomb)", {
+  # An anchor/alias ladder: expanded, the value of the unknown key is 2^14
+  # nested leaves. Printing it into an "unused argument" error never returns.
+  lines <- c("a0: &a0 [x, x]")
+  for (i in 1:14) lines <- c(lines, sprintf("a%d: &a%d [*a%d, *a%d]", i, i, i - 1L, i - 1L))
+  path <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(c(
+    "x-bomb:", paste0("  ", lines),
+    "metadata:",
+    "  title: T",
+    "  version: '1'",
+    "  bogus_key: *a14"
+  ), path)
+  elapsed <- system.time(out <- lint_dta(path))[["elapsed"]]
+  expect_lt(elapsed, 20)
+  md <- out[out$code == "metadata_invalid", ]
+  expect_identical(nrow(md), 1L)
+  expect_match(md$message, "bogus_key", fixed = TRUE)
+  expect_lt(nchar(md$message), 200L)
 })
 
 test_that("a rule operand finding names the condition value, not 'values'", {
@@ -383,4 +483,158 @@ test_that("a rule operand finding names the condition value, not 'values'", {
   expect_identical(codes_of(out), "rule_condition_value_unfit")
   expect_match(out$message, "condition value '2.5' is not a valid Int", fixed = TRUE)
   expect_no_match(out$message, "values '2.5'", fixed = TRUE)
+})
+
+# ---- file entries: container and unknown keys ----------------------------------
+
+# The one-dataset document of the container tests, with a chosen `container:`
+# line (written exactly as it should appear in the YAML).
+container_yaml_lines <- function(container_line) {
+  c(
+    "metadata:", "  title: T", "  version: '1'",
+    "datasets:",
+    "  - id: ae", "    type: tabular", "    files:",
+    "      type: csv", "      filename: ae.csv",
+    paste0("      ", container_line)
+  )
+}
+
+test_that("file_container_invalid flags a container that is not a .zip or .xpt", {
+  out <- lint_dta(list(datasets = list(list(
+    id = "ae", type = "tabular",
+    files = list(type = "csv", filename = "ae.csv", container = "sdtm.tar")
+  ))))
+  expect_identical(nrow(out), 1L)
+  expect_identical(out$code, "file_container_invalid")
+  expect_identical(out$severity, "error")
+  expect_identical(out$dataset, "ae")
+  expect_identical(out$object, "file")
+  expect_identical(out$id, "ae.csv")
+  expect_identical(
+    out$message,
+    "The container 'sdtm.tar' must name a .zip archive or a .xpt SAS transport file."
+  )
+})
+
+test_that("valid containers lint clean", {
+  out <- lint_dta(list(datasets = list(list(
+    id = "ae", type = "tabular",
+    files = list(
+      list(type = "csv", filename = "ae.csv", container = "sdtm_*.zip"),
+      list(type = "csv", filename = "dm.csv")
+    )
+  ))))
+  expect_false(any(startsWith(out$code, "file_")))
+})
+
+test_that("file datasets are linted as well", {
+  out <- lint_dta(list(datasets = list(list(
+    id = "define", type = "file",
+    files = list(type = "any", filename = "define.xml", container = "x.tar")
+  ))))
+  expect_identical(out$code, "file_container_invalid")
+})
+
+test_that("file_count_bound_invalid flags bounds the file entry would be refused for", {
+  lint_files <- function(...) {
+    lint_dta(list(datasets = list(list(
+      id = "ae", type = "tabular",
+      files = list(c(list(type = "csv", filename = "ae_.*[.]csv$", pattern = TRUE), list(...)))
+    ))))
+  }
+  bad <- list(
+    list(min_number_of_files = 3, max_number_of_files = 2),
+    list(number_of_files = -1),
+    list(number_of_files = 2.5),
+    list(max_number_of_files = Inf),
+    list(number_of_files = "2")
+  )
+  for (b in bad) {
+    out <- do.call(lint_files, b)
+    expect_identical(out$code, "file_count_bound_invalid", info = names(b)[[1]])
+    expect_identical(out$severity, "error")
+    # And the class refuses exactly what the lint flags.
+    expect_error(
+      do.call(DTAFileCSV, c(list(filename = "ae_.*[.]csv$", pattern = TRUE), b)),
+      class = "dta_file_count_bound_invalid"
+    )
+  }
+  expect_match(lint_files(number_of_files = -1)$message, "'number_of_files'", fixed = TRUE)
+  # Round-3 review: the two rules the constructor kept to itself.
+  both <- lint_files(number_of_files = 2, min_number_of_files = 1)
+  expect_identical(both$code, "file_count_bound_invalid")
+  lit <- function(...) {
+    lint_dta(list(datasets = list(list(
+      id = "ae", type = "tabular",
+      files = list(c(list(type = "csv", filename = "ae.csv"), list(...)))
+    ))))
+  }
+  for (b in list(list(number_of_files = 2), list(number_of_files = 0), list(min_number_of_files = 0, max_number_of_files = 0))) {
+    expect_identical(do.call(lit, b)$code, "file_count_bound_invalid", info = paste(names(b), b, collapse = " "))
+    expect_error(do.call(DTAFileCSV, c(list(filename = "ae.csv"), b)), class = "dta_file_count_bound_invalid")
+  }
+  expect_false(any(lit(number_of_files = 1)$code == "file_count_bound_invalid"))
+  h <- DTAFileCSV(filename = "ae.csv")
+  expect_error(h@max_number_of_files <- 5, class = "dta_file_count_bound_invalid")
+  for (ok in list(list(number_of_files = 0), list(min_number_of_files = 1, max_number_of_files = 3), list())) {
+    out <- do.call(lint_files, ok)
+    expect_false(any(out$code == "file_count_bound_invalid"))
+  }
+})
+
+test_that("read_dta_from_yaml stops on an invalid container", {
+  p <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(container_yaml_lines("container: deliveries/sdtm.zip"), p)
+  expect_error(read_dta_from_yaml(p), class = "dta_lint_error")
+})
+
+test_that("a misspelt file key is named", {
+  out <- lint_dta(list(datasets = list(list(
+    id = "ae", type = "tabular",
+    files = list(type = "csv", filename = "ae.csv", contianer = "sdtm.zip")
+  ))))
+  expect_identical(nrow(out), 1L)
+  expect_identical(out$code, "file_field_unknown")
+  expect_identical(out$message, "Unknown file field(s): 'contianer'.")
+})
+
+test_that("a container on the dataset is pointed to its place", {
+  out <- lint_dta(list(datasets = list(list(
+    id = "ae", type = "tabular", container = "sdtm.zip",
+    files = list(type = "csv", filename = "ae.csv")
+  ))))
+  expect_identical(nrow(out), 1L)
+  expect_identical(out$code, "file_container_misplaced")
+  expect_identical(
+    out$message,
+    "'container' belongs to a file entry: write it under 'files:'."
+  )
+})
+
+test_that("every bundled specification still lints without file findings", {
+  specs <- list.files(
+    system.file("extdata", package = "DTAtools"),
+    pattern = "\\.ya?ml$", full.names = TRUE, recursive = TRUE
+  )
+  expect_gt(length(specs), 0L)
+  for (f in specs) {
+    out <- lint_dta(f)
+    expect_false(any(startsWith(out$code, "file_")), info = f)
+  }
+})
+
+test_that("an unquoted value starting with * is explained", {
+  p <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(container_yaml_lines("container: *_SDTM.zip"), p)
+  out <- lint_dta(p)
+  hit <- out[out$code == "yaml_unreadable", ]
+  expect_identical(nrow(hit), 1L)
+  expect_match(hit$message, "must be quoted", fixed = TRUE)
+})
+
+test_that("a container value with braces is shown as written", {
+  p <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(container_yaml_lines('container: "{1+1}.tar"'), p)
+  e <- expect_error(read_dta_from_yaml(p), class = "dta_lint_error")
+  expect_match(conditionMessage(e), "{1+1}", fixed = TRUE)
 })

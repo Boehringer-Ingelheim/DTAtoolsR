@@ -41,8 +41,8 @@ DTARule <- S7::new_class(
     description = class_character_or_null
   ),
   validator = function(self) {
-    if (!is.null(self@id) && (length(self@id) != 1 || !is.character(self@id) || any(grepl("\\s", self@id)))) {
-      cli_abort("@id cannot have whitespaces and needs to be defined.")
+    if (!is.null(dta_id_problem(self@id))) {
+      cli_abort(dta_id_problem(self@id), class = "dta_rule_invalid_id")
     }
 
     # description can be NULL or a character of length 1

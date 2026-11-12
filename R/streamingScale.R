@@ -214,7 +214,9 @@ dta_stream_unique_arrow_enabled <- function() {
 #'   answers and deriving the second one twice could let them drift.
 #' @keywords internal
 dta_arrow_unique_eligible <- function(rule, source, specs = NULL) {
-  ineligible <- list(ok = FALSE, numeric_columns = character(0))
+  ineligible <- list(
+    ok = FALSE, numeric_columns = character(0), integer_columns = character(0)
+  )
 
   tryCatch(
     {
@@ -255,7 +257,21 @@ dta_arrow_unique_eligible <- function(rule, source, specs = NULL) {
         USE.NAMES = FALSE
       )]
 
-      list(ok = TRUE, numeric_columns = as.character(numeric_columns))
+      # The integer-typed subset: the per-batch and eager paths coerce these to
+      # R integer, where a fractional or out-of-int32 value becomes NA (and
+      # repeated NAs are duplicates), so they must not be grouped as doubles.
+      integer_columns <- numeric_columns[vapply(
+        numeric_columns,
+        function(col) identical(dta_spec_r_type(specs, col), "integer"),
+        logical(1),
+        USE.NAMES = FALSE
+      )]
+
+      list(
+        ok = TRUE,
+        numeric_columns = as.character(numeric_columns),
+        integer_columns = as.character(integer_columns)
+      )
     },
     error = function(e) ineligible
   )
@@ -275,8 +291,8 @@ dta_arrow_unique_eligible <- function(rule, source, specs = NULL) {
 #' columns, run once before the main batch loop rather than accumulated
 #' alongside it.
 #' @section Declared-numeric key columns:
-#' A key column the specs declare `Num` or `Int` is grouped on
-#' `as.numeric(col)`, so that Arrow keys it on the same values the per-batch
+#' A key column the specs declare `Num` is grouped on `as.numeric(col)` (`Int`:
+#' `as.integer(col)`, so a value R reads as `NA` is refused and falls back), so that Arrow keys it on the same values the per-batch
 #' accumulator keys its coerced column on -- `"1.50"` and `"1.5"` are one key on
 #' both. Two properties of that cast are what make it safe, both measured on
 #' arrow 25.0.1 rather than assumed:
@@ -341,9 +357,36 @@ dta_stream_unique_precompute <- function(specs, source, rules_list) {
     tryCatch(
       {
         cols <- dta_unique_columns(rule)
-        numeric_cols <- eligibility$numeric_columns
+        int_cols <- eligibility$integer_columns
+        numeric_cols <- setdiff(eligibility$numeric_columns, int_cols)
 
         query <- dplyr::select(source, dplyr::all_of(cols))
+        if (length(int_cols) > 0) {
+          # Cast to int32 like the per-batch coercion. Acero refuses what R
+          # would turn into NA ("1.5", out-of-range), which routes the rule to
+          # the per-batch accumulator instead of grouping on a wrong key.
+          #
+          # Two inputs get past that refusal and disagree with R: INT32_MIN
+          # (R reserves it as NA_integer_) and hex text above 0x7FFFFFFF, which
+          # Arrow wraps (0xFFFFFFFF -> -1). Flag both on the raw text, in this
+          # same scan, so the verdict below can be withdrawn for the R path.
+          query <- dplyr::mutate(
+            query,
+            dplyr::across(
+              dplyr::all_of(int_cols),
+              ~ dplyr::if_else(
+                grepl("^[[:space:]]*[-+]?0[xX]", .x) |
+                  as.integer(.x) == -2147483648,
+                1L, 0L
+              ),
+              .names = ".r_differs_{.col}"
+            )
+          )
+          query <- dplyr::mutate(
+            query,
+            dplyr::across(dplyr::all_of(int_cols), ~ as.integer(.x))
+          )
+        }
         if (length(numeric_cols) > 0) {
           # See the "Declared-numeric key columns" section above for why the
           # cast is safe and why the zero fold is needed but a NaN fold is not.
@@ -363,11 +406,23 @@ dta_stream_unique_precompute <- function(specs, source, rules_list) {
         # reaches R.
         agg <- dplyr::summarise(
           dplyr::group_by(query, dplyr::across(dplyr::all_of(cols))),
-          .n = dplyr::n(), .groups = "drop"
+          .n = dplyr::n(),
+          dplyr::across(dplyr::starts_with(".r_differs_"), ~ max(.x, na.rm = TRUE)),
+          .groups = "drop"
         )
         counts <- dplyr::collect(
-          dplyr::summarise(agg, dups = sum(.n) - dplyr::n(), total = sum(.n))
+          dplyr::summarise(
+            agg,
+            dups = sum(.n) - dplyr::n(), total = sum(.n),
+            dplyr::across(dplyr::starts_with(".r_differs_"), ~ max(.x, na.rm = TRUE))
+          )
         )
+        if (length(int_cols) > 0 &&
+          any(unlist(counts[paste0(".r_differs_", int_cols)]) > 0, na.rm = TRUE)) {
+          # Arrow and R read some key differently: let the per-batch path,
+          # which uses R, answer.
+          return(NULL)
+        }
         # dups equals sum(duplicated(df[cols])) exactly for these keys.
         n <- as.double(counts$dups[[1]])
 

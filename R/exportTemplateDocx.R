@@ -74,15 +74,10 @@
 #'     malformed marker -- unclosed, unopened, or not alone in its paragraph
 #'     -- is left in place and reported alongside unrendered blocks. A dataset
 #'     value that happens to spell a *block* placeholder renders as the text it
-#'     is, not as that block. The same is not yet true of an *inline*
-#'     placeholder: a value spelling one is substituted again by the pass that
-#'     follows region expansion, so a dataset described as
-#'     `"Title is {DTA_TITLE}"` comes out with the title resolved. That is a
-#'     known defect (DEV-016 in `inst/qualification/deviations.yaml`), not a
-#'     documented behaviour to rely on -- the two passes are separated by a
-#'     write and a re-read of the document, and only a token's spelling
-#'     survives that, which identifies a block paragraph but not an inline
-#'     placeholder inside a sentence.}
+#'     is, not as that block. The same holds for an *inline* placeholder: a
+#'     dataset described as `"Title is {DTA_TITLE}"` renders that text
+#'     literally, without the title being resolved a second time (this was
+#'     DEV-016 in `inst/qualification/deviations.yaml`, now closed).}
 #' }
 #'
 #' Additional or overriding values can be supplied through `variables`; names
@@ -106,6 +101,8 @@
 #'   TRUE`), so it can be trapped programmatically with
 #'   `withCallingHandlers(warning = )`. If `FALSE`, a failure is raised as an
 #'   error.
+#' @param overwrite Logical. Whether to replace an existing `output` file.
+#'   Default: `FALSE`, so a call against an existing path aborts.
 #'
 #' @return Invisibly returns the `output` path.
 #'
@@ -138,8 +135,12 @@ export_with_template <- function(
   output,
   variables = NULL,
   quiet = FALSE,
-  fallback = TRUE
+  fallback = TRUE,
+  overwrite = FALSE
 ) {
+  if (!is.logical(overwrite) || length(overwrite) != 1L || is.na(overwrite)) {
+    cli::cli_abort("{.arg overwrite} must be a single {.code TRUE}/{.code FALSE}.")
+  }
   if (!inherits(dta, "DTAtools::DTA")) {
     cli::cli_abort("{.arg dta} must be a DTA object.")
   }
@@ -152,6 +153,12 @@ export_with_template <- function(
   if (!file.exists(template)) {
     cli::cli_abort("Template file not found: {.file {template}}")
   }
+  if (file.exists(output) && !overwrite) {
+    cli::cli_abort(c(
+      "File {.file {output}} already exists.",
+      i = "Specify {.code overwrite = TRUE} to replace it."
+    ))
+  }
   if (tolower(tools::file_ext(template)) != "docx") {
     cli::cli_abort("{.arg template} must be a {.file .docx} file, not {.file {template}}.")
   }
@@ -159,8 +166,11 @@ export_with_template <- function(
     cli::cli_abort("{.arg variables} must be a named list or NULL.")
   }
 
+  # Every author text, in the placeholders and in the table blocks alike, is
+  # made safe for XML once, here (see .xml_safe_deep()).
+  dta <- .xml_safe_deep(dta)
   dta_vars <- .extract_template_variables(dta)
-  user_vars <- .normalize_template_variables(variables)
+  user_vars <- .xml_safe_deep(.normalize_template_variables(variables))
   all_vars <- utils::modifyList(dta_vars, user_vars)
 
   tryCatch(
@@ -507,6 +517,10 @@ dta_template_placeholders <- function(dta = NULL) {
 
 
 #' Render a detailed contact block with signature lines for signers
+#'
+#' Per contact: name, role, department, email, phone and address, then the
+#' responsibilities of the built-in contact table (Signatory / Reviewer /
+#' Backup, each "Yes"), and a signature line for a signatory.
 #' @keywords internal
 .tv_contacts_block <- function(org) {
   contacts <- .tv_get(org, "contacts")
@@ -518,14 +532,17 @@ dta_template_placeholders <- function(dta = NULL) {
     if (!is.list(ct)) {
       next
     }
-    nm <- if (!is.null(ct$name) && nzchar(ct$name)) as.character(ct$name)[[1]] else "(Unnamed)"
+    nm <- .tv_scalar(ct$name, default = "(Unnamed)")
     lines <- c(lines, paste0("- ", nm))
-    if (!is.null(ct$role) && nzchar(ct$role)) lines <- c(lines, paste0("  - Role: ", ct$role))
-    if (!is.null(ct$department) && nzchar(ct$department)) lines <- c(lines, paste0("  - Department: ", ct$department))
-    if (!is.null(ct$email) && nzchar(ct$email)) lines <- c(lines, paste0("  - Email: ", ct$email))
-    if (!is.null(ct$phone) && nzchar(ct$phone)) lines <- c(lines, paste0("  - Phone: ", ct$phone))
-    if (isTRUE(ct$reviewer)) lines <- c(lines, "  - Reviewer: yes")
-    if (isTRUE(ct$backup)) lines <- c(lines, "  - Backup: yes")
+    for (label in c("Role", "Department", "Email", "Phone")) {
+      v <- .tv_scalar(ct[[tolower(label)]])
+      if (nzchar(v)) lines <- c(lines, paste0("  - ", label, ": ", v))
+    }
+    address <- .tv_scalar(ct$address)
+    if (nzchar(address)) lines <- c(lines, paste0("  - Address: ", address))
+    if (isTRUE(ct$signature)) lines <- c(lines, "  - Signatory: Yes")
+    if (isTRUE(ct$reviewer)) lines <- c(lines, "  - Reviewer: Yes")
+    if (isTRUE(ct$backup)) lines <- c(lines, "  - Backup: Yes")
     if (isTRUE(ct$signature)) {
       lines <- c(lines, "  - Signature: ______________________________   Date: ______________")
     }
@@ -567,40 +584,28 @@ dta_template_placeholders <- function(dta = NULL) {
 
 
 #' Render process information block (transmission, handling, corrections)
+#'
+#' Transmission keys carry the reader-facing labels of the built-in layout
+#' (`.transmission_label()`, as `.transmission_pairs()`).
 #' @keywords internal
 .tv_process_information_block <- function(meta) {
   lines <- character(0)
   trans <- meta@transmission
   if (!is.null(trans) && length(trans) > 0) {
     lines <- c(lines, "- Transmission")
-    if (!is.null(trans$type) && nzchar(as.character(trans$type))) {
-      lines <- c(lines, paste0("  - Type: ", as.character(trans$type)))
-    }
-    if (!is.null(trans$frequency) && nzchar(as.character(trans$frequency))) {
-      lines <- c(lines, paste0("  - Frequency: ", as.character(trans$frequency)))
-    }
-    if (!is.null(trans$notification) && nzchar(as.character(trans$notification))) {
-      lines <- c(lines, paste0("  - Notification: ", as.character(trans$notification)))
-    }
-    if (!is.null(trans$date_first_transfer) && nzchar(as.character(trans$date_first_transfer))) {
-      lines <- c(lines, paste0("  - First transfer: ", as.character(trans$date_first_transfer)))
-    }
-    if (!is.null(trans$date_last_transfer) && nzchar(as.character(trans$date_last_transfer))) {
-      lines <- c(lines, paste0("  - Last transfer: ", as.character(trans$date_last_transfer)))
-    }
-    extra_fields <- setdiff(
-      names(trans),
-      c("type", "frequency", "notification", "date_first_transfer", "date_last_transfer")
-    )
-    for (key in extra_fields) {
+    lead_fields <- c("type", "frequency", "notification", "date_first_transfer", "date_last_transfer")
+    # .tv_scalar() joins a YAML sequence with ", " and treats empty as absent,
+    # so a vector-valued field never reaches a length-1-only `&&`.
+    for (key in c(lead_fields, setdiff(names(trans), lead_fields))) {
       value <- .tv_scalar(trans[[key]])
       if (nzchar(value)) {
-        lines <- c(lines, paste0("  - ", .title_case_field(key), ": ", value))
+        lines <- c(lines, paste0("  - ", .transmission_label(key), ": ", value))
       }
     }
   }
-  if (!is.null(meta@error_handling) && nzchar(as.character(meta@error_handling))) {
-    lines <- c(lines, "- Error handling", paste0("  - ", as.character(meta@error_handling)))
+  error_handling <- .tv_scalar(meta@error_handling)
+  if (nzchar(error_handling)) {
+    lines <- c(lines, "- Error handling", paste0("  - ", error_handling))
   }
   auth <- .format_authorized_for_corrections_lines(meta@authorized_for_corrections)
   if (length(auth) > 0) {
@@ -922,9 +927,20 @@ dta_template_placeholders <- function(dta = NULL) {
   unresolved <- character(0)
 
   for (p in paras) {
+    # Only this paragraph's OWN runs: a nested paragraph (text box content) is
+    # visited as a paragraph in its own right.
+    # Descendants (content controls, simple fields, custom XML, ... wrap runs),
+    # but only those whose nearest enclosing paragraph is this one.
+    depth <- xml2::xml_find_num(p, "count(ancestor-or-self::*[local-name()='p'])")
     t_nodes <- xml2::xml_find_all(
       p,
-      ".//*[local-name()='r']/*[local-name()='t']"
+      sprintf(
+        paste0(
+          ".//*[local-name()='r']/*[local-name()='t']",
+          "[count(ancestor::*[local-name()='p']) = %d]"
+        ),
+        as.integer(depth)
+      )
     )
     if (length(t_nodes) == 0) {
       next
@@ -1230,40 +1246,32 @@ dta_template_placeholders <- function(dta = NULL) {
     return(invisible(NULL))
   }
 
-  kids <- xml2::xml_children(run)
-  rpr_idx <- which(vapply(
-    kids,
-    function(ch) grepl("(^|:)rPr$", xml2::xml_name(ch)),
-    logical(1)
-  ))
-  if (length(kids) > 0) {
-    if (length(rpr_idx) > 0) {
-      drop_idx <- setdiff(seq_along(kids), rpr_idx[[1]])
-      if (length(drop_idx) > 0) {
-        xml2::xml_remove(kids[drop_idx])
-      }
-    } else {
-      xml2::xml_remove(kids)
-    }
-  }
-
   chunks <- .tv_split_word_chunks(text)
   if (length(chunks) == 0) {
     chunks <- list(list(type = "text", value = ""))
   }
 
+  # Replace ONLY the target w:t, in place: the run's other w:t / w:tab / w:br
+  # children (Word writes several per run) and its w:rPr stay untouched.
+  cursor <- t_node
   for (chunk in chunks) {
     if (identical(chunk$type, "break")) {
-      xml2::xml_add_child(run, "w:br")
+      cursor <- xml2::xml_add_sibling(cursor, "w:br", .where = "after")
       next
     }
     if (identical(chunk$type, "tab")) {
-      xml2::xml_add_child(run, "w:tab")
+      cursor <- xml2::xml_add_sibling(cursor, "w:tab", .where = "after")
       next
     }
-    t_new <- xml2::xml_add_child(run, "w:t", chunk$value)
-    .tv_set_preserve_space(t_new)
+    cursor <- xml2::xml_add_sibling(
+      cursor,
+      "w:t",
+      chunk$value,
+      .where = "after"
+    )
+    .tv_set_preserve_space(cursor)
   }
+  xml2::xml_remove(t_node)
 
   invisible(run)
 }
@@ -1278,6 +1286,11 @@ dta_template_placeholders <- function(dta = NULL) {
   text <- as.character(text)[[1]]
   text <- gsub("\r\n", "\n", text, fixed = TRUE)
   text <- gsub("\r", "\n", text, fixed = TRUE)
+
+  # Vertical tab / form feed read as line breaks; every other C0 control is
+  # forbidden in XML 1.0 and would make the part unparseable, so drop it.
+  text <- gsub("[\v\f]", "\n", text, perl = TRUE)
+  text <- gsub(paste0("[\x01-\x08\x0E-\x1F", "\uFFFE\uFFFF", "]"), "", text, perl = TRUE)
 
   marks <- gregexpr("[\n\t]", text, perl = TRUE)[[1]]
   if (length(marks) == 1L && marks[[1]] == -1L) {

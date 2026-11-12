@@ -70,6 +70,26 @@ bi_rgb <- function(hex) {
   strtoi(substring(h, c(1, 3, 5), c(2, 4, 6)), 16L)
 }
 
+# Text colour for a label filled with `hex`: white if it reaches WCAG AA
+# (4.5:1) on that fill, else `dark` if that does, else black. Black always
+# does when white does not (the two cross at about 4.58:1), so the result
+# meets AA on any fill. Relative luminance and contrast ratio per WCAG 2.x.
+bi_ink_on <- function(hex, dark = dta_app_config_defaults()$colors[["text"]]) {
+  lum <- function(h) {
+    v <- bi_rgb(h) / 255
+    v <- ifelse(v <= 0.04045, v / 12.92, ((v + 0.055) / 1.055)^2.4)
+    sum(v * c(0.2126, 0.7152, 0.0722))
+  }
+  bg <- lum(hex)
+  for (ink in c("#FFFFFF", dark)) {
+    l <- lum(ink)
+    if ((max(bg, l) + 0.05) / (min(bg, l) + 0.05) >= 4.5) {
+      return(ink)
+    }
+  }
+  "#000000"
+}
+
 bi_css <- function(colors = dta_app_config_defaults()$colors) {
   colors <- bi_colors(colors)
   # Derived, not configurable: the focus glow is the accent at 25% alpha.
@@ -119,8 +139,34 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
       border-bottom: 3px solid var(--bi-accent); box-shadow: none;
     }
     .app-brandbar .brand-logo { height: 36px; width: auto; display: block; flex: none; border-radius: 8px; }
-    .app-brandbar .brand-title { font-weight: 600; font-size: 1.0625rem; letter-spacing: 0; line-height: 1.2; }
+    /* A flex row so the header tag (below) centres on the title exactly, and
+       drops flush left under it when a long title leaves no room beside it. */
+    .app-brandbar .brand-title {
+      font-weight: 600; font-size: 1.0625rem; letter-spacing: 0; line-height: 1.2;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px;
+    }
     .app-brandbar .brand-sub { opacity: .78; font-size: .8125rem; line-height: 1.3; }
+    /* header_tag in dta-app.yaml (header_tag_ui(), ui_components.R): a label
+       pill beside the title, such as GxP. A label, not a control, so like
+       .brand-status it has no :hover and no transition. Fill and text colour
+       come from --tag-bg / --tag-fg on the element, set only when the config
+       gives a colour (the text colour is computed for AA); without one it
+       falls back to the .brand-status look. 500, not the title's 600. On a
+       coloured tag --tag-border is the text colour at low opacity, so even a
+       fill close to the bar's own colour keeps a visible outline. */
+    .app-brandbar .brand-tag {
+      padding: 2px 9px; border-radius: 999px;
+      font-size: .75rem; line-height: 1.2; font-weight: 500; white-space: nowrap;
+      background: var(--tag-bg, rgba(255,255,255,.2));
+      border: 1px solid var(--tag-border, rgba(255,255,255,.5));
+      color: var(--tag-fg, #fff);
+    }
+    /* On a phone a long label wraps inside the bar instead of scrolling it
+       sideways; above this width nowrap keeps `non-GxP` from breaking at the
+       hyphen. */
+    @media (max-width: 900px) {
+      .app-brandbar .brand-tag { white-space: normal; }
+    }
     /* align-items: center -- without it a flex container defaults to
        'stretch', so the Edit menu toggle and the status pill (whose heights
        come from their own content) and the .brand-link pills (padding:
@@ -1019,8 +1065,9 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
       font-size: .72rem; background: var(--bi-grey-light); color: var(--bi-grey);
       border-radius: 999px; padding: 1px 8px;
     }
+    /* A rule is shown as a plain-English sentence, never as code: this takes
+       the UI's own face, not the monospace stack. */
     .inspect-desc-detail {
-      font-family: var(--bs-font-monospace);
       font-size: .82rem; color: #333; margin-top: 4px; word-break: break-word;
     }
     .inspect-desc-note { font-size: .78rem; color: var(--bi-grey); margin-top: 3px; }

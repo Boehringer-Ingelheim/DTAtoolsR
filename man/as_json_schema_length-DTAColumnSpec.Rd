@@ -20,3 +20,6 @@ which has no length to read.
 \description{
 Converts a DTAColumnSpec to a JSON Schema length.
 }
+\examples{
+as_json_schema_length(DTAColumnSpec(id = "SUBJID", type = "SAS Char", length = 8))
+}

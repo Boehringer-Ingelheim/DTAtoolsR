@@ -36,6 +36,10 @@ once installed).
 - Import/export DTA/DTS specifications from/to YAML and Word documents
 - Columns are read in the type the specification declares for them, so
   `"007"` in a text column stays `"007"`
+- Reads delimited text (CSV, TSV, any single-character separator, plain or
+  gzip-compressed), SAS datasets (`.sas7bdat`) and SAS transport files (`.xpt`),
+  the last two via the haven package; delivered loose, in `.zip` archives or in
+  SAS transport libraries (`load_delivery()`)
 - Comprehensive validation of tabular data: type, format, nullability,
   allowed values, and regex patterns
 - Cross-column rule validation (`col_condition`, `col_range`,
@@ -182,8 +186,10 @@ DTA                              ← top-level agreement container
     |   |   |                        input types, manage file names,
     │   │   ├── DTAFileCSV           which can have patterns,
     |   |   ├── DTAFileTSV           number of files, etc ..
-    |   |   └── DTAFileDelim
-    │   │       └── read_file()  → Arrow Table
+    |   |   ├── DTAFileDelim
+    |   |   ├── DTAFileSAS7BDAT
+    |   |   └── DTAFileXPT       (a DTAFileSAS7BDAT subclass)
+    |   |   read_file(handler, file)  → Arrow Table
     |   |
     │   ├── specs (DTAColumnSpecCollection)  ← column-level specs +
     |   |   |                                   cross-column rules
@@ -301,11 +307,127 @@ numbers, and `validate_file_stream()` still reads a compressed file in batches
 rather than expanding it into memory. An anchored filename pattern such as
 `^clinical_data\.csv$` matches the gzipped form too.
 
+### SAS datasets (.sas7bdat)
+
+A SAS dataset is declared like a delimited file, with `type: sas7bdat`, and
+validated against the same column specifications. The file is decoded by the
+haven package, which `DTAtools` depends on, so nothing extra has to be
+installed:
+
+```yaml
+datasets:
+  - id: adverse_events
+    type: tabular
+    files:
+      type: sas7bdat
+      filename: ae.sas7bdat
+    columns:
+      - id: USUBJID
+        type: SAS Char
+        nullable: false
+      - id: ASTDT
+        type: SAS Date
+        format: SAS DATE9.
+        nullable: true
+```
+
+```r
+dta <- read_dta_from_yaml("spec.yaml")
+dta <- load_file(dta, "adverse_events", file = "ae.sas7bdat")   # or ae.sas7bdat.gz
+dta <- check(dta, quiet = TRUE)
+results(dta)
+```
+
+What the reader hands to the validation, and what that means for a spec:
+
+- Values are checked as stored. A blank character value is missing; trailing
+  blanks are not part of a value (SAS pads them), but leading blanks, leading
+  zeros and non-ASCII characters are kept. The text `NA` is a value, unlike in
+  a CSV file, where it is read as missing.
+- Column names are exactly as stored, upper and lower case included. A file
+  with duplicate column names is refused.
+- SAS dates, datetimes and times are numbers in the file. A column carrying a
+  SAS date, datetime or time format arrives as the display text of the format
+  the specification declares (`15AUG2025` under `DATE9.`), or as ISO 8601 text
+  (`2025-08-15`, `2025-08-15T14:30:00`, `14:30:00`) when no matching format is
+  declared. Declared as any non-date type (`SAS Num`, `SAS Int`), the column
+  stays the SAS number itself: days (dates) or seconds (datetimes, times) since
+  1960-01-01. A date stored without a SAS date format cannot be told from any
+  other number, so it arrives as a number, and a `SAS Date` declaration then
+  fails.
+- Do not declare `length` on a SAS date, datetime or time column. It is checked
+  against the text above, and the `length: 8` that `PROC CONTENTS` reports for
+  the 8-byte numeric storage would fail every row.
+- A type that does not match the data (a numeric column declared `SAS Char`, a
+  fraction under `SAS Int`, a date column declared `SAS DateTime`) is a
+  column-spec type violation, not an import error: the file stores numbers as
+  numbers, so there is nothing to parse. The one exception is text in a column
+  declared `SAS Num` or `SAS Int`: that text is parsed, as in a CSV file, and a
+  value that does not parse is an import error. A column declared `SAS Int`
+  holds a double, so a whole number passes and a fraction, or a value outside
+  the 32-bit integer range, is a type violation.
+- Numeric values under a `w.d` display format are checked as stored, not
+  rounded to how SAS would display them.
+- The dataset is always read into memory, with about three times its size as the
+  peak. `stream = "auto"` reads it whatever its size and, when the size alone
+  would have streamed it, says so in a message (class
+  `dta_sas7bdat_in_memory`); `stream = "always"` is refused. A file near the
+  1 GB upload limit of the app can exhaust the memory of a server process.
+  `validate_file_stream()` and `cache_as_parquet()` are for delimited text
+  only and refuse a SAS dataset, pointing to `load_file()`.
+- A `.sas7bdat.gz` needs no separate decompression step, and `ae.sas7bdat` also
+  matches it. haven unpacks it to a temporary file in `tempdir()`, of the
+  uncompressed size, which is removed at garbage collection.
+- The format catalog (`.sas7bcat`) is not read. Ship it as a `type: file`
+  deliverable.
+
+### Deliveries in containers (.zip, SAS transport .xpt)
+
+A delivery often arrives as one `.zip`, or as one SAS transport library
+(`.xpt`) holding several datasets. `load_delivery()` takes either, loose files,
+or a mix, and routes every file by name to the datasets whose file entries
+match it, exactly as if the files had been delivered loose:
+
+```r
+dta <- load_delivery(dta, "sdtm.zip")
+dta <- load_delivery(dta, "sdtm.xpt")
+attr(dta, "last_delivery") # what was loaded, opened, unused, ignored or refused
+```
+
+A library is split into one file per member, named after the member in lower
+case: member `AE` is offered as `ae.xpt`, which an entry `filename: ae.xpt`
+with `type: xpt` takes. A file entry may say where its file must come from,
+in one line: `container: sdtm.zip` (`*` and `?` are wildcards; letter case
+must match). A `.zip` or `.xpt` that a `type: any` entry takes as a deliverable,
+by its name or because its `extensions` list `zip` or `xpt`, stays one file and
+is not opened, unless an entry declares it as its `container`.
+
+An archive is inspected before anything is extracted, and refused as a whole
+when an entry name would escape its folder (absolute, `..`, a drive letter),
+is a symbolic link or is encrypted, or when two entries collide. An entry whose
+name only cannot be written on some file systems (Windows: a colon, `?`, a
+device name such as `CON`, a control character) is skipped and listed when
+nothing asks for it, and refuses the archive when something does. macOS
+system files (`__MACOSX/`, `.DS_Store`, the Finder's `Icon\r`) are ignored.
+Four options bound one call: `DTAtools.container_max_members` (10,000 entries,
+members or files created), `DTAtools.container_max_bytes` and
+`DTAtools.container_max_member_bytes` (both `1e13` in R, effectively off; the
+app uses 1e10 and 2e9) and `DTAtools.container_max_ratio` (1100:1). Every file
+taken out of a zip needs its full size in free disk space under `exdir` (by
+default `tempdir()`), also when its table is then streamed.
+
+Validation results name the dataset and the table. For a table read into
+memory the validation report does not name the zip or library it came from;
+the summary `load_delivery()` prints and its `last_delivery` table do.
+
 ### Validating a file too large to load
 
 The workflow above reads the file into memory first. For a file larger than
 the memory available, that is not slow but impossible — so the file can be
 scanned in batches instead, never holding more than one batch.
+
+Streaming applies to delimited text only. A `.sas7bdat` or `.xpt` file is always
+read into memory (see [SAS datasets](#sas-datasets-sas7bdat)).
 
 The ordinary way in is the `stream` argument on `load_file()`, which decides
 how the table is *held* once loaded:
@@ -481,9 +603,12 @@ ds_file <- load_file(ds_file, file = "report_2024.pdf", handler_index = 1)
 ds_file <- check(ds_file)
 ```
 
-`extensions` is an open list, so a delivery of `.xpt` or `.sas7bdat` files needs
-no change to the package. A file whose ending is not listed is refused as it is
-offered, rather than at validation time.
+`extensions` is an open list, so a delivery of `.sas7bcat` or `.e2b` files
+needs no change to the package. A file whose ending is not listed is
+refused as it is offered, rather than at validation time. To validate the
+*contents* of a `.sas7bdat`, declare it with `type: sas7bdat` in a tabular
+dataset instead (see [SAS datasets](#sas-datasets-sas7bdat)). To validate a
+`.xpt`, use `type: xpt`.
 
 ### Building a full `DTA` object, mixing dataset types
 
@@ -710,6 +835,14 @@ To host it on Posit Connect, create Git-backed content from this repository's
 **root** directory (`/`). The root `app.R` installs the deployed checkout's
 DTAtools and serves the app bundled with it, so the app and the package always
 come from the same commit.
+A `.zip` or `.xpt` dropped in the app is extracted under the R process's
+temporary directory. Each browser session may keep up to
+`DTATOOLS_SESSION_DELIVERY_BYTES` of extracted files (default 2e10 bytes);
+this bounds one session, not the server, so a worker process serving several
+sessions can hold that much for each of them. Give the content a disk quota per
+worker, or point `TMPDIR` at a volume of bounded size, and lower
+`DTATOOLS_SESSION_DELIVERY_BYTES` together with the content's maximum
+connections per process.
 
 ### Private templates
 
@@ -749,15 +882,16 @@ my-templates/
   .github/workflows/validate-templates.yml
 ```
 
-`validate_template(".", strict = TRUE)` at the repository root validates the
+`lint_template_repo(".")` at the repository root validates the
 four folders and reports a template file in the wrong place (for example a
 party profile left in `templates/`, or any template file at the root) as an
-error. The app's `dir:`/`pkg:`/`git:` sources use the same layout; the older
+error, along with repository-format problems such as a mis-capitalised folder
+name; it aborts on any error, which is what the scaffolded CI relies on. The app's `dir:`/`pkg:`/`git:` sources use the same layout; the older
 flat and mixed-`templates/` layouts are no longer read, and the scaffolded
 `README.md` explains how to reorganise an existing repository.
 
 The optional `dta-app.yaml` at the repository root customises the app that serves the library:
-organisation, title, logo, colours, links, which features and export formats are
+organisation, title, logo, colours, a header tag such as `GxP` beside the title, links, which features and export formats are
 offered (including a read-only mode). Every `.docx` in `export-templates/` with a `{PLACEHOLDER}` marker is
 offered automatically as a Word export template. With no
 file the app looks as before, except that no organisation name is shown until you
@@ -1146,6 +1280,8 @@ row-level validation.
 | `DTAFileCSV`              | CSV file handler for `read_file()`                            |
 | `DTAFileTSV`              | TSV file handler for `read_file()`                            |
 | `DTAFileDelim`            | Generic delimited-text file handler for `read_file()`         |
+| `DTAFileSAS7BDAT`         | SAS dataset (`.sas7bdat`) handler, read via haven, in memory only |
+| `DTAFileXPT`              | SAS transport (`.xpt`) handler, one dataset, read via haven, in memory only |
 | `DTAFileAny`              | Handler for a file that is never parsed; optional `extensions` |
 
 ### Key Functions
@@ -1157,6 +1293,7 @@ row-level validation.
 | `import_specs_from_yaml(file)`| Load bare column specs + rules from a standalone YAML      |
 | `columns_specs_from_word(file)`| Import column specs from a Word table                     |
 | `load_file(dta, dataset, file, stream)`| Read a data file into a dataset using its YAML-defined handler; `stream` keeps it lazy instead |
+| `load_delivery(x, files, stream, on_error, exdir)` | Load loose files, `.zip` archives and SAS transport libraries into the datasets whose entries match them |
 | `read_file(handler, file)`     | Read a file using a file handler (`DTAFileCSV`, etc.)       |
 | `open_file(handler, file)`     | Open a file lazily as an Arrow `Dataset` (the counterpart of `read_file()`) |
 | `check(x, force, persist, quiet, batch_rows, max_errors, …)` | Validate all datasets/tables; returns the updated object |

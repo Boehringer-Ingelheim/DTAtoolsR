@@ -26,6 +26,12 @@
 #'   expected.
 #' @param info Character, list or \code{NULL}; free-text description of the
 #'   file.
+#' @param container Character or \code{NULL}; the name of the \code{.zip}
+#'   archive or \code{.xpt} SAS transport file this file arrives inside.
+#'   \code{*} matches any text and \code{?} one character
+#'   (\code{"sdtm_*.zip"}); the name is matched as a whole, independently of
+#'   \code{pattern}. \code{NULL} (the default) accepts the file loose or inside
+#'   any container. Only \code{\link{load_delivery}()} consults it.
 #'
 #' @return An object of class \code{DTAFile} containing file parsing
 #'   information.
@@ -34,7 +40,8 @@
 #'   the metadata and parsing properties every handler shares. It is rarely
 #'   constructed directly: prefer a concrete subclass --
 #'   \code{\link{DTAFileCSV}}, \code{\link{DTAFileTSV}},
-#'   \code{\link{DTAFileDelim}} for a file that is read, or
+#'   \code{\link{DTAFileDelim}} for a delimited file that is read,
+#'   \code{\link{DTAFileSAS7BDAT}} for a SAS dataset that is read, or
 #'   \code{\link{DTAFileAny}} for a deliverable that is only checked for
 #'   arrival.
 #' @examples
@@ -50,7 +57,8 @@ DTAFile <- S7::new_class(
     number_of_files = NULL,
     min_number_of_files = NULL,
     max_number_of_files = NULL,
-    info = NULL
+    info = NULL,
+    container = NULL
   ) {
     if (is.null(pattern)) {
       pattern <- FALSE
@@ -72,46 +80,32 @@ DTAFile <- S7::new_class(
       number_of_files <- 1
     }
 
-    # A non-pattern handler names one exact file, so every count it declares
-    # must be 1 -- whichever of the three arguments it used to say so. Testing
-    # `number_of_files != 1` alone left two holes: a min/max pair was never
-    # checked at all, and with only a min/max set `number_of_files` is NULL, so
-    # the comparison was on a zero-length value and errored with a message about
-    # the wrong thing.
-    if (!pattern) {
-      declared <- c(number_of_files, min_number_of_files, max_number_of_files)
-      if (length(declared) > 0 && any(declared != 1)) {
-        cli::cli_abort(
-          "if pattern is FALSE, then number_of_files must be 1. Then only one file can exist for this filename."
-        )
-      }
+    # Every rule on the declared counts lives in dta_file_count_bounds_problem(),
+    # which lint_dta() runs on the raw YAML as well, so the lint flags exactly
+    # what this constructor refuses.
+    problem <- dta_file_count_bounds_problem(
+      min_number_of_files, max_number_of_files,
+      number = number_of_files, pattern = pattern
+    )
+    if (!is.null(problem)) {
+      cli::cli_abort("{problem}", class = "dta_file_count_bound_invalid")
     }
-
-    # Length 0 (e.g. `numeric(0)`) is caught here too, not just length > 1:
-    # both are "not a single number". They used to be reported by two
-    # separate checks with two different messages; folding length 0 in here
-    # removes the second one, which was live only for that one case.
-    if (!is.null(number_of_files) && length(number_of_files) != 1) {
-      cli::cli_abort("'number_of_files' can only be length 1.")
-    }
-
-    if (
-      !is.null(number_of_files) &&
-        (!is.null(min_number_of_files) || !is.null(max_number_of_files))
-    ) {
-      cli::cli_abort(
-        "You must not set both 'number_of_files' and 'min_number_of_files'/'max_number_of_files'. Choose one approach."
-      )
-    }
-
     if (!is.null(number_of_files)) {
-      if (!is.numeric(number_of_files)) {
-        cli::cli_abort(
-          "'number_of_files' must be a non-negative integer or NULL."
-        )
-      }
       min_number_of_files <- number_of_files
       max_number_of_files <- number_of_files
+    }
+
+    # Checked here, before new_object(): S7 checks a property's TYPE before it
+    # runs the validator, so `container = 3`, `TRUE` or a list would otherwise
+    # be refused with a plain simpleError and no class. A list is refused, not
+    # flattened (the YAML lint refuses `container: [a.zip]` the same way).
+    problem <- dta_container_value_problem(container)
+    if (!is.null(problem)) {
+      cli::cli_abort(
+        "{problem}",
+        class = "dta_container_invalid",
+        container = container
+      )
     }
 
     new_object(
@@ -121,7 +115,8 @@ DTAFile <- S7::new_class(
       pattern_description = pattern_description,
       min_number_of_files = min_number_of_files,
       max_number_of_files = max_number_of_files,
-      info = info
+      info = info,
+      container = container
     )
   },
   properties = list(
@@ -130,7 +125,8 @@ DTAFile <- S7::new_class(
     pattern_description = class_character_or_null,
     min_number_of_files = class_numeric_or_null,
     max_number_of_files = class_numeric_or_null,
-    info = class_character_or_list_or_null
+    info = class_character_or_list_or_null,
+    container = class_character_or_null
   ),
   validator = function(self) {
     # `self@filename == ""` was a length-1 test on a property documented as a
@@ -148,6 +144,30 @@ DTAFile <- S7::new_class(
     }
     if (!is.logical(self@pattern) || length(self@pattern) != 1) {
       cli::cli_abort("The 'pattern' property must be a single logical value.")
+    }
+
+    # Bounds are counts of files: NULL (no bound) or one non-negative whole
+    # number. NA and Inf are refused -- "no bound" is NULL, and an unbounded
+    # maximum is expressed by leaving it unset. Here rather than in the
+    # constructor so `h@min_number_of_files <- 5` is checked as well.
+    problem <- dta_file_count_bounds_problem(
+      self@min_number_of_files, self@max_number_of_files,
+      pattern = self@pattern
+    )
+    if (!is.null(problem)) {
+      cli::cli_abort("{problem}", class = "dta_file_count_bound_invalid")
+    }
+
+    # The constructor checks the same thing; this is what refuses `h@container
+    # <- "x.tar"`, which never passes through the constructor.
+    container <- dta_handler_container(self)
+    problem <- dta_container_value_problem(container)
+    if (!is.null(problem)) {
+      cli::cli_abort(
+        "{problem}",
+        class = "dta_container_invalid",
+        container = container
+      )
     }
   }
 )
@@ -318,6 +338,94 @@ dta_matches_filename_base <- function(x, file) {
   }
 }
 
+# ---- container declarations ---------------------------------------------------
+# A handler may say which .zip archive or .xpt SAS transport file its file
+# arrives inside (`container`). Only load_delivery() consults it; read_file()
+# and open_file() work on the file they are given.
+
+# The regular expression for a container name: `*` is any text, `?` one
+# character, every other character is literal, and the whole name must match.
+dta_container_regex <- function(glob) {
+  esc <- gsub("([.+^$(){}|\\\\\\[\\]])", "\\\\\\1", glob, perl = TRUE)
+  paste0("^", gsub("?", ".", gsub("*", ".*", esc, fixed = TRUE), fixed = TRUE), "$")
+}
+
+# NULL when `value` is an acceptable container, else the sentence that says
+# why not. Shared by the constructor and the validator.
+# Why a file entry's count bounds cannot hold, or NULL. Each bound is NULL (no
+# bound) or one finite non-negative whole number -- an unbounded maximum is an
+# unset one, so NA and Inf are refused -- and the minimum is not above the
+# maximum. `number` (number_of_files) is the exact count, set instead of the
+# two bounds, and a literal entry (`pattern` FALSE) names one file, so every
+# count it declares must be 1. Shared by the DTAFile constructor and validator
+# and by lint_dta(), which judges the raw YAML, so they can never disagree.
+dta_file_count_bounds_problem <- function(min, max, number = NULL, pattern = TRUE) {
+  whole <- function(b) is.null(b) || (is.numeric(b) && length(b) == 1L && is.finite(b) && b >= 0 && b == round(b))
+  if (!is.null(number)) {
+    if (!is.null(min) || !is.null(max)) {
+      return("You must not set both 'number_of_files' and 'min_number_of_files'/'max_number_of_files'. Choose one approach.")
+    }
+    if (!whole(number)) {
+      return("'number_of_files' must be NULL or a single non-negative whole number.")
+    }
+    min <- number
+    max <- number
+  }
+  if (!isTRUE(pattern)) {
+    declared <- c(min, max)
+    if (length(declared) > 0 && !isTRUE(all(declared == 1))) {
+      return("if pattern is FALSE, then number_of_files must be 1. Then only one file can exist for this filename.")
+    }
+  }
+  if (!whole(min)) {
+    return("'min_number_of_files' must be NULL or a single non-negative whole number.")
+  }
+  if (!whole(max)) {
+    return("'max_number_of_files' must be NULL or a single non-negative whole number.")
+  }
+  if (!is.null(min) && !is.null(max) && min > max) {
+    return(sprintf(
+      "'min_number_of_files' (%s) exceeds 'max_number_of_files' (%s).",
+      format(min, scientific = FALSE), format(max, scientific = FALSE)
+    ))
+  }
+  NULL
+}
+
+dta_container_value_problem <- function(value) {
+  if (is.null(value)) {
+    return(NULL)
+  }
+  if (!is.character(value) || length(value) != 1 || is.na(value) || !nzchar(value)) {
+    return("The container of a file entry must be a single non-empty file name.")
+  }
+  if (grepl("[[:cntrl:]]", value) || !identical(value, trimws(value))) {
+    return(sprintf("The container '%s' must be a file name without control characters or leading or trailing spaces.", value))
+  }
+  if (grepl("[/\\\\]", value)) {
+    return(sprintf("The container '%s' must be a file name, not a path.", value))
+  }
+  if (is.na(dta_container_kind(value))) {
+    return(sprintf("The container '%s' must name a .zip archive or a .xpt SAS transport file.", value))
+  }
+  NULL
+}
+
+# The only reader of the property. A handler restored from an autosave written
+# before `container` existed has no such slot, and reads as "no container".
+dta_handler_container <- function(h) tryCatch(h@container, error = function(e) NULL)
+
+# TRUE when `names` (container file names) include one the handler's container
+# declaration matches. Letter case must match; a compression suffix is ignored.
+dta_matches_container <- function(x, names) {
+  declared <- dta_handler_container(x)
+  if (is.null(declared) || length(names) == 0) {
+    return(FALSE)
+  }
+  candidates <- unique(c(names, dta_strip_compression_extension(names)))
+  any(grepl(dta_container_regex(declared), candidates, perl = TRUE))
+}
+
 #' @keywords internal
 dta_assert_single_file_path <- function(file, .caller) {
   if (!is.character(file) || length(file) != 1 || is.na(file) || !nzchar(file)) {
@@ -374,10 +482,13 @@ dta_check_readable_file <- function(x, file, namecheck, .caller) {
   # after scanning for hours. Catching the extension here trades that for an
   # immediate, actionable message.
   if (tolower(tools::file_ext(file)) == "zip") {
-    cli::cli_abort(c(
-      ".zip archives are not supported.",
-      "i" = "Supply the file gzip-compressed (.gz) or uncompressed instead; Arrow reads both transparently."
-    ))
+    cli::cli_abort(
+      c(
+        ".zip archives are not read by a file handler.",
+        "i" = "Load the archive as a delivery (drop it in the app, or {.fn load_delivery} in R): each file inside is matched to the specification. A single file can also be read gzip-compressed ({.file .gz}) or uncompressed."
+      ),
+      class = "dta_zip_not_readable"
+    )
   }
 
   file
@@ -426,7 +537,11 @@ method(read_file_execution, DTAFile) <- function(x, ...) {
 
 #' @title Read a file based on DTAFile
 #' @description Reads a data file using the parameters specified in a
-#'   \code{DTAFile} object or one of its subclasses.
+#'   \code{DTAFile} object or one of its subclasses. A delimited file is parsed
+#'   by Arrow; a SAS dataset (\code{\link{DTAFileSAS7BDAT}}) or a SAS transport
+#'   file (\code{\link{DTAFileXPT}}) is decoded by \pkg{haven}. A
+#'   \code{container} declaration is not consulted here; see
+#'   \code{\link{load_delivery}()}.
 #'
 #' @param x A \code{DTAFile} object (or subclass) containing file reading
 #'   parameters.
@@ -545,6 +660,12 @@ method(open_file_execution, DTAFile) <- function(x, ...) {
 #'
 #' Both apply the same name checks and the same column-type pinning, so the two
 #' differ in when the data is read, not in what it is read as.
+#'
+#' Only the delimited handlers can be opened lazily. A SAS dataset
+#' (\code{\link{DTAFileSAS7BDAT}}) or SAS transport file
+#' (\code{\link{DTAFileXPT}}) is decoded whole, so \code{open_file()} on it
+#' aborts and points to \code{stream = "never"}. A \code{container} declaration
+#' is not consulted here; see \code{\link{load_delivery}()}.
 #'
 #' @section What a batch of a delimited scan actually is:
 #' Arrow splits a delimited file into fixed-size READ BLOCKS -- eight megabytes

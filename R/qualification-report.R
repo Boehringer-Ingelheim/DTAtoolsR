@@ -15,9 +15,10 @@
 # ---- small Markdown helpers -------------------------------------------------
 
 qual_md_escape <- function(x) {
-  x <- as.character(x)
-  x[is.na(x)] <- ""
-  gsub("\\|", "\\\\|", gsub("[\r\n]+", " ", x))
+  # Evidence text (failure messages, titles, paths, regular expressions) is
+  # data: pandoc must not read it as raw HTML, TeX, maths or emphasis, and an
+  # address in it stays text rather than becoming a link.
+  .md_escape(gsub("[\r\n]+", " ", as.character(x)), table = TRUE, links = FALSE)
 }
 
 qual_md_table <- function(df, align = NULL) {
@@ -339,13 +340,13 @@ qual_report_stage_detail <- function(x, rows) {
     ]
     out <- c(
       out,
-      sprintf("**%s** (%s) - %s", bad$tc_id[[i]], bad$status[[i]], bad$title[[i]]),
+      sprintf("**%s** (%s) - %s", bad$tc_id[[i]], bad$status[[i]], qual_md_escape(bad$title[[i]])),
       ""
     )
     for (j in seq_len(nrow(exps))) {
       out <- c(out, sprintf(
         "- `%s:%s` [%s] %s",
-        exps$file[[j]], exps$line[[j]], exps$type[[j]], exps$message[[j]]
+        exps$file[[j]], exps$line[[j]], exps$type[[j]], qual_md_escape(exps$message[[j]])
       ))
     }
     out <- c(out, "")

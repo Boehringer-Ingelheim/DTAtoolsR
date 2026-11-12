@@ -46,19 +46,10 @@ test_that("DTAColumnSpec rejects invalid metadata combinations", {
   expect_error(DTAColumnSpec(id = "AGE", colclass = "not_a_real_class"), "colclass")
 })
 
-test_that("DTAColumnSpec @id validator only rejects whitespace (documented gap)", {
-  # The validator checks `is.null(self@id) || any(grepl("\\s", self@id))` and
-  # nothing else, so the three ids below are accepted today even though none of
-  # them is a usable column id: an empty string, a zero-length vector, and a
-  # multi-element vector (which silently makes @id non-scalar).
-  #
-  # These expectations PIN the current behaviour rather than assert the desired
-  # behaviour -- asserting that they error requires tightening the validator in
-  # R/DTAColumnSpec-class.R. When that fix lands these three lines must flip to
-  # expect_error(), which is exactly the deliberate, visible change we want.
-  expect_identical(DTAColumnSpec(id = "")@id, "")
-  expect_identical(DTAColumnSpec(id = character(0))@id, character(0))
-  expect_identical(DTAColumnSpec(id = c("A", "B"))@id, c("A", "B"))
+test_that("DTAColumnSpec @id validator rejects empty, zero-length and multi-element ids", {
+  expect_error(DTAColumnSpec(id = ""), class = "dta_spec_invalid_id")
+  expect_error(DTAColumnSpec(id = character(0)), class = "dta_spec_invalid_id")
+  expect_error(DTAColumnSpec(id = c("A", "B")), class = "dta_spec_invalid_id")
 })
 
 test_that("DTAColumnSpec builds structure metadata from type and format", {
@@ -170,18 +161,12 @@ test_that("DTAColumnSpecStructureFactory validates backend prefixes", {
     "supported backends"
   )
 
-  # With no type, format or length there is no deliberate guard: the factory
-  # falls through to `switch(NULL, ...)` and R raises its own base-level
-  # "EXPR must be a length 1 vector". That message is localised (it is German on
-  # a German R install), so pin the condition class instead of the text. The
-  # class is the informative part: a bare `simpleError` rather than the
-  # `rlang_error` that cli_abort() would produce is itself the evidence that
-  # this input is unguarded rather than deliberately rejected.
-  err <- expect_error(
+  # With no type, format or length there is no backend to build: a package
+  # error, not R's base "EXPR must be a length 1 vector" from switch(NULL, ...).
+  expect_error(
     DTAColumnSpecStructureFactory(type = NULL, format = NULL, length = NULL),
-    class = "simpleError"
+    class = "dta_spec_no_backend"
   )
-  expect_false(inherits(err, "rlang_error"))
 })
 
 # ---- schema derivation for a column with no @structure ----------------------
@@ -266,4 +251,68 @@ test_that("get_arrow_type does not interpolate braces in a column id", {
     fixed = TRUE,
     class = "rlang_error"
   )
+})
+
+# ---- review fixes: construction guards -------------------------------------
+
+test_that("a column declaring only a length aborts with a package error naming the backend", {
+  expect_error(
+    DTAColumnSpec(id = "X", length = 20),
+    class = "dta_spec_no_backend"
+  )
+  expect_error(
+    specs_from_list(columns = list(list(id = "X", length = 20))),
+    class = "dta_spec_no_backend"
+  )
+})
+
+test_that("a column id must be a single, non-missing, non-empty string without whitespace", {
+  for (bad in list("", NA_character_, character(0), c("A", "B"), "A B")) {
+    expect_error(DTAColumnSpec(id = bad), class = "dta_spec_invalid_id")
+  }
+  expect_s3_class(DTAColumnSpec(id = "A_B"), "S7_object")
+})
+
+test_that("nullable must be a single TRUE or FALSE", {
+  expect_error(DTAColumnSpec(id = "X", nullable = NA), class = "dta_spec_invalid_nullable")
+  expect_error(DTAColumnSpec(id = "X", nullable = c(TRUE, FALSE)), class = "dta_spec_invalid_nullable")
+  expect_false(DTAColumnSpec(id = "X", nullable = FALSE)@nullable)
+})
+
+test_that("values read from YAML as logicals abort with a quoting hint", {
+  parsed <- yaml::yaml.load("values: [Y, N]")$values
+  expect_true(is.logical(parsed))
+  expect_error(DTAColumnSpec(id = "X", values = parsed), class = "dta_spec_logical_values")
+  expect_error(
+    DTAColumnSpec(id = "X", values = as.list(parsed)),
+    class = "dta_spec_logical_values"
+  )
+})
+
+test_that("create_example_DTAColumnSpec aborts on an unknown index with a cli condition", {
+  expect_error(create_example_DTAColumnSpec(99), class = "rlang_error", regexp = "Invalid index")
+})
+
+test_that("print of a column spec shows the id even when there is no label", {
+  out <- cli::cli_fmt(print(DTAColumnSpec(id = "NOLABEL", type = "SAS Char")))
+  expect_true(any(grepl("NOLABEL", out, fixed = TRUE)))
+})
+
+test_that("a mixed list holding a YAML-logical Y/N still gets the quoting hint", {
+  # `[Y, N, U]` parses to list(TRUE, FALSE, "U"); flattening it first turned
+  # the logicals into the text "TRUE"/"FALSE" with no complaint.
+  parsed <- yaml::yaml.load("values: [Y, N, U]")$values
+  expect_error(DTAColumnSpec(id = "X", values = parsed), class = "dta_spec_logical_values")
+
+  yml <- tempfile(fileext = ".yaml")
+  writeLines(
+    c("columns:", "  FLAG:", "    id: FLAG", "    type: SAS Char", "    nullable: false", "    values: [Y, N, U]"),
+    yml
+  )
+  # The YAML entry point lints first and wraps the same hint.
+  expect_error(import_specs_from_yaml(yml), class = "dta_lint_error")
+
+  # Quoted, the same list is plain text and is kept as written.
+  ok <- DTAColumnSpec(id = "X", values = list("Y", "N", "U"))
+  expect_identical(ok@values, c("Y", "N", "U"))
 })

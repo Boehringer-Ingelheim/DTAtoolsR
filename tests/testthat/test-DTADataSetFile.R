@@ -599,9 +599,22 @@ test_that("handler_index resolves a character index numerically, not via string 
 test_that("handler_index aborts on NULL, NA, or a length-2 value", {
   handlers <- list(DTAFileAny(filename = "a.txt"), DTAFileAny(filename = "b.txt"))
 
-  expect_error(dta_resolve_file_handler_index(NULL, handlers), class = "rlang_error")
-  expect_error(dta_resolve_file_handler_index(NA, handlers), class = "rlang_error")
-  expect_error(dta_resolve_file_handler_index(c(1, 2), handlers), class = "rlang_error")
+  abort_text <- "must be a single, non-missing character or numeric value"
+  expect_error(
+    dta_resolve_file_handler_index(NULL, handlers),
+    abort_text,
+    fixed = TRUE, class = "rlang_error"
+  )
+  expect_error(
+    dta_resolve_file_handler_index(NA, handlers),
+    abort_text,
+    fixed = TRUE, class = "rlang_error"
+  )
+  expect_error(
+    dta_resolve_file_handler_index(c(1, 2), handlers),
+    abort_text,
+    fixed = TRUE, class = "rlang_error"
+  )
 })
 
 # ---------------------------------------------------------------------------
@@ -724,4 +737,179 @@ test_that("a restored dataset whose artifact directory is gone can still be used
     },
     "single directory path"
   )
+})
+
+# ---- stale 'not delivered' rows and declared file counts --------------------
+
+delivery_dir_for_counts <- function() {
+  dir <- tempfile("delivery")
+  dir.create(dir)
+  dir
+}
+
+touch_delivery <- function(dir, name) {
+  path <- file.path(dir, name)
+  writeLines("x", path)
+  path
+}
+
+test_that("a pattern's 'not delivered' row disappears once a file satisfies it", {
+  dir <- delivery_dir_for_counts()
+  ds <- DTADataSetFile(
+    id = "r",
+    files = list(DTAFileAny("^report_.*[.]pdf$", pattern = TRUE))
+  )
+  ds <- check(ds, quiet = TRUE, persist = FALSE)
+  status <- validation_status(ds)
+  expect_identical(status$table, "^report_.*[.]pdf$")
+  expect_false(status$ok)
+  # A regex is not a file name, and the message must not say it is.
+  expect_match(messages(ds)$message, "matching pattern", fixed = TRUE)
+
+  ds <- load_file(ds, file = touch_delivery(dir, "report_1.pdf"))
+  ds <- check(ds, quiet = TRUE, persist = FALSE)
+  status <- validation_status(ds)
+  expect_identical(status$table, "report_1.pdf")
+  expect_true(all(status$ok))
+  expect_identical(names(ds@validation_index), "report_1.pdf")
+})
+
+test_that("min and max number of files are enforced against the delivery", {
+  dir <- delivery_dir_for_counts()
+  handler <- DTAFileAny(
+    "^report_.*[.]pdf$",
+    pattern = TRUE,
+    min_number_of_files = 3,
+    max_number_of_files = 3
+  )
+  ds <- DTADataSetFile(id = "r", files = list(handler))
+  ds <- load_file(ds, file = touch_delivery(dir, "report_1.pdf"))
+  ds <- check(ds, quiet = TRUE, persist = FALSE)
+
+  status <- validation_status(ds)
+  expect_false(all(status$ok))
+  expect_match(messages(ds)$message, "Expected 3 file(s)", fixed = TRUE)
+  expect_match(messages(ds)$message, "got 1", fixed = TRUE)
+
+  ds <- load_file(ds, file = touch_delivery(dir, "report_2.pdf"))
+  ds <- load_file(ds, file = touch_delivery(dir, "report_3.pdf"))
+  ds <- check(ds, quiet = TRUE, persist = FALSE)
+  expect_true(all(validation_status(ds)$ok))
+  expect_identical(nrow(validation_status(ds)), 3L)
+
+  # Over the maximum fails too, and with a message naming the count.
+  ds <- load_file(ds, file = touch_delivery(dir, "report_4.pdf"))
+  ds <- check(ds, quiet = TRUE, persist = FALSE)
+  expect_false(all(validation_status(ds)$ok))
+  expect_match(messages(ds)$message, "got 4", fixed = TRUE)
+})
+
+test_that("an open-ended minimum fails only below it", {
+  dir <- delivery_dir_for_counts()
+  handler <- DTAFileAny("^r_.*[.]txt$", pattern = TRUE, min_number_of_files = 2)
+  ds <- DTADataSetFile(id = "r", files = list(handler))
+  ds <- load_file(ds, file = touch_delivery(dir, "r_1.txt"))
+  expect_false(all(validation_status(check(ds, quiet = TRUE, persist = FALSE))$ok))
+  ds <- load_file(ds, file = touch_delivery(dir, "r_2.txt"))
+  ds <- load_file(ds, file = touch_delivery(dir, "r_3.txt"))
+  expect_true(all(validation_status(check(ds, quiet = TRUE, persist = FALSE))$ok))
+})
+
+# --- The file count follows routing --------------------------------------------
+
+test_that("each pattern entry counts the files routed to it, not every file its name matches", {
+  # Two entries that differ only in their container: by name both match both
+  # PDFs, so a name-based count says 2 for each against a limit of 1.
+  dta <- DTA(datasets = list(DTADataSetFile(id = "docs", files = list(
+    DTAFileAny("[.]pdf$", pattern = TRUE, number_of_files = 1, container = "sdtm.zip"),
+    DTAFileAny("[.]pdf$", pattern = TRUE, number_of_files = 1, container = "adam.zip")
+  ))))
+  d <- suppressMessages(load_delivery(dta, c(
+    cont_zip(list("csdrg.pdf" = "%PDF-1.4 a"), name = "sdtm.zip"),
+    cont_zip(list("adrg.pdf" = "%PDF-1.4 b"), name = "adam.zip")
+  )))
+  ds <- datasets(d, "docs")
+  expect_identical(ds@file_handlers, c(1L, 2L))
+  expect_true(all(validation_status(check(ds, quiet = TRUE, persist = FALSE))$ok))
+
+  # An over-count of one entry is still reported.
+  ds <- load_file(ds, file = cont_write("extra.pdf", "%PDF"), handler_index = 1)
+  ck <- check(ds, quiet = TRUE, persist = FALSE)
+  expect_false(all(validation_status(ck)$ok))
+  expect_match(messages(ck)$message, "got 2", fixed = TRUE)
+})
+
+test_that("a literal entry beside a pattern entry takes its file out of the pattern count", {
+  mk <- function() {
+    DTADataSetFile(id = "docs", files = list(
+      DTAFileAny("[.]pdf$", pattern = TRUE, number_of_files = 1),
+      DTAFileAny("define.pdf")
+    ))
+  }
+  dir <- delivery_dir_for_counts()
+  guide <- touch_delivery(dir, "guide.pdf")
+  define <- touch_delivery(dir, "define.pdf")
+  ok <- function(ds) all(validation_status(check(ds, quiet = TRUE, persist = FALSE))$ok)
+
+  # Routed by load_delivery().
+  routed <- suppressMessages(load_delivery(DTA(datasets = list(mk())), c(guide, define)))
+  expect_true(ok(datasets(routed, "docs")))
+
+  # Two manual calls, each naming its entry.
+  ds <- load_file(load_file(mk(), file = guide, handler_index = 1), file = define, handler_index = 2)
+  expect_identical(ds@file_handlers, c(1L, 2L))
+  expect_true(ok(ds))
+
+  # Out of step (a legacy object, or paths edited directly): the name test
+  # still lets the literal entry win.
+  ds@file_handlers <- integer()
+  expect_true(ok(ds))
+  ds@file_handlers <- c(1L, NA_integer_)
+  expect_true(ok(ds))
+
+  # More files than the pattern entry allows are still caught on the fallback.
+  ds@file_handlers <- integer()
+  ds <- load_file(ds, file = touch_delivery(dir, "second.pdf"), handler_index = 1)
+  ds@file_handlers <- integer()
+  expect_false(ok(ds))
+})
+
+# Regression (round-2 review): entries reordered or removed after load_file()
+# left recorded indices pointing at another entry, which the count believed.
+test_that("a recorded entry that no longer takes the file is not believed", {
+  dir <- delivery_dir_for_counts()
+  files <- c(
+    touch_delivery(dir, "guide.pdf"), touch_delivery(dir, "define.pdf"),
+    touch_delivery(dir, "define.xml")
+  )
+  ok <- function(ds) all(validation_status(check(ds, quiet = TRUE, persist = FALSE))$ok)
+  pdf <- DTAFileAny("[.]pdf$", pattern = TRUE, number_of_files = 2)
+  xml <- DTAFileAny("[.]xml$", pattern = TRUE, number_of_files = 1)
+  ds <- DTADataSetFile(id = "docs", files = list(pdf, xml))
+  for (i in seq_along(files)) ds <- load_file(ds, file = files[[i]], handler_index = if (i < 3) 1 else 2)
+  expect_identical(ds@file_handlers, c(1L, 1L, 2L))
+  expect_true(ok(ds))
+
+  # Swapped entries: every recorded index now names the wrong entry.
+  swapped <- ds
+  swapped@files <- list(xml, pdf)
+  expect_true(ok(swapped))
+  # An index past the last entry.
+  short <- ds
+  short@file_handlers <- c(1L, 1L, 9L)
+  expect_true(ok(short))
+})
+
+test_that("an entry with a minimum of zero is optional", {
+  dir <- delivery_dir_for_counts()
+  report <- touch_delivery(dir, "report.pdf")
+  mk <- function(min) {
+    DTADataSetFile(id = "f", paths = report, files = list(
+      DTAFileAny("report.pdf"),
+      DTAFileAny("^annex_.*[.]pdf$", pattern = TRUE, min_number_of_files = min, max_number_of_files = 3)
+    ))
+  }
+  ok <- function(ds) all(validation_status(check(ds, quiet = TRUE, persist = FALSE))$ok)
+  expect_true(ok(mk(0)))
+  expect_false(ok(mk(1)))
 })

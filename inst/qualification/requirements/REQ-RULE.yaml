@@ -165,7 +165,9 @@ requirements:
   - id: REQ-RULE-016
     text: >
       A range rule shall require exactly one target column, and shall raise a
-      condition when given none or several.
+      condition when given none or several: a rule naming several columns is
+      refused when it is constructed, with the condition class
+      dta_rule_range_columns.
     risk: medium
     category: interface
     covers: [DTARuleColRange, rule_check_range]
@@ -345,7 +347,8 @@ requirements:
       exactly two for range, at least one for in and not_in, and a single
       TRUE or FALSE for empty. A missing value does not count as a value for
       the single-value operators or range; a missing member of in or not_in
-      is allowed, and matches missing values.
+      is allowed, and matches missing values; an empty YAML entry (~) is a
+      missing member.
     risk: high
     category: functional
     covers: [DTARuleColCondition, DTARuleGroupCondition]

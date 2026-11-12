@@ -12,60 +12,6 @@ skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
 
-# Path of `filename` inside library root `root`, routed by its kind suffix:
-# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
-# for everything else (creation and dataset templates, and the plain data
-# files that sit beside them, which resolve relative to the template).
-# Creates the folder, so a fixture can write straight to the returned path.
-lib_path <- function(root, filename) {
-  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
-    "parties"
-  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
-    "vocabulary"
-  } else {
-    "templates"
-  }
-  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
-  file.path(root, sub, filename)
-}
-
-app_server_dir <- function() .shiny_app_dir()
-
-# Local copy of the isolation helper defined in test-shinyapp-template-
-# sources.R and test-shinyapp-template-create.R -- deliberately duplicated
-# (per those files' own stated convention) so this file does not depend on
-# another test file's internals. Every DTATOOLS_TEMPLATE_* variable is
-# cleared for the duration of each test: a developer machine with
-# DTATOOLS_TEMPLATE_SOURCES exported would flip the app into private-only
-# mode and fail unrelated tests confusingly.
-local_clean_template_env <- function(..., .local_envir = parent.frame()) {
-  withr::local_envvar(
-    c(
-      DTATOOLS_TEMPLATE_SOURCES = NA,
-      DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = NA,
-      DTATOOLS_TEMPLATE_REFRESH_SECONDS = NA,
-      DTATOOLS_TEMPLATE_CACHE_DIR = NA,
-      DTATOOLS_TEMPLATE_GIT_TOKEN = NA,
-      DTATOOLS_TEMPLATE_GIT_USER = NA,
-      DTATOOLS_TEMPLATE_GIT_AUTH = NA,
-      ...
-    ),
-    .local_envir = .local_envir
-  )
-  withr::local_options(
-    list(DTAtools.template_dir = NULL),
-    .local_envir = .local_envir
-  )
-}
-
-# The rendered HTML of a renderUI output, as one string -- copied from
-# test-shinyapp-server.R's own ui_text(), same rationale: a renderUI output is
-# never evaluated unless a test reads it, so anything asserted about a UI gate
-# (or, here, about a UI CRASH) has to go through this.
-ui_text <- function(out) {
-  if (is.null(out) || is.null(out$html)) "" else paste(as.character(out$html), collapse = "")
-}
-
 # How many times `pattern` (a fixed substring) occurs in `x` -- used as a
 # structural stand-in for "exactly N templates were listed" that does not
 # depend on knowing any template's exact label text.
@@ -158,20 +104,6 @@ pick_template_step1 <- function(session, output, id, version) {
   session$setInputs(template_select_name = id, template_select_version = version)
   session$setInputs(template_select_next = 1)
   invisible(html)
-}
-
-# Local copy of the autosave-slot cleanup defined in test-shinyapp-server.R /
-# test-shinyapp-versioning.R / test-shinyapp-edit-mode.R -- deliberately
-# duplicated, same rationale as local_clean_template_env() above: this is not
-# part of helper-shinyapp.R, so a test file that needs it owns its own copy
-# rather than depending on another test file's internals. Only the one
-# reload test below (dta_client_id + restore_session) needs it.
-clean_session_file <- function() {
-  f <- list.files(tempdir(),
-    pattern = "^dtatools_app_session.*\\.rds$", full.names = TRUE
-  )
-  unlink(f, force = TRUE)
-  invisible(f)
 }
 
 # ---- Picker: grouping by source, excluding the packaged template ----------
@@ -782,6 +714,46 @@ test_that("'From a file' with no file chosen is a clear error, and the modal sta
   shiny::testServer(app_server_dir(), {
     pick_template_step1(session, output, "filecarry_tpl", "1.0")
     session$setInputs(tmpl_carry_source = "file")
+    session$setInputs(template_create_confirm = 1)
+
+    expect_null(rv$dta)
+  })
+})
+
+test_that("a carry-over file chosen in an earlier dialog is not silently reused after the dialog is reopened", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+  write_min_template(root, id = "stalecarry_tpl", version = "1.0", label = "Stale Carry Template")
+
+  anc_path <- file.path(withr::local_tempdir(), "ancestor.yaml")
+  writeLines(
+    c(
+      "metadata:",
+      "  title: Stale Ancestor",
+      '  version: "1.0"',
+      "datasets:",
+      "  - id: anc_ds",
+      "    type: file",
+      "    files: { filename: a.csv, type: csv }"
+    ),
+    anc_path
+  )
+  anc_upload <- data.frame(
+    name = "ancestor.yaml", size = file.size(anc_path), type = "",
+    datapath = anc_path, stringsAsFactors = FALSE
+  )
+
+  shiny::testServer(app_server_dir(), {
+    pick_template_step1(session, output, "stalecarry_tpl", "1.0")
+    session$setInputs(tmpl_carry_source = "file")
+    session$setInputs(tmpl_carry_file = anc_upload)
+
+    # Reopen the options dialog: Shiny's client keeps the OLD fileInput value on
+    # the server even though the re-rendered control is empty.
+    session$setInputs(create_from_template = 2)
+    session$setInputs(template_select_next = 2)
     session$setInputs(template_create_confirm = 1)
 
     expect_null(rv$dta)

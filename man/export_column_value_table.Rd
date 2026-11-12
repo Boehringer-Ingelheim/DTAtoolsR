@@ -8,7 +8,8 @@ export_column_value_table(
   DTAColumnSpecCollection,
   file = "column_value_table.docx",
   id,
-  quiet = FALSE
+  quiet = FALSE,
+  overwrite = FALSE
 )
 }
 \arguments{
@@ -20,6 +21,8 @@ column specifications.}
 \item{id}{Character. The id of the column for which a table with all its values shall be generated.}
 
 \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
+
+\item{overwrite}{Logical. If FALSE (default), an existing \code{file} is not replaced and an error is raised.}
 }
 \value{
 Invisibly, the data.frame of values that was written to \code{file}.

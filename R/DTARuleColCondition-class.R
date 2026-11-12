@@ -78,9 +78,7 @@ DTARuleColCondition <- S7::new_class(
     then = class_character_or_list
   ),
   validator = function(self) {
-    if (!is.null(self@id) && (length(self@id) != 1 || !is.character(self@id) || any(grepl("\\s", self@id)))) {
-      cli_abort("@id cannot have whitespaces and needs to be defined.")
-    }
+    # The id is validated once, by the DTARule parent validator S7 runs first.
     if (!identical(self@type, "col_condition")) {
       cli_abort("{.arg type} must be {.val col_condition}.")
     }
@@ -116,14 +114,11 @@ method(print, DTARuleColCondition) <- function(x, ...) {
   cli_text("<{.emph DTARuleColCondition}> : {.field {x@id}}")
   if (!is.null(x@description)) cli_text("{x@description}")
 
-  # Both clauses map column -> constraint; .format_condition_map() names the
-  # column AND the operator ("'AGE' > '17'"). Assigned to a variable first so
-  # braces in a value are printed literally, not interpolated by cli.
-  if_text <- .format_condition_map(x@condition)
-  then_text <- .format_condition_map(x@then)
-  cli_alert_info("  {if_text}")
-  cli_alert("then:")
-  cli_text("  {then_text}")
+  # The shared one-line wording names every column, test and value of both
+  # clauses. Assigned to a variable first so braces in a value are printed
+  # literally, not interpolated by cli.
+  summary_text <- .rule_summary(x)
+  cli_alert_info("{summary_text}")
   invisible(x)
 }
 
@@ -154,13 +149,10 @@ create_example_DTARuleColCondition <- function(index = 1) {
 
 # check() method for DTARuleColCondition; documented at ?check (generic).
 method(check, DTARuleColCondition) <- function(x, tab) {
-  # nolint
-
-  if (!inherits(tab, "Table")) {
-    cli::cli_abort("The 'tab' argument must be an arrow Table.")
-  }
-
-  # TODO from here
+  cli::cli_abort(
+    "{.fn check} is not implemented for rules; use {.fn validate_table} on a table instead.",
+    class = "dta_rule_check_not_implemented"
+  )
 }
 
 

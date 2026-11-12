@@ -11,7 +11,7 @@
 #' @param columns Character. The single column the range applies to. The
 #'   property is a character vector for consistency with the other rule
 #'   classes, but a range rule must name exactly one column; more than one is
-#'   an error when the rule is evaluated.
+#'   an error (class `dta_rule_range_columns`) when the rule is constructed.
 #' @param range Numeric vector or list of length 2 (lower, upper). Legacy
 #'   argument for range checks; it is used only when both \code{min} and
 #'   \code{max} are \code{NULL}, and is ignored otherwise.
@@ -81,9 +81,7 @@ DTARuleColRange <- S7::new_class(
     max = class_numeric # Maximum value of the range
   ),
   validator = function(self) {
-    if (!is.null(self@id) && (length(self@id) != 1 || !is.character(self@id) || any(grepl("\\s", self@id)))) {
-      cli_abort("@id cannot have whitespaces and needs to be defined.")
-    }
+    # The id is validated once, by the DTARule parent validator S7 runs first.
 
     if (!identical(self@type, "col_range")) {
       cli_abort("{.arg type} must be {.val col_range}.")
@@ -93,8 +91,22 @@ DTARuleColRange <- S7::new_class(
       cli_abort("A 'columns' must be set.")
     }
 
+    if (length(self@columns) != 1L) {
+      cli_abort(
+        "A range rule names exactly one column, not {length(self@columns)}.",
+        class = "dta_rule_range_columns"
+      )
+    }
+
     if (!is.numeric(self@min) || !is.numeric(self@max)) {
       cli_abort("Min and max range must be numeric.")
+    }
+
+    if (length(self@min) != 1L || length(self@max) != 1L || is.na(self@min) || is.na(self@max)) {
+      cli_abort(
+        "Min and max must each be a single, non-missing number.",
+        class = "dta_rule_invalid_range"
+      )
     }
 
     if (self@min >= self@max) {
@@ -143,13 +155,10 @@ create_example_DTARuleColRange <- function(index = 1) {
 
 # check() method for DTARuleColRange; documented at ?check (generic).
 method(check, DTARuleColRange) <- function(x, tab) {
-  # nolint
-
-  if (!inherits(tab, "Table")) {
-    cli::cli_abort("The 'tab' argument must be an arrow Table.")
-  }
-
-  # TODO from here
+  cli::cli_abort(
+    "{.fn check} is not implemented for rules; use {.fn validate_table} on a table instead.",
+    class = "dta_rule_check_not_implemented"
+  )
 }
 
 #' @export

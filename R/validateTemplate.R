@@ -84,7 +84,7 @@
   if (!dir.exists(r_dir)) {
     cli::cli_abort("Found {.file {app_dir}} but it has no {.file R/} directory of engine code.")
   }
-  files <- sort(list.files(r_dir, pattern = "[.][Rr]$", full.names = TRUE), method = "radix")
+  files <- sort(enc2utf8(list.files(r_dir, pattern = "[.][Rr]$", full.names = TRUE)), method = "radix")
   if (length(files) == 0) {
     cli::cli_abort("Found {.file {r_dir}} but it contains no {.file .R} files.")
   }
@@ -192,7 +192,7 @@
   # output (which file "wins" a duplicate-id@version, which file the strict
   # abort lists first) must not depend on which machine ran it. See the
   # project's own "locale collation diverges from CI" lesson.
-  sort(unique(files), method = "radix")
+  sort(enc2utf8(unique(files)), method = "radix")
 }
 
 # Recursive counterpart to .dta_template_list_dir(), used ONLY to find files the
@@ -497,6 +497,25 @@
       kind, id, version, "warning", "kind_unknown",
       sprintf("kind '%s' is not one of the known template kinds (%s).", kind, paste(all_kinds, collapse = ", "))
     )
+  } else {
+    # The app picks a file's kind from its NAME, never from `kind:`, so a file
+    # whose suffix names another kind is loaded as that other kind (or, for a
+    # party profile in templates/, rejected by its reader). Only a basename that
+    # matches exactly one kind pattern is judged; an unsuffixed one is a
+    # different problem (it is never loaded) and not this rule's business.
+    kind_pattern <- .dta_template_engine_get("dta_template_kind_pattern")
+    by_name <- all_kinds[vapply(
+      all_kinds, function(k) grepl(kind_pattern(k), basename(path), ignore.case = TRUE), logical(1)
+    )]
+    if (length(by_name) == 1L && !identical(by_name, kind)) {
+      add(
+        kind, id, version, "error", "kind_suffix_mismatch",
+        sprintf(
+          "File name says kind '%s' but the file declares kind '%s'; the app picks the kind from the file name, so it is loaded as '%s'. Rename the file or correct `kind:`.",
+          by_name, kind, by_name
+        )
+      )
+    }
   }
 
   if (is.na(id) || !nzchar(id)) {
@@ -541,11 +560,29 @@
     .dta_template_check_dataset_tpl(path, id, version, def, index_df)
   } else if (identical(kind, "dta_vocabulary")) {
     .dta_template_check_vocabulary(path, id, version, index_df)
+  } else if (identical(kind, "dta_party_profile")) {
+    .dta_template_check_party(path, id, version)
   } else {
     list()
   }
 
   .dta_template_bind_rows(c(rows, kind_rows))
+}
+
+# A party profile is validated by the reader the app itself uses; a file it
+# rejects never appears in the party picker.
+.dta_template_check_party <- function(path, id, version) {
+  # suppressWarnings: a validator must not also signal its findings (cf. the
+  # note on .dta_template_read_raw()).
+  # Not reported here: the reader drops malformed contacts with a warning,
+  # which is suppressed above.
+  read <- suppressWarnings(.dta_template_engine_get("read_party_profile")(path))
+  if (isTRUE(read$ok)) {
+    return(list())
+  }
+  list(.dta_template_row(
+    path, "dta_party_profile", id, version, "error", "party_profile_invalid", read$error
+  ))
 }
 
 # Every structural + dry-run-build check specific to a creation template.
@@ -1359,7 +1396,7 @@
   if (nrow(hits) == 0) {
     return(.dta_template_validation_empty())
   }
-  hits <- hits[order(hits$file, method = "radix"), , drop = FALSE]
+  hits <- hits[order(enc2utf8(hits$file), method = "radix"), , drop = FALSE]
 
   # A kind folder passed as `path`: every file in it is "misplaced" relative to
   # a root that is not there. One row naming the real mistake beats N rows.
@@ -1460,7 +1497,7 @@
     strsplit(rel, "[/\\]"),
     function(p) any(grepl("^[.]", utils::head(p, -1L))), logical(1)
   )
-  for (f in file.path(path, sort(rel[!under_dotdir], method = "radix"))) {
+  for (f in file.path(path, sort(enc2utf8(rel[!under_dotdir]), method = "radix"))) {
     row(
       f, "error", "app_config_misplaced",
       "App configuration file belongs in the repository root, directly next to templates/, parties/ and vocabulary/; the app reads only the root, so this file is invisible. Move it there (or delete it)."
@@ -1475,14 +1512,17 @@
 # dialog. Anything else sitting there (a .doc, a .pdf, a stray .txt) is
 # silently ignored by it, which is exactly the kind of thing an author wants to
 # hear about; dotfiles, README files and Word's own "~$" lock files are
-# ordinary clutter and stay quiet. Runs for a directory whatever `kinds` says.
+# ordinary clutter and stay quiet. A .docx with no {PLACEHOLDER} marker (or one
+# that is not a readable Word document) is ignored too, so it is reported as
+# well, unless dta-app.yaml lists it (the app offers listed files unfiltered).
+# Runs for a directory whatever `kinds` says.
 .dta_template_check_export_templates <- function(path, is_dir) {
   if (!is_dir) {
     return(.dta_template_validation_empty())
   }
   dir <- file.path(path, .dta_template_engine_get("dta_export_templates_subdir")())
   files <- list.files(dir, full.names = TRUE, recursive = FALSE)
-  files <- sort(files[!dir.exists(files)], method = "radix")
+  files <- sort(enc2utf8(files[!dir.exists(files)]), method = "radix")
   base <- basename(files)
   bad <- !grepl("[.]docx$", base, ignore.case = TRUE) &
     !grepl("^README([.](md|txt))?$|^~[$]", base, ignore.case = TRUE)
@@ -1493,6 +1533,28 @@
       "Only .docx Word templates are offered as export templates; this file is ignored."
     )
   })
+  docx <- files[grepl("[.]docx$", base, ignore.case = TRUE) & !startsWith(base, "~$")]
+  has_placeholders <- .dta_template_engine_get("template_has_placeholders")
+  docx <- docx[!vapply(docx, function(f) isTRUE(has_placeholders(f)), logical(1))]
+  # The app offers a file dta-app.yaml lists whatever it contains, so a listed
+  # one is the author's explicit choice and stays quiet. The paths come from
+  # the app's own finder and parser, as in the app-config check above.
+  cfg_file <- .dta_template_engine_get("dta_app_config_find")(path)$path
+  if (length(docx) > 0 && !is.na(cfg_file)) {
+    parsed <- tryCatch(
+      .dta_template_engine_get("parse_dta_app_config")(cfg_file),
+      error = function(e) NULL
+    )
+    listed <- parsed$config$exports$word_templates$path
+    docx <- docx[!normalizePath(docx, winslash = "/", mustWork = FALSE) %in% listed]
+  }
+  rows <- c(rows, lapply(docx, function(f) {
+    .dta_template_row(
+      f, "dta_export_template", NA_character_, NA_character_,
+      "warning", "export_template_no_placeholders",
+      "This file contains no {PLACEHOLDER} marker or is not a readable Word document, so the app does not offer it unless dta-app.yaml lists it, and exporting through it inserts no DTA content."
+    )
+  }))
   .dta_template_bind_rows(rows)
 }
 
@@ -1544,7 +1606,9 @@
 #' and mirrored to GitHub for CI) run its own continuous integration against
 #' the templates it authors, with nothing more than an R installation of
 #' DTAtools. See `system.file("extdata", "ci", "validate-templates.yml",
-#' package = "DTAtools")` for a ready-to-copy GitHub Actions workflow.
+#' package = "DTAtools")` for a ready-to-copy GitHub Actions workflow. For
+#' repository CI, [lint_template_repo()] runs these checks plus
+#' repository-format checks and prints every finding.
 #'
 #' @details
 #' A template library is a repository root with one folder per file kind:
@@ -1585,7 +1649,11 @@
 #' creation template's hand-written `prior_versions:`), `mixin_invalid` (a
 #' malformed `mixins:` value, or a named template that is not a valid mixin),
 #' `mixin_conflict` (a key contributed twice, or a mixin an ancestor already
-#' mixes in), the app-configuration
+#' mixes in), `kind_suffix_mismatch` (the file name's kind suffix and the
+#' declared `kind:` disagree; the app takes the kind from the name),
+#' `party_profile_invalid` (the app's party-profile reader rejects the file,
+#' for instance an unknown `role:`; it never appears in the party picker; it
+#' may accompany `id_missing` or `version_missing`), the app-configuration
 #' errors `app_config_invalid` (a bad value in `dta-app.yaml`, or a missing
 #' logo or Word template it names), `app_config_duplicate` (both
 #' `dta-app.yaml` and `dta-app.yml` in the repository root) and
@@ -1609,7 +1677,10 @@
 #' app-configuration warnings `app_config_unknown_key` and
 #' `app_config_warning`, and `export_template_invalid` (a file in
 #' `export-templates/` that is not a `.docx` Word document, and is therefore
-#' ignored by the app). The app-configuration and `export-templates/` checks
+#' ignored by the app) and `export_template_no_placeholders` (a `.docx` there
+#' with no `{PLACEHOLDER}` marker, or not a readable Word document, which the
+#' app does not offer unless `dta-app.yaml` lists it; a listed file is not
+#' reported). The app-configuration and `export-templates/` checks
 #' run on every directory scan regardless of `kinds`.
 #'
 #' @param path A template file or a library root (the repository root). For a
@@ -1690,7 +1761,7 @@ validate_template <- function(path, strict = FALSE, kinds = NULL) {
   if (nrow(result) > 0) {
     # Deterministic order across locales/OSes -- see the "locale collation
     # diverges from CI" lesson referenced in .dta_template_list_dir().
-    result <- result[order(result$file, result$code, method = "radix"), , drop = FALSE]
+    result <- result[order(enc2utf8(result$file), result$code, method = "radix"), , drop = FALSE]
   }
   rownames(result) <- NULL
 

@@ -110,25 +110,25 @@ expect_no_code_row <- function(result, code) {
 test_that("validate_template() aborts for a path that does not exist", {
   expect_error(
     validate_template(file.path(withr::local_tempdir(), "nope")),
-    class = "rlang_error"
+    regexp = "does not exist", class = "rlang_error"
   )
 })
 
 test_that("validate_template() aborts for a non-scalar/empty path", {
-  expect_error(validate_template(character(0)), class = "rlang_error")
-  expect_error(validate_template(NA_character_), class = "rlang_error")
-  expect_error(validate_template(c("a", "b")), class = "rlang_error")
+  expect_error(validate_template(character(0)), regexp = "single non-empty", class = "rlang_error")
+  expect_error(validate_template(NA_character_), regexp = "single non-empty", class = "rlang_error")
+  expect_error(validate_template(c("a", "b")), regexp = "single non-empty", class = "rlang_error")
 })
 
 test_that("validate_template() aborts for a non-scalar-logical strict", {
   dir <- withr::local_tempdir()
-  expect_error(validate_template(dir, strict = "yes"), class = "rlang_error")
-  expect_error(validate_template(dir, strict = NA), class = "rlang_error")
+  expect_error(validate_template(dir, strict = "yes"), regexp = "single `TRUE`/`FALSE`", class = "rlang_error")
+  expect_error(validate_template(dir, strict = NA), regexp = "single `TRUE`/`FALSE`", class = "rlang_error")
 })
 
 test_that("validate_template() aborts for an unknown kind in `kinds`", {
   dir <- withr::local_tempdir()
-  expect_error(validate_template(dir, kinds = "not_a_kind"), class = "rlang_error")
+  expect_error(validate_template(dir, kinds = "not_a_kind"), regexp = "Unknown template kind", class = "rlang_error")
 })
 
 # ---- Clean directory --------------------------------------------------------
@@ -758,7 +758,10 @@ test_that("a column with a values_from binding is built without the binding key 
 test_that("strict = TRUE aborts on a column_spec_invalid error", {
   dir <- withr::local_tempdir()
   write_column_tpl(dir, "{id: BADPAT, type: SAS Char, pattern: \"^[0-9]+$\", examples: [abc]}")
-  expect_error(validate_template(dir, strict = TRUE), "Template validation found")
+  err <- tryCatch(validate_template(dir, strict = TRUE), error = function(e) e)
+  expect_s3_class(err, "rlang_error")
+  expect_match(conditionMessage(err), "found 1 error", fixed = TRUE)
+  expect_match(conditionMessage(err), "[column_spec_invalid]", fixed = TRUE)
 })
 
 # ---- linter codes (lint_dta) ------------------------------------------------
@@ -789,7 +792,10 @@ test_that("a dataset template rule on an undeclared column is a rule_column_unde
   result <- validate_template(dir)
   rows <- expect_code_row(result, "rule_column_undeclared", "error")
   expect_equal(nrow(rows), 1)
-  expect_error(validate_template(dir, strict = TRUE), "Template validation found")
+  err <- tryCatch(validate_template(dir, strict = TRUE), error = function(e) e)
+  expect_s3_class(err, "rlang_error")
+  expect_match(conditionMessage(err), "found 1 error", fixed = TRUE)
+  expect_match(conditionMessage(err), "[rule_column_undeclared]", fixed = TRUE)
 })
 
 test_that("a dataset template with rules on declared columns, including a values_from column, is clean", {
@@ -1003,11 +1009,51 @@ test_that("strict = TRUE aborts, summarising the error count, when any row is se
     lib_file(dir, "unquoted.dta-template.yaml")
   )
 
-  expect_error(
-    validate_template(dir, strict = TRUE),
-    regexp = "Template validation found",
-    class = "rlang_error"
+  result <- validate_template(dir)
+  errs <- result[result$severity == "error", , drop = FALSE]
+  expect_gte(nrow(errs), 1)
+
+  err <- tryCatch(validate_template(dir, strict = TRUE), error = function(e) e)
+  expect_s3_class(err, "rlang_error")
+  msg <- conditionMessage(err)
+  expect_match(msg, "Template validation found", fixed = TRUE)
+  expect_match(msg, sprintf("found %d error", nrow(errs)), fixed = TRUE)
+  expect_match(msg, "[version_unquoted]", fixed = TRUE)
+  expect_true("version_unquoted" %in% errs$code)
+})
+
+test_that("strict = TRUE does not abort on warning-only findings and returns the rows", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c("kind: something_else", "id: x", "version: \"1.0\""),
+    lib_file(dir, "x.dta-template.yaml")
   )
+  expected <- validate_template(dir)
+  expect_gte(nrow(expected), 1)
+  expect_true(all(expected$severity == "warning"))
+
+  expect_no_error(res <- validate_template(dir, strict = TRUE))
+  expect_true("kind_unknown" %in% res$code)
+  expect_false(any(res$severity == "error"))
+  expect_true(all(res$severity == "warning"))
+})
+
+test_that("strict = TRUE lists at most five errors and counts the rest", {
+  dir <- withr::local_tempdir()
+  for (i in 1:7) {
+    nm <- paste0("m", i)
+    writeLines(party_lines(nm), lib_file(dir, paste0(nm, ".dta-template.yaml")))
+  }
+  result <- validate_template(dir)
+  expect_equal(sum(result$severity == "error"), 7)
+
+  err <- tryCatch(validate_template(dir, strict = TRUE), error = function(e) e)
+  expect_s3_class(err, "rlang_error")
+  msg <- conditionMessage(err)
+  expect_match(msg, "found 7 error", fixed = TRUE)
+  expect_match(msg, "... and 2 more", fixed = TRUE)
+  lines <- strsplit(msg, "\n", fixed = TRUE)[[1]]
+  expect_equal(sum(grepl("[kind_suffix_mismatch]", lines, fixed = TRUE)), 5)
 })
 
 test_that("strict = TRUE never evaluates the offending file's path as a cli format string", {
@@ -1363,7 +1409,7 @@ test_that("strict = TRUE aborts on an empty directory instead of passing silentl
   # sailed through strict = TRUE, so a CI job pointed at a typo'd or stale
   # path went green having validated nothing.
   dir <- withr::local_tempdir()
-  expect_error(validate_template(dir, strict = TRUE), class = "rlang_error")
+  expect_error(validate_template(dir, strict = TRUE), regexp = "Template validation found", class = "rlang_error")
 })
 
 test_that("no_templates does not fire when path names a single file", {
@@ -1780,8 +1826,8 @@ test_that("export_template_invalid flags a non-docx file in export-templates/ an
   write_clean_template(dir)
   exp_dir <- file.path(dir, "export-templates")
   dir.create(exp_dir)
-  writeLines("x", file.path(exp_dir, "good.docx"))
-  writeLines("x", file.path(exp_dir, "GOOD2.DOCX"))
+  file.copy(.make_template("{TITLE}"), file.path(exp_dir, "good.docx"))
+  file.copy(.make_template("{TITLE}"), file.path(exp_dir, "GOOD2.DOCX"))
   writeLines("x", file.path(exp_dir, "README.md"))
   writeLines("x", file.path(exp_dir, "readme.txt"))
   writeLines("x", file.path(exp_dir, ".gitkeep"))
@@ -1831,6 +1877,108 @@ test_that("a single file never gets export-template rows", {
   writeLines("x", file.path(dir, "export-templates", "notes.txt"))
   result <- validate_template(file.path(dir, "templates", "clean.dta-template.yaml"))
   expect_equal(nrow(result), 0)
+})
+
+test_that("export_template_no_placeholders flags a .docx the app would not offer", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  exp_dir <- file.path(dir, "export-templates")
+  dir.create(exp_dir)
+  file.copy(.make_template("{TITLE}"), file.path(exp_dir, "ok.docx"))
+  writeLines("x", file.path(exp_dir, "~$x.docx")) # Word lock file: clutter
+  expect_equal(nrow(validate_template(dir)), 0)
+
+  file.copy(.make_template("No markers"), file.path(exp_dir, "plain.docx"))
+  writeLines("x", file.path(exp_dir, "broken.docx")) # not a zip at all
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "export_template_no_placeholders", "warning")
+  expect_setequal(basename(rows$file), c("plain.docx", "broken.docx"))
+  expect_true(all(rows$kind == "dta_export_template"))
+  expect_equal(nrow(result), 2)
+  # A warning: strict stays silent.
+  expect_no_error(validate_template(dir, strict = TRUE))
+})
+
+test_that("export_template_no_placeholders skips a marker-less .docx that dta-app.yaml lists", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  exp_dir <- file.path(dir, "export-templates")
+  dir.create(exp_dir)
+  file.copy(.make_template("No markers"), file.path(exp_dir, "listed.docx"))
+  file.copy(.make_template("No markers"), file.path(exp_dir, "unlisted.docx"))
+  writeLines(
+    c("exports:", "  word_templates:", "    - file: export-templates/listed.docx"),
+    file.path(dir, "dta-app.yaml")
+  )
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "export_template_no_placeholders", "warning")
+  expect_identical(basename(rows$file), "unlisted.docx")
+  expect_equal(nrow(result), 1)
+
+  # Without a config file the listed file is reported again.
+  file.remove(file.path(dir, "dta-app.yaml"))
+  rows <- expect_code_row(validate_template(dir), "export_template_no_placeholders", "warning")
+  expect_setequal(basename(rows$file), c("listed.docx", "unlisted.docx"))
+})
+
+# ---- kind_suffix_mismatch / party_profile_invalid ---------------------------
+
+test_that("kind_suffix_mismatch flags a file whose name says another kind than `kind:`", {
+  dir <- withr::local_tempdir()
+  write_party_file(dir) # positive control: name and kind agree
+  expect_no_code_row(validate_template(dir), "kind_suffix_mismatch")
+
+  # A party profile saved under the creation-template suffix.
+  writeLines(party_lines("mismatch"), lib_file(dir, "mismatch.dta-template.yaml"))
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "kind_suffix_mismatch", "error")
+  expect_equal(nrow(rows), 1)
+  expect_equal(basename(rows$file), "mismatch.dta-template.yaml")
+  expect_equal(rows$kind, "dta_party_profile")
+  expect_error(
+    validate_template(dir, strict = TRUE),
+    regexp = "found 1 error", fixed = TRUE, class = "rlang_error"
+  )
+  expect_error(
+    validate_template(dir, strict = TRUE),
+    regexp = "[kind_suffix_mismatch]", fixed = TRUE, class = "rlang_error"
+  )
+})
+
+test_that("an unknown declared kind stays kind_unknown, not kind_suffix_mismatch", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c("kind: something_else", "id: x", "version: \"1.0\""),
+    lib_file(dir, "x.dta-template.yaml")
+  )
+  result <- validate_template(dir)
+  expect_code_row(result, "kind_unknown", "warning")
+  expect_no_code_row(result, "kind_suffix_mismatch")
+})
+
+test_that("party_profile_invalid flags a profile the app's reader rejects", {
+  dir <- withr::local_tempdir()
+  write_party_file(dir, "good_party")
+  expect_equal(nrow(validate_template(dir)), 0)
+
+  writeLines(
+    sub("role: supplier", "role: vendor", party_lines("bad_party"), fixed = TRUE),
+    lib_file(dir, "bad_party.dta-party.yaml")
+  )
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "party_profile_invalid", "error")
+  expect_equal(nrow(rows), 1)
+  expect_equal(basename(rows$file), "bad_party.dta-party.yaml")
+  expect_equal(rows$id, "bad_party")
+  expect_match(rows$message, "vendor", fixed = TRUE)
+  expect_error(
+    validate_template(dir, strict = TRUE),
+    regexp = "found 1 error", fixed = TRUE, class = "rlang_error"
+  )
+  expect_error(
+    validate_template(dir, strict = TRUE),
+    regexp = "[party_profile_invalid]", fixed = TRUE, class = "rlang_error"
+  )
 })
 
 # ---- The scaffold validates under the same layout --------------------------

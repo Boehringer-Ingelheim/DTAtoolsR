@@ -172,7 +172,7 @@ test_that("the editor offers only the types a reader can restore", {
   # offering it would create a handler no document could be read back into.
   types <- app_fn("dta_handler_types")()
 
-  expect_equal(types, c("csv", "tsv"))
+  expect_equal(types, c("csv", "tsv", "sas7bdat", "xpt"))
 })
 
 test_that("only a pattern handler may carry several file names", {
@@ -194,7 +194,7 @@ test_that("dta_set_handler rejects an index that is not there", {
   )
 
   expect_false(res$ok)
-  expect_match(res$error, "not found")
+  expect_match(res$error, "File handler not found.", fixed = TRUE)
 })
 
 # ---- Removing and reordering ------------------------------------------------
@@ -234,7 +234,7 @@ test_that("dta_remove_handler rejects an index that is not there", {
   res <- fn(app_fixture_dta(), "clinical_data", 2)
 
   expect_false(res$ok)
-  expect_match(res$error, "not found")
+  expect_match(res$error, "File handler not found.", fixed = TRUE)
 })
 
 test_that("dta_move_handler swaps neighbours and stops at both ends", {
@@ -611,9 +611,9 @@ test_that("dta_match_handlers on a rewritten handler reports it as gone", {
 # DTAFileAny / "any" type in the Shiny app helpers -- new tests
 # ---------------------------------------------------------------------------
 
-test_that("dta_handler_types() with no argument still returns exactly c('csv','tsv')", {
+test_that("dta_handler_types() with no argument returns exactly c('csv','tsv','sas7bdat','xpt')", {
   fn <- app_fn("dta_handler_types")
-  expect_equal(fn(), c("csv", "tsv"))
+  expect_equal(fn(), c("csv", "tsv", "sas7bdat", "xpt"))
 })
 
 test_that("dta_handler_types('file') offers 'any' and nothing else", {
@@ -675,7 +675,7 @@ test_that("dta_set_handler() rejects a parsing type when dataset_type is file", 
   ds <- DTAtools::DTADataSetFile(id = "reports")
   dta_obj <- DTAtools::DTA(datasets = list(reports = ds))
 
-  for (ty in c("csv", "tsv")) {
+  for (ty in c("csv", "tsv", "sas7bdat", "xpt")) {
     res <- fn(dta_obj, "reports",
       filename = "report.pdf", type = ty, dataset_type = "file"
     )
@@ -982,4 +982,153 @@ test_that("reader settings a type cannot take are dropped, not forwarded", {
     handlers_fn(datasets(res$value, "reports"))[[1]],
     "DTAtools::DTAFileAny"
   )
+})
+
+# ---------------------------------------------------------------------------
+# DTAFileSAS7BDAT / "sas7bdat" type in the Shiny app helpers
+# ---------------------------------------------------------------------------
+# A SAS handler is NOT a DTAFileTabular, so the csv fallback in
+# dta_handler_type() would silently save it as `type: csv` and the document
+# would read back as a delimited-text handler.
+
+test_that("dta_handler_type() returns 'sas7bdat' for a DTAFileSAS7BDAT", {
+  fn <- app_fn("dta_handler_type")
+
+  expect_equal(fn(DTAtools::DTAFileSAS7BDAT(filename = "ae.sas7bdat")), "sas7bdat")
+})
+
+test_that("dta_handler_to_list() writes a SAS handler so the factory reads it back", {
+  fn <- app_fn("dta_handler_to_list")
+  h <- DTAtools::DTAFileSAS7BDAT(filename = "ae.sas7bdat")
+
+  l <- fn(h)
+
+  expect_identical(
+    l,
+    list(filename = "ae.sas7bdat", type = "sas7bdat", number_of_files = 1L)
+  )
+  back <- do.call(DTAtools::DTAFileFactory, l)
+  expect_s3_class(back, "DTAtools::DTAFileSAS7BDAT")
+  expect_false(inherits(back, "DTAtools::DTAFileTabular"))
+  expect_equal(back@filename, "ae.sas7bdat")
+})
+
+test_that("a SAS handler survives YAML -> app -> YAML as a SAS handler", {
+  from_yaml <- app_fn("dta_read_yaml_text")
+  to_yaml <- app_fn("dta_to_yaml_text")
+  handlers_fn <- app_fn("dta_handlers")
+
+  yaml_in <- paste(
+    "metadata:",
+    "  title: SAS delivery",
+    "  version: \"0.1\"",
+    "datasets:",
+    "  - id: ae",
+    "    type: tabular",
+    "    files:",
+    "      filename: ae.sas7bdat",
+    "      type: sas7bdat",
+    sep = "\n"
+  )
+
+  first <- from_yaml(yaml_in)
+  expect_true(first$ok)
+  out <- to_yaml(first$value)
+  expect_true(out$ok)
+  expect_match(out$value, "type: sas7bdat", fixed = TRUE)
+  expect_false(grepl("type: csv", out$value, fixed = TRUE))
+
+  again <- from_yaml(out$value)
+  expect_true(again$ok)
+  h <- handlers_fn(datasets(again$value, "ae"))[[1]]
+  expect_s3_class(h, "DTAtools::DTAFileSAS7BDAT")
+  expect_equal(h@filename, "ae.sas7bdat")
+})
+
+test_that("dta_set_handler() builds a SAS handler and drops the reader settings it cannot take", {
+  # DTAFileSAS7BDAT() takes none of the delimited-text settings; do.call()ing
+  # them into it would abort with "unused argument" for something the form
+  # never showed.
+  set_fn <- app_fn("dta_set_handler")
+  handlers_fn <- app_fn("dta_handlers")
+
+  res <- set_fn(app_fixture_dta(), "clinical_data",
+    index = NULL, filename = "ae.sas7bdat", type = "sas7bdat",
+    reader_settings = list(
+      encoding = "latin1", newlines_in_values = TRUE, has_header = FALSE
+    )
+  )
+
+  expect_true(res$ok)
+  hs <- handlers_fn(datasets(res$value, "clinical_data"))
+  expect_length(hs, 2)
+  expect_s3_class(hs[[2]], "DTAtools::DTAFileSAS7BDAT")
+  expect_equal(hs[[2]]@filename, "ae.sas7bdat")
+})
+
+test_that("a SAS handler reports no reader settings at all", {
+  fields_fn <- app_fn("dta_handler_fields")
+  set_fn <- app_fn("dta_set_handler")
+
+  res <- set_fn(app_fixture_dta(), "clinical_data",
+    index = 1, filename = "ae.sas7bdat", type = "sas7bdat"
+  )
+  expect_true(res$ok)
+
+  f <- fields_fn(res$value, "clinical_data", 1)
+  expect_equal(f$type, "sas7bdat")
+  expect_length(f$reader_settings, 0)
+})
+
+test_that("dta_load_file() reads a SAS handler's file into the dataset", {
+  load_fn <- app_fn("dta_load_file")
+
+  iris_sas <- system.file("qualification", "fx", "sas", "iris.sas7bdat", package = "DTAtools")
+  expect_true(nzchar(iris_sas), info = "iris.sas7bdat missing from inst/qualification/fx/sas")
+
+  num <- function(id) DTAtools::DTAColumnSpec(id = id, type = "SAS Num", nullable = FALSE)
+  cols <- list(
+    num("Sepal_Length"), num("Sepal_Width"), num("Petal_Length"), num("Petal_Width"),
+    DTAtools::DTAColumnSpec(id = "Species", type = "SAS Char", nullable = FALSE)
+  )
+  specs <- DTAtools::DTAColumnSpecCollection(
+    columns = stats::setNames(cols, vapply(cols, function(x) x@id, character(1))),
+    rules = list()
+  )
+  dta <- DTAtools::DTA(datasets = list(iris = DTAtools::DTADataSetTabular(
+    id = "iris",
+    specs = specs,
+    files = list(DTAtools::DTAFileSAS7BDAT(filename = "iris.sas7bdat"))
+  )))
+
+  res <- load_fn(dta, dataset = "iris", file = iris_sas, handler_index = 1)
+
+  expect_true(res$ok)
+  expect_null(res$error)
+  tbl <- datasets(res$value, "iris")@tables[["iris"]]
+  expect_equal(nrow(as.data.frame(tbl)), 150L)
+})
+
+# ---- YAML alias bomb ---------------------------------------------------------
+
+test_that("dta_read_yaml rejects an alias bomb quickly instead of freezing", {
+  # Nine-fold nested aliases: a few hundred bytes that expand to 9^9 values.
+  lines <- "a0: &a0 [x, x, x, x, x, x, x, x, x]"
+  for (i in 1:9) {
+    refs <- paste(rep(sprintf("*a%d", i - 1), 9), collapse = ", ")
+    lines <- c(lines, sprintf("a%d: &a%d [%s]", i, i, refs))
+  }
+  path <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(c(lines, "metadata: {}"), path)
+
+  elapsed <- system.time(res <- app_fn("dta_read_yaml")(path))[["elapsed"]]
+
+  expect_false(res$ok)
+  expect_match(res$error, "too large once its anchors/aliases are expanded", fixed = TRUE)
+  expect_lt(elapsed, 5)
+})
+
+test_that("dta_read_yaml still reads an ordinary document", {
+  path <- app_fixture_path("clinical_dta.yaml")
+  expect_true(app_fn("dta_read_yaml")(path)$ok)
 })

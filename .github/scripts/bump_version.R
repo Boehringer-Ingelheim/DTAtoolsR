@@ -12,9 +12,13 @@
 # mismatch. The two modes share the site definitions below, so the checker can
 # never fall out of step with the writer.
 #
-# Three files, four places. Only DESCRIPTION <-> VERSION used to be checked,
+# Four files, five places. Only DESCRIPTION <-> VERSION used to be checked,
 # which is exactly why docs/index.html had silently drifted behind by the time
-# this script was written.
+# this script was written. The qualification suite records the version twice
+# more: `package_version:` in inst/qualification/requirements/_index.yaml is a
+# site below, and because inst/shiny/dta_app/VERSION and that file are both
+# hashed in inst/qualification/baseline/inst-files.sha256, a bump finishes by
+# running .github/scripts/sync_qualification_manifest.R.
 #
 # `--sync-manifest` is a separate axis, not part of a version bump: it rewrites
 # the per-file checksums in the root manifest.json, which Posit Connect deploys.
@@ -86,6 +90,7 @@ description_version <- function() {
 MANIFEST <- "manifest.json"
 VERSION_FILE <- "inst/shiny/dta_app/VERSION"
 DOCS <- "docs/index.html"
+QUAL_INDEX <- "inst/qualification/requirements/_index.yaml"
 
 extract <- function(line, pattern) sub(pattern, "\\1", line)
 
@@ -108,6 +113,20 @@ sites <- list(
       trimws(lines[[1L]])
     },
     write = function(v) write_lines_utf8(v, VERSION_FILE)
+  ),
+  list(
+    name = QUAL_INDEX,
+    read = function() {
+      lines <- read_lines_utf8(QUAL_INDEX)
+      i <- sole_match(lines, "^package_version:", "package_version: in the qualification index")
+      trimws(sub("#.*$", "", sub("^package_version:", "", lines[i])))
+    },
+    write = function(v) {
+      lines <- read_lines_utf8(QUAL_INDEX)
+      i <- sole_match(lines, "^package_version:", "package_version: in the qualification index")
+      lines[i] <- paste0("package_version: ", v)
+      write_lines_utf8(lines, QUAL_INDEX)
+    }
   ),
   list(
     name = "docs/index.html version badge",
@@ -277,6 +296,30 @@ sync_manifest <- function() {
 
 # --- CHANGELOG ---------------------------------------------------------------
 #
+# The link block at the foot of the changelog has `[Unreleased]` comparing the
+# last release against HEAD. Promoting the heading must also define `[<v>]` as
+# that comparison closed at `v<v>`, and move `[Unreleased]` on to `v<v>...HEAD`.
+# Stops loudly when the block is not in that shape; does nothing when `[<v>]`
+# is already defined.
+promote_unreleased_link <- function(lines, v) {
+  if (any(startsWith(lines, sprintf("[%s]: ", v)))) {
+    return(lines)
+  }
+  i <- sole_match(lines, "^\\[Unreleased\\]: ", "[Unreleased]: link definition in CHANGELOG.md")
+  shape <- "^\\[Unreleased\\]: (.*/compare/)v([0-9]+\\.[0-9]+\\.[0-9]+)\\.\\.\\.HEAD$"
+  if (!grepl(shape, lines[i])) {
+    fail("the [Unreleased] link in CHANGELOG.md is not a 'compare/v<last>...HEAD' URL.")
+  }
+  base <- sub(shape, "\\1", lines[i])
+  last <- sub(shape, "\\2", lines[i])
+  c(
+    lines[seq_len(i - 1L)],
+    sprintf("[Unreleased]: %sv%s...HEAD", base, v),
+    sprintf("[%s]: %sv%s...v%s", v, base, last, v),
+    lines[seq_len(length(lines) - i) + i]
+  )
+}
+#
 # Write-only, and idempotent. The documented workflow (CLAUDE.md) is that
 # changes accumulate under `## [Unreleased]`, so a bump promotes that heading to
 # the released version. Falls back to inserting a fresh stanza when there is
@@ -296,6 +339,7 @@ update_changelog <- function(v) {
   unreleased <- grep("^## \\[Unreleased\\]", lines)
   if (length(unreleased) == 1L) {
     lines[unreleased] <- heading
+    lines <- promote_unreleased_link(lines, v)
     write_lines_utf8(lines, path)
     cat("  CHANGELOG.md          promoted [Unreleased] ->", heading, "\n")
     return(invisible(TRUE))
@@ -357,6 +401,11 @@ bump <- function(v) {
     ))
   }
   update_changelog(v)
+  # The VERSION file and _index.yaml above are hashed in the qualification
+  # manifest; leave it describing the files as they now are.
+  sync <- ".github/scripts/sync_qualification_manifest.R"
+  status <- system2(file.path(R.home("bin"), "Rscript"), shQuote(sync))
+  if (!identical(status, 0L)) fail("%s failed (exit status %s).", sync, status)
   cat("\nDone. Review with `git diff`, then commit on `dev`.\n")
   invisible(TRUE)
 }

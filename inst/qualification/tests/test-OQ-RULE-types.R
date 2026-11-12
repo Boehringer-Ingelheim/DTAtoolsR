@@ -134,13 +134,13 @@ test_that("OQ-RULE-026 | a range rule requires exactly one target column | REQ-R
   # Two columns would make "outside the range" ambiguous: outside for either,
   # or for both? Refusing to guess is the right answer.
   err <- tryCatch(
-    rule_check_range(
-      DTARuleColRange(id = "r", columns = c("A", "B"), range = c(1, 2)),
-      rt_frame(A = 1, B = 2)
-    ),
+    DTARuleColRange(id = "r", columns = c("A", "B"), range = c(1, 2)),
     error = function(e) e
   )
-  qa_check("naming two columns raises a condition", inherits(err, "condition"))
+  qa_step(
+    "naming two columns is refused at construction with the range-columns class",
+    TRUE, inherits(err, "dta_rule_range_columns")
+  )
 })
 
 test_that("OQ-RULE-027 | a range rule whose column is absent is not applicable | REQ-RULE-017", {

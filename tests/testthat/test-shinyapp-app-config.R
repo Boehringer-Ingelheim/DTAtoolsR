@@ -601,3 +601,84 @@ test_that("document and organisation text is collapsed to one line", {
   expect_identical(res$config$document$names, "Doc # Evil")
   expect_identical(res$config$document$abbreviations, "A B")
 })
+
+# ---- header_tag ----------------------------------------------------------------
+
+test_that("header_tag defaults to no label and no colour", {
+  d <- app_fn("dta_app_config_defaults")()
+  expect_identical(d$header_tag, list(label = "", color = NULL))
+  expect_true("color" %in% names(d$header_tag))
+})
+
+test_that("a header_tag with label and colour round-trips; the label is collapsed to one line", {
+  full <- parse_cfg(c("header_tag:", "  label: GxP", "  color: '#C0392B'"))
+  expect_identical(nrow(full$problems), 0L)
+  expect_identical(full$config$header_tag$label, "GxP")
+  expect_identical(full$config$header_tag$color, "#C0392B")
+
+  collapsed <- parse_cfg("header_tag: {label: \"Non-GcP\\n\\tsandbox\", color: '#abc'}")
+  expect_identical(nrow(collapsed$problems), 0L)
+  expect_identical(collapsed$config$header_tag$label, "Non-GcP sandbox")
+  expect_identical(collapsed$config$header_tag$color, "#abc")
+
+  # A whitespace-only label collapses to empty: no tag, and not an error.
+  blank <- parse_cfg("header_tag: {label: '   '}")
+  expect_identical(nrow(blank$problems), 0L)
+  expect_identical(blank$config$header_tag$label, "")
+
+  no_colour <- parse_cfg("header_tag: {label: GxP}")
+  expect_identical(nrow(no_colour$problems), 0L)
+  expect_identical(no_colour$config$header_tag$label, "GxP")
+  expect_null(no_colour$config$header_tag$color)
+
+  blank <- parse_cfg("header_tag: {label: ''}")
+  expect_identical(nrow(blank$problems), 0L)
+  expect_identical(blank$config$header_tag$label, "")
+})
+
+test_that("a header_tag label of 32 characters is kept, 33 is an error and never truncated", {
+  ok <- parse_cfg(paste0("header_tag: {label: ", strrep("x", 32), "}"))
+  expect_identical(nrow(ok$problems), 0L)
+  expect_identical(ok$config$header_tag$label, strrep("x", 32))
+
+  long <- parse_cfg(paste0("header_tag: {label: ", strrep("x", 33), "}"))
+  expect_identical(problem_keys(long, "error"), "header_tag.label")
+  expect_identical(long$config$header_tag$label, "")
+})
+
+test_that("a header_tag label that is not a single string is an error and the label stays empty", {
+  # yes / 2024 are YAML booleans and numbers: an author must quote them.
+  for (value in c("[GxP, GcP]", "42", "2024", "yes", "{a: 1}")) {
+    res <- parse_cfg(paste0("header_tag: {label: ", value, "}"))
+    expect_identical(problem_keys(res, "error"), "header_tag.label", info = value)
+    expect_identical(res$config$header_tag$label, "", info = value)
+  }
+})
+
+test_that("a bad header_tag colour is reported and dropped while the label is kept", {
+  quoted <- c("red", "'red;}body{x:1'", "'#12'", "'#12345G'")
+  for (value in quoted) {
+    res <- parse_cfg(c("header_tag:", "  label: GxP", paste0("  color: ", value)))
+    expect_identical(problem_keys(res, "error"), "header_tag.color", info = value)
+    expect_null(res$config$header_tag$color, info = value)
+    expect_identical(res$config$header_tag$label, "GxP", info = value)
+  }
+
+  # an unquoted hex is a YAML comment -> null -> reported, not silently dropped
+  unq <- parse_cfg(c("header_tag:", "  label: GxP", "  color: #C0392B"))
+  expect_identical(problem_keys(unq, "error"), "header_tag.color")
+  expect_null(unq$config$header_tag$color)
+  expect_identical(unq$config$header_tag$label, "GxP")
+})
+
+test_that("header_tag must be a mapping, and an unknown key under it is only a warning", {
+  scalar <- parse_cfg("header_tag: GxP")
+  expect_identical(problem_keys(scalar, "error"), "header_tag")
+  expect_identical(scalar$config$header_tag$label, "")
+
+  typo <- parse_cfg("header_tag: {label: GxP, colour: '#C0392B'}")
+  expect_identical(problem_keys(typo, "warning"), "header_tag.colour")
+  expect_length(problem_keys(typo, "error"), 0)
+  expect_null(typo$config$header_tag$color)
+  expect_identical(typo$config$header_tag$label, "GxP")
+})

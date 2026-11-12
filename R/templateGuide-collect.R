@@ -464,7 +464,7 @@
     terms = .tgc_df(c("Code", "Label", "Description")),
     contacts = .tgc_df(c("Name", "Role", "Email", "Phone", "Signs")),
     settings = .tgc_df(c("Setting", "Answer type", "Pre-filled answer", "Appears in the DTA as", "Explanation")),
-    columns = .tgc_df(.tgc_col_headers), rules = .tgc_df(c("Rule", "What it checks")),
+    columns = .tgc_df(.tgc_col_headers), rules = .tgc_df(.tgc_rule_headers),
     build_note = paste("This file could not be read:", msg),
     technical = .tgc_technical(row)
   ), .tgc_meta_empty(row, rec))
@@ -1262,6 +1262,7 @@
 # ---- Built datasets -----------------------------------------------------------------
 
 .tgc_col_headers <- c("Column", "Type", "Can be empty", "Allowed values", "Description")
+.tgc_rule_headers <- c("Rule ID", "Description")
 
 # One list(id, rows) for the columns of a dataset. `notes` maps column id to a
 # suffix line (term-list provenance) and is applied only when asked for.
@@ -1293,26 +1294,25 @@
   list(id = ids, rows = rows)
 }
 
-# The plain sentence of a rule; the IF/THEN line that repeats it is dropped.
-.tgc_rule_text <- function(txt) {
-  lines <- strsplit(as.character(txt), "\n", fixed = TRUE)[[1]]
-  if (length(lines) > 1L && !grepl("^\\s*(IF|THEN)\\b", lines[[1]]) &&
-    any(grepl("^\\s*IF\\b", lines[-1]))) {
-    lines[[1]]
-  } else {
-    as.character(txt)
-  }
-}
-
+# One row per rule: the id and the full plain-English wording of the rule
+# (see R/rulePhrasing.R). `lines` keeps the line layout so the Word table can
+# bold the labels and set the lists as bullets.
 .tgc_rule_rows <- function(ds) {
   rules <- ds@specs@rules
   list(
     id = vapply(rules, function(r) r@id, character(1)),
-    rows = lapply(rules, function(r) c(r@id, .tgc_rule_text(translate_rule_to_human(r))))
+    rows = lapply(rules, function(r) c(r@id, .rule_text(r))),
+    lines = lapply(rules, .rule_lines)
   )
 }
 
 .tgc_file_type <- function(f) {
+  # The other handlers read as their upper-cased class name (CSV, TSV, ANY);
+  # a SAS dataset or SAS transport file (which inherits from it) uses the label
+  # the exported document uses.
+  if (inherits(f, "DTAtools::DTAFileSAS7BDAT")) {
+    return(.file_format_label(f))
+  }
   cls <- sub("^DTAtools::DTAFile", "", class(f)[[1]])
   toupper(cls)
 }
@@ -1324,12 +1324,19 @@
     shown <- if (isTRUE(f@pattern)) .tgc_chr(f@pattern_description) else ""
     if (nzchar(shown)) shown else .tgc_chr(f@filename)
   }, character(1))
-  kv <- list(
-    .tgc_join(names_),
-    .tgc_join(unique(vapply(files, .tgc_file_type, character(1))), ", "),
-    as.character(n_cols), as.character(n_rules)
+  cts <- unique(unlist(lapply(files, dta_handler_container)))
+  kv <- c(
+    list(
+      .tgc_join(names_),
+      .tgc_join(unique(vapply(files, .tgc_file_type, character(1))), ", ")
+    ),
+    if (length(cts) > 0) list(paste(cts, collapse = ", ")),
+    list(as.character(n_cols), as.character(n_rules))
   )
-  names(kv) <- c(if (pattern) "File name pattern" else "File name", "File type", "Columns", "Rules")
+  names(kv) <- c(
+    if (pattern) "File name pattern" else "File name", "File type",
+    if (length(cts) > 0) "Delivered in", "Columns", "Rules"
+  )
   do.call(.tgc_kv, kv)
 }
 
@@ -1399,6 +1406,8 @@
       key <- function(x) vapply(x$rows, paste, character(1), collapse = "\r")
       cmark <- .tgc_change_marks(cols$id, key(cols), tc$id, key(tc))
       removed <- setdiff(tc$id, cols$id)
+      # The key is the wording itself: any change a reader can see in a rule
+      # (a condition, a limit, the purpose) shows up as "Changed".
       rkey <- function(x) vapply(x$rows, `[[`, character(1), 2)
       rmark <- .tgc_change_marks(rules$id, rkey(rules), tr$id, rkey(tr))
       removed_rules <- setdiff(tr$id, rules$id)
@@ -1409,7 +1418,8 @@
       source = source, source_version = source_version,
       columns = .tgc_df(c(.tgc_col_headers, "Change"), Map(c, cols$rows, cmark)),
       removed_columns = removed,
-      rules = .tgc_df(c("Rule", "What it checks", "Change"), Map(c, rules$rows, rmark)),
+      rules = .tgc_df(c(.tgc_rule_headers, "Change"), Map(c, rules$rows, rmark)),
+      rule_lines = rules$lines,
       removed_rules = removed_rules
     )
   }))
@@ -1492,14 +1502,14 @@
         .tgc_join(cl[["values"]], "\n", "Any"), .tgc_chr(cl[["description"]])
       )
     }))
-    rules <- .tgc_df(c("Rule", "What it checks"))
+    rules <- .tgc_df(.tgc_rule_headers)
     about <- .tgc_kv(Columns = as.character(nrow(cols)))
     nrules <- 0L
   } else {
     cr <- .tgc_col_rows(ds, notes)
     cols <- .tgc_df(.tgc_col_headers, cr$rows)
     rr <- .tgc_rule_rows(ds)
-    rules <- .tgc_df(c("Rule", "What it checks"), rr$rows)
+    rules <- .tgc_df(.tgc_rule_headers, rr$rows)
     about <- .tgc_about(ds, length(cr$id), length(rr$id))
     nrules <- length(rr$id)
   }

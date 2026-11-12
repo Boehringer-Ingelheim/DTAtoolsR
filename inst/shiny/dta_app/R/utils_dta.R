@@ -187,6 +187,31 @@ dta_numeric_column_ids <- function(dta, dataset) {
 
 # ---- Loading -------------------------------------------------------------
 
+# Reject a parsed YAML whose alias-EXPANDED size is absurd (an "alias bomb":
+# nested anchors share memory while parsed, but every later walk or copy
+# expands them exponentially). Walks the parsed object, stopping as soon as the
+# leaf count passes `max_leaves`, so a bomb costs ~max_leaves steps, not 9^depth.
+dta_check_yaml_size <- function(x, max_leaves = 1e6) {
+  n <- 0
+  walk <- function(v) {
+    if (is.list(v) && length(v)) {
+      for (e in v) walk(e)
+    } else {
+      n <<- n + 1
+      if (n > max_leaves) {
+        stop(
+          "The YAML is too large once its anchors/aliases are expanded ",
+          "(more than ", format(max_leaves, scientific = FALSE), " values). ",
+          "Remove nested aliases and try again.",
+          call. = FALSE
+        )
+      }
+    }
+  }
+  walk(x)
+  invisible(TRUE)
+}
+
 # Read a YAML file into a DTA object, detecting its shape first.
 # A DTA YAML has a top-level `metadata:` and/or `datasets:` key. A standalone
 # DATASET YAML (e.g. gf_dataset.yaml) has the dataset fields at the top level
@@ -202,7 +227,11 @@ dta_numeric_column_ids <- function(dta, dataset) {
 #   wrapped_dataset : TRUE when a standalone dataset YAML was wrapped into a new
 #                     empty DTA (used only for an informative load message).
 dta_read_yaml <- function(path) {
-  raw <- dta_try(yaml::read_yaml(path))
+  raw <- dta_try({
+    parsed <- yaml::read_yaml(path)
+    dta_check_yaml_size(parsed)
+    parsed
+  })
   if (!raw$ok) {
     return(list(
       ok = FALSE, value = NULL, error = raw$error,
@@ -378,6 +407,13 @@ handler_endings <- function(h) {
   if (is.null(ext) || length(ext) == 0) "" else paste(ext, collapse = ", ")
 }
 
+# The .zip / .xpt a handler's file arrives inside ("sdtm_*.zip"), or "" when the
+# entry declares none -- or is an object that predates the property.
+handler_container <- function(h) {
+  ct <- tryCatch(h@container, error = function(e) NULL)
+  if (is.null(ct)) "" else ct
+}
+
 handler_hint <- function(h) {
   pd <- tryCatch(h@pattern_description, error = function(e) NULL)
   info <- tryCatch(h@info, error = function(e) NULL)
@@ -437,6 +473,14 @@ dta_stage_upload <- function(datapath, filename) {
     },
     error = function(e) datapath
   )
+}
+
+# Is a dropped file a delivery container? A .zip archive, or a SAS transport
+# file (.xpt, optionally gzip-compressed). Restates the package's internal
+# dta_container_kind() rule: the app does not call package internals (same
+# reason as dta_bound_item_name() below).
+dta_is_container_name <- function(name) {
+  grepl("\\.zip$|\\.xpt(\\.gz)?$", basename(as.character(name)), ignore.case = TRUE)
 }
 
 # List the data files bundled in inst/extdata that can populate an upload slot,
@@ -567,13 +611,56 @@ dta_load_file <- function(dta, dataset, file, handler_index, name = NULL) {
 # Run validation for all datasets or one named dataset. Returns dta_try()
 # result whose value (on success) is the UPDATED dta object.
 dta_check <- function(dta, dataset = NULL) {
-  dta_try({
-    if (is.null(dataset)) {
-      DTAtools::check(dta, quiet = TRUE, persist = FALSE)
-    } else {
-      DTAtools::check(dta, datasets = dataset, quiet = TRUE, persist = FALSE)
-    }
+  # check(datasets = ) keeps the file-count findings of the datasets it does
+  # not check (re-judged on the datasets as they are now), so the attribute it
+  # returns is already complete; merging the prior rows in here as well would
+  # count them twice and keep rows a fix has made stale.
+  out <- dta_try({
+    # check() warns (class `dta_file_count_mismatch`) when a dataset's file
+    # count is outside its declared bounds. Muffling that one class is safe:
+    # the same finding rides on the returned object's
+    # `last_file_count_findings` attribute, which the status map and the
+    # report read. Every other warning still propagates.
+    withCallingHandlers(
+      if (is.null(dataset)) {
+        DTAtools::check(dta, quiet = TRUE, persist = FALSE)
+      } else {
+        DTAtools::check(dta, datasets = dataset, quiet = TRUE, persist = FALSE)
+      },
+      warning = function(w) {
+        if (inherits(w, "dta_file_count_mismatch")) invokeRestart("muffleWarning")
+      }
+    )
   })
+  out
+}
+
+# File-count findings recorded by the last check(), or NULL when there are
+# none. Never throws: the attribute may be absent or malformed.
+dta_file_count_findings <- function(dta) {
+  f <- tryCatch(
+    attr(dta, "last_file_count_findings", exact = TRUE),
+    error = function(e) NULL
+  )
+  if (!is.data.frame(f) || nrow(f) == 0 || !all(c("dataset", "message") %in% names(f))) {
+    return(NULL)
+  }
+  # The attribute survives removing or renaming a dataset, so a finding can
+  # outlive the dataset it was about; drop those rather than report a ghost.
+  live <- tryCatch(dta_dataset_names(dta), error = function(e) NULL)
+  if (!is.null(live)) f <- f[f$dataset %in% live, , drop = FALSE]
+  if (nrow(f) == 0) NULL else f
+}
+
+# The human-readable reasons behind those findings (character(0) when none).
+# `datasets` restricts them to the datasets of the current run.
+dta_file_count_messages <- function(dta, datasets = NULL) {
+  f <- dta_file_count_findings(dta)
+  if (is.null(f)) {
+    return(character(0))
+  }
+  if (!is.null(datasets)) f <- f[f$dataset %in% datasets, , drop = FALSE]
+  as.character(f$message)
 }
 
 # Update a single metadata scalar field, returning an updated dta object.
@@ -951,6 +1038,13 @@ dta_status_map <- function(dta) {
       out[[nm]] <- "pending"
     }
   }
+  # A dataset whose supplied file count is outside its declared bounds fails
+  # even when every table it holds is valid; results() cannot see that, so
+  # the findings recorded by check() are folded in here. This map is the single
+  # source for the chips, the completion toast and the report banner.
+  for (nm in dta_file_count_findings(dta)$dataset) {
+    if (nm %in% names(out) && !identical(out[[nm]], "nodata")) out[[nm]] <- "fail"
+  }
   out
 }
 
@@ -1148,7 +1242,12 @@ dta_unload_table <- function(dta, dataset, table) {
     ty <- tryCatch(ds@type, error = function(e) NA_character_)
     if (identical(ty, "file")) {
       fp <- tryCatch(ds@file_paths, error = function(e) character(0)) %||% character(0)
-      ds@file_paths <- fp[basename(fp) != table]
+      fh <- tryCatch(ds@file_handlers, error = function(e) NULL)
+      keep <- basename(fp) != table
+      ds@file_paths <- fp[keep]
+      # The recorded handler of each file moves with it; a record that is not in
+      # step with the paths is dropped (the package then matches by name).
+      ds@file_handlers <- if (length(fh) == length(fp)) fh[keep] else integer(0)
     } else {
       tabs <- tryCatch(ds@tables, error = function(e) list()) %||% list()
       tabs[[table]] <- NULL
@@ -1173,6 +1272,7 @@ dta_unload_all <- function(dta, dataset) {
     ty <- tryCatch(ds@type, error = function(e) NA_character_)
     if (identical(ty, "file")) {
       ds@file_paths <- character(0)
+      ds@file_handlers <- integer(0)
     } else {
       ds@tables <- list()
     }
@@ -1429,11 +1529,137 @@ dta_markdown_to_pdf <- function(lines, file) {
   invisible(file)
 }
 
+# ---- Inline Markdown for the built-in PDF renderer ------------------------
+#
+# The Markdown the package writes (write_dta(format = "md")) carries more than
+# plain text: a linked table of contents "[1 Title](#1-title)", entities such
+# as "&amp;" in headings and cells, backslash escapes ("clinical\_data",
+# "a\|b"), "<br>" for a line break inside a table cell, and autolinks such as
+# "<a@b.org>" or "<ftp://host/file>". The renderer below draws text with R
+# graphics and understands none of that on its own, so every piece of text goes
+# through these three steps first:
+#   dta_md_inline()      links -> their text, images -> alt text, autolinks ->
+#                        the address without "<>" and "mailto:", <br> -> "\n",
+#                        any other HTML tag dropped; escape pairs are skipped
+#                        so an escaped "\<" is never mistaken for a tag.
+#   dta_md_decode()      backslash escapes and entities -> the characters.
+#   dta_md_split_cells() one table row -> cells, splitting on unescaped "|".
+# Decoding comes last, so "&lt;br&gt;" in the text is shown as the literal
+# characters "<br>" and is not turned into a line break.
+
+# Replace every match of `pattern` in `x` by fn(match); text between matches is
+# kept. `x` is a single string.
+.dta_md_replace <- function(x, pattern, fn) {
+  m <- gregexpr(pattern, x, perl = TRUE)[[1]]
+  if (m[[1]] == -1L) {
+    return(x)
+  }
+  hits <- regmatches(x, list(m))[[1]]
+  regmatches(x, list(m)) <- list(vapply(hits, fn, character(1), USE.NAMES = FALSE))
+  x
+}
+
+dta_md_inline <- function(x) {
+  x <- as.character(x)[1]
+  if (is.na(x) || !nzchar(x)) {
+    return("")
+  }
+  link_text <- "((?:[^\\]\\\\]|\\\\.)*)"
+  label <- "[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+  email_local <- "[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+"
+  email_domain <- paste0(label, "(?:\\.", label, ")*")
+  pattern <- paste0(
+    "\\\\[[:punct:]]", # an escape pair: kept, decoded later
+    "|!\\[", link_text, "\\]\\([^)]*\\)", # image
+    "|\\[", link_text, "\\]\\([^)]*\\)", # link
+    "|<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^<>\\s]*>", # autolink: <scheme:...>
+    "|<", email_local, "@", email_domain, ">", # autolink: <a@b.org>
+    "|<br\\s*/?>", # line break
+    "|<!--.*?-->", # comment
+    "|</?[A-Za-z][^>]*>" # any other tag
+  )
+  .dta_md_replace(x, pattern, function(h) {
+    if (startsWith(h, "\\")) {
+      return(h)
+    }
+    if (grepl("^<br\\s*/?>$", h, ignore.case = TRUE)) {
+      return("\n")
+    }
+    # An autolink shows its address; "mailto:" is dropped, other schemes
+    # (https:, ftp:, ...) stay because they are part of what is written.
+    if (grepl("^<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^<>\\s]*>$", h, perl = TRUE) ||
+      grepl("^<[^<>\\s:]+@[^<>\\s]+>$", h, perl = TRUE)) {
+      return(sub("^<(?:[Mm][Aa][Ii][Ll][Tt][Oo]:)?(.*)>$", "\\1", h, perl = TRUE))
+    }
+    if (startsWith(h, "<")) {
+      return("")
+    }
+    # image or link: keep the text between the brackets
+    sub("^!?\\[((?:[^\\]\\\\]|\\\\.)*)\\]\\([^)]*\\)$", "\\1", h, perl = TRUE)
+  })
+}
+
+dta_md_decode <- function(x) {
+  x <- as.character(x)[1]
+  if (is.na(x) || !nzchar(x)) {
+    return("")
+  }
+  named <- c(
+    amp = "&", lt = "<", gt = ">", quot = "\"", apos = "'", nbsp = " "
+  )
+  .dta_md_replace(
+    x,
+    "\\\\[[:punct:]]|&(?:#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6}|[A-Za-z][A-Za-z0-9]*);",
+    function(h) {
+      if (startsWith(h, "\\")) {
+        return(substr(h, 2L, 2L))
+      }
+      body <- substr(h, 2L, nchar(h) - 1L)
+      if (startsWith(body, "#")) {
+        code <- if (grepl("^#[xX]", body)) {
+          strtoi(substr(body, 3L, nchar(body)), 16L)
+        } else {
+          strtoi(substr(body, 2L, nchar(body)), 10L)
+        }
+        if (is.na(code) || code < 1L || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)) {
+          return(h)
+        }
+        return(intToUtf8(code))
+      }
+      if (body %in% names(named)) named[[body]] else h
+    }
+  )
+}
+
+dta_md_split_cells <- function(row) {
+  s <- trimws(as.character(row)[1])
+  # A "|" separates cells unless an odd number of backslashes precedes it: a
+  # backslash escapes the next character, so a pair of them before a pipe
+  # leaves it a separator. One regex pass finds every separator and
+  # regmatches(invert = TRUE) cuts the cells out. Both work on BYTES: character
+  # offsets into UTF-8 text are recomputed from the start of the row, which made
+  # a long non-ASCII row quadratic. "|" and "\\" are ASCII, so no multibyte
+  # character is ever split. (Growing a vector one character at a time was
+  # quadratic too.)
+  m <- gregexpr("(?<!\\\\)(?:\\\\\\\\)*\\K\\|", s, perl = TRUE, useBytes = TRUE)
+  cells <- regmatches(s, m, invert = TRUE)[[1]]
+  Encoding(cells) <- Encoding(s)
+  # Only a pipe that really is the last character closes the row.
+  if (endsWith(s, "|") && m[[1]][length(m[[1]])] == nchar(s, "bytes")) {
+    cells <- cells[-length(cells)]
+  }
+  if (startsWith(s, "|") && length(cells) > 0) {
+    cells <- cells[-1L]
+  }
+  trimws(cells)
+}
+
 # Draw "compiled" Markdown onto the CURRENT graphics device, managing its own
-# A4 pages via plot.new(). Headings, inline **bold** labels, bullet lists,
-# `| pipe |` tables and `---` rules are rendered as formatted content -- never
-# dumped as raw source. `ascii` transliterates glyphs for devices whose fonts
-# lack full Unicode (identity for cairo). Kept separate from the device set-up
+# A4 pages via plot.new(). Headings (levels 1-6, graded in size), inline
+# **bold** and *italic* text, bullet and numbered lists, `| pipe |` tables and
+# `---` rules are rendered as formatted content -- never dumped as raw source.
+# `ascii` transliterates glyphs for devices whose fonts lack full Unicode
+# (identity for cairo). Kept separate from the device set-up
 # so it can also target other devices (e.g. PNG previews).
 dta_render_markdown <- function(lines, ascii = function(x) x) {
   lines <- as.character(lines)
@@ -1482,8 +1708,8 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
     out
   }
 
-  # Draw a list of words (each list(text=, bold=)) with word-wrapping and proper
-  # per-word bold/italic; advances the y cursor.
+  # Draw a list of words (each list(text=, bold=, italic=)) with word-wrapping
+  # and proper per-word bold/italic; advances the y cursor.
   draw_words <- function(words, cex = 1, indent = 0, italic = FALSE, color = "black") {
     startX <- mL + indent
     maxX <- mL + contentW
@@ -1493,7 +1719,16 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
     x <- startX
     started <- FALSE
     for (w in words) {
-      font <- if (italic) 3 else if (isTRUE(w$bold)) 2 else 1
+      if (isTRUE(w$br)) {
+        # A <br> in the source: end the line, even when nothing follows.
+        y <<- y - step
+        ensure(step)
+        x <- startX
+        started <- FALSE
+        next
+      }
+      it <- isTRUE(italic) || isTRUE(w$italic)
+      font <- if (it && isTRUE(w$bold)) 4 else if (it) 3 else if (isTRUE(w$bold)) 2 else 1
       pieces <- break_token(ascii(w$text), cex, font, maxX - startX)
       for (pi in seq_along(pieces)) {
         piece <- pieces[[pi]]
@@ -1516,27 +1751,55 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
     y <<- y - step
   }
 
-  # Split a line into **bold** / normal word tokens.
-  parse_rich <- function(text) {
-    segs <- list()
-    rest <- text
-    while (nzchar(rest)) {
-      m <- regexpr("\\*\\*(.+?)\\*\\*", rest, perl = TRUE)
-      if (m[1] == -1L) {
-        segs[[length(segs) + 1L]] <- list(text = rest, bold = FALSE)
-        break
-      }
-      before <- substr(rest, 1L, m[1] - 1L)
-      if (nzchar(before)) segs[[length(segs) + 1L]] <- list(text = before, bold = FALSE)
-      chunk <- substr(rest, m[1], m[1] + attr(m, "match.length") - 1L)
-      segs[[length(segs) + 1L]] <- list(text = gsub("^\\*\\*|\\*\\*$", "", chunk), bold = TRUE)
-      rest <- substr(rest, m[1] + attr(m, "match.length"), nchar(rest))
+  # Split inline-Markdown text (links and tags already resolved by
+  # dta_md_inline()) into runs list(text=, bold=, italic=): **bold**, *italic*,
+  # and either inside the other. An escaped "\\*" is never an emphasis mark,
+  # and neither is a "*" with a space inside it ("5 * 3 * 2").
+  emph_segments <- function(text, bold = FALSE, italic = FALSE) {
+    if (!nzchar(text)) {
+      return(list())
     }
+    bold_re <- "(?s)(?<![\\\\*])\\*\\*(?=\\S)(.+?)(?<=\\S)(?<!\\\\)\\*\\*"
+    ital_re <- "(?s)(?<![\\\\*])\\*(?![\\s*])(.+?)(?<![\\s\\\\*])\\*(?!\\*)"
+    mb <- regexpr(bold_re, text, perl = TRUE)
+    mi <- regexpr(ital_re, text, perl = TRUE)
+    if (mb[1] == -1L && mi[1] == -1L) {
+      return(list(list(text = text, bold = bold, italic = italic)))
+    }
+    use_bold <- mb[1] != -1L && (mi[1] == -1L || mb[1] <= mi[1])
+    m <- if (use_bold) mb else mi
+    mark <- if (use_bold) 2L else 1L
+    len <- attr(m, "match.length")
+    before <- substr(text, 1L, m[1] - 1L)
+    inner <- substr(text, m[1] + mark, m[1] + len - 1L - mark)
+    after <- substr(text, m[1] + len, nchar(text))
+    c(
+      emph_segments(before, bold, italic),
+      emph_segments(inner, bold || use_bold, italic || !use_bold),
+      emph_segments(after, bold, italic)
+    )
+  }
+
+  # Split a line into word tokens carrying their bold/italic state. Links,
+  # <br>, escapes and entities are resolved here (see dta_md_inline() and
+  # dta_md_decode()); a <br> becomes a list(br = TRUE) entry that draw_words()
+  # turns into a new line.
+  parse_rich <- function(text) {
+    segs <- emph_segments(dta_md_inline(text))
     words <- list()
     for (s in segs) {
-      toks <- strsplit(s$text, "[ \t]+")[[1]]
-      toks <- toks[nzchar(toks)]
-      for (t in toks) words[[length(words) + 1L]] <- list(text = t, bold = s$bold)
+      parts <- strsplit(s$text, "\n", fixed = TRUE)[[1]]
+      if (grepl("\n$", s$text)) parts <- c(parts, "")
+      for (k in seq_along(parts)) {
+        if (k > 1L) words[[length(words) + 1L]] <- list(br = TRUE)
+        toks <- strsplit(parts[[k]], "[ \t]+")[[1]]
+        toks <- toks[nzchar(toks)]
+        for (t in toks) {
+          words[[length(words) + 1L]] <- list(
+            text = dta_md_decode(t), bold = s$bold, italic = s$italic
+          )
+        }
+      }
     }
     words
   }
@@ -1569,10 +1832,18 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
   }
 
   draw_heading <- function(level, text) {
-    cex <- c(1.7, 1.4, 1.22, 1.08, 1.0, 0.95)[min(level, 6)]
-    y <<- y - lh(cex) * c(0.35, 0.85, 0.65, 0.5, 0.4, 0.3)[min(level, 6)]
-    text <- gsub("\\*\\*", "", text)
-    words <- lapply(strsplit(text, "[ \t]+")[[1]], function(t) list(text = t, bold = TRUE))
+    level <- min(level, 6L)
+    cex <- c(1.7, 1.4, 1.22, 1.08, 1.0, 0.95)[level]
+    # Keep a heading together with the first line under it.
+    ensure(lh(cex) * 4)
+    y <<- y - lh(cex) * c(0.35, 0.85, 0.65, 0.5, 0.4, 0.3)[level]
+    # A closing run of "#" ("## Title ##") is not part of the title.
+    text <- sub("\\s+#+\\s*$", "", text)
+    words <- Filter(function(w) !isTRUE(w$br), parse_rich(text))
+    words <- lapply(words, function(w) {
+      w$bold <- TRUE
+      w
+    })
     draw_words(words, cex = cex, color = "#1b3a5b")
     if (level <= 2) {
       graphics::segments(mL, y + lh(cex) * 0.08, mL + contentW, y + lh(cex) * 0.08,
@@ -1589,17 +1860,27 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
     y <<- y - lh(1) * 0.45
   }
 
-  draw_bullet <- function(text) {
+  # One list item: a bullet (or its number, for an ordered list), then the
+  # wrapped text, indented past the marker.
+  draw_bullet <- function(text, level = 0L, marker = NULL) {
     ensure(lh(1))
-    graphics::text(mL + 0.08, y, ascii("\u2022"), adj = c(0, 1), cex = 1, font = 1, col = "#1b3a5b")
-    draw_words(parse_rich(text), cex = 1, indent = 0.26)
+    off <- 0.25 * level
+    if (is.null(marker)) {
+      graphics::text(mL + 0.08 + off, y, ascii("\u2022"), adj = c(0, 1), cex = 1, font = 1, col = "#1b3a5b")
+      indent <- 0.26 + off
+    } else {
+      graphics::text(mL + 0.04 + off, y, ascii(marker), adj = c(0, 1), cex = 1, font = 1, col = "#1b3a5b")
+      indent <- 0.34 + off
+    }
+    draw_words(parse_rich(text), cex = 1, indent = indent)
   }
 
-  parse_cells <- function(s) {
-    s <- trimws(s)
-    s <- sub("^\\|", "", s)
-    s <- sub("\\|$", "", s)
-    trimws(strsplit(s, "\\|")[[1]])
+  # One cell of a pipe table -> its lines of text: links, escapes and entities
+  # resolved, and a <br> starting a new line.
+  cell_lines <- function(cell) {
+    segs <- emph_segments(dta_md_inline(cell))
+    txt <- dta_md_decode(paste(vapply(segs, function(s) s$text, character(1)), collapse = ""))
+    strsplit(paste0(txt, "\n"), "\n", fixed = TRUE)[[1]]
   }
 
   draw_table <- function(header, rows) {
@@ -1610,10 +1891,14 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
       return(invisible())
     }
     fit <- function(v, k) if (length(v) >= k) v[[k]] else ""
+    # Cells -> lines of text once, so widths and drawing agree.
+    prep <- function(r) lapply(seq_len(ncol), function(j) cell_lines(fit(r, j)))
+    header <- prep(header)
+    rows <- lapply(rows, prep)
     natural <- numeric(ncol)
     for (r in c(list(header), rows)) {
       for (j in seq_len(ncol)) {
-        natural[j] <- max(natural[j], sw(ascii(fit(r, j)), cex, 2))
+        natural[j] <- max(natural[j], vapply(r[[j]], function(l) sw(ascii(l), cex, 2), numeric(1)))
       }
     }
     natural <- natural + 2 * pad
@@ -1622,7 +1907,9 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
     xl <- mL + c(0, cumsum(colw)[-ncol])
     draw_row <- function(cells, header = FALSE) {
       font <- if (header) 2L else 1L
-      wr <- lapply(seq_len(ncol), function(j) wrap_text(fit(cells, j), colw[j] - 2 * pad, cex, font))
+      wr <- lapply(seq_len(ncol), function(j) {
+        unlist(lapply(cells[[j]], wrap_text, colw[j] - 2 * pad, cex, font))
+      })
       nlin <- max(1L, vapply(wr, length, 1L))
       rowH <- nlin * lh(cex) + pad
       ensure(rowH)
@@ -1657,11 +1944,11 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
       next
     }
     if (grepl("^\\s*\\|", ln) && i < n && is_sep(lines[[i + 1L]])) {
-      header <- parse_cells(ln)
+      header <- dta_md_split_cells(ln)
       j <- i + 2L
       rows <- list()
       while (j <= n && grepl("^\\s*\\|", lines[[j]])) {
-        rows[[length(rows) + 1L]] <- parse_cells(lines[[j]])
+        rows[[length(rows) + 1L]] <- dta_md_split_cells(lines[[j]])
         j <- j + 1L
       }
       draw_table(header, rows)
@@ -1679,14 +1966,26 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
       i <- i + 1L
       next
     }
-    if (grepl("^\\s*[-*]\\s+\\S", ln)) {
-      draw_bullet(sub("^\\s*[-*]\\s+", "", ln))
+    if (grepl("^\\s*[-*+]\\s+\\S", ln)) {
+      level <- nchar(sub("^(\\s*).*$", "\\1", ln)) %/% 2L
+      draw_bullet(sub("^\\s*[-*+]\\s+", "", ln), level)
       i <- i + 1L
       next
     }
-    if (grepl("^\\*[^*].*\\*$", ln) && !grepl("\\*\\*", ln)) {
-      txt <- sub("^\\*(.*)\\*$", "\\1", ln)
-      words <- lapply(strsplit(trimws(txt), "[ \t]+")[[1]], function(t) list(text = t, bold = FALSE))
+    if (grepl("^\\s*[0-9]{1,9}[.)]\\s+\\S", ln)) {
+      level <- nchar(sub("^(\\s*).*$", "\\1", ln)) %/% 2L
+      draw_bullet(
+        sub("^\\s*[0-9]{1,9}[.)]\\s+", "", ln), level,
+        marker = sub("^\\s*([0-9]{1,9}[.)]).*$", "\\1", ln)
+      )
+      i <- i + 1L
+      next
+    }
+    # A line that is one single italic span, such as a rule's type "*Range*":
+    # drawn smaller and grey, as a caption.
+    if (grepl("^\\s*\\*(?![\\s*])(?:[^*\\\\]|\\\\.)+(?<![\\s\\\\])\\*\\s*$", ln, perl = TRUE)) {
+      inner <- sub("^\\s*\\*(.*)\\*\\s*$", "\\1", ln)
+      words <- Filter(function(w) !isTRUE(w$br), parse_rich(inner))
       draw_words(words, cex = 0.9, italic = TRUE, color = "#555555")
       i <- i + 1L
       next
@@ -1871,7 +2170,13 @@ dta_build_validation_report <- function(dta, status = NULL, document_name = NULL
   # Three-state banner. "Passed" is reserved for the case where EVERY dataset in
   # the DTA was actually validated and passed -- a dataset skipped for missing
   # data leaves the run incomplete, and calling that a pass overstates it.
-  banner_cls <- if (n_fail > 0) {
+  #
+  # A recorded file-count failure can never produce "pass", even if the status
+  # map handed in does not reflect it.
+  count_msgs <- dta_file_count_messages(dta)
+  count_failed <- isFALSE(attr(dta, "last_validation_ok", exact = TRUE)) &&
+    !is.null(dta_file_count_findings(dta))
+  banner_cls <- if (n_fail > 0 || count_failed) {
     "warn"
   } else if (n_pass > 0 && n_unvalidated == 0) {
     "pass"
@@ -1897,6 +2202,17 @@ dta_build_validation_report <- function(dta, status = NULL, document_name = NULL
       "cannot be reported as passed. Load the missing data and re-check the ",
       "datasets listed below as &ldquo;No data&rdquo; or &ldquo;Not ",
       "validated&rdquo;.</div>"
+    )
+  } else {
+    ""
+  }
+  # Why a dataset failed on file count: the per-target table below cannot show
+  # it because every table may be individually valid. Messages are escaped.
+  count_html <- if (length(count_msgs) > 0) {
+    paste0(
+      "<h2>File count</h2><ul>",
+      paste0("<li>", vapply(count_msgs, esc, character(1)), "</li>", collapse = ""),
+      "</ul>"
     )
   } else {
     ""
@@ -1938,7 +2254,7 @@ dta_build_validation_report <- function(dta, status = NULL, document_name = NULL
     "<div class='banner ", banner_cls, "'>", banner_txt, "</div>",
     "<div class='summary'>", esc(summary_line), "</div>", caveat,
     "<h2>Datasets</h2><table><thead><tr><th>Dataset</th><th>Name</th><th>Status</th></tr>",
-    "</thead><tbody>", ds_rows, "</tbody></table>", detail_html,
+    "</thead><tbody>", ds_rows, "</tbody></table>", count_html, detail_html,
     "</body></html>"
   )
 }
@@ -2194,11 +2510,16 @@ dta_yaml_blank_lines <- function(text, max_depth = 3L) {
   res
 }
 
-# Recover a handler's file-type token ("csv" / "tsv") from its S7 class.
+# Recover a handler's file-type token ("csv" / "tsv" / "sas7bdat" / "xpt" /
+# "any") from its S7 class. The SAS branches must come before the csv fallback:
+# a DTAFileSAS7BDAT is not tabular, and without its own token it would be saved
+# as `type: csv` and read back as a delimited-text handler. The transport
+# branch must come before the SAS one: DTAFileXPT extends DTAFileSAS7BDAT, so
+# testing the parent first would save every `type: xpt` entry as `sas7bdat`.
 #
 # KNOWN GAP, not reachable from the app: a DTAFileDelim reports "csv", which
 # discards its `sep`. DTAFileFactory() -- the only route from a document back to
-# an object -- implements csv and tsv only, so no YAML can produce a
+# an object -- implements csv, tsv, sas7bdat and any only, so no YAML can produce a
 # DTAFileDelim and the file editor deliberately does not offer one
 # (dta_handler_types()). A Delim handler can therefore only arrive here from an
 # object built in R and handed to the app. Giving it its own token would make
@@ -2207,6 +2528,12 @@ dta_yaml_blank_lines <- function(text, max_depth = 3L) {
 dta_handler_type <- function(h) {
   if (inherits(h, "DTAtools::DTAFileAny")) {
     return("any")
+  }
+  if (inherits(h, "DTAtools::DTAFileXPT")) {
+    return("xpt")
+  }
+  if (inherits(h, "DTAtools::DTAFileSAS7BDAT")) {
+    return("sas7bdat")
   }
   if (inherits(h, "DTAtools::DTAFileTSV")) {
     return("tsv")
@@ -2242,6 +2569,9 @@ dta_handler_type <- function(h) {
 #
 # `any` is deliberately outside all of this: its one extra property,
 # `extensions`, is already emitted by name, and a DTAFileAny parses nothing.
+# A `sas7bdat` handler has no reader settings either: it is not a
+# DTAFileTabular, so .dta_reader_setting_names() returns none for it, and its
+# constructor refuses all of them.
 
 # A throwaway handler of `type`, carrying nothing but its constructor's own
 # defaults. It answers both questions the filters ask -- which arguments that
@@ -2315,6 +2645,8 @@ dta_handler_to_list <- function(h) {
   if (!is.null(pd) && length(pd) > 0 && any(nzchar(pd))) out$pattern_description <- pd
   info <- tryCatch(h@info, error = function(e) NULL)
   if (!is.null(info) && length(info) > 0) out$info <- info
+  ct <- handler_container(h)
+  if (nzchar(ct)) out$container <- ct
   ext <- tryCatch(h@extensions, error = function(e) NULL)
   if (!is.null(ext) && length(ext) > 0) {
     out$extensions <- if (length(ext) == 1) ext else as.list(ext)
@@ -2901,25 +3233,26 @@ dta_move_column <- function(dta, dataset, id, direction) {
 
 # ---- Rule editing --------------------------------------------------------
 
-# Render a nested condition/then list to a short, human-readable string.
-.dta_cond_to_text <- function(cond) {
-  if (is.null(cond) || length(cond) == 0) {
+# The one-sentence plain-English wording of a rule. It comes from the package
+# (R/rulePhrasing.R), the single source every export, report and console
+# printout describes rules with, so the editor and the Inspect panel say the
+# same thing as a Word or HTML report. Rules are never shown as code. An
+# internal, so it is looked up in the namespace rather than exported; "" when
+# the installed package has no such function or the rule cannot be described.
+dta_rule_summary <- function(rule) {
+  fn <- tryCatch(
+    get(".rule_summary", envir = asNamespace("DTAtools")),
+    error = function(e) NULL
+  )
+  if (is.null(fn)) {
     return("")
   }
-  parts <- vapply(names(cond), function(col) {
-    spec <- cond[[col]]
-    if (is.list(spec) && length(spec) > 0) {
-      op <- names(spec)[1]
-      val <- spec[[1]]
-      sprintf("%s %s %s", col, op, paste(unlist(val), collapse = ", "))
-    } else {
-      col
-    }
-  }, character(1))
-  paste(parts, collapse = "; ")
+  out <- tryCatch(fn(rule), error = function(e) "")
+  if (length(out) != 1L || is.na(out)) "" else as.character(out)
 }
 
 # A compact data.frame overview of a dataset's rules (for the editor table).
+# `detail` is the rule's wording as dta_rule_summary() gives it.
 dta_rules_overview <- function(dta, dataset) {
   ds <- dta_get_dataset(dta, dataset)
   rules <- tryCatch(ds@specs@rules, error = function(e) NULL) %||% list()
@@ -2928,28 +3261,9 @@ dta_rules_overview <- function(dta, dataset) {
   }
   do.call(rbind, lapply(seq_along(rules), function(i) {
     l <- dta_rule_to_list(rules[[i]])
-    detail <- if (identical(l$type, "col_condition")) {
-      sprintf("IF %s THEN %s", .dta_cond_to_text(l$condition), .dta_cond_to_text(l$then))
-    } else if (identical(l$type, "col_range")) {
-      sprintf(
-        "%s in [%s, %s]", paste(l$columns, collapse = ", "),
-        l$min %||% "", l$max %||% ""
-      )
-    } else if (identical(l$type, "col_unique")) {
-      sprintf("unique(%s)", paste(l$columns, collapse = ", "))
-    } else if (identical(l$type, "group_condition")) {
-      sprintf(
-        "group(%s): %s condition(s), %s constraint(s)",
-        paste(l$group_by %||% character(0), collapse = ", "),
-        length(l$conditions %||% list()),
-        length(l$constraints %||% list())
-      )
-    } else {
-      ""
-    }
     data.frame(
       index = i, id = l$id %||% "", type = l$type %||% "",
-      detail = detail, description = l$description %||% "",
+      detail = dta_rule_summary(rules[[i]]), description = l$description %||% "",
       stringsAsFactors = FALSE
     )
   }))
@@ -3076,15 +3390,15 @@ dta_move_rule <- function(dta, dataset, index, direction) {
 # happens, and invite a user to declare a PDF or an archive as something it is
 # not.
 #
-# A TABULAR dataset is offered csv and tsv, deliberately narrower than the
-# DTAFile class tree: DTAFileFactory() -- the only route from a YAML document
-# back to an object -- implements csv and tsv only, so offering `delim` would
-# create a handler that cannot be read back.
+# A TABULAR dataset is offered csv, tsv, sas7bdat and xpt, deliberately
+# narrower than the DTAFile class tree: DTAFileFactory() -- the only route from
+# a YAML document back to an object -- implements those four and `any`, so
+# offering `delim` would create a handler that cannot be read back.
 dta_handler_types <- function(dataset_type = "tabular") {
   if (identical(dataset_type, "file")) {
     "any"
   } else {
-    c("csv", "tsv")
+    c("csv", "tsv", "sas7bdat", "xpt")
   }
 }
 
@@ -3108,6 +3422,7 @@ dta_handlers_overview <- function(dta, dataset) {
     data.frame(
       filename = handler_expected(h),
       type = dta_handler_type(h),
+      container = handler_container(h),
       pattern = if (handler_is_pattern(h)) "yes" else "no",
       files = handler_count_label(h),
       endings = handler_endings(h),
@@ -3192,6 +3507,7 @@ dta_handler_fields <- function(dta, dataset, index) {
     pattern_description = tryCatch(h@pattern_description, error = function(e) NULL) %||% "",
     info = paste(.dta_info_to_lines(info), collapse = "\n"),
     extensions = paste(tryCatch(h@extensions, error = function(e) NULL) %||% character(0), collapse = ", "),
+    container = handler_container(h),
     # Every reader setting the handler carries, in one nested list rather than
     # one field each. The form has controls for two of them; the rest are
     # invisible in the editor and are handed straight back to dta_set_handler()
@@ -3214,7 +3530,7 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
                             number_of_files = 1, min_number_of_files = 1,
                             max_number_of_files = 1, pattern_description = NULL,
                             info = NULL, extensions = NULL, dataset_type = "tabular",
-                            reader_settings = list()) {
+                            reader_settings = list(), container = NULL) {
   dta_try({
     # One name or pattern per line, so a multi-name handler survives the
     # fields -> form -> set round trip as several names rather than one.
@@ -3316,6 +3632,12 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
     }, logical(1))]
     factory_args <- c(factory_args, settings)
 
+    # The .zip / .xpt the file is delivered inside; blank means "none". A value
+    # the class refuses (a path, another extension) fails in the DTAFile
+    # constructor, and its sentence comes back through dta_try() as the error.
+    ct <- trimws(as.character(container %||% "")[1])
+    if (!is.na(ct) && nzchar(ct)) factory_args$container <- ct
+
     handler <- do.call(DTAtools::DTAFileFactory, factory_args)
 
     ds <- DTAtools::datasets(dta, dataset)
@@ -3333,6 +3655,27 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
   })
 }
 
+# Re-point the recorded handler of each bound file after the handlers moved:
+# `map` is old index -> new index (dta_handler_index_map(), dta_match_handlers());
+# NA, or an entry the map has no row for, leaves the file unknown, which the
+# package resolves by name. A record out of step with the paths is dropped.
+dta_remap_file_handlers <- function(ds, map) {
+  if (!identical(tryCatch(ds@type, error = function(e) NA_character_), "file")) {
+    return(ds)
+  }
+  fh <- tryCatch(ds@file_handlers, error = function(e) NULL)
+  if (length(fh) != length(ds@file_paths) || length(fh) == 0L) {
+    ds@file_handlers <- integer(0)
+    return(ds)
+  }
+  fh <- as.integer(fh)
+  ok <- !is.na(fh) & fh >= 1L & fh <= length(map)
+  out <- rep(NA_integer_, length(fh))
+  out[ok] <- as.integer(unname(map)[fh[ok]])
+  ds@file_handlers <- out
+  ds
+}
+
 # Remove one file handler by index. Removing the LAST handler is allowed: the
 # dataset then declares no expected files, which the reader and the app both
 # handle, and is the only way back out of a handler added by mistake.
@@ -3342,6 +3685,7 @@ dta_remove_handler <- function(dta, dataset, index) {
     hs <- dta_handlers(ds)
     idx <- suppressWarnings(as.integer(index))[1]
     if (is.na(idx) || idx < 1 || idx > length(hs)) stop("File handler not found.")
+    ds <- dta_remap_file_handlers(ds, dta_handler_index_map(length(hs), "remove", index = idx))
     hs[[idx]] <- NULL
     ds@files <- unname(hs)
     dta@datasets[[dataset]] <- ds
@@ -3360,6 +3704,7 @@ dta_move_handler <- function(dta, dataset, index, direction) {
     idx <- suppressWarnings(as.integer(index))[1]
     target <- if (identical(direction, "up")) idx - 1L else idx + 1L
     if (!is.na(idx) && idx >= 1L && idx <= n && target >= 1L && target <= n) {
+      ds <- dta_remap_file_handlers(ds, dta_handler_index_map(n, "move", index = idx, direction = direction))
       hs[c(idx, target)] <- hs[c(target, idx)]
       ds@files <- unname(hs)
       dta@datasets[[dataset]] <- ds
@@ -3557,6 +3902,10 @@ dta_transfer_bound_data <- function(dta, dataset, old_ds, keep_validation = TRUE
     ty <- tryCatch(old_ds@type, error = function(e) NA_character_)
     if (identical(ty, "file")) {
       new_ds@file_paths <- tryCatch(old_ds@file_paths, error = function(e) character(0)) %||% character(0)
+      fh <- tryCatch(old_ds@file_handlers, error = function(e) NULL)
+      # Each file keeps the entry that took it, wherever the YAML put that entry.
+      new_ds@file_handlers <- if (length(fh) == length(new_ds@file_paths)) as.integer(fh) else integer(0)
+      new_ds <- dta_remap_file_handlers(new_ds, dta_match_handlers(old_ds, new_ds))
     } else {
       new_ds@tables <- tryCatch(old_ds@tables, error = function(e) list()) %||% list()
     }
@@ -3847,4 +4196,239 @@ dta_export_stem <- function(dta, when = Sys.time()) {
   }
 
   paste0(base, "-v", ver_safe, "-", stamp)
+}
+
+# ---- Container deliveries ---------------------------------------------------
+# A delivery is one drop that holds a .zip or .xpt (loose files next to them are
+# routed with it): DTAtools::load_delivery() matches every file, and every file
+# inside an archive, to the dataset entries that name it. The helpers below
+# keep the app's limits, the extracted files on disk and the wording around
+# that one call.
+
+# Load a delivery into a copy of `dta`, under the app's own limits, for this
+# call only: they are never set for the R session, so a run_dta_app() inside a
+# user's session leaves its options alone. `bytes_left` is the session's room
+# for extracted files, `held` the bytes of extracted files it already holds.
+dta_load_delivery <- function(dta, paths, exdir, bytes_left, held = 0) {
+  # TRUE when the session's remaining room, not the app's cap, is the byte
+  # limit of this call AND the session holds extracted files it could free:
+  # dta_app_reason() then names the remedy the user has. With nothing held (a
+  # small session budget set by the administrator) neither remedy exists, so
+  # the refusal names the administrator's limit instead.
+  budget_limited <- held > 0 && bytes_left < getOption("DTAtools.container_max_bytes", 1e10)
+  op <- options(
+    DTAtools.container_max_bytes = min(getOption("DTAtools.container_max_bytes", 1e10), bytes_left),
+    DTAtools.container_max_member_bytes = getOption("DTAtools.container_max_member_bytes", 2e9)
+  )
+  on.exit(options(op), add = TRUE)
+  missing <- character(0)
+  res <- dta_try(withCallingHandlers(
+    DTAtools::load_delivery(dta, files = paths, exdir = exdir, on_error = "skip"),
+    warning = function(w) if (inherits(w, "dta_delivery_refused")) invokeRestart("muffleWarning"),
+    message = function(m) {
+      if (inherits(m, "dta_delivery_summary")) missing <<- m$missing %||% character(0)
+      if (inherits(m, c("dta_delivery_summary", "dta_sas7bdat_in_memory"))) invokeRestart("muffleMessage")
+    }
+  ))
+  res$missing <- missing
+  res$budget_limited <- budget_limited
+  res
+}
+
+# The most bytes of extracted deliveries one session may hold, from the
+# environment variable DTATOOLS_SESSION_DELIVERY_BYTES (default 2e10). A value
+# that is not a positive number, 0 included, means the default.
+dta_session_delivery_budget <- function() {
+  b <- suppressWarnings(as.numeric(Sys.getenv("DTATOOLS_SESSION_DELIVERY_BYTES", "2e10")))
+  if (is.na(b) || b <= 0) 2e10 else b
+}
+
+# Bytes of every file below those of `dirs` that are delivery directories
+# ("dta_upload_delivery_*"); staged uploads ("dta_upload_<random>") do not
+# count. Called after dta_delivery_cleanup(), it counts exactly the files the
+# upload records name. na.rm: a file deleted between listing and sizing must
+# not turn the budget into NA.
+dta_session_delivery_bytes <- function(dirs) {
+  dirs <- dirs[startsWith(basename(dirs), "dta_upload_delivery_")]
+  files <- list.files(dirs, recursive = TRUE, full.names = TRUE, all.files = TRUE)
+  sum(file.size(files), na.rm = TRUE)
+}
+
+# `paths` without those another live session (any token but `token`) owns.
+dta_not_owned_elsewhere <- function(paths, token) {
+  others <- as.list(.dta_live_session_paths)
+  others <- unlist(others[setdiff(names(others), token)], use.names = FALSE)
+  norm <- function(p) normalizePath(as.character(p), winslash = "/", mustWork = FALSE)
+  paths[!norm(paths) %in% norm(others)]
+}
+
+# Deletes every file under the session's delivery directories that no upload
+# record names as its `path`, then every delivery directory left without a
+# file. The unit of bookkeeping is the bound file, not the delivery directory:
+# one delivery can fill several datasets, and removing or discarding the files
+# of one of them must free exactly those files. On Windows a file an Arrow scan
+# still holds is not deleted; the 24-hour sweep is the fallback.
+dta_delivery_cleanup <- function(dirs, uploads, token = shiny::getDefaultReactiveDomain()$token) {
+  dirs <- dirs[startsWith(basename(dirs), "dta_upload_delivery_")]
+  # A second tab that restored the autosave owns the same directory and may
+  # still read its files; whichever session ends or frees files first must not
+  # delete them. The last owner (or the 24-hour sweep) frees the directory.
+  dirs <- dta_not_owned_elsewhere(dirs, token)
+  paths <- unlist(lapply(unlist(uploads, recursive = FALSE), `[[`, "path"), use.names = FALSE)
+  keep <- normalizePath(as.character(paths), winslash = "/", mustWork = FALSE)
+  files <- list.files(dirs, recursive = TRUE, full.names = TRUE, all.files = TRUE)
+  unlink(files[!normalizePath(files, winslash = "/", mustWork = FALSE) %in% keep])
+  for (d in dirs) {
+    if (!length(list.files(d, recursive = TRUE, all.files = TRUE))) unlink(d, recursive = TRUE)
+  }
+  invisible()
+}
+
+# The delivery directories ("dta_upload_delivery_*" directly below `base`) that
+# the `path` of an upload record lies under. A restored session re-reads files
+# from them, so it must own them again: the 24-hour sweep spares what a live
+# session owns, and cleanup and the budget only look at owned directories. A
+# record naming a path anywhere else (a staged upload, a forged session file)
+# yields nothing.
+dta_delivery_roots <- function(uploads, base = tempdir()) {
+  paths <- unlist(lapply(unlist(uploads, recursive = FALSE), `[[`, "path"), use.names = FALSE)
+  paths <- as.character(paths)
+  paths <- paths[!is.na(paths) & nzchar(paths)]
+  norm <- function(p) normalizePath(p, winslash = "/", mustWork = FALSE)
+  roots <- vapply(norm(paths), function(p) {
+    while (!startsWith(basename(p), "dta_upload_delivery_") && dirname(p) != p) p <- dirname(p)
+    p
+  }, character(1), USE.NAMES = FALSE)
+  roots <- roots[startsWith(basename(roots), "dta_upload_delivery_") & dirname(roots) == norm(base)]
+  unique(roots)
+}
+
+# The rows of a delivery plan that would replace a table already loaded:
+# data frame with the columns `dataset` and `item`, zero rows when none.
+dta_delivery_replaced <- function(dta, plan) {
+  loaded <- plan[plan$status == "loaded", , drop = FALSE]
+  hit <- vapply(seq_len(nrow(loaded)), function(i) {
+    loaded$item[i] %in% dta_dataset_table_names(dta_get_dataset(dta, loaded$dataset[i]))
+  }, logical(1))
+  data.frame(dataset = loaded$dataset[hit], item = loaded$item[hit], stringsAsFactors = FALSE)
+}
+
+# Datasets whose slots hold more files than their entry declares as a maximum,
+# as "ae (3 files, at most 1)". load_delivery() routes every file by design and
+# check() reports the excess; the delivery note says so up front.
+dta_slots_over_max <- function(dta, uploads) {
+  out <- character(0)
+  for (k in names(uploads)) {
+    id <- sub("\\|\\|.*$", "", k)
+    hi <- suppressWarnings(as.integer(sub("^.*\\|\\|", "", k)))
+    h <- tryCatch(dta_handlers(dta_get_dataset(dta, id))[[hi]], error = function(e) NULL)
+    mx <- if (is.null(h)) NA_real_ else handler_max(h)
+    n <- length(uploads[[k]])
+    if (!is.na(mx) && n > mx) out <- c(out, sprintf("%s (%d files, at most %d)", id, n, as.integer(mx)))
+  }
+  out
+}
+
+# The one notification a committed delivery shows, as list(type, text). Plain
+# text: Shiny escapes it.
+dta_delivery_note <- function(plan, n_replaced = 0L, missing = character(0), budget_limited = FALSE,
+                              over = character(0)) {
+  cap <- function(v, sep = ", ") {
+    if (length(v) > 5) paste0(paste(v[1:5], collapse = sep), ", and ", length(v) - 5, " more") else paste(v, collapse = sep)
+  }
+  why <- function(rows) {
+    paste0(rows$name, " (", vapply(rows$reason, dta_app_reason, character(1), budget_limited = budget_limited, USE.NAMES = FALSE), ")")
+  }
+  loaded <- plan[plan$status == "loaded", , drop = FALSE]
+  text <- sprintf(
+    "%s: loaded %d file(s) into %d dataset(s)",
+    paste(unique(plan$delivered), collapse = ", "), nrow(loaded), length(unique(loaded$dataset))
+  )
+  if (n_replaced > 0) text <- paste0(text, sprintf(" (%d replaced)", n_replaced))
+  text <- paste0(text, ".")
+  if (length(missing) > 0) text <- paste0(text, " Not in the delivery: ", cap(missing), ".")
+  unused <- plan[plan$status == "unused", , drop = FALSE]
+  if (nrow(unused) > 0) {
+    shown <- ifelse(
+      is.na(unused$reason) | unused$reason == "matches no file entry of the specification",
+      unused$name, paste0(unused$name, " (", unused$reason, ")")
+    )
+    text <- paste0(text, " Not used: ", cap(shown), ".")
+  }
+  refused <- plan[plan$status == "refused", , drop = FALSE]
+  if (nrow(refused) > 0) text <- paste0(text, " Refused: ", cap(why(refused), "; "), ".")
+  # An archive bound as a file whose contents could not be opened (skip mode):
+  # the file loaded, nothing inside it was checked.
+  failed <- plan[plan$status == "opened" & !is.na(plan$reason), , drop = FALSE]
+  failed$reason <- sub("^could not be opened: ", "", failed$reason)
+  if (nrow(failed) > 0) text <- paste0(text, " Could not open: ", cap(why(failed), "; "), ".")
+  # A deliverable archive kept closed because a `type: any` entry takes it as
+  # one file: loaded, its contents unchecked.
+  kept <- unique(loaded$name[!is.na(loaded$reason) & startsWith(loaded$reason, "kept as one file")])
+  if (length(kept) > 0) {
+    text <- paste0(text, " Kept closed: ", cap(kept), " (a deliverable; to have its files checked, name it as the container of their entries).")
+  }
+  if (length(over) > 0) text <- paste0(text, " More files than a slot accepts: ", cap(over), ".")
+  text <- paste0(text, " Run Check to validate.")
+  list(type = if (nrow(refused) + nrow(failed) + length(over) > 0) "warning" else "message", text = text)
+}
+
+# The one place a package message that names an R option is turned into app
+# wording. It rewrites only the phrases that name an option, so everything else
+# (file names, the sizes, the other reasons of a failed delivery) is kept. cli
+# wraps long lines, so a phrase may span a line break: the text is judged as one
+# line.
+dta_app_reason <- function(text, budget_limited = FALSE) {
+  if (!grepl("DTAtools.container_", text, fixed = TRUE)) {
+    return(text)
+  }
+  app <- "it is larger than this application accepts; deliver it in smaller parts or ask the application's administrator to raise the limit."
+  # The byte limit is the session's remaining room when that is the smaller one.
+  room <- if (budget_limited) {
+    "it is larger than the room this session has left for extracted deliveries; remove or discard files loaded from a delivery and drop again, or use Start over."
+  } else {
+    app
+  }
+  text <- gsub("\\s+", " ", text)
+  # The R hint goes, with its bullet symbol.
+  text <- gsub("\\S+ Raise the limit with `options\\(.*?\\)` in R if this delivery is genuine\\.", "", text, perl = TRUE)
+  text <- gsub("it exceeds `DTAtools.container_max_bytes`.", room, text, fixed = TRUE)
+  # One file over the cap cannot be delivered "in smaller parts".
+  text <- gsub(
+    "it exceeds `DTAtools.container_max_member_bytes`.",
+    "it is larger than this application accepts for one file; load it in R with load_delivery(), or ask the application's administrator to raise the limit.",
+    text,
+    fixed = TRUE
+  )
+  # More entries than the cap: smaller parts do cure it, but it is not a size.
+  text <- gsub(
+    "it exceeds `DTAtools.container_max_members`.",
+    "it holds more files than this application accepts; deliver it in smaller parts or ask the application's administrator to raise the limit.",
+    text,
+    fixed = TRUE
+  )
+  # Smaller parts do not cure a compression ratio.
+  text <- gsub(
+    "it exceeds `DTAtools.container_max_ratio`.",
+    "it is compressed far more than any genuine delivery and is refused as unsafe.",
+    text,
+    fixed = TRUE
+  )
+  text <- gsub("it exceeds `DTAtools\\.container_[a-z_]+`\\.", app, text)
+  # The routing's own reason for a member over the cap.
+  text <- gsub("than DTAtools\\.container_[a-z_]+ \\(([^)]*)\\)", "than this application accepts (\\1 bytes)", text)
+  trimws(text)
+}
+
+# The elements of `uploads` whose key's dataset is a file dataset of `dta`. Only
+# those extracted files outlive a session: "Restore previous session" re-reads
+# file datasets from their files, while tables come back from the autosave's
+# own copies.
+dta_file_dataset_uploads <- function(dta, uploads) {
+  keys <- names(uploads) %||% character(0)
+  is_file <- vapply(keys, function(k) {
+    id <- sub("\\|\\|.*$", "", k)
+    identical(tryCatch(dta_get_dataset(dta, id)@type, error = function(e) NA), "file")
+  }, logical(1), USE.NAMES = FALSE)
+  uploads[is_file]
 }

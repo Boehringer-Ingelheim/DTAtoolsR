@@ -54,7 +54,7 @@ dta-templates/
 # failure on all five platforms and nothing before it.
 !inst/extdata/library/parties/*.dta-party.yaml
 !inst/extdata/template-repo-skeleton/parties/*.dta-party.yaml
-!inst/qualification/fixtures/**/*.dta-party.yaml
+!inst/qualification/fx/**/*.dta-party.yaml
 
 # `R CMD check` writes <pkg>.Rcheck/ beside the package and `R CMD build`
 # leaves a <pkg>_<version>.tar.gz. Both are regenerated on demand and must

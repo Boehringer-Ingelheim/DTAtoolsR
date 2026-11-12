@@ -12,7 +12,8 @@ DTAFile(
   number_of_files = NULL,
   min_number_of_files = NULL,
   max_number_of_files = NULL,
-  info = NULL
+  info = NULL,
+  container = NULL
 )
 }
 \arguments{
@@ -39,6 +40,13 @@ expected.}
 
 \item{info}{Character, list or \code{NULL}; free-text description of the
 file.}
+
+\item{container}{Character or \code{NULL}; the name of the \code{.zip}
+archive or \code{.xpt} SAS transport file this file arrives inside.
+\code{*} matches any text and \code{?} one character
+(\code{"sdtm_*.zip"}); the name is matched as a whole, independently of
+\code{pattern}. \code{NULL} (the default) accepts the file loose or inside
+any container. Only \code{\link{load_delivery}()} consults it.}
 }
 \value{
 An object of class \code{DTAFile} containing file parsing
@@ -57,7 +65,8 @@ This class is the base of the file-handler hierarchy and carries
 the metadata and parsing properties every handler shares. It is rarely
 constructed directly: prefer a concrete subclass --
 \code{\link{DTAFileCSV}}, \code{\link{DTAFileTSV}},
-\code{\link{DTAFileDelim}} for a file that is read, or
+\code{\link{DTAFileDelim}} for a delimited file that is read,
+\code{\link{DTAFileSAS7BDAT}} for a SAS dataset that is read, or
 \code{\link{DTAFileAny}} for a deliverable that is only checked for
 arrival.
 }

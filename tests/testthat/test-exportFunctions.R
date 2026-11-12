@@ -21,6 +21,15 @@ test_that("export_specs_table validates inputs and writes DOCX output", {
   on.exit(unlink(out_default, force = TRUE), add = TRUE)
   ft_default <- export_specs_table(specs, file = out_default, overwrite = TRUE, quiet = TRUE)
   expect_true(file.exists(out_default))
+  # The saved document must carry the table: every column header and the id of
+  # every specified column, not merely exist on disk.
+  default_text <- .docx_text(out_default)
+  for (hdr in names(ft_default$body$dataset)) {
+    expect_match(default_text, hdr, fixed = TRUE)
+  }
+  for (id in names(specs@columns)) {
+    expect_match(default_text, id, fixed = TRUE)
+  }
   expect_s3_class(ft_default, "flextable")
   # file.exists() + class say nothing about the table that was produced.
   expect_equal(
@@ -53,6 +62,10 @@ test_that("export_specs_table validates inputs and writes DOCX output", {
     quiet = TRUE
   )
   expect_true(file.exists(out_compact))
+  # The excluded column must be absent from the saved document, too.
+  compact_text <- .docx_text(out_compact)
+  expect_match(compact_text, "Variable Label", fixed = TRUE)
+  expect_no_match(compact_text, "Length", fixed = TRUE)
   expect_s3_class(ft_compact, "flextable")
 
   # The caller excluded "Length", so the table must carry exactly the six
@@ -132,6 +145,11 @@ test_that("export_column_value_table writes DOCX and returns value table", {
 
   values_df <- export_column_value_table(specs, file = out, id = "VISIT", quiet = TRUE)
   expect_true(file.exists(out))
+  # The saved document lists the allowed values under the column id.
+  values_text <- .docx_text(out)
+  expect_match(values_text, "VISIT", fixed = TRUE)
+  expect_match(values_text, "V01", fixed = TRUE)
+  expect_match(values_text, "EOT", fixed = TRUE)
   expect_s3_class(values_df, "data.frame")
   expect_true("VISIT" %in% names(values_df))
   expect_equal(as.character(values_df$VISIT), c("V01", "EOT"))
@@ -246,4 +264,55 @@ test_that("write_table_to_file() with get_md5sum = FALSE returns NA_character_ a
   expect_identical(res$n_rows, nrow(written))
   expect_identical(res$n_cols, ncol(written))
   expect_false(file.exists(paste0(out, ".md5")))
+})
+
+test_that("export_column_value_table() refuses to overwrite unless asked", {
+  specs <- DTAColumnSpecCollection(
+    columns = list(VISIT = DTAColumnSpec(id = "VISIT", type = "SAS Char", nullable = FALSE, values = c("V01", "EOT")))
+  )
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  writeLines("precious", out)
+
+  expect_error(
+    export_column_value_table(specs, file = out, id = "VISIT", quiet = TRUE),
+    "File exists",
+    class = "rlang_error"
+  )
+  expect_identical(readLines(out, warn = FALSE), "precious")
+
+  export_column_value_table(specs, file = out, id = "VISIT", quiet = TRUE, overwrite = TRUE)
+  expect_true(any(officer::docx_summary(officer::read_docx(out))$text == "EOT"))
+})
+
+test_that("export_specs_table() aborts with the cli error for empty colnames", {
+  specs <- create_example_DTAColumnSpecCollection()
+  out <- tempfile(fileext = ".docx")
+  expect_error(
+    export_specs_table(specs, file = out, colnames = character(0), quiet = TRUE),
+    "colnames not supported",
+    class = "rlang_error"
+  )
+  expect_false(file.exists(out))
+})
+
+test_that("export_specs_table() and export_column_value_table() leave an existing file intact when the writer fails", {
+  specs <- create_example_DTAColumnSpecCollection()
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  writeLines("precious", out)
+  testthat::local_mocked_bindings(
+    save_as_docx = function(x, path, ...) {
+      writeLines("partial", path)
+      stop("disk full")
+    },
+    .package = "flextable"
+  )
+  expect_error(export_specs_table(specs, file = out, overwrite = TRUE, quiet = TRUE), "disk full")
+  expect_identical(readLines(out, warn = FALSE), "precious")
+  expect_error(
+    export_column_value_table(specs, file = out, id = "STUDYID", overwrite = TRUE, quiet = TRUE),
+    "disk full"
+  )
+  expect_identical(readLines(out, warn = FALSE), "precious")
 })

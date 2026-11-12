@@ -212,9 +212,13 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
     t <- type_of(col_name)
     !is.na(t) && !t %in% numeric_types
   }
-  # The engine compares Date/Time/DateTime correctly against numeric bounds on
-  # typed tables, so a numeric operator is wrong only on a string (Char) column.
-  text_typed <- function(col_name) identical(type_of(col_name), "Char")
+  # The engine reads Date/Time/DateTime as text (as_r_type() maps them to
+  # "character") and runs a numeric operator through a strict number
+  # conversion, so every comparison on such a column is a false failure. A
+  # numeric operator is therefore wrong on Char and on the three SAS date types.
+  text_typed <- function(col_name) {
+    type_of(col_name) %in% c("Char", "Date", "Time", "DateTime")
+  }
   probe_cache <- new.env(parent = emptyenv())
 
   for (rule in rules) {
@@ -295,12 +299,19 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
 
           if (op %in% dta_numeric_condition_operators()) {
             if (text_typed(col_name)) {
+              is_char <- identical(type_of(col_name), "Char")
+              # A date column is text only in file reads; an in-memory Date-class
+              # table compares correctly, so that case warns instead of
+              # refusing a spec the engine can run.
               fb$add(
-                "rule", rid, "error", "rule_condition_numeric_on_text",
-                sprintf("%s compares numbers, but the column is %s.", where, type_of(col_name))
+                "rule", rid, if (is_char) "error" else "warning", "rule_condition_numeric_on_text",
+                sprintf(
+                  "%s compares numbers, but the column is %s, which is read as text%s.",
+                  where, type_of(col_name),
+                  if (is_char) "" else ": file reads hold dates as text and a date is not a number, so compare with a quoted ISO value, and only on Date-class data"
+                )
               )
-            } else if (!type_of(col_name) %in% c("Date", "Time", "DateTime") &&
-              length(vals) > 0L &&
+            } else if (length(vals) > 0L &&
               any(is.na(suppressWarnings(as.numeric(as.character(vals)))))) {
               fb$add(
                 "rule", rid, "error", "rule_condition_numeric_on_text",
@@ -312,6 +323,19 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
 
           if (!op %in% c("equals", "equal", "in", "not_equals", "not_equal", "not_in") ||
             length(vals) == 0L) {
+            next
+          }
+          # YAML reads an unquoted Y/N/yes/no/on/off as a logical, which can
+          # never equal the text a non-Bool column holds. Reported for the
+          # negated operators too: `not_equals: N` then excludes nothing.
+          if (is.logical(vals) && !is.na(type_of(col_name)) && type_of(col_name) != "Bool") {
+            fb$add(
+              "rule", rid, "error", "rule_condition_value_unfit",
+              sprintf(
+                "%s uses a logical value, but the column is %s. YAML reads an unquoted Y or N as TRUE or FALSE; quote it, e.g. equals: 'Y'.",
+                where, type_of(col_name)
+              )
+            )
             next
           }
           # A negated comparison against a value outside the codelist is always
@@ -346,6 +370,15 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
               probe_cache[[key]] <- list(dta_operand_problems(spec, vals))
             }
             problems <- probe_cache[[key]][[1]]
+            # A number against a text column: YAML has already dropped any
+            # leading zero or trailing zero (`01` is 1, `1.10` is 1.1), so the
+            # value no longer matches the text the data holds.
+            if (is.numeric(vals) && identical(type_of(col_name), "Char")) {
+              fb$add(
+                "rule", rid, "warning", "rule_condition_value_unfit",
+                sprintf("%s: a number was written where the column holds text; YAML drops leading and trailing zeros, so quote the value.", where)
+              )
+            }
             if (length(problems) > 0L) {
               fb$add(
                 "rule", rid, "error", "rule_condition_value_unfit",
@@ -380,7 +413,8 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
 #' `rule_column_undeclared`, `rule_range_non_numeric`,
 #' `rule_condition_operator_invalid`, `rule_condition_numeric_on_text`,
 #' `rule_condition_value_unfit`, `rule_condition_value_outside_values`,
-#' `group_constraint_unknown_condition`.
+#' `group_constraint_unknown_condition`, `file_container_invalid`,
+#' `file_field_unknown`, `file_container_misplaced`, `file_count_bound_invalid`.
 #'
 #' Warnings: `rules_without_columns`, `rule_not_checkable`,
 #' `format_narrower_than_length`, `metadata_import_issue`, `version_unquoted`
@@ -458,9 +492,15 @@ dta_lint_path <- function(path) {
   }
   raw <- tryCatch(yaml::read_yaml(path), error = function(e) e)
   if (inherits(raw, "error")) {
+    text <- dta_condition_text(raw)
     return(dta_lint_row(
       "", "document", NA_character_, "error", "yaml_unreadable",
-      paste("The file is not valid YAML:", dta_condition_text(raw))
+      paste0(
+        "The file is not valid YAML: ", text,
+        if (grepl("alias", text, fixed = TRUE)) {
+          " A value that starts with * must be quoted, e.g. container: \"*_SDTM.zip\"."
+        }
+      )
     ))
   }
   if (!is.list(raw)) {
@@ -565,6 +605,16 @@ dta_lint_metadata_list <- function(md) {
       "Metadata section must contain 'version' field"
     ))
   }
+  # An unknown key makes R print the whole offending argument into its
+  # "unused argument" error, which is exponential for a YAML alias bomb, so
+  # unknown keys are reported by name here, before anything is expanded.
+  unknown <- setdiff(names(md), names(formals(DTAMetaData)))
+  if (length(unknown) > 0L) {
+    return(dta_lint_row(
+      "", "metadata", NA_character_, "error", "metadata_invalid",
+      sprintf("Unknown metadata field(s): %s.", paste(sQuote(unknown, FALSE), collapse = ", "))
+    ))
+  }
   built <- tryCatch(do.call(DTAMetaData, md), error = function(e) e)
   if (inherits(built, "error")) {
     return(dta_lint_row(
@@ -612,10 +662,82 @@ dta_lint_dataset_list <- function(d, label) {
       sprintf("Dataset type '%s' is not supported.", paste(type, collapse = ","))
     ))
     return(out)
-  } else if (!identical(type, "tabular")) {
-    return(out)
+  }
+  if (!is.null(type)) {
+    if (!is.null(d[["container"]])) {
+      out <- rbind(out, dta_lint_row(
+        label, "dataset", label, "error", "file_container_misplaced",
+        "'container' belongs to a file entry: write it under 'files:'."
+      ))
+    }
+    out <- rbind(out, dta_lint_files_list(d[["files"]], label))
+    if (!identical(type, "tabular")) {
+      return(out)
+    }
   }
   rbind(out, dta_lint_specs_lists(d[["columns"]], d[["rules"]], label))
+}
+
+# The file entries of a dataset, judged without building them: a key the
+# entry's constructor does not take, and a `container` that is not a single
+# .zip/.xpt file name. `files` is normalised as dta_file_handlers_from_list()
+# does (fully named = one entry, otherwise a list of entries).
+dta_lint_files_list <- function(files, dataset) {
+  out <- dta_lint_empty()
+  if (is.null(files) || length(files) == 0L || !is.list(files)) {
+    return(out)
+  }
+  nms <- names(files)
+  if (!is.null(nms) && all(nzchar(nms))) {
+    files <- list(files)
+  }
+  constructors <- list(
+    csv = DTAFileCSV, tsv = DTAFileTSV, any = DTAFileAny,
+    sas7bdat = DTAFileSAS7BDAT, xpt = DTAFileXPT
+  )
+  for (i in seq_along(files)) {
+    entry <- files[[i]]
+    if (!is.list(entry)) {
+      next
+    }
+    id <- if (is.null(entry[["filename"]])) {
+      paste0("#", i)
+    } else {
+      paste(unlist(entry[["filename"]]), collapse = ", ")
+    }
+    type <- entry[["type"]]
+    if (is.character(type) && length(type) == 1L && type %in% names(constructors)) {
+      unknown <- setdiff(names(entry), c("type", names(formals(constructors[[type]]))))
+      if (length(unknown) > 0L) {
+        out <- rbind(out, dta_lint_row(
+          dataset, "file", id, "error", "file_field_unknown",
+          sprintf("Unknown file field(s): %s.", paste(sQuote(unknown, FALSE), collapse = ", "))
+        ))
+      }
+    }
+    if (!is.null(entry[["container"]])) {
+      problem <- dta_container_value_problem(entry[["container"]])
+      if (!is.null(problem)) {
+        out <- rbind(out, dta_lint_row(
+          dataset, "file", id, "error", "file_container_invalid", problem
+        ))
+      }
+    }
+    # The bounds the entry would be refused for when built (the DTAFile
+    # validator runs the same test), reported here instead of as an abort.
+    nf <- entry[["number_of_files"]]
+    lo <- entry[["min_number_of_files"]]
+    hi <- entry[["max_number_of_files"]]
+    # The constructor defaults an entry that declares no count to exactly 1.
+    if (is.null(nf) && is.null(lo) && is.null(hi)) nf <- 1
+    problem <- dta_file_count_bounds_problem(lo, hi, number = nf, pattern = isTRUE(entry[["pattern"]]))
+    if (!is.null(problem)) {
+      out <- rbind(out, dta_lint_row(
+        dataset, "file", id, "error", "file_count_bound_invalid", problem
+      ))
+    }
+  }
+  out
 }
 
 # Builds every column and rule from its raw list, one by one, then runs the

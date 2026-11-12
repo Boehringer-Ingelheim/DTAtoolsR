@@ -286,11 +286,16 @@ qual_discover_tests <- function(tests_dir) {
 
 # ---- running a stage --------------------------------------------------------
 
-qual_stage_filter <- function(stage, filter = NULL) {
-  if (is.null(filter)) {
-    return(paste0("^", stage, "-"))
-  }
-  sprintf("^%s-.*(%s)", stage, filter)
+# The test files of one stage that the run filter selects, by the name testthat
+# matches on (file name without `test-` and `.R`). The filter is a regular
+# expression searched for in that name, stage prefix included and unanchored
+# unless it anchors itself: "VAL", "OQ-VAL" and "^OQ-VAL" all select OQ-VAL-*.
+qual_stage_files <- function(stage, tests_dir, filter = NULL) {
+  files <- list.files(tests_dir, pattern = "^test-.*\\.[Rr]$")
+  nm <- sub("\\.[Rr]$", "", sub("^test-", "", files))
+  nm <- nm[startsWith(nm, paste0(stage, "-"))]
+  if (!is.null(filter)) nm <- nm[grepl(filter, nm)]
+  nm
 }
 
 # `load_package = "none"` together with `package = "DTAtools"` runs the tests in
@@ -300,12 +305,19 @@ qual_stage_filter <- function(stage, filter = NULL) {
 # than a source tree.
 qual_run_stage <- function(stage, tests_dir, filter = NULL, reporter = "silent") {
   qual_log("stage_start", stage)
+  selected <- qual_stage_files(stage, tests_dir, filter)
+  if (length(selected) == 0) {
+    # A filter that selects nothing in this stage is an empty stage, not a
+    # failure; only a real abort (below) is recorded as one.
+    qual_log("stage_end", stage, 0L)
+    return(list())
+  }
   results <- tryCatch(
     withr::with_envvar(
       c(TESTTHAT_PARALLEL = "FALSE", TESTTHAT_EDITION = "3"),
       testthat::test_dir(
         tests_dir,
-        filter = qual_stage_filter(stage, filter),
+        filter = sprintf("^(%s)$", paste(selected, collapse = "|")),
         reporter = reporter,
         env = NULL,
         load_helpers = TRUE,
@@ -316,12 +328,11 @@ qual_run_stage <- function(stage, tests_dir, filter = NULL, reporter = "silent")
       )
     ),
     error = function(e) {
-      # testthat aborts the whole stage for two very different reasons: a
-      # filter that matches no file, which is merely an empty stage, and a
-      # helper that fails to load, which silently removes every test the stage
-      # had. Both arrive here as one error, and the second must never be
-      # reported as a clean run of nothing -- so the abort is recorded as a
-      # failing result rather than swallowed.
+      # testthat aborts the whole stage when, for example, a helper fails to
+      # load, which silently removes every test the stage had. That must never
+      # be reported as a clean run of nothing -- so the abort is recorded as a
+      # failing result rather than swallowed. (A filter that matches no file
+      # never reaches here: it is handled above as an empty stage.)
       qual_log("stage_error", stage, conditionMessage(e))
       structure(conditionMessage(e), class = "qual_stage_abort")
     }
@@ -1373,12 +1384,19 @@ qual_mark_incomplete <- function(x, failed) {
 
 # ---- hashing ----------------------------------------------------------------
 
+qual_has_sha256 <- function() exists("sha256sum", asNamespace("tools"))
+
 qual_hash_algorithm <- function() {
-  if (exists("sha256sum", asNamespace("tools"))) "sha256" else "md5"
+  if (qual_has_sha256()) "sha256" else "md5"
 }
 
-qual_hash_one <- function(path) {
-  algo <- qual_hash_algorithm()
+# `algo` lets a caller hash with the algorithm a manifest was written with
+# rather than whatever this R happens to offer; asking for sha256 on an R
+# without it is an error, never a silent substitution of md5.
+qual_hash_one <- function(path, algo = qual_hash_algorithm()) {
+  if (identical(algo, "sha256") && !qual_has_sha256()) {
+    cli::cli_abort("sha256 is not available in this R (tools::sha256sum needs R >= 4.5).")
+  }
   fun <- if (identical(algo, "sha256")) {
     get("sha256sum", asNamespace("tools"))
   } else {
@@ -1799,7 +1817,7 @@ run_qualification <- function(output_dir,
   if (!is.character(formats) || !all(formats %in% qual_formats())) {
     cli::cli_abort("{.arg formats} must be a subset of {.val {qual_formats()}}.")
   }
-  if (!is.null(filter) && (!is.character(filter) || length(filter) != 1)) {
+  if (!is.null(filter) && (!is.character(filter) || length(filter) != 1 || is.na(filter))) {
     cli::cli_abort("{.arg filter} must be {.code NULL} or a single regular expression.")
   }
   for (pkg in c("testthat", "withr")) {
@@ -1868,6 +1886,18 @@ run_qualification <- function(output_dir,
     }
     tests_df <- rbind(tests_df, qual_tests_df(results, stage))
     exp_df <- rbind(exp_df, qual_expectations_df(results, stage))
+  }
+  # A stage with no matching file is an empty stage, but a filter that selects
+  # nothing in ANY stage is a typo, and must not read as a pass.
+  if (length(stages) > 0 && length(filter) == 1 && !is.na(filter) &&
+    nzchar(filter) && nrow(tests_df) == 0) {
+    # No evidence was produced, so leave no half-written bundle behind. The log
+    # is closed first: Windows will not delete a directory holding an open file.
+    qual_safe(close(log_con), NULL)
+    unlink(bundle_dir, recursive = TRUE)
+    cli::cli_abort(
+      "{.arg filter} {.val {filter}} matched no qualification test in stage{?s} {.val {stages}}."
+    )
   }
 
   unit <- if (length(stages) > 0) {

@@ -9,48 +9,51 @@
 # written for one version of the software say nothing certain about another.
 
 suite_revision: 1
-package_version: 0.26.0
+package_version: 0.27.0
 
 areas:
   - area: CORE
     title: The qualification runner itself
-    min_tests: 11
+    min_tests: 13
   - area: ENV
     title: Installed system and environment
     min_tests: 23
   - area: SPEC
     title: Specifications, YAML and factories
-    min_tests: 32
+    min_tests: 34
   - area: TYPE
     title: Declared types and typing at read
     min_tests: 31
   - area: VAL
     title: Validation engine and result accessors
-    min_tests: 39
+    min_tests: 46
   - area: RULE
     title: Cross-column and grouped rules
-    min_tests: 40
+    min_tests: 43
   - area: FILE
     title: File handlers and readers
-    min_tests: 42
+    min_tests: 54
+  - area: CONT
+    title: Container deliveries (zip archives, SAS transport libraries)
+    min_tests: 32
   - area: STREAM
     title: Streaming validation and engine parity
-    min_tests: 31
+    min_tests: 32
   - area: META
     title: Transfer metadata
     min_tests: 22
   - area: TMPL
     title: Templates, inheritance and controlled vocabulary
-    min_tests: 102
+    min_tests: 114
   - area: EXPORT
     title: Document and data export
-    min_tests: 54
+    min_tests: 73
   - area: REPORT
     title: The standalone HTML validation report
-    min_tests: 17
+    min_tests: 18
   - area: APP
     title: The interactive application
-    min_tests: 37
+    min_tests: 38
   - area: ROBUST
     title: Error handling, integrity and isolation
     min_tests: 17

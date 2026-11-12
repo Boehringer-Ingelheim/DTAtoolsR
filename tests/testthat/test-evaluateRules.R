@@ -549,11 +549,8 @@ test_that("Range rules support min/max slots and reject multi-column usage", {
   expect_true(all_na$valid)
 
   expect_error(
-    rule_check_range(
-      DTARuleColRange(id = "range_multi", columns = c("AGE", "WEIGHT"), min = 0, max = 100),
-      data.frame(AGE = 1, WEIGHT = 2)
-    ),
-    "exactly one"
+    DTARuleColRange(id = "range_multi", columns = c("AGE", "WEIGHT"), min = 0, max = 100),
+    class = "dta_rule_range_columns"
   )
 })
 
@@ -1024,6 +1021,11 @@ test_that("rule_check_unique() gives identical valid/message with Arrow on and o
   result_off <- rule_check_unique(rule, df)
 
   options(DTAtools.use_arrow_compute = TRUE, DTAtools.arrow_min_rows = 10L)
+  # dta_count_duplicates() swallows an Arrow error and falls back to R; make
+  # the fallback fail loudly so "Arrow on" cannot silently be the R path.
+  testthat::local_mocked_bindings(
+    dta_unique_key = function(...) stop("R fallback used instead of Arrow")
+  )
   result_on <- rule_check_unique(rule, df)
 
   expect_identical(result_on$valid, result_off$valid)
@@ -1164,7 +1166,7 @@ test_that("Unsupported condition operators abort via cli, naming column and key"
       ),
       data.frame(VISIT = "V03", AGE = 1, stringsAsFactors = FALSE)
     ),
-    class = "rlang_error"
+    regexp = "Unsupported condition operator.*bogus_op.*for column.*AGE", class = "rlang_error"
   )
   # The abort must identify both the column and the offending key, otherwise a
   # typo in a large DTS is untraceable.
@@ -1182,7 +1184,7 @@ test_that("Unsupported condition operators abort via cli, naming column and key"
       ),
       data.frame(VISIT = "V03", AGE = 1, stringsAsFactors = FALSE)
     ),
-    class = "rlang_error"
+    regexp = "Unsupported condition operator.*bogus_op.*for column.*AGE", class = "rlang_error"
   )
 })
 
@@ -1341,14 +1343,14 @@ test_that("Malformed conditions abort with a clear message, never 'invalid argum
       condition = "VISIT == V03",
       then = list(AGE = list(less = 5))
     ),
-    class = "rlang_error"
+    regexp = "must map column names to operators", class = "rlang_error"
   )
   expect_match(conditionMessage(chr_err), "condition")
   expect_false(grepl("invalid argument", conditionMessage(chr_err), fixed = TRUE))
 
   engine_err <- expect_error(
     evaluate_conditions("VISIT == V03", df),
-    class = "rlang_error"
+    regexp = "must map column names to operators", class = "rlang_error"
   )
   expect_false(grepl("invalid argument", conditionMessage(engine_err), fixed = TRUE))
 
@@ -1360,7 +1362,7 @@ test_that("Malformed conditions abort with a clear message, never 'invalid argum
       condition = list(list(equals = "V03")),
       then = list(AGE = list(less = 5))
     ),
-    class = "rlang_error"
+    regexp = "must name the column", class = "rlang_error"
   )
 
   # An empty operator map must abort, not wave every row through.
@@ -1373,7 +1375,7 @@ test_that("Malformed conditions abort with a clear message, never 'invalid argum
       ),
       df
     ),
-    class = "rlang_error"
+    regexp = "must map operators to values", class = "rlang_error"
   )
 
   # The same column named twice is ambiguous: one of the two would be lost.
@@ -1386,7 +1388,7 @@ test_that("Malformed conditions abort with a clear message, never 'invalid argum
       ),
       then = list(AGE = list(less = 5))
     ),
-    class = "rlang_error"
+    regexp = "more than once", class = "rlang_error"
   )
 })
 
@@ -1891,13 +1893,11 @@ test_that("A rule naming an absent column fails the rule instead of aborting the
 
   # Precision check: a malformed rule is a specification error, not an
   # unevaluable one, and must still abort rather than be reported as a failure.
+  multi_col <- DTARuleColRange(id = "multi_col", columns = "A", min = 0, max = 1)
+  S7::prop(multi_col, "columns", check = FALSE) <- c("A", "B")
   expect_error(
-    apply_rules(
-      list(DTARuleColRange(id = "multi_col", columns = c("A", "B"), min = 0, max = 1)),
-      data.frame(A = 1, B = 2),
-      verbose = FALSE
-    ),
-    "exactly one"
+    apply_rules(list(multi_col), data.frame(A = 1, B = 2), verbose = FALSE),
+    class = "dta_rule_range_columns"
   )
 })
 
@@ -2073,6 +2073,45 @@ test_that("a numeric group-by value renders canonically in the violation label, 
   expect_identical(streamed$message, eager$message)
 })
 
+test_that("a YAML ~ in an in list matches a missing value on both paths", {
+  members <- yaml::yaml.load("v: [A, ~]")$v
+  rule <- DTARuleColCondition(
+    id = "in_null",
+    condition = list(V = list(`in` = members)),
+    then = list(FLAG = list(equals = "yes"))
+  )
+  df <- data.frame(V = c("A", NA, "B", "NULL"), FLAG = "no", stringsAsFactors = FALSE)
+  expect_identical(dta_condition_violated(rule, df), c(TRUE, TRUE, FALSE, FALSE))
+
+  state <- dta_rule_stream_init(rule)
+  reader <- dta_as_batch_reader(df, batch_rows = 1L)
+  repeat {
+    batch <- reader$read_next_batch()
+    if (is.null(batch)) break
+    dta_rule_stream_update(state, rule, as.data.frame(batch))
+  }
+  streamed <- dta_rule_stream_finalise(state, rule)
+  expect_false(streamed$valid)
+  expect_identical(streamed$message, rule_check_col_condition(rule, df)$message)
+})
+
+test_that("an in or not_in list holding only a YAML ~ is accepted and selects missing values", {
+  only_null <- yaml::yaml.load("v: [~]")$v
+  df <- data.frame(V = c("A", NA), FLAG = "no", stringsAsFactors = FALSE)
+  for (op in c("in", "not_in")) {
+    condition <- stats::setNames(list(only_null), op)
+    rule <- DTARuleColCondition(
+      id = paste0(op, "_only_null"),
+      condition = list(V = condition),
+      then = list(FLAG = list(equals = "yes"))
+    )
+    expect_identical(
+      dta_condition_violated(rule, df),
+      if (op == "in") c(FALSE, TRUE) else c(TRUE, FALSE)
+    )
+  }
+})
+
 test_that("integer64 columns are exempt from equality-bound parsing", {
   # is.numeric(integer64) is TRUE, but as.numeric() rounds past 2^53: parsing
   # the bound would turn "9007199254740993" into 9007199254740992 and break an
@@ -2119,10 +2158,10 @@ test_that("print() on the other rule classes already survives braces in id/colum
   expect_true(any(grepl("cc{r}", out_cond, fixed = TRUE)))
   expect_true(any(grepl("desc{ription}", out_cond, fixed = TRUE)))
 
-  range_rule <- DTARuleColRange(id = "range{r}", columns = c("A{B}", "C{D}"), min = 0, max = 10)
+  range_rule <- DTARuleColRange(id = "range{r}", columns = "A{B}", min = 0, max = 10)
   out_range <- capture.output(print(range_rule), type = "message")
   expect_true(any(grepl("range{r}", out_range, fixed = TRUE)))
-  expect_true(any(grepl("A{B}, C{D}", out_range, fixed = TRUE)))
+  expect_true(any(grepl("A{B}", out_range, fixed = TRUE)))
 
   group_rule <- DTARuleGroupCondition(
     id = "grp{r}",
@@ -2243,4 +2282,307 @@ test_that("well-formed operator values are unaffected by the arity check", {
   # range check must not insist on numbers.
   expect_true(check(list(D = list(range = c("2020-01-01", "2020-12-31")))))
   expect_false(check(list(AGE = list(range = c(15, 40)))))
+})
+
+# ---- review fixes: VAL-2..VAL-7 ------------------------------------------------
+
+test_that("requires with then_scope = all attributes rows per group, by positional lookup", {
+  # groups_idx() (the row indices of each group) is read positionally, [[g]],
+  # only on the requires + then_scope = "all" path; a lookup by name scanned the
+  # names vector once per violating group. Every group fails here: IF holds on
+  # its first row, THEN (all rows) fails on its second.
+  make <- function(n) {
+    df <- data.frame(
+      SUBJ = rep(sprintf("S%05d", seq_len(n)), each = 2L),
+      A = rep(c("x", "y"), times = n),
+      stringsAsFactors = FALSE
+    )
+    rule <- DTARuleGroupCondition(
+      id = "perf",
+      group_by = "SUBJ",
+      conditions = list(a = list(A = list(equals = "x")), b = list(A = list(equals = "x"))),
+      constraints = list(list(type = "requires", `if` = "a", then = "b", then_scope = "all"))
+    )
+    list(df = df, rule = rule)
+  }
+
+  n <- 2000L
+  small <- make(n)
+  res <- rule_check_group_condition(small$rule, small$df)
+  expect_false(res$valid)
+  expect_length(res$details, n)
+  # Rows are attributed to the right group: first and last (IF row + failing row).
+  expect_identical(res$details[[1]]$rows, c(1L, 2L))
+  expect_identical(res$details[[n]]$rows, c(2L * n - 1L, 2L * n))
+  expect_match(res$details[[n]]$message, "rows 4000 do not satisfy", fixed = TRUE)
+
+  # Cost shape, asserted structurally rather than by wall clock: the group
+  # index must be read by integer position, [[g]]. A lookup by name (or by
+  # match() against names()) is a linear scan per violating group, which is
+  # the quadratic cost this test exists to catch. split() is wrapped so the
+  # list it returns records every character subscript and every names() call.
+  probe <- new.env(parent = emptyenv())
+  probe$by_name <- 0L
+  probe$names_calls <- 0L
+  probe$positional <- 0L
+  # Only the group-index split of this very table is wrapped (every other
+  # split() call, here and in testthat, passes straight through).
+  real_split <- base::split
+  local_mocked_bindings(
+    split = function(x, f, ...) {
+      out <- real_split(x, f, ...)
+      if (identical(x, seq_len(2L * n)) && nlevels(f) == n) class(out) <- "dta_probe"
+      out
+    },
+    .package = "base"
+  )
+  local_mocked_s3_method("[[", "dta_probe", function(x, i, ...) {
+    if (is.character(i)) probe$by_name <- probe$by_name + 1L else probe$positional <- probe$positional + 1L
+    unclass(x)[[i, ...]]
+  })
+  local_mocked_s3_method("[", "dta_probe", function(x, i, ...) {
+    if (is.character(i)) probe$by_name <- probe$by_name + 1L
+    unclass(x)[i, ...]
+  })
+  local_mocked_s3_method("names", "dta_probe", function(x) {
+    probe$names_calls <- probe$names_calls + 1L
+    names(unclass(x))
+  })
+  res <- rule_check_group_condition(small$rule, small$df)
+  expect_length(res$details, n)
+  # One positional read per violating group, and not a single name lookup.
+  expect_gte(probe$positional, n)
+  expect_identical(probe$by_name, 0L)
+  expect_identical(probe$names_calls, 0L)
+})
+
+test_that("group IF conditions keep unconvertible rows in scope", {
+  df <- data.frame(
+    SUBJ = c("S1", "S1"),
+    AGE = c("ninety", "5"),
+    FLAG = c("N", "N"),
+    stringsAsFactors = FALSE
+  )
+  rule <- DTARuleGroupCondition(
+    id = "g",
+    group_by = "SUBJ",
+    conditions = list(
+      adult = list(AGE = list(greater = 18)),
+      flagged = list(FLAG = list(equals = "Y"))
+    ),
+    constraints = list(list(type = "requires", `if` = "adult", then = "flagged"))
+  )
+  res <- rule_check_group_condition(rule, df)
+  expect_false(res$valid)
+  expect_identical(res$details[[1]]$rows, 1L)
+})
+
+# ---- group_condition on a zero-row table (TST-11) ----------------------------
+# Semantics of the nrow == 0 early return in rule_check_group_condition() (the
+# roxygen does not state them): an empty table has no group to violate
+# anything, so the rule is valid. The grouping column is still required to exist, so a table
+# lacking it is "not applicable" rather than silently valid.
+
+zero_row_group_rule <- function(scope) {
+  DTARuleGroupCondition(
+    id = paste0("grp_zero_", scope),
+    group_by = "SUBJ",
+    conditions = list(
+      failed = list(REASND = list(empty = FALSE)),
+      done = list(STAT = list(equals = "DONE"))
+    ),
+    constraints = list(
+      list(
+        type = "mutually_exclusive", left = "failed", right = "done",
+        left_scope = scope, right_scope = scope
+      ),
+      list(
+        type = "requires", `if` = "failed", then = "done",
+        if_scope = scope, then_scope = scope
+      )
+    )
+  )
+}
+
+zero_row_group_df <- function() {
+  data.frame(
+    SUBJ = character(), REASND = character(), STAT = character(),
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("group_condition is valid on a zero-row table for every supported scope", {
+  df <- zero_row_group_df()
+  expect_identical(nrow(df), 0L)
+
+  for (scope in c("any", "all")) {
+    res <- rule_check_group_condition(zero_row_group_rule(scope), df)
+    expect_true(res$valid, info = scope)
+    expect_null(res$message, info = scope)
+  }
+})
+
+test_that("group_condition on a zero-row table is valid through apply_rules() too", {
+  res <- apply_rules(list(zero_row_group_rule("all")), zero_row_group_df(), verbose = FALSE)[[1]]
+  expect_true(res$valid)
+})
+
+test_that("group_condition on a zero-row table still requires the grouping column", {
+  df <- data.frame(REASND = character(), STAT = character(), stringsAsFactors = FALSE)
+  expect_error(
+    rule_check_group_condition(zero_row_group_rule("any"), df),
+    class = "dta_rule_not_applicable"
+  )
+})
+
+test_that("group_condition then_scope 'all' fails a group with a non-matching row, 'any' passes it", {
+  # Group A is flagged "failed" and has one DONE and one OPEN row: "any" is
+  # satisfied, "all" is not. Group B is entirely DONE. Only the scope differs
+  # between the two rules, so this distinguishes "all" from "any".
+  df <- data.frame(
+    SUBJ = c("A", "A", "B", "B"),
+    REASND = c("BROKEN", NA_character_, NA_character_, NA_character_),
+    STAT = c("DONE", "OPEN", "DONE", "DONE"),
+    stringsAsFactors = FALSE
+  )
+  make_rule <- function(scope) {
+    DTARuleGroupCondition(
+      id = paste0("grp_then_", scope),
+      group_by = "SUBJ",
+      conditions = list(
+        failed = list(REASND = list(empty = FALSE)),
+        done = list(STAT = list(equals = "DONE"))
+      ),
+      constraints = list(list(type = "requires", `if` = "failed", then = "done", then_scope = scope))
+    )
+  }
+
+  res_all <- rule_check_group_condition(make_rule("all"), df)
+  expect_false(res_all$valid)
+  expect_match(res_all$message, "SUBJ=A", fixed = TRUE)
+  expect_false(grepl("SUBJ=B", res_all$message, fixed = TRUE))
+
+  expect_true(rule_check_group_condition(make_rule("any"), df)$valid)
+})
+
+test_that("group_condition then_scope 'all' reports exactly the failing rows as evidence", {
+  # Rows 1-4 are group A, rows 5-6 group B (row numbers are 1-based, whole table).
+  # "failed" holds only at row 1. "done" holds at rows 1 and 3 of A but not at
+  # rows 2 and 4, so with then_scope "all" the rows failing "done" are 2 and 4.
+  # Evidence = rows where `if` holds (1) plus rows failing `then` (2, 4) = 1, 2, 4.
+  # Group B is entirely DONE and has no "failed" row, so it must not appear.
+  df <- data.frame(
+    SUBJ = c("A", "A", "A", "A", "B", "B"),
+    REASND = c("BROKEN", NA, NA, NA, NA, NA),
+    STAT = c("DONE", "OPEN", "DONE", "OPEN", "DONE", "DONE"),
+    stringsAsFactors = FALSE
+  )
+  rule <- DTARuleGroupCondition(
+    id = "grp_then_all_evidence",
+    group_by = "SUBJ",
+    conditions = list(
+      failed = list(REASND = list(empty = FALSE)),
+      done = list(STAT = list(equals = "DONE"))
+    ),
+    constraints = list(list(type = "requires", `if` = "failed", then = "done", then_scope = "all"))
+  )
+
+  res <- rule_check_group_condition(rule, df)
+  expect_false(res$valid)
+  expect_match(res$message, "SUBJ=A", fixed = TRUE)
+  expect_false(grepl("SUBJ=B", res$message, fixed = TRUE))
+  # "all"-scope wording, not the "any"-scope wording
+  expect_match(res$message, "do not satisfy \"done\"", fixed = TRUE)
+  expect_false(grepl("no row in the group satisfies", res$message, fixed = TRUE))
+
+  expect_length(res$details, 1L)
+  expect_match(res$details[[1]]$group, "SUBJ=A", fixed = TRUE)
+  expect_equal(as.integer(res$details[[1]]$rows), c(1L, 2L, 4L))
+  expect_false(res$details[[1]]$rows_truncated)
+})
+
+# Regression (red-team F3): a YAML `~` in an `in` list was replaced by
+# NA_character_, so unlist() coerced the whole bound to text and members that
+# need 16-17 significant digits stopped matching a numeric column.
+test_that("a `~` in an in-list does not change how the other members compare", {
+  num <- c(0.30000000000000004, 9007199254740994)
+  df <- data.frame(
+    K = c(format(num, digits = 17), "", "42"),
+    FLAG = "Y",
+    stringsAsFactors = FALSE
+  )
+  specs <- DTAColumnSpecCollection(columns = list(
+    K = DTAColumnSpec(id = "K", type = "SAS Num", nullable = TRUE),
+    FLAG = DTAColumnSpec(id = "FLAG", type = "SAS Char", nullable = FALSE)
+  ))
+  failing_rows <- function(members) {
+    rule <- DTARuleColCondition(
+      id = "k_flag",
+      condition = list(K = list(`in` = members)),
+      then = list(FLAG = list(equals = "N"))
+    )
+    specs@rules <- list(rule)
+    ds <- DTADataSetTabular(id = "d", specs = specs, tables = list(t = df))
+    ck <- suppressMessages(check(ds, quiet = TRUE, persist = FALSE))
+    dta_rule_failure_row_indices(rule, as.data.frame(ck@tables[["t"]]))
+  }
+  plain <- failing_rows(list(num[[1]], num[[2]]))
+  expect_identical(as.integer(plain), 1:2)
+  with_null <- failing_rows(list(num[[1]], num[[2]], NULL))
+  expect_identical(as.integer(with_null), 1:3)
+})
+
+# Regression (red-team F3, generalised): the bound of an in-list is judged
+# member by member. Whatever else the list holds -- a text number, a `~` --
+# a number that needs 16-17 significant digits keeps matching its cell.
+test_that("an in-list compares each member against a numeric column, whatever else the list holds", {
+  num <- 0.30000000000000004
+  x <- c(num, 0.3, 5, 1, NA)
+  mask <- function(members, op = "in") dta_condition_mask("K", op, members, x)
+
+  expect_identical(mask(list(num, "5")), c(TRUE, FALSE, TRUE, FALSE, FALSE))
+  expect_identical(mask(list(num, "5", NULL)), c(TRUE, FALSE, TRUE, FALSE, TRUE))
+  expect_identical(mask(list(num, "5"), "not_in"), c(FALSE, TRUE, FALSE, TRUE, TRUE))
+  expect_identical(dta_equality_bound(x, list(num, "5")), c(num, 5))
+
+  # A member that is text and not a number: the comparison stays textual, so
+  # the numeric member still matches its cell and nothing is parsed.
+  expect_identical(dta_equality_bound(x, list(1, "UNK")), list(1, "UNK"))
+  expect_identical(mask(list(1, "UNK")), c(FALSE, FALSE, FALSE, TRUE, FALSE))
+})
+
+test_that("the in-memory and the streamed check agree on an in-list of mixed members", {
+  frame <- data.frame(
+    K = c("0.30000000000000004", "0.30000000000000004", "0.3", "5", "1", ""),
+    FLAG = "Y",
+    stringsAsFactors = FALSE
+  )
+  path <- file.path(withr::local_tempdir(), "f3.csv")
+  utils::write.csv(frame, path, row.names = FALSE, na = "")
+  num <- 0.30000000000000004
+  failed_rows <- function(members, mode) {
+    rule <- DTARuleColCondition(
+      id = "r", condition = list(K = list(`in` = members)),
+      then = list(FLAG = list(equals = "N"))
+    )
+    specs <- DTAColumnSpecCollection(
+      columns = list(
+        K = DTAColumnSpec(id = "K", type = "SAS Num", nullable = TRUE),
+        FLAG = DTAColumnSpec(id = "FLAG", type = "SAS Char", nullable = FALSE)
+      ),
+      rules = list(rule)
+    )
+    ds <- DTADataSetTabular(id = "d", specs = specs, files = list(DTAFileCSV(filename = "f3.csv")))
+    ds <- load_file(ds, file = path, handler_index = 1, stream = mode)
+    ck <- suppressMessages(suppressWarnings(check(ds, quiet = TRUE, persist = FALSE)))
+    errors <- as.data.frame(validation_errors(ck, names(tables(ck))[[1]]))
+    msg <- errors$message[errors$rule_id == "r"]
+    if (length(msg) == 0L) 0L else as.integer(sub("^.*violated: ([0-9]+) rows? failed.*$", "\\1", msg[[1]]))
+  }
+  for (mode in c("never", "always")) {
+    # rows 1, 2 and the "5" row
+    expect_identical(failed_rows(list(num, "5"), mode), 3L, info = mode)
+    # ... and the missing row
+    expect_identical(failed_rows(list(num, "5", NULL), mode), 4L, info = mode)
+  }
 })

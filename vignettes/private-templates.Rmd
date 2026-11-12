@@ -319,6 +319,9 @@ organisation:
 branding:
   app_title: DTA Viewer
   logo: logo.png          # a file beside dta-app.yaml, at most 1 MB
+header_tag:
+  label: GxP
+  color: "#C0392B"
 colors:
   primary: "#1F4E79"      # always quote a hex colour: a bare # starts a comment
   primary_dark: "#12304D"
@@ -358,6 +361,11 @@ documents (for example `DTS` instead of `DTA`); the name becomes the main title
 of every export, with the document's own title beneath it, and the organisation
 appears on the front page and in the running header.
 
+`header_tag.label` puts a short label such as `GxP` beside the app title on
+every page of the app; `header_tag.color` fills it, and the text colour is
+picked for contrast automatically. The tag is not added to exports or the
+browser tab title.
+
 Links must be `http`, `https` or `mailto` URLs. The logo and Word templates are
 files in the library, named by a path relative to `dta-app.yaml` that must not
 leave the library root.
@@ -395,7 +403,7 @@ git mv *.dta-template.yaml *.dta-dataset-template.yaml templates/
 # Move any .yml spellings and the data files that a dataset `source:` names
 # into templates/ as well (beside the template that uses them).
 git mv our_dta.docx export-templates/      # Word templates ({PLACEHOLDER} markers)
-Rscript -e 'DTAtools::validate_template(".", strict = TRUE)'
+Rscript -e 'DTAtools::lint_template_repo(".")'
 ```
 
 If your repository was in the mixed `templates/` layout, move the party,
@@ -436,13 +444,15 @@ From here on, the loop is the one you will use for the rest of this
 repository's life: edit a file, then run
 
 ```r
-DTAtools::validate_template(".", strict = TRUE)
+DTAtools::lint_template_repo(".")
 ```
 
 from the repository root, fix whatever it reports, and commit only once it
-passes silently. See "CI for a private template repository" below for
-running that same check automatically on every push and pull request — using
-the workflow `create_template_repo()` already wrote for you.
+reports no findings. `lint_template_repo()` runs every `validate_template()`
+check and adds checks on the repository itself (see "CI for a private template
+repository" below). That section also shows how to run the same check
+automatically on every push and pull request — using the workflow
+`create_template_repo()` already wrote for you.
 
 ## Authoring a creation template
 
@@ -1473,7 +1483,8 @@ folder, `app_config_misplaced` (error) for a `dta-app.yaml` that is not at the
 root, and `export_template_invalid` (warning) for a non-`.docx` file in
 `export-templates/`. Pointing it at `templates/`, `parties/` or `vocabulary/`
 itself is refused with `library_subfolder_given` (error); validate the parent.
-The shipped CI assets use this same root command.
+The shipped CI assets run `lint_template_repo(".")`, described below, from the
+same root.
 
 With `strict = TRUE`, `validate_template()` raises a single error naming every
 row of severity `"error"` and stays silent when there are none — the one line
@@ -1487,6 +1498,21 @@ stale working directory, or templates kept in an unrecognised folder — used to
 return zero rows and pass `strict = TRUE` cleanly, which is the worst
 outcome a linter can produce: green, having validated nothing. It now fails,
 naming the directory it found nothing in.
+
+For the repository's own CI, run `lint_template_repo(".")` instead. It returns
+every row `validate_template()` would, plus three repository-format findings:
+`folder_name_case` (error) for a folder such as `Vocabulary/`, which a Linux
+server does not read; `id_filename_mismatch` (warning) for a file whose name
+does not start with its `id`; and `file_ignored` (warning) for a YAML file that
+declares a template `kind` but whose name lacks that kind's suffix, so the app
+never loads it. It prints every finding, then aborts with the class
+`dta_template_lint_error` when one has severity `"error"`, so `Rscript` exits
+with status 1; `fail_on = "warning"` makes warnings fail as well and
+`fail_on = "none"` only reports.
+
+```sh
+Rscript -e 'DTAtools::lint_template_repo(".")'
+```
 
 A ready-to-copy GitHub Actions workflow — checkout, install DTAtools from your
 internal package source, run the check above — ships at
@@ -1507,7 +1533,7 @@ loudly, it just never runs, since there is nothing on that side reading the
 file. If your Bitbucket is Server or Data Center (as this project's own
 production deployment is — see "Deploying on Posit Connect" above), use the
 `Jenkinsfile` instead: a declarative Jenkins pipeline that installs DTAtools
-and runs the same `validate_template(".", strict = TRUE)` check, triggered by
+and runs the same `lint_template_repo(".")` check, triggered by
 a Jenkins job configured against the Bitbucket Server webhook (or a
 Multibranch Pipeline scanning it) rather than an `on:` block in the file
 itself — Jenkinsfiles carry no triggers the way a GitHub Actions workflow

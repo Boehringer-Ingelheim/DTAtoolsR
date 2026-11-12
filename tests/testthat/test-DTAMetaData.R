@@ -247,6 +247,31 @@ test_that("DTAMetaData validator checks version_history shape and changes", {
   )
 })
 
+test_that("version_history changes may be one string or several", {
+  rec <- function(changes) {
+    list(list(version = "1.0", date = as.Date("2026-01-01"), changes = changes))
+  }
+  expect_no_error(DTAMetaData(version_history = rec(c("a", "b"))))
+  expect_no_error(DTAMetaData(version_history = rec(list("a", "b"))))
+
+  # YAML `changes: [a, b]` simplifies to a character vector
+  parsed <- yaml::yaml.load(paste(
+    "version: '1.0'", "date: '2026-01-01'",
+    "changes: [Added files, Added rules]",
+    sep = "\n"
+  ))
+  md <- DTAMetaData(version_history = list(parsed))
+  expect_equal(md@version_history[[1]]$changes, c("Added files", "Added rules"))
+  expect_equal(get_version_history_df(md)$changes, "Added files; Added rules")
+
+  for (bad in list(character(0), c("a", ""), NA_character_, c("a", NA), NA, list(), list("a", 1))) {
+    expect_error(
+      DTAMetaData(version_history = rec(bad)),
+      "changes (must be one or more|cannot be an empty string or NA)"
+    )
+  }
+})
+
 test_that("DTAMetaData validator checks transmission date field types", {
   expect_error(
     DTAMetaData(
@@ -746,4 +771,18 @@ test_that("a clean ISO metadata date is still written as exactly the ISO string"
   out <- as.list(md)
   expect_identical(out$date, "2026-01-15")
   expect_identical(out$transmission$date_last_transfer, "2026-12-31")
+})
+
+# ---- review fixes ----------------------------------------------------------
+
+test_that("a metadata object with an NA date survives a YAML round trip", {
+  md <- DTAMetaData(title = "T", version = "1", date = NULL)
+  md@date <- as.Date(NA)
+  lst <- as.list(md)
+  expect_null(lst$date)
+  path <- tempfile(fileext = ".yaml")
+  on.exit(unlink(path))
+  yaml::write_yaml(lst, path)
+  back <- do.call(DTAMetaData, yaml::read_yaml(path))
+  expect_null(back@date)
 })

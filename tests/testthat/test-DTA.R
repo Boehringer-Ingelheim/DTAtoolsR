@@ -25,43 +25,20 @@ test_that("DTA object is constructed correctly from example", {
   expect_equal(datasets(dta, 2), dta@datasets[["vitals"]])
 
   # Error on missing container
-  expect_error(datasets(dta, "missing"), "not found")
+  expect_error(datasets(dta, "missing"), "following dataset")
 
   # Index bounds are checked
   expect_error(datasets(dta, 0), "out of bounds")
   expect_error(datasets(dta, 99), "out of bounds")
 })
 
-test_that("datasets() does not enforce a single 'name' argument (documented gap)", {
-  # The guard in method(datasets, DTA) reads
-  #   !is.null(name) && !is.character(name) && !is.numeric(name) && length(name) != 1
-  # so the length check is ANDed with the two type checks. Any character or any
-  # numeric input short-circuits the condition to FALSE, which means the
-  # "must be a single ..." abort is unreachable for exactly the inputs it was
-  # written to catch. The `&&` should be `||` around the length test.
-  #
-  # Consequences pinned below; both are gaps, not intended behaviour:
+test_that("datasets() rejects a name that is not a single value", {
   dta <- create_example_DTA()
-
-  # (1) A length-2 character vector passes the guard, passes the setdiff()
-  #     membership check (both names exist), and then dies inside `[[` with
-  #     R's own subscript error instead of the intended cli_abort. The message
-  #     is localised, so pin the condition class rather than the text.
-  expect_error(
-    datasets(dta, c("demographics", "vitals")),
-    class = "subscriptOutOfBoundsError"
-  )
-  expect_error(
-    datasets(dta, c(1, 2)),
-    class = "subscriptOutOfBoundsError"
-  )
-
-  # (2) A non-integer numeric index is silently truncated by `[[` rather than
-  #     rejected, so a caller asking for dataset 1.9 quietly receives dataset 1.
+  expect_error(datasets(dta, c("demographics", "vitals")), regexp = "must be a single")
+  expect_error(datasets(dta, c(1, 2)), regexp = "must be a single")
+  # A non-integer numeric index is still silently truncated by `[[`, so a
+  # caller asking for dataset 1.9 quietly receives dataset 1. Pinned, not endorsed.
   expect_identical(datasets(dta, 1.9)@id, "demographics")
-
-  # Deferred: asserting a "single value" error for all four calls above
-  # requires fixing the guard in R/DTA-class.R.
 })
 
 
@@ -263,7 +240,7 @@ test_that("[[ extracts a single dataset by index or name", {
   expect_error(dta[[c(1, 2)]], "single value")
 
   # Error on missing name
-  expect_error(dta[["nonexistent"]], "not found")
+  expect_error(dta[["nonexistent"]], "following dataset")
 
   # Error on out-of-bounds index
   expect_error(dta[[99]], "out of bounds")
@@ -290,7 +267,7 @@ test_that("[ extracts multiple datasets as a named list", {
   expect_named(result_names, c("demographics", "vitals"))
 
   # Error on missing name
-  expect_error(dta[c("demographics", "missing")], "not found")
+  expect_error(dta[c("demographics", "missing")], "following dataset")
 
   # Error on out-of-bounds index
   expect_error(dta[c(1, 99)], "out of bounds")
@@ -541,7 +518,7 @@ test_that("check() aborts on invalid dataset index", {
 
 test_that("check() aborts on missing dataset name", {
   dta <- create_example_DTA()
-  expect_error(check(dta, datasets = "nonexistent", quiet = TRUE), "not found")
+  expect_error(check(dta, datasets = "nonexistent", quiet = TRUE), "following dataset")
 })
 
 test_that("read_dta_from_yaml aborts for non-existent yaml file", {
@@ -562,7 +539,7 @@ test_that("load_file() aborts for missing dataset name", {
       "missing_dataset",
       file = system.file("extdata", "clinical_data.csv", package = "DTAtools")
     ),
-    "not found"
+    "following dataset"
   )
 })
 
@@ -848,8 +825,10 @@ test_that("check() aborts on a non-DTADataSet entry regardless of quiet", {
   # `quiet` governs how much is PRINTED, never what is checked. Skipping the
   # entry under quiet = TRUE left it out of the rollup entirely, so the run
   # reported last_validation_ok = TRUE: a pass over an object nothing had
-  # looked at.
-  dta <- DTA(datasets = list(bogus = "x"), metadata = create_example_DTAMetaData())
+  # looked at. The validator now refuses such an entry, so it is slipped in
+  # with check = FALSE to keep exercising check()'s own guard.
+  dta <- DTA(datasets = list(), metadata = create_example_DTAMetaData())
+  S7::prop(dta, "datasets", check = FALSE) <- list(bogus = "x")
 
   expect_error(check(dta, quiet = TRUE, persist = FALSE), "is not a DTADataSet")
   expect_error(check(dta, quiet = FALSE, persist = FALSE), "is not a DTADataSet")
@@ -887,4 +866,48 @@ test_that("create_example_DTA() accepts only the examples that exist", {
   for (bad in list(2, 3, 0, -1)) {
     expect_error(create_example_DTA(bad), "No example found", class = "rlang_error")
   }
+})
+
+# ---- review fixes ----------------------------------------------------------
+
+test_that("DTA() with no datasets constructs an empty DTA", {
+  dta <- DTA(title = "Empty")
+  expect_length(dta@datasets, 0)
+  expect_length(datasets(dta), 0)
+})
+
+test_that("datasets() rejects a name that is not a single non-missing string or number", {
+  dta <- create_example_DTA()
+  expect_error(datasets(dta, c("demographics", "vitals")), regexp = "must be a single")
+  expect_error(datasets(dta, character(0)), regexp = "must be a single")
+  expect_error(datasets(dta, NA_character_), regexp = "must be a single")
+  expect_error(datasets(dta, TRUE), regexp = "must be a single")
+})
+
+test_that("the DTA validator rejects an entry that is not a DTADataSet", {
+  dta <- create_example_DTA()
+  expect_error(
+    {
+      dta@datasets[["junk"]] <- "not a dataset"
+    },
+    class = "dta_invalid_dataset_entry"
+  )
+})
+
+test_that("dta_from_list_build names an unknown metadata key without printing its value", {
+  # Expanded, the alias ladder is 2^14 leaves; R's "unused argument" error
+  # would print every one of them.
+  lines <- c("a0: &a0 [x, x]")
+  for (i in 1:14) lines <- c(lines, sprintf("a%d: &a%d [*a%d, *a%d]", i, i, i - 1L, i - 1L))
+  doc <- yaml::yaml.load(paste(c(
+    "x-bomb:", paste0("  ", lines),
+    "metadata:", "  title: T", "  version: '1'", "  bogus_key: *a14"
+  ), collapse = "\n"))
+  elapsed <- system.time(
+    err <- tryCatch(dta_from_list_build(doc), error = function(e) e)
+  )[["elapsed"]]
+  expect_lt(elapsed, 5)
+  expect_s3_class(err, "dta_metadata_unknown_field")
+  expect_match(conditionMessage(err), "bogus_key", fixed = TRUE)
+  expect_lt(nchar(conditionMessage(err)), 300L)
 })

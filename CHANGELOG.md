@@ -4,6 +4,297 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2026-11-12
+
+### Added
+
+- `load_delivery()` loads loose files, `.zip` archives and SAS transport
+  (`.xpt`) libraries in one call: every file is routed by name to the datasets
+  whose file entries match it, a library holding several datasets is split into
+  one file per dataset (member `AE` is offered as `ae.xpt`), and the result
+  carries a `last_delivery` table of what was loaded, opened, unused, ignored
+  or refused.
+- File type `xpt` (`DTAFileXPT`) reads a SAS transport file holding one dataset
+  through haven, normalised like a `.sas7bdat`, always in memory. A transport
+  file records no character encoding, so its text must be UTF-8 (or ASCII);
+  other bytes are refused with `dta_xpt_read_error`. Trailing rows whose values
+  are all blank, which haven drops, are restored from the row count the file
+  itself records (a V8 file, or a V5 file whose rows are 80 bytes or longer).
+- A file entry may declare `container: sdtm.zip` (`*` and `?` are wildcards,
+  e.g. `sdtm_*.zip`; letter case must match); `load_delivery()` then gives that
+  entry only files that came out of a matching container. Exported
+  specifications show it in a "Delivered In" column. A `.zip` or `.xpt` that a
+  `type: any` entry takes as a deliverable stays one file and is not opened,
+  unless an entry declares it as its container.
+- The app loads a `.zip` or `.xpt` dropped on any upload slot into every dataset
+  it belongs to, asks once before replacing loaded files, and its file editor
+  gains a "Delivered inside" field. Four options bound what one delivery may
+  extract or read into memory: `DTAtools.container_max_members`,
+  `DTAtools.container_max_bytes`, `DTAtools.container_max_member_bytes` and
+  `DTAtools.container_max_ratio`. In R the two byte limits default to `1e13`,
+  effectively off; the app sets its own, tighter ones. Extracting needs free
+  disk space for every member taken out, streamed or not.
+- `lint_template_repo()` checks a template repository: every
+  `validate_template()` finding plus `folder_name_case`,
+  `id_filename_mismatch` and `file_ignored`, printed one per line, and an
+  error (class `dta_template_lint_error`) when a finding reaches `fail_on`.
+  The CI assets written by `create_template_repo()` (GitHub Actions,
+  Bitbucket Pipelines, Jenkins) now call it.
+- A SAS dataset (`.sas7bdat`) can be read as input data and validated against a
+  specification, like a CSV or TSV file. Declare it with the new
+  `DTAFileSAS7BDAT` handler (`type: sas7bdat` in YAML,
+  `DTAFileFactory(type = "sas7bdat", ...)`). Values are taken as stored: a blank
+  character value is missing, trailing blanks are not part of a value, the text
+  `NA` is a value, and column names are exact, case included. A SAS date,
+  datetime or time column arrives as the display text of the format the
+  specification declares for it (`15AUG2025`), as ISO 8601 text when no format
+  is declared, or as the SAS number (days or seconds since 1960-01-01) when the
+  column is declared with a non-date type such as `SAS Num` or `SAS Int`. A
+  number where the specification wants text, a fraction under `SAS Int`, or a
+  date of another kind than the declared one is reported as a column-spec
+  violation, not an import error; text in a column declared `SAS Num` or
+  `SAS Int` is parsed, and a value that does not parse is an import error. The
+  dataset is always read into memory: `stream = "auto"` reads it whatever its
+  size, with a message when the size alone would have streamed it, and
+  `stream = "always"` is refused. A `.sas7bdat.gz` needs no separate
+  decompression step, but haven unpacks it to a temporary file of the
+  uncompressed size in `tempdir()`. The `.sas7bcat` format catalog is not read;
+  ship it as a `type: file` deliverable. Text that is not valid in the encoding
+  the file declares is refused with `dta_sas7bdat_read_error`, naming the column
+  and row.
+- The app's file editor offers `sas7bdat` as a file type for a tabular dataset.
+- **Breaking:** `check()` on a `DTA` now enforces the file count its tabular
+  datasets' handlers declare, so a delivery that passed before can fail. The bound is the dataset-wide sum over all its handlers,
+  not checked per handler. A dataset holding more or fewer tables than the
+  declared bounds signals a warning of class `dta_file_count_mismatch`, adds an
+  `n_file_count_errors` column (placed before `n_import_errors`) to
+  `last_validation_summary`, is listed in the new `last_file_count_findings`
+  attribute, sets `last_validation_ok` to `FALSE`, is named in the console
+  summary alongside other failures, and turns the HTML validation report's
+  overview and messages to failed. Checking some datasets by name keeps the
+  findings of the others, each judged again on the dataset as it now is (a
+  dataset fixed since is no longer reported); a dataset that had no finding is
+  judged only when it is checked. A dataset checked on its own is unaffected.
+- `dta-app.yaml` gains `header_tag:`. `label` (plain text, at most 32
+  characters) is shown as a pill beside the app title on every page, the start
+  page included; `color` (a quoted hex value) fills it, with an automatically
+  chosen text colour that meets WCAG AA contrast. Use it to mark a deployment,
+  for example `GxP` or `non-GxP`. No label shows nothing, and bad values are
+  reported by `validate_template()` as `app_config_invalid`.
+
+### Changed
+
+- `read_file()` and `open_file()` still refuse a `.zip`, and the message now
+  points to loading it as a delivery.
+- The specification lint reports file-entry keys a file type does not take
+  (`file_field_unknown`), a `container` written on a dataset
+  (`file_container_misplaced`) and an invalid container
+  (`file_container_invalid`).
+- `zip` 3.0.0 or later is required.
+- **Breaking:** `export_with_template()` gains `overwrite` (default `FALSE`)
+  and now aborts when `output` already exists, consistent with `write_dta()`
+  and `export_column_value_table()`. Callers that relied on silent replacement
+  must pass `overwrite = TRUE`.
+- **Breaking:** `export_column_value_table()` gained an `overwrite` argument,
+  default `FALSE`: it now refuses to overwrite an existing file, as the other
+  export functions do. Pass `overwrite = TRUE` for the old behaviour.
+- The qualification runner's `filter` is now matched against the test file
+  name (`IQ-ENV`, `OQ-VAL-check`), so a filter that contains the stage prefix
+  or is anchored, such as `"OQ-VAL"` or `"^OQ-VAL"`, selects its files; before,
+  it selected nothing. The match is still unanchored unless you anchor it.
+- `run_qualification()` removes the half-written evidence bundle when its
+  `filter` matches no test and it aborts.
+- **Breaking:** `DTARuleColRange()` now rejects a rule naming more than one
+  column at construction (condition class `dta_rule_range_columns`), instead of
+  only when the rule is evaluated, so a specification holding such a rule no
+  longer loads.
+- **Breaking:** a file entry's `number_of_files`, `min_number_of_files` and
+  `max_number_of_files` must each be a non-negative whole number, and the
+  minimum may not exceed the maximum (condition class
+  `dta_file_count_bound_invalid`; `lint_dta()` reports such bounds as
+  `file_count_bound_invalid`). Such bounds used to be accepted, and since
+  `check()` enforces file counts they would fail every delivery.
+- `load_file(stream = "never")` refuses a UTF-16 or UTF-32 file with the same
+  advice as the streaming readers (convert to UTF-8 first), instead of failing
+  in the Arrow reader with an unrelated message.
+- **Breaking:** Word, PDF and Markdown exports (including the
+  `{VALIDATION_RULES}` and `{DATASETS}` template blocks and
+  `write_dataset_metadata()`) no longer show a rule's exact definition as YAML
+  (the monospace `Definition` column in Word/PDF and the fenced YAML block per
+  rule in Markdown, both introduced in 0.26.0). They now describe every rule
+  completely in plain English, never as code: no YAML, code block or monospace
+  font. The description names every parameter of the rule (each column, test,
+  value, grouping column, condition, requirement id, scope and message) and
+  says how missing and non-numeric values are treated, so nothing of the rule
+  is lost. Values are written in full, numbers at full precision. A rule's own
+  description is shown as its "Purpose" above the mechanical wording and never
+  replaces it. The Word rules table has two columns, `Rule ID` and
+  `Description`, with bold labels and bulleted lists; a short guide to reading
+  the rules precedes the first rules table of a document. The console
+  `print()` of a column-condition rule uses the same wording.
+- The HTML validation report, `explain_messages()`, the template guide and the
+  Shiny app describe a rule with the same wording as the Word and Markdown
+  exports instead of three different dialects. A uniqueness rule over several
+  columns is worded as one combination of values, not as if each column had to
+  be unique on its own. The template guide lists a rule as `Rule ID` and
+  `Description` and reports any change to a rule (a bound, a requirement, a
+  condition) as changed, not only a change to its author's description. The
+  app's rules overview shows every operator of a column and no longer sets the
+  text in a monospace font.
+- **Breaking:** the Markdown export of `write_dta()` and
+  `write_dataset_metadata()` is redesigned and follows the Word layout. It has
+  numbered chapters in the same order (approval and signatures, document
+  information, study, parties, process information, agreement sections,
+  datasets), a linked table of contents, and tables for the document facts,
+  the parties' organisations and contacts, the transmission, the files and
+  their format, the columns and the approval block. Allowed values are listed in
+  full, not cut after five. Every author text is escaped, so it cannot change
+  the structure of the document. The footer carries no timestamp, so the same
+  specification always produces the same bytes. A parser of the old format
+  (`**Title:**` lines, `Exact rule definitions`, per-column headings) must be
+  adapted.
+- `write_dataset_metadata()` honours `include_file_specs`, `include_rules` and
+  `include_signatures` for Markdown as well, and its Word document is built
+  like the agreement document: numbered chapters, the full description, the
+  same `Files` chapter name, and a title page with the dataset's facts.
+- A missing file name or column type reads "(not specified)" and an unset
+  `nullable` reads "No (default)", the same in Word, Markdown and the template
+  blocks. The contact and dataset blocks of a Word template (`{*_CONTACTS_TABLE}`,
+  `{DATASETS}`, `{SUPPLIER_CONTACTS}`, `{PROCESS_INFORMATION}`) use the same
+  tables and labels as the built-in layout, with "Yes" instead of "yes".
+- The app builds a PDF from the new Markdown with working table-of-contents
+  links and line breaks inside table cells.
+- haven (>= 2.5.2) is now in `Imports`, so SAS datasets can be read wherever the
+  package is installed, the deployed app included.
+
+### Fixed
+
+- A delimited-file handler accepts `quote = ""` to declare a file with no quote
+  character; the class validator used to reject it although the readers already
+  supported it.
+- The Shiny app no longer reports a DTA whose supplied file count is outside the
+  declared bounds as passed: the dataset is marked failed, the reason is listed
+  in the completion message, and the HTML summary report shows VALIDATION
+  FAILED with the file-count finding.
+- The Word document of `write_dataset_metadata()` no longer prints the day it
+  was generated, shows the full description instead of its first 80 characters,
+  and no longer labels the document version with the template version in its
+  footer.
+- A rule that cannot be evaluated (a range over two columns, an unknown
+  operator) is described as such instead of as a valid rule; `equals: true` is
+  no longer worded as "is present"; a list of values is worded as "one of", not
+  as all of them; large numbers are written in full instead of as `1e+08`.
+- An empty YAML entry in an `in` or `not_in` list (`in: [A, ~]`) now matches a
+  missing value, as documented. It used to be dropped on numeric columns and,
+  on text columns, to match the literal text `"NULL"` instead of a missing
+  value, so such a rule passed or failed the wrong rows. A number in a list
+  that also holds text or a missing entry keeps its full precision on a
+  numeric column (`in: [0.30000000000000004, "5"]` used to match 0.3).
+- `export_with_template()` and `write_dta(template = )` write to a relative
+  output path. They used to fail with "not a valid DOCX" (or, with the default
+  `fallback = TRUE`, fall back to the built-in layout with a warning), because
+  the document was zipped relative to a temporary folder. Closes DEV-017.
+- The `{PROCESS_INFORMATION}` and contact blocks of a Word template no longer
+  abort when a transmission, error-handling or contact field holds several
+  values (a YAML list); the values are joined with ", " as the single
+  placeholders already did. Transfer dates in the block use the same date
+  format as the single placeholders.
+- A version-history entry may list several `changes`. A YAML list or character
+  vector used to fail with an internal R error, and `get_version_history_df()`
+  kept only the first change; the change descriptions are now joined with
+  "; " in every export. An empty list, an empty string or a missing entry is
+  rejected with a clear message.
+- `validate_template()` now reports `kind_suffix_mismatch`,
+  `party_profile_invalid` and `export_template_no_placeholders`, which the app
+  silently skipped while validation passed.
+- Streaming: Int-key uniqueness checked through Arrow now agrees with the eager
+  path. A `fail_fast` scan that stopped early reports `NA` instead of a clean
+  column-specification axis and skips the uniqueness pre-pass.
+  `set_dta_compute_threads(Inf)` raises the classed error instead of failing
+  obscurely.
+- Reading: leading blank lines before a header (CRLF, BOM and CR-only files)
+  no longer turn the header into data. CR-only files are converted with bounded
+  memory. The UTF-16/UTF-32 refusal no longer suggests a workaround that fails,
+  header-parse errors carry a specific hint, and a header with a quoted line
+  break is refused.
+- `write_table_to_file()` refuses unquoted cells that would not read back (a
+  leading quote, the separator, CR or LF).
+- `DTADataSetFile` no longer keeps stale "not delivered" rows and now enforces
+  `min_number_of_files` / `max_number_of_files` for pattern handlers. Each
+  pattern entry counts the files routed to it: a literal entry beside it, or an
+  entry that differs only in its `container`, keeps its own files out of the
+  count. A pattern entry with `min_number_of_files: 0` is optional. An
+  unbounded maximum file count prints as open-ended.
+- Rule evaluation: group conditions look groups up by position (it was
+  quadratic); an unconvertible `IF` value no longer exempts a group (eager and
+  streaming); `messages()` ordering no longer depends on the locale; huge row
+  numbers are no longer narrowed to integer; `inspect()` duplicate wording corrected.
+- `lint_dta()`: a logical operand (unquoted `Y`/`N`) on a non-`Bool` column is
+  an error; a numeric operand on a text column, and numeric operators on SAS
+  Date, Time or DateTime columns, are warnings. Unknown metadata keys are
+  reported by name without printing their values, which also closes an
+  alias-bomb hang.
+- S7 classes: column and rule ids must be a single non-empty string without
+  whitespace; a column with only a `length` gets a clear error; `DTA()` with no
+  datasets works; `datasets()` and `files()` reject bad name arguments; `DTA`
+  rejects non-dataset entries; an `NA` transmission date round-trips through
+  YAML; `nullable` and range `min`/`max` are validated; unnamed column
+  collections are rejected; `check()` stubs on rules abort instead of returning
+  `NULL`; YAML values written unquoted as `Y`/`N` get a quoting hint, also in a
+  list of allowed values that holds other entries (`[Y, N, U]`); the
+  `create_example_*()` index is guarded.
+- Export: `export_specs_table()`, the column value table and the validation
+  report write through the staged writer; empty `colnames` gives the `cli`
+  error; markdown export escapes author text; the LibreOffice profile argument
+  is quoted; the HTML report no longer loses capped rows after sort and filter,
+  and lists its filter choices in the same order in every locale. A character
+  XML does not allow (`\v`, `\f`, another control character, U+FFFE) anywhere
+  in an author's text -- a title, a contact, a column label, a description --
+  no longer aborts the Word or PDF export of `write_dta()`,
+  `write_dataset_metadata()` or `export_with_template()`.
+- `validate_template()`, `lint_template_repo()`, `collect_full_errors()` and
+  the app's template list no longer abort with "Character encoding must be
+  UTF-8, Latin-1 or bytes" on a template file, repository folder, package
+  library or temporary directory whose path holds a non-ASCII character.
+- The Jenkins and Bitbucket CI files written by `create_template_repo()`
+  install from Posit Package Manager's current snapshot. The
+  `rocker/r-ver:4.4` image they use is frozen at a 2025 snapshot that lacks
+  `zip` 3.0.0 and `S7` 0.2.2, so installing DTAtools there failed.
+- Template DOCX: substitution keeps tabs, breaks and other text in a run; text
+  boxes no longer leak into the outer paragraph; `\v`, `\f` and control
+  characters no longer produce an invalid DOCX. `create_template_repo()`
+  escapes braces in paths. The DEV-016 documentation is corrected.
+- Shiny app: a YAML alias-bomb guard (1e6 leaf cap); a stale carry-over upload
+  is no longer reused; overwritten tables are removed from every slot; the
+  maximum-files gate counts only matching files; the messages dock is keyboard
+  accessible and re-selecting a message works.
+- Qualification: report text is escaped, so test messages can no longer inject
+  HTML or TeX; a filter that selects nothing aborts; IQ-ENV-016 uses the
+  manifest's hash algorithm and IQ-ENV-020 reads the real defaults.
+  `bump_version.R` now also updates the qualification `_index.yaml` and
+  regenerates its manifest.
+- CI: workflow input injection closed, `r-style` also fails on untracked `man/`
+  or `NAMESPACE` files, and the `pre-commit` checkout is safe for forks. The
+  source-tree tests now run once with `DTATOOLS_REQUIRE_SOURCE_TREE=true`, so
+  a skip fails the build.
+- Packaging: the unused `doconv` is dropped from `Suggests`, and a stray
+  top-level markdown file is excluded from the tarball. `validation_status()`,
+  `validation_errors()` and `as_json_schema_length()` gained runnable examples.
+
+### Security
+
+- Archives are inspected before anything is extracted, and refused as a whole
+  when an entry name is absolute, climbs out with `..` or uses a drive letter,
+  is a symbolic link or is encrypted, when two entries collide, or when the
+  archive exceeds the size limits; an entry whose name cannot be written on
+  some file systems (a device name, a colon, a character Windows does not
+  allow) refuses the archive when something needs it, saying so, and is
+  otherwise never extracted. A name of 511 bytes or more, which the zip library
+  cannot read in full, is treated the same way. Each needed entry is then
+  extracted on its own
+  into a fresh directory. `zip::unzip()` does not refuse such names itself, and
+  writes absolute names below its target under their full path.
+
 ## [0.26.0] - 2026-11-07
 
 ### Added
@@ -4658,7 +4949,9 @@ All of the following belong to the manifest verification work above.
 
 - Initial internal release
 
-[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.26.0...v0.27.0
+[0.26.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.20.1...v0.23.0
@@ -4677,3 +4970,4 @@ All of the following belong to the manifest verification work above.
 [0.11.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.8.1...v0.9.0
+[0.8.1]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/releases/tag/v0.8.1

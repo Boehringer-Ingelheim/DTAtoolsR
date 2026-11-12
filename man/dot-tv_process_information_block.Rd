@@ -7,6 +7,7 @@
 .tv_process_information_block(meta)
 }
 \description{
-Render process information block (transmission, handling, corrections)
+Transmission keys carry the reader-facing labels of the built-in layout
+(\code{.transmission_label()}, as \code{.transmission_pairs()}).
 }
 \keyword{internal}

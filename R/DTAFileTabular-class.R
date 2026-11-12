@@ -75,10 +75,16 @@
 #'
 #'   The wide encodings (UTF-16, UTF-32, UCS-2, UCS-4) are the exception: their
 #'   characters can contain a newline byte, so the file cannot be converted in
-#'   blocks cut at newlines and \code{\link{open_file}()} refuses it, naming
-#'   \code{stream = "never"} as the way to read it. A name this platform's
+#'   blocks cut at newlines and \code{\link{open_file}()} refuses it, asking for
+#'   the file to be converted to UTF-8 first. A name this platform's
 #'   \code{\link[base]{iconv}()} does not know (\code{"latin-1"} for
 #'   \code{"latin1"}, say) is refused too, before the file is opened.
+#' @param container Character or \code{NULL}; the name of the \code{.zip}
+#'   archive or \code{.xpt} SAS transport file this file arrives inside.
+#'   \code{*} matches any text and \code{?} one character
+#'   (\code{"sdtm_*.zip"}); the name is matched as a whole, independently of
+#'   \code{pattern}. \code{NULL} (the default) accepts the file loose or inside
+#'   any container. Only \code{\link{load_delivery}()} consults it.
 #'
 #' @name DTAFileTabular-class
 #' @return An object of class \code{DTAFileTabular}.
@@ -106,7 +112,8 @@ DTAFileTabular <- S7::new_class(
     has_header = TRUE,
     quote = '"',
     newlines_in_values = FALSE,
-    encoding = "UTF-8"
+    encoding = "UTF-8",
+    container = NULL
   ) {
     new_object(
       .parent = DTAFile(
@@ -116,7 +123,8 @@ DTAFileTabular <- S7::new_class(
         max_number_of_files = max_number_of_files,
         info = info,
         pattern = pattern,
-        pattern_description = pattern_description
+        pattern_description = pattern_description,
+        container = container
       ),
       sep = sep,
       has_header = has_header,
@@ -164,9 +172,9 @@ DTAFileTabular <- S7::new_class(
       !is.character(self@quote) ||
         length(self@quote) != 1 ||
         is.na(self@quote) ||
-        nchar(self@quote) != 1
+        nchar(self@quote) > 1
     ) {
-      problems <- c(problems, "'quote' must be a single character.")
+      problems <- c(problems, "'quote' must be a single character, or \"\" for no quoting.")
     }
 
     # Same shape as the `has_header` check, plus the NA guard: this value ends
@@ -390,6 +398,19 @@ dta_encoding_is_wide <- function(encoding) {
   grepl("^(utf|ucs)[-_]?(16|32|2|4)", tolower(encoding))
 }
 
+# Refuses a wide encoding for EVERY reader (lazy and eager, whatever `stream`
+# says), so the advice is the same wherever the file is read.
+dta_refuse_wide_encoding <- function(encoding, path) {
+  if (dta_encoding_is_wide(encoding)) {
+    cli::cli_abort(c(
+      "A file declaring {.val {encoding}} cannot be converted block by block.",
+      "x" = "{.path {path}} would have to be split on the byte {.val 0x0A}, which is part of an ordinary character in this encoding.",
+      "i" = "UTF-16 and UTF-32 are not supported for tabular reading. Convert the file to UTF-8 first."
+    ))
+  }
+  invisible(TRUE)
+}
+
 # ---- reading a file that is not UTF-8 ---------------------------------------
 
 #' @title A UTF-8 Copy of a File Declared in Another Encoding
@@ -481,13 +502,7 @@ dta_transcode_to_utf8 <- function(path, encoding) {
   # costs nothing and needs no I/O to establish.
   dta_check_encoding_supported(encoding, path)
 
-  if (dta_encoding_is_wide(encoding)) {
-    cli::cli_abort(c(
-      "A file declaring {.val {encoding}} cannot be converted block by block.",
-      "x" = "{.path {path}} would have to be split on the byte {.val 0x0A}, which is part of an ordinary character in this encoding.",
-      "i" = "Load it with {.code stream = \"never\"}, or convert the file to UTF-8 first."
-    ))
-  }
+  dta_refuse_wide_encoding(encoding, path)
 
   source <- normalizePath(path, winslash = "/", mustWork = FALSE)
 
@@ -533,10 +548,12 @@ dta_transcode_to_utf8 <- function(path, encoding) {
   # enough to matter here runs an integer counter past its range.
   bytes_done <- 0
 
-  # Bytes left over from the previous block because no line ended in them. The
-  # copy is byte-faithful precisely because this is carried rather than
-  # terminated: nothing here decides what a line ending is.
-  carry <- raw(0)
+  # Chunks left over from the previous block because no line ended in them,
+  # kept as a list so that a long unterminated stretch costs one concatenation
+  # when it finally ends rather than one per chunk. The copy is byte-faithful
+  # precisely because this is carried rather than terminated: nothing here
+  # decides what a line ending is.
+  pending <- list()
 
   repeat {
     chunk <- readBin(input, "raw", n = block)
@@ -544,32 +561,35 @@ dta_transcode_to_utf8 <- function(path, encoding) {
       break
     }
 
-    buffer <- if (length(carry) == 0) chunk else c(carry, chunk)
-    cut <- dta_last_newline(buffer)
+    # Everything carried over holds no line break, so only the new chunk can.
+    cut <- dta_last_newline(chunk)
+    pending[[length(pending) + 1L]] <- chunk
 
     if (is.na(cut)) {
-      # A single line longer than one block. Hold everything and read on: the
+      # A single stretch longer than one block. Hold everything and read on: the
       # alternative is cutting a line in half, and with it any multi-byte
       # character that happens to straddle the cut.
-      carry <- buffer
       next
     }
+
+    buffer <- if (length(pending) == 1L) chunk else do.call(c, pending)
+    cut <- cut + (length(buffer) - length(chunk))
 
     dta_transcode_write_block(
       buffer[seq_len(cut)], output, encoding, path, bytes_done
     )
     bytes_done <- bytes_done + cut
-    carry <- if (cut < length(buffer)) {
-      buffer[(cut + 1L):length(buffer)]
+    pending <- if (cut < length(buffer)) {
+      list(buffer[(cut + 1L):length(buffer)])
     } else {
-      raw(0)
+      list()
     }
   }
 
   # A last line with no terminator: written exactly as it arrived, with none
   # added. The in-memory reader does not invent one either.
-  if (length(carry) > 0) {
-    dta_transcode_write_block(carry, output, encoding, path, bytes_done)
+  if (length(pending) > 0) {
+    dta_transcode_write_block(do.call(c, pending), output, encoding, path, bytes_done)
   }
 
   finished <- TRUE
@@ -622,7 +642,7 @@ dta_check_encoding_supported <- function(encoding, path) {
   ))
 }
 
-#' @title The Last Newline Byte in a Block
+#' @title The Last Line-Break Byte in a Block
 #' @description
 #' Where [dta_transcode_to_utf8()] cuts a block so that no line is split. The
 #' search runs backwards in doubling windows rather than over the whole block,
@@ -630,7 +650,11 @@ dta_check_encoding_supported <- function(encoding, path) {
 #' allocates a logical vector the size of the block to answer a question that a
 #' 64 KiB tail answers for every real delimited file.
 #' @param bytes A raw vector.
-#' @return The index of the last `0x0A`, or `NA_integer_` when there is none.
+#' @return The index of the last `0x0A` or `0x0D`, or `NA_integer_` when there
+#'   is none. A lone CR (an old-Mac file) is a line end too: cutting there
+#'   cannot split a character in any ASCII-compatible encoding, and without it a
+#'   CR-only file never has a cut. A CRLF split between blocks is harmless, as
+#'   the copy is byte-faithful.
 #' @keywords internal
 dta_last_newline <- function(bytes) {
   n <- length(bytes)
@@ -638,12 +662,14 @@ dta_last_newline <- function(bytes) {
     return(NA_integer_)
   }
 
-  newline <- as.raw(0x0a)
+  lf <- as.raw(0x0a)
+  cr <- as.raw(0x0d)
   window <- min(n, 65536L)
 
   repeat {
     from <- n - window + 1L
-    hits <- which(bytes[from:n] == newline)
+    tail <- bytes[from:n]
+    hits <- which(tail == lf | tail == cr)
     if (length(hits) > 0) {
       return(from + hits[[length(hits)]] - 1L)
     }
@@ -1022,6 +1048,73 @@ dta_refresh_transcoded_dataset <- function(table) {
   do.call(dta_open_normalized_dataset, plan$args)
 }
 
+#' @title Where the Header Line Really Is
+#' @description
+#' Arrow takes the column names from the first NON-EMPTY line
+#' (`ignore_empty_lines = TRUE`), but `skip_rows` counts PHYSICAL lines, empty
+#' ones included. Skipping one line after a leading blank line therefore left
+#' the header to be parsed as a data row. This reads the first bytes to count
+#' the leading empty lines (LF or CRLF), so that the skip can include them, and
+#' to notice a header with a quoted line break, which `skip_rows` would split.
+#' @param path Character path to the delimited file.
+#' @param quote The quote character, or `""` for none.
+#' @param delim The field delimiter (a quote opens a field only after one).
+#' @return A list: `blank` (leading empty lines) and `multiline` (the header
+#'   line holds an unbalanced quote, i.e. a quoted line break).
+#' @keywords internal
+dta_header_layout <- function(path, quote = '"', delim = ",") {
+  input <- if (tolower(tools::file_ext(path)) %in% dta_compression_extensions()) {
+    gzfile(path, open = "rb")
+  } else {
+    file(path, open = "rb")
+  }
+  on.exit(close(input), add = TRUE)
+  bytes <- readBin(input, "raw", n = 1048576L)
+
+  # Line ends and quotes are single ASCII bytes in every encoding this package
+  # accepts for tabular reading, so no decoding is needed.
+  lf <- as.raw(0x0a)
+  cr <- as.raw(0x0d)
+  n <- length(bytes)
+
+  # Arrow drops a leading BOM, so a line holding only the BOM is empty.
+  pos <- if (n >= 3L && all(bytes[1:3] == as.raw(c(0xef, 0xbb, 0xbf)))) 4L else 1L
+
+  # A line ends at LF, CRLF or a lone CR.
+  blank <- 0L
+  while (pos <= n && (bytes[[pos]] == lf || bytes[[pos]] == cr)) {
+    pos <- pos + if (bytes[[pos]] == cr && pos < n && bytes[[pos + 1L]] == lf) 2L else 1L
+    blank <- blank + 1L
+  }
+  if (pos > n || !nzchar(quote)) {
+    return(list(blank = blank, multiline = FALSE))
+  }
+
+  rest <- bytes[pos:n]
+  eol <- which(rest == lf | rest == cr)[1L]
+  line <- if (is.na(eol)) rest else rest[seq_len(eol - 1L)]
+
+  # A quote only means something where it opens a field (line start or right
+  # after the delimiter); a mid-field one (`5" pipe`) is literal. Inside a
+  # quoted field a doubled quote is an escape. Still open at the end of the
+  # line means the quoted field holds a line break.
+  q <- which(line == charToRaw(quote)[[1]])
+  d <- charToRaw(delim)[[1]]
+  open <- FALSE
+  i <- 1L
+  while (i <= length(q)) {
+    if (!open) {
+      open <- q[[i]] == 1L || line[[q[[i]] - 1L]] == d
+    } else if (i < length(q) && q[[i + 1L]] == q[[i]] + 1L) {
+      i <- i + 1L
+    } else {
+      open <- FALSE
+    }
+    i <- i + 1L
+  }
+  list(blank = blank, multiline = open)
+}
+
 #' @title The Header Names of a Delimited File
 #' @description
 #' Opens the file for its header alone. An `arrow::Dataset` reads its schema
@@ -1058,10 +1151,20 @@ dta_delim_header_names <- function(path, parse_options, has_header, encoding = "
     ),
     error = function(e) {
       reason <- conditionMessage(e)
+      # Only name a cause Arrow's own message supports.
+      hint <- if (grepl("Empty CSV file", reason, fixed = TRUE)) {
+        "The file holds no header line."
+      } else if (grepl("Expected [0-9]+ columns", reason)) {
+        "A row has a different number of fields than the first line; check the delimiter and quoting."
+      } else if (grepl("multiple columns named", reason, fixed = TRUE)) {
+        "Repeated names in the first line are the cause."
+      } else {
+        "Repeated or unparseable names in the first line are a common cause."
+      }
       cli::cli_abort(c(
         "Cannot read the column names of {.path {path}}.",
         "x" = "{reason}",
-        "i" = "Repeated or unparseable names in the first line are the usual cause."
+        "i" = "{hint}"
       ))
     }
   )
@@ -1188,6 +1291,20 @@ dta_delim_reader_plan <- function(
     encoding = settings$encoding
   )
 
+  skip <- 0L
+  if (isTRUE(has_header)) {
+    layout <- dta_header_layout(path, quote, delim)
+    if (layout$multiline) {
+      cli::cli_abort(c(
+        "The header of {.path {path}} contains a quoted line break.",
+        "x" = "Column names spanning more than one line cannot be read.",
+        "i" = "Put the header on a single line."
+      ))
+    }
+    # The header line itself, plus the empty lines in front of it.
+    skip <- layout$blank + 1L
+  }
+
   # With no header there is nothing to clean: Arrow's generated names (f0,
   # f1, ...) are used as-is.
   cleaned <- if (isTRUE(has_header)) dta_clean_column_names(raw_names) else raw_names
@@ -1217,7 +1334,7 @@ dta_delim_reader_plan <- function(
     column_names = cleaned,
     # The header line was consumed to learn the names; skipping it is what
     # keeps it from being parsed a second time as a data row.
-    skip = as.integer(isTRUE(has_header)),
+    skip = skip,
     col_types = col_types,
     parse_options = parse_options,
     encoding = settings$encoding,
@@ -1279,6 +1396,7 @@ dta_open_normalized_dataset <- function(
   na = NULL,
   handler = NULL
 ) {
+  dta_refuse_sas7bdat(path)
   settings <- dta_reader_parse_settings(handler)
 
   # Decided before the plan does any I/O, because it decides which file the
@@ -1389,6 +1507,8 @@ dta_read_delim_normalized <- function(
   na = NULL,
   handler = NULL
 ) {
+  dta_refuse_wide_encoding(dta_reader_parse_settings(handler)$encoding, path)
+
   plan <- dta_delim_reader_plan(
     path,
     specs = specs,
@@ -1486,4 +1606,28 @@ method(print_info, DTAFileTabular) <- function(x) {
   cli::cli_alert("Encoding: {x@encoding}")
 
   invisible(x)
+}
+
+#' @title Refuse a SAS Dataset or Transport File Offered to a Delimited-Text Reader
+#' @description
+#' Arrow does not reject a `.sas7bdat` or `.xpt` outright: it tries to parse the
+#' binary as delimited text and fails with an opaque "Is this a 'csv' file?"
+#' schema error. Catching the extension (with or without a `.gz`) trades that
+#' for a message that names the real cause, the way the `.zip` guard in
+#' `dta_check_readable_file()` does.
+#' @param path Character path.
+#' @return `NULL`, invisibly, when `path` is not a SAS dataset or transport file.
+#' @keywords internal
+dta_refuse_sas7bdat <- function(path) {
+  if (grepl("\\.(sas7bdat|xpt)(\\.gz)?$", path, ignore.case = TRUE)) {
+    cli::cli_abort(
+      c(
+        "{.path {path}} is a SAS dataset or transport file, which cannot be read as delimited text.",
+        "i" = "A SAS dataset or transport file is read into memory only; {.fn validate_file_stream} and {.fn cache_as_parquet} take delimited text.",
+        "i" = "Use {.fn load_file} or {.fn read_file} with a {.cls DTAFileSAS7BDAT} or {.cls DTAFileXPT} handler instead."
+      ),
+      class = "dta_sas7bdat_not_delimited"
+    )
+  }
+  invisible(NULL)
 }

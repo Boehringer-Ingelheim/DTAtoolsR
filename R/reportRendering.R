@@ -77,38 +77,6 @@
 
 
 #' @keywords internal
-#' @title Human-Readable Label for Rule Type
-#' @description
-#' Dispatches on an S7 rule object and returns a human-readable type description.
-#' @param rule_def An S7 rule object (inherits "DTAtools::DTARule*"), or `NULL`.
-#' @return A character string describing the rule type, or an em dash for `NULL`/unrecognized.
-.report_rule_type_label <- function(rule_def) {
-  if (is.null(rule_def)) {
-    return(.report_em_dash()) # ASCII-only source; see helper below
-  }
-
-  if (inherits(rule_def, "DTAtools::DTARuleColCondition")) {
-    return("Conditional (IF/THEN)")
-  }
-
-  if (inherits(rule_def, "DTAtools::DTARuleColRange")) {
-    return("Range")
-  }
-
-  if (inherits(rule_def, "DTAtools::DTARuleColUnique")) {
-    return("Unique")
-  }
-
-  if (inherits(rule_def, "DTAtools::DTARuleGroupCondition")) {
-    return("Grouped condition")
-  }
-
-  # Unrecognized
-  .report_em_dash()
-}
-
-
-#' @keywords internal
 #' @title Add the Metadata Axis to the Overview Rows
 #' @description
 #' `results()` carries one row per dataset target and none for metadata: the
@@ -168,6 +136,92 @@
     return(row)
   }
   rbind(results_df, row)
+}
+
+
+#' @keywords internal
+#' @title File-Count Findings of a Checked DTA
+#' @description
+#' The rows of the `"last_file_count_findings"` attribute `check()` leaves on a
+#' DTA. Like the metadata axis, a file count outside the declared bounds fails
+#' the run (`last_validation_ok`) without appearing in `results()` or
+#' `messages()`, so the report folds it in itself.
+#' @param x The object being reported on.
+#' @return A data frame with at least one row, or `NULL` when there is nothing
+#'   to report (also for an unchecked DTA, which has no attribute).
+.report_file_count_findings <- function(x) {
+  f <- attr(x, "last_file_count_findings", exact = TRUE)
+  if (is.data.frame(f) && nrow(f) > 0 && all(c("dataset", "message") %in% names(f))) f else NULL
+}
+
+#' @keywords internal
+#' @title Add the File-Count Axis to the Overview Rows
+#' @description
+#' One failed row per dataset whose file count is outside its declared bounds,
+#' appended to the `results()` frame, so the overview cards agree with
+#' `last_validation_ok`.
+#' @param x The object being reported on.
+#' @param results_df The frame returned by `results(x)`.
+#' @return `results_df` with the rows appended.
+.report_with_file_count_rows <- function(x, results_df) {
+  f <- .report_file_count_findings(x)
+  if (is.null(f)) {
+    return(results_df)
+  }
+  n <- nrow(f)
+  rows <- if (is.data.frame(results_df) && ncol(results_df) > 0) {
+    results_df[rep(NA_integer_, n), , drop = FALSE]
+  } else {
+    data.frame(
+      dataset = rep(NA_character_, n), target = NA_character_,
+      target_type = NA_character_, status = NA_character_,
+      n_columnspec_errors = NA_integer_, n_rule_errors = NA_integer_,
+      n_import_errors = NA_integer_, stringsAsFactors = FALSE
+    )
+  }
+  rownames(rows) <- NULL
+  rows$dataset <- as.character(f$dataset)
+  rows$target <- "file count"
+  if ("target_type" %in% names(rows)) {
+    rows$target_type <- "file count"
+  }
+  rows$status <- "failed"
+  rows$n_columnspec_errors <- 0L
+  rows$n_rule_errors <- 0L
+  rows$n_import_errors <- 0L
+
+  if (!is.data.frame(results_df) || nrow(results_df) == 0) {
+    return(rows)
+  }
+  rbind(results_df, rows)
+}
+
+#' @keywords internal
+#' @title Add the File-Count Findings to the Messages Table
+#' @description
+#' One message row per finding, appended after the ids `messages()` assigned.
+#' Called after the inspect panels are built: a finding has no inspect detail.
+#' @param x The object being reported on.
+#' @param msgs The frame returned by `messages(x, as_tibble = FALSE)`.
+#' @return `msgs` with the rows appended.
+.report_with_file_count_messages <- function(x, msgs) {
+  f <- .report_file_count_findings(x)
+  if (is.null(f) || !is.data.frame(msgs)) {
+    return(msgs)
+  }
+  n <- nrow(f)
+  rows <- msgs[rep(NA_integer_, n), , drop = FALSE]
+  rownames(rows) <- NULL
+  rows$id <- as.integer(max(c(0L, msgs$id), na.rm = TRUE) + seq_len(n))
+  rows$dataset <- as.character(f$dataset)
+  rows$target <- "file count"
+  rows$severity <- "error"
+  rows$source <- "file_count"
+  rows$message <- as.character(f$message)
+  if (nrow(msgs) == 0) {
+    return(rows)
+  }
+  rbind(msgs, rows)
 }
 
 
@@ -540,21 +594,21 @@
   tbody_html <- paste0(table_rows, collapse = "\n")
 
   # Build filter select options for unique non-NA values
-  unique_datasets <- sort(unique(messages_df$dataset[!is.na(messages_df$dataset)]))
+  unique_datasets <- sort(enc2utf8(unique(messages_df$dataset[!is.na(messages_df$dataset)])), method = "radix")
   dataset_options <- paste0(
     '<option value="', .report_html_escape(unique_datasets), '">',
     .report_html_escape(unique_datasets), "</option>",
     collapse = "\n    "
   )
 
-  unique_targets <- sort(unique(messages_df$target[!is.na(messages_df$target)]))
+  unique_targets <- sort(enc2utf8(unique(messages_df$target[!is.na(messages_df$target)])), method = "radix")
   target_options <- paste0(
     '<option value="', .report_html_escape(unique_targets), '">',
     .report_html_escape(unique_targets), "</option>",
     collapse = "\n    "
   )
 
-  unique_sources <- sort(unique(messages_df$source[!is.na(messages_df$source)]))
+  unique_sources <- sort(enc2utf8(unique(messages_df$source[!is.na(messages_df$source)])), method = "radix")
   source_options <- paste0(
     '<option value="', .report_html_escape(unique_sources), '">',
     .report_html_escape(unique_sources), "</option>",
@@ -621,93 +675,11 @@
 }
 
 #' @keywords internal
-#' @title Human-Readable Text for One Condition Operator
-#' @description
-#' Converts a single condition-DSL operator/value pair (as used in
-#' `DTARuleColCondition@condition`/`@then` and one entry of
-#' `DTARuleGroupCondition@conditions`) into a short readable fragment such as
-#' `"= 18"` or `"in {A, B}"`. Every recognized operator from
-#' `dta_condition_operators()` (`R/evaluateRules.R`) is covered.
-#' @param op Character scalar operator name.
-#' @param value The operator's right-hand side.
-#' @param html If `FALSE`, return plain text: no escaping, operators as `!=`, `>` etc.
-#' @return A length-1 character string, HTML-escaped where it embeds data.
-.report_condition_operator_text <- function(op, value, html = TRUE) {
-  esc <- .report_escaper(html)
-  op <- as.character(op)[1]
-
-  if (identical(op, "range")) {
-    v <- as.character(unlist(value))
-    lo <- if (length(v) >= 1) esc(v[[1]]) else ""
-    hi <- if (length(v) >= 2) esc(v[[2]]) else ""
-    return(paste0("between ", lo, " and ", hi))
-  }
-
-  if (identical(op, "empty")) {
-    return(if (isTRUE(value)) "is empty" else "is not empty")
-  }
-
-  val_text <- esc(paste(as.character(unlist(value)), collapse = ", "))
-
-  switch(op,
-    equals = ,
-    equal = paste0("= ", val_text),
-    not_equals = ,
-    not_equal = paste0(if (html) "&#8800; " else "!= ", val_text),
-    `in` = paste0("in {", val_text, "}"),
-    not_in = paste0("not in {", val_text, "}"),
-    greater = paste0(if (html) "&gt; " else "> ", val_text),
-    less = paste0(if (html) "&lt; " else "< ", val_text),
-    greater_equal = ,
-    min = paste0(if (html) "&gt;= " else ">= ", val_text),
-    less_equal = ,
-    max = paste0(if (html) "&lt;= " else "<= ", val_text),
-    pattern = paste0("matches pattern ", val_text),
-    paste0(esc(op), " ", val_text)
-  )
-}
-
-#' @keywords internal
 #' @title Escape Function for HTML or Plain Output
 #' @param html If `TRUE`, HTML-escape; otherwise return `as.character`.
 #' @return A function.
 .report_escaper <- function(html) {
   if (isTRUE(html)) .report_html_escape else as.character
-}
-
-#' @keywords internal
-#' @title Human-Readable Text for a Condition Map
-#' @description
-#' Converts a condition map -- a named list keyed by column, each value a
-#' list of one or more `operator = value` pairs -- into one readable phrase,
-#' e.g. `"AGE &gt;= 18 and STATUS = COMPLETED"`. A column can legitimately
-#' carry more than one operator at once (e.g. `WEIGHT: {min: 1, max: 2}`;
-#' `evaluate_condition()` in `R/evaluateRules.R` ANDs every operator
-#' supplied), so every operator for a column is rendered, not just the
-#' first. Used for `DTARuleColCondition`'s `condition`/`then` and each named
-#' entry of `DTARuleGroupCondition@conditions`.
-#' @param cond A named list, or `NULL`/empty/not list-shaped.
-#' @param html If `FALSE`, return plain text.
-#' @return A length-1 character string (possibly `""`), HTML-escaped.
-.report_condition_to_text <- function(cond, html = TRUE) {
-  esc <- .report_escaper(html)
-  if (is.null(cond) || length(cond) == 0 || is.null(names(cond))) {
-    return("")
-  }
-
-  parts <- vapply(names(cond), function(col) {
-    spec <- cond[[col]]
-    if (is.list(spec) && length(spec) > 0 && !is.null(names(spec))) {
-      op_texts <- vapply(names(spec), function(op) {
-        paste0(esc(col), " ", .report_condition_operator_text(op, spec[[op]], html = html))
-      }, character(1))
-      paste(op_texts, collapse = " and ")
-    } else {
-      esc(col)
-    }
-  }, character(1))
-
-  paste(parts, collapse = " and ")
 }
 
 #' @keywords internal
@@ -817,173 +789,15 @@
   if (nzchar(raw_text)) .report_escaper(html)(raw_text) else "(empty)"
 }
 
-#' @keywords internal
-#' @title Human-Readable "Should Be" Text for a (Non-Group) Rule Violation
-#' @description
-#' Builds a plain-language description of the constraint straight from the
-#' rule's own S7 properties, specific to its class
-#' (`DTARuleColRange`/`DTARuleColUnique`/`DTARuleColCondition`).
-#' `DTARuleGroupCondition` is handled separately by
-#' `.report_group_condition_expected_text()` -- its constraint is a
-#' group-level relationship, not a single per-row bound.
-#' @param rule_def An S7 rule object, or `NULL` when it could not be resolved.
-#' @param html If `FALSE`, return plain text instead of HTML-escaped text.
-#' @return A length-1 character string, HTML-escaped where it embeds data.
-.report_rule_expected_text <- function(rule_def, html = TRUE) {
-  esc <- .report_escaper(html)
-  if (is.null(rule_def)) {
+# "Should be" text of a rule violation: the shared one-line rule wording
+# (.rule_summary), HTML-escaped unless html = FALSE. Without a resolvable
+# rule there is nothing to describe.
+.report_rule_should_be <- function(rule_def, html = TRUE) {
+  if (!.rule_is(rule_def, "DTARule")) {
     return("(rule definition not available; see technical detail below)")
   }
-
-  if (inherits(rule_def, "DTAtools::DTARuleColRange")) {
-    cols <- esc(paste(rule_def@columns, collapse = ", "))
-    has_min <- length(rule_def@min) == 1 && !is.na(rule_def@min)
-    has_max <- length(rule_def@max) == 1 && !is.na(rule_def@max)
-    bound <- if (has_min && has_max) {
-      paste0(
-        "between ", esc(rule_def@min), " and ",
-        esc(rule_def@max), " (inclusive)"
-      )
-    } else if (has_min) {
-      paste0("at least ", esc(rule_def@min))
-    } else if (has_max) {
-      paste0("at most ", esc(rule_def@max))
-    } else {
-      "within the configured range"
-    }
-    return(paste0("Values in ", cols, " must be ", bound, "."))
-  }
-
-  if (inherits(rule_def, "DTAtools::DTARuleColUnique")) {
-    cols <- esc(paste(rule_def@columns, collapse = ", "))
-    return(paste0("Values in ", cols, " must be unique across all rows."))
-  }
-
-  if (inherits(rule_def, "DTAtools::DTARuleColCondition")) {
-    cond_text <- .report_condition_to_text(rule_def@condition, html = html)
-    then_text <- .report_condition_to_text(rule_def@then, html = html)
-    if (nzchar(cond_text) && nzchar(then_text)) {
-      return(paste0("IF ", cond_text, " THEN ", then_text, " must hold."))
-    }
-    return("The configured IF/THEN condition must hold.")
-  }
-
-  "(see the rule definition below)"
-}
-
-#' @keywords internal
-#' @title "Should Be" Text for a Group Condition Violation
-#' @description
-#' A group_condition rule's constraint is a relationship across the rows of
-#' one group, not a single per-row bound, so the "should be" box only points
-#' at the "What this rule checks" explanation (built by
-#' `.report_rule_explain_html()`) rather than trying to compress the whole
-#' constraint into one line.
-#' @param rule_def A `DTARuleGroupCondition` object, or `NULL`.
-#' @param html If `FALSE`, return plain text instead of HTML-escaped text.
-#' @return A length-1 character string, HTML-escaped where it embeds data.
-.report_group_condition_expected_text <- function(rule_def, html = TRUE) {
-  if (is.null(rule_def)) {
-    return("A group-level constraint (see technical detail below) must hold.")
-  }
-  group_by <- .report_escaper(html)(paste(rule_def@group_by, collapse = ", "))
-  paste0(
-    "Within each group of rows sharing the same ", group_by,
-    ", the constraint(s) described above (\"What this rule checks\") must hold."
-  )
-}
-
-#' @keywords internal
-#' @title Human-Readable Text for One Group Condition Constraint
-#' @description
-#' `constraints` is a plain list (not S7), each element itself a list with
-#' `id`, `type` (`"mutually_exclusive"` or `"requires"`), and either
-#' `left`/`right` or `` `if`  ``/`` `then` `` plus `if_scope`/`then_scope`
-#' (see `R/DTARuleGroupCondition-class.R`, and the constraint construction in
-#' `R/evaluateRules.R`).
-#' @param constraint One element of `DTARuleGroupCondition@constraints`.
-#' @return A length-1 character string: one `<dt>`/`<dd>` pair, HTML-escaped
-#'   where it embeds data.
-.report_group_constraint_text <- function(constraint) {
-  if (!is.list(constraint)) {
-    return("")
-  }
-  cid <- .report_or_default(constraint$id, "(constraint)")
-  ctype <- .report_or_default(constraint$type, "")
-
-  paste0(
-    "<dt>Constraint ", .report_html_escape(cid), " (", .report_html_escape(ctype), ")</dt><dd>",
-    .report_group_constraint_desc(constraint), "</dd>"
-  )
-}
-
-#' @keywords internal
-#' @title Sentence Describing One Group Condition Constraint
-#' @param constraint One element of `DTARuleGroupCondition@constraints`.
-#' @param html If `FALSE`, return plain text instead of HTML-escaped text.
-#' @return A length-1 character string.
-.report_group_constraint_desc <- function(constraint, html = TRUE) {
-  esc <- .report_escaper(html)
-  ctype <- .report_or_default(constraint$type, "")
-
-  # DTARuleGroupCondition-class.R's normalize_scope() defaults EVERY scope
-  # field (left_scope/right_scope/if_scope/then_scope) to "any" when unset --
-  # not "all" -- so every fallback below matches that, not a guess.
-  if (identical(ctype, "mutually_exclusive")) {
-    left <- esc(.report_or_default(constraint$left, ""))
-    right <- esc(.report_or_default(constraint$right, ""))
-    left_scope <- esc(.report_or_default(constraint$left_scope, "any"))
-    right_scope <- esc(.report_or_default(constraint$right_scope, "any"))
-    paste0(
-      "\"", left, "\" (", left_scope, " row(s)) and \"", right, "\" (", right_scope,
-      " row(s)) must never both hold within the same group."
-    )
-  } else if (identical(ctype, "requires")) {
-    if_name <- esc(.report_or_default(constraint[["if"]], ""))
-    then_name <- esc(.report_or_default(constraint[["then"]], ""))
-    if_scope <- esc(.report_or_default(constraint$if_scope, "any"))
-    then_scope <- esc(.report_or_default(constraint$then_scope, "any"))
-    paste0(
-      "When \"", if_name, "\" holds for ", if_scope,
-      " row(s) in the group, \"", then_name, "\" must hold for ",
-      then_scope, " row(s) in the group."
-    )
-  } else {
-    paste0("Constraint type: ", esc(ctype), ".")
-  }
-}
-
-#' @keywords internal
-#' @title "What This Rule Checks" Body for a Group Condition Rule
-#' @param rule_def A `DTARuleGroupCondition` object.
-#' @return A length-1 character string of `<dt>`/`<dd>` pairs.
-.report_group_condition_explain_body <- function(rule_def) {
-  group_html <- paste0(
-    "<dt>Grouped by</dt><dd>",
-    .report_html_escape(paste(rule_def@group_by, collapse = ", ")), "</dd>"
-  )
-
-  conditions <- rule_def@conditions
-  cond_html <- ""
-  if (!is.null(conditions) && length(conditions) > 0 && !is.null(names(conditions))) {
-    cond_items <- vapply(names(conditions), function(nm) {
-      text <- .report_condition_to_text(conditions[[nm]])
-      paste0(
-        "<dt>", .report_html_escape(nm), "</dt><dd>",
-        if (nzchar(text)) text else "(condition)", "</dd>"
-      )
-    }, character(1))
-    cond_html <- paste(cond_items, collapse = "")
-  }
-
-  constraints <- rule_def@constraints
-  constraint_html <- ""
-  if (!is.null(constraints) && length(constraints) > 0) {
-    constraint_items <- vapply(constraints, .report_group_constraint_text, character(1))
-    constraint_html <- paste(constraint_items, collapse = "")
-  }
-
-  paste0(group_html, cond_html, constraint_html)
+  text <- .rule_summary(rule_def)
+  if (isTRUE(html)) .report_html_escape(text) else text
 }
 
 #' @keywords internal
@@ -991,14 +805,16 @@
 #' @description
 #' A neutral (not pass/fail-colored) box describing the rule's own
 #' definition, shown above the should-be/actual comparison so a reader
-#' understands the rule's intent before its failure. Only built for
-#' `type == "rule"` messages; the caller skips it entirely for
-#' columnspec/import messages, whose "should be" text already states the
+#' understands the rule's intent before its failure. The rule ID and kind
+#' come first, followed by the shared plain-English wording of the rule
+#' (`.rule_html_dl()`: purpose, statement, lists and missing-value notes).
+#' Only built for `type == "rule"` messages; the caller skips it entirely
+#' for columnspec/import messages, whose "should be" text already states the
 #' constraint in full.
 #' @param rule_def An S7 rule object, or `NULL`.
 #' @return A length-1 character string (`""` when `rule_def` is `NULL`).
 .report_rule_explain_html <- function(rule_def) {
-  if (is.null(rule_def)) {
+  if (!.rule_is(rule_def, "DTARule")) {
     return("")
   }
 
@@ -1008,36 +824,8 @@
   } else {
     ""
   }
-  type_dt <- paste0("<dt>Rule type</dt><dd>", .report_html_escape(.report_rule_type_label(rule_def)), "</dd>")
-
-  desc <- tryCatch(rule_def@description, error = function(e) NULL)
-  desc_html <- if (!is.null(desc) && length(desc) == 1 && !is.na(desc) && nzchar(desc)) {
-    paste0("<dt>Description</dt><dd>", .report_html_escape(desc), "</dd>")
-  } else {
-    ""
-  }
-
-  body <- if (inherits(rule_def, "DTAtools::DTARuleGroupCondition")) {
-    .report_group_condition_explain_body(rule_def)
-  } else if (inherits(rule_def, "DTAtools::DTARuleColCondition")) {
-    cond_text <- .report_condition_to_text(rule_def@condition)
-    then_text <- .report_condition_to_text(rule_def@then)
-    paste0(
-      "<dt>IF</dt><dd>", if (nzchar(cond_text)) cond_text else "(condition)", "</dd>",
-      "<dt>THEN</dt><dd>", if (nzchar(then_text)) then_text else "(condition)", "</dd>"
-    )
-  } else if (inherits(rule_def, "DTAtools::DTARuleColRange")) {
-    paste0(
-      "<dt>Columns</dt><dd>", .report_html_escape(paste(rule_def@columns, collapse = ", ")), "</dd>",
-      "<dt>Allowed range</dt><dd>", .report_rule_expected_text(rule_def), "</dd>"
-    )
-  } else if (inherits(rule_def, "DTAtools::DTARuleColUnique")) {
-    paste0(
-      "<dt>Columns</dt><dd>", .report_html_escape(paste(rule_def@columns, collapse = ", ")), "</dd>"
-    )
-  } else {
-    ""
-  }
+  type_dt <- paste0("<dt>Rule type</dt><dd>", .report_html_escape(.rule_kind_label(rule_def)), "</dd>")
+  body <- .rule_html_dl(rule_def)
 
   glue::glue(
     '<div class="inspect-explain">
@@ -1045,7 +833,6 @@
   <dl>
 {id_dt}
 {type_dt}
-{desc_html}
 {body}
   </dl>
 </div>'
@@ -1205,7 +992,7 @@
     should_be <- .report_import_expected_text(row1)
     actual <- .report_import_actual_text(row1)
   } else if (identical(type, "rule") && is_group_condition) {
-    should_be <- .report_group_condition_expected_text(rule_def)
+    should_be <- .report_rule_should_be(rule_def)
     # The violation summary (which group, which constraint, why) plus the
     # actual column VALUES for the rows involved -- dta_inspect_tabular_message()
     # populates failing_rows_preview for group_condition too (its preview_cols
@@ -1218,7 +1005,7 @@
       affected_rows_html
     )
   } else if (identical(type, "rule")) {
-    should_be <- .report_rule_expected_text(rule_def)
+    should_be <- .report_rule_should_be(rule_def)
     actual <- .report_rule_failing_rows_html(inspect_rows)
   } else {
     should_be <- if ("message" %in% names(row1) && !is.na(row1[["message"]])) {

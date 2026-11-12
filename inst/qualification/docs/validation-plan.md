@@ -49,6 +49,31 @@ tool is qualified to enforce a specification, not to judge whether a
 specification is the right one. The interactive application's visual
 appearance.
 
+**SAS datasets.** The binary `.sas7bdat` format is decoded by the `haven`
+package (the ReadStat library inside it), a hard dependency since the SAS
+reader was added. Decoding is a dependency's job and out of scope as above, but
+the package's use of it is not: the suite checks what is made of the decoded
+values (names, blanks, dates and times, types) against `delivery.sas7bdat`, which
+was written by `haven::write_sas` -- the same codec that reads it, so that
+check shows the package passes the decoded values on faithfully, not that the
+codec agrees with SAS -- and against byte-level facts about the SAS epoch.
+Only `iris.sas7bdat` was written by SAS itself, and it holds no dates or
+blanks. A SAS dataset is
+read into memory only, which LIM-010 records.
+
+**Container deliveries.** A delivery may be a `.zip` archive or a SAS
+transport (`.xpt`) library holding several datasets. `load_delivery()` lists
+the archive with the `zip` package, refuses unsafe, encrypted, duplicated
+and oversized content before extracting anything, extracts each needed file
+on its own, and splits a transport library into single-dataset files that
+haven then reads. Area CONT checks the refusals against hostile fixtures, the
+split byte for byte, truncated libraries, and that a file inside a container
+is validated exactly as the same file delivered loose. Decompression itself
+is the `zip` package's job and out of scope, as decoding is for haven. What
+the package makes of a transport file's decoded values is in scope: its text
+is read as UTF-8 only, and a version 5 file with rows under 80 bytes cannot
+say how many rows it holds (LIM-017, LIM-018).
+
 ## 3. Evidence and its properties
 
 Each run writes a bundle whose properties are the ones a regulated record needs.
@@ -188,7 +213,7 @@ A qualification describes one build of the software on one system. Repeat it
 when any of these changes:
 
 - the package version;
-- the R minor version (4.5 to 4.6, say), or the major version of Arrow;
+- the R minor version (4.5 to 4.6, say), or the major version of Arrow or of haven;
 - the operating system, or the deployment target the package is installed onto;
 - any dependency that fails its declared minimum after an environment change;
 - a defect is fixed that was reproduced by the previous run, since its register

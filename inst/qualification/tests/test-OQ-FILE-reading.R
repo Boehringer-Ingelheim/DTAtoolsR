@@ -61,10 +61,13 @@ test_that("OQ-FILE-020 | a .zip file is refused immediately with an actionable m
 
   err_read <- tryCatch(read_file(DTAFileCSV(filename = "delivery.csv.zip"), p), error = function(e) e)
   qa_check("read_file() raises a condition for a .zip file", inherits(err_read, "condition"))
+  # REQ-FILE-010 still holds: the message names the reason and a supported
+  # alternative, which is now a delivery (the archive is loaded as a whole and
+  # each file inside it is matched to the specification).
   qa_step(
     "the message names the reason and a supported alternative, not an opaque parse failure",
     TRUE,
-    grepl(".zip archives are not supported.", conditionMessage(err_read), fixed = TRUE)
+    grepl(".zip archives are not read by a file handler.", conditionMessage(err_read), fixed = TRUE)
   )
 
   err_open <- tryCatch(open_file(DTAFileCSV(filename = "delivery.csv.zip"), p), error = function(e) e)
@@ -354,4 +357,38 @@ test_that("OQ-FILE-037 | open_file returns a lazy dataset, never a materialised 
   qa_step("the column names are known from the header alone", c("A", "B", "C"), names(ds))
   qa_check("open_file() returns a lazy Dataset object", inherits(ds, "Dataset"))
   qa_check("...unlike read_file(), which returns an already-materialised table", !inherits(t, "Dataset"))
+})
+
+test_that("OQ-FILE-055 | quote = \"\" declares a file with no quote character and keeps a literal double quote | REQ-FILE-032", {
+  dir <- qa_tempdir()
+  p <- file.path(dir, "noquote.psv")
+  fr_write_raw(c("ID|NOTE", "1|5\" pipe", "2|plain"), p)
+
+  handler <- DTAFileDelim(filename = "noquote.psv", sep = "|", quote = "")
+  t <- as.data.frame(read_file(handler, p))
+
+  qa_step("the value with a double quote is read as written", c("5\" pipe", "plain"), as.character(t$NOTE))
+  qa_step("both rows are read", 2L, nrow(t))
+})
+
+test_that("OQ-FILE-056 | a UTF-16 file is refused with the same advice in every stream mode | REQ-FILE-033", {
+  dir <- qa_tempdir()
+  p <- file.path(dir, "wide.csv")
+  # Written from the specification's own bytes, not through the package.
+  writeBin(iconv("ID,AGE\nA1,30\n", from = "UTF-8", to = "UTF-16LE", toRaw = TRUE)[[1]], p)
+
+  for (mode in c("never", "auto", "always")) {
+    ds <- DTADataSetTabular(
+      id = "w", specs = fr_specs(),
+      files = list(DTAFileCSV(filename = "wide.csv", encoding = "UTF-16LE"))
+    )
+    msg <- tryCatch(
+      load_file(ds, file = p, handler_index = 1, stream = mode),
+      error = function(e) gsub("[[:space:]]+", " ", conditionMessage(e))
+    )
+    qa_check(
+      paste0("stream = \"", mode, "\" refuses and says to convert to UTF-8 first"),
+      is.character(msg) && grepl("Convert the file to UTF-8 first", msg, fixed = TRUE)
+    )
+  }
 })

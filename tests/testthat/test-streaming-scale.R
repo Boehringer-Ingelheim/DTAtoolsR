@@ -630,11 +630,11 @@ test_that("a .zip input is refused with a clear message", {
   handler <- DTAFileCSV(filename = "ss_refused.zip")
   expect_error(
     read_file(handler, path),
-    regexp = "zip archives are not supported"
+    regexp = "zip archives are not read by a file handler"
   )
   expect_error(
     open_file(handler, path),
-    regexp = "zip archives are not supported"
+    regexp = "zip archives are not read by a file handler"
   )
 })
 
@@ -690,4 +690,170 @@ test_that("validate_file_stream cleans a padded header like every other entry po
   # reported missing (once per row) and the padded one unexpected.
   expect_true(details$columnspec_valid)
   expect_identical(details$n_columnspec_errors, 0L)
+})
+
+test_that("a declared-Int key is typed like the eager path, not grouped as a double", {
+  rule <- DTARuleColUnique(id = "i_unique", columns = "I")
+  specs <- vc_specs(
+    list(
+      DTAColumnSpec(id = "I", type = "SAS Int", nullable = TRUE),
+      DTAColumnSpec(id = "S", type = "SAS Char", length = 4, nullable = TRUE)
+    ),
+    list(rule)
+  )
+  # Fractional / out-of-int32 values type to NA on the eager path, and repeated
+  # NAs are duplicates, so every one of these tables is invalid.
+  for (vals in list(c("1.5", "2.5", "3"), c("3000000000", "4000000000", "3"))) {
+    df <- data.frame(I = vals, S = c("a", "b", "c"), stringsAsFactors = FALSE)
+    path <- ss_write_csv(df, "ss_int_key_na.csv")
+
+    coerced <- dta_coerce_table_to_specs(df, specs)
+    expect_false(rule_check_unique(rule, as.data.frame(coerced$table))$valid)
+
+    for (engine_on in c(TRUE, FALSE)) {
+      withr::local_options(DTAtools.stream_arrow_unique = engine_on)
+      details <- validate_file_stream(specs, path, batch_rows = 1L, verbose = FALSE)
+      expect_false(details$rules_valid, info = paste(vals[1], "engine on:", engine_on))
+    }
+    unlink(path)
+  }
+})
+
+test_that("Int keys Arrow and R parse differently get the eager verdict, engine on or off", {
+  # Arrow reads "-2147483648" and wrapped hex ("0xFFFFFFFF" -> -1) as valid
+  # int32; R reads the first as NA_integer_ and the second as NA. The verdicts
+  # used to flip both ways, so such a key must be answered by the R path.
+  rule <- DTARuleColUnique(id = "i_unique", columns = "I")
+  specs <- vc_specs(
+    list(DTAColumnSpec(id = "I", type = "SAS Int", nullable = TRUE)),
+    list(rule)
+  )
+  cases <- list(
+    c("-2147483648", "", "5"),
+    c("0xFFFFFFFF", "-1"),
+    c("0x80000000", "", "5"),
+    c("-2147483648", "-2147483648")
+  )
+  for (vals in cases) {
+    path <- file.path(tempdir(), "ss_int_arrow_r.csv")
+    # A bare empty line is skipped by the CSV reader, so quote the empty value.
+    writeLines(c("I", ifelse(vals == "", "\"\"", vals)), path)
+    coerced <- dta_coerce_table_to_specs(
+      data.frame(I = vals, stringsAsFactors = FALSE), specs
+    )
+    expected <- rule_check_unique(rule, as.data.frame(coerced$table))$valid
+    for (engine_on in c(TRUE, FALSE)) {
+      withr::local_options(DTAtools.stream_arrow_unique = engine_on)
+      details <- validate_file_stream(specs, path, batch_rows = 1L, verbose = FALSE)
+      expect_identical(
+        details$rules_valid, expected,
+        info = paste(paste(vals, collapse = "|"), "engine on:", engine_on)
+      )
+    }
+    unlink(path)
+  }
+})
+
+test_that("fail_fast does not leave columnspec_valid TRUE for an unread tail", {
+  specs <- vc_specs(
+    list(DTAColumnSpec(id = "K", type = "SAS Char", length = 4, nullable = TRUE)),
+    list(DTARuleColUnique(id = "k_unique", columns = "K"))
+  )
+  # The duplicate stops the scan after batch 2; row 5 (too long) is never read.
+  path <- ss_write_csv(
+    data.frame(K = c("a", "a", "b", "c", "TOOLONGVALUE"), stringsAsFactors = FALSE),
+    "ss_failfast_columnspec.csv"
+  )
+  on.exit(unlink(path), add = TRUE)
+
+  details <- validate_file_stream(
+    specs, path,
+    batch_rows = 2L, fail_fast = TRUE, verbose = FALSE
+  )
+  expect_true(isTRUE(attr(details, "partial_scan")))
+  expect_false(details$rules_valid)
+  expect_true(is.na(details$columnspec_valid))
+})
+
+test_that("fail_fast skips the Arrow uniqueness precompute and still finds the duplicate", {
+  specs <- vc_specs(
+    list(DTAColumnSpec(id = "K", type = "SAS Char", length = 8, nullable = TRUE)),
+    list(DTARuleColUnique(id = "k_unique", columns = "K"))
+  )
+  path <- ss_write_csv(
+    data.frame(K = c("a", "a", "b", "c"), stringsAsFactors = FALSE),
+    "ss_failfast_precompute.csv"
+  )
+  on.exit(unlink(path), add = TRUE)
+
+  calls <- 0L
+  testthat::local_mocked_bindings(
+    dta_stream_unique_precompute = function(...) {
+      calls <<- calls + 1L
+      list()
+    }
+  )
+  details <- validate_file_stream(
+    specs, path,
+    batch_rows = 2L, fail_fast = TRUE, verbose = FALSE
+  )
+  expect_identical(calls, 0L)
+  expect_false(details$rules_valid)
+  expect_match(details$rule_errors[[1]]$message, "1 duplicate row")
+
+  validate_file_stream(specs, path, batch_rows = 2L, verbose = FALSE)
+  expect_identical(calls, 1L)
+})
+
+test_that("a partial scan keeps a precomputed PASS in rule_results", {
+  rule <- DTARuleColUnique(id = "k_unique", columns = "K")
+  specs <- vc_specs(
+    list(DTAColumnSpec(id = "K", type = "SAS Char", length = 4, nullable = TRUE)),
+    list(rule)
+  )
+  df <- data.frame(K = c("TOOLONGVALUE", "b"), stringsAsFactors = FALSE)
+  details <- dta_validate_table_stream(
+    specs, dta_as_batch_reader(df, batch_rows = 1L),
+    verbose = FALSE, fail_fast = TRUE,
+    precomputed = list(list(id = "k_unique", valid = TRUE, message = NULL))
+  )
+  expect_true(isTRUE(attr(details, "partial_scan")))
+  expect_false(details$columnspec_valid)
+  expect_true(details$rules_valid)
+  expect_length(details$rule_results, 1)
+  expect_true(details$rule_results[[1]]$valid)
+  expect_length(details$rule_errors, 0)
+})
+
+# Regression (red-team G3): the spill directory lives under tempdir(), which
+# holds the user name. list.files() hands back its parts as native strings, and
+# a radix sort refuses a non-ASCII one that is not marked as UTF-8.
+test_that("collect_full_errors() reads spilled parts from a directory with a non-ASCII name", {
+  specs <- vc_specs(
+    list(
+      DTAColumnSpec(id = "ID", type = "SAS Char", length = 2, nullable = FALSE),
+      DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = TRUE)
+    )
+  )
+  df <- data.frame(ID = paste0("TOOLONG", 1:5), AGE = rep("abc", 5), stringsAsFactors = FALSE)
+  path <- ss_write_csv(df, "ss_spill_nonascii.csv")
+  on.exit(unlink(path), add = TRUE)
+
+  full <- validate_file_stream(specs, path, batch_rows = 1L, max_errors = NULL, verbose = FALSE)
+  capped <- validate_file_stream(specs, path, batch_rows = 1L, max_errors = 1L, verbose = FALSE)
+
+  spill <- attr(capped$columnspec_errors$full_error, "spill_dir", exact = TRUE)
+  parts <- list.files(spill, pattern = "^part-\\d+\\.rds$", full.names = TRUE)
+  expect_gt(length(parts), 1L)
+
+  # Move the spilled parts under a directory named like a user profile.
+  moved <- file.path(withr::local_tempdir(), "J\u00fcrgen", "spill")
+  dir.create(moved, recursive = TRUE)
+  expect_true(all(file.copy(parts, moved)))
+  attr(capped$columnspec_errors$full_error, "spill_dir") <- moved
+
+  collected <- collect_full_errors(capped, axis = "columnspec")
+  reference <- full$columnspec_errors$full_error
+  expect_identical(nrow(collected), nrow(reference))
+  expect_identical(collected$message, reference$message)
 })

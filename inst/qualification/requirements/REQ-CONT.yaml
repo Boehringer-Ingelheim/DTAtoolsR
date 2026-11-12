@@ -1,0 +1,316 @@
+area: CONT
+title: Container deliveries (zip archives, SAS transport libraries)
+
+# A container decides which files reach the readers at all. A member that is
+# silently skipped, half-extracted or read past its end is a defect no check on
+# the values can see: haven reads a multi-member transport library as one table
+# and returns rows decoded from the other members' bytes, and a library cut
+# short hands its last member rows decoded from header bytes. Archives are
+# untrusted input: zip::unzip() corrupted its own error text and once
+# terminated R on the entry a/../../evil.csv, and both zip::unzip() and
+# utils::unzip() write an absolute entry name below their target directory
+# under its full path (observed with zip 3.0.2 while the feature was designed).
+
+requirements:
+  - id: REQ-CONT-001
+    text: >
+      load_delivery() shall accept a DTA or a DTADataSet and one or more paths,
+      each a loose file, a .zip archive or a SAS transport file (.xpt or
+      .xpt.gz), shall bind every file it routes with load_file(), and shall
+      return the object with a last_delivery attribute holding one row per file
+      considered, with the columns delivered, container, member, name, dataset,
+      handler, item, status, reason and path, status being one of loaded,
+      opened, unused, ignored and refused.
+    risk: high
+    category: interface
+    covers: [load_delivery, load_file]
+    source: R/loadDelivery.R
+  - id: REQ-CONT-002
+    text: >
+      A file inside a .zip archive shall be routed by its base name exactly as a
+      loose file of that name would be, whether the archive separates folders
+      with slashes or backslashes; within a dataset to the first matching
+      literal file entry, else the first matching pattern entry; to every
+      dataset that matches it, except that a file some literal entry matches is
+      not routed to pattern entries of other datasets, and that holds when
+      the literal entry declares a container the file did not come from (the
+      file is then taken only by a pattern entry that declares a container the
+      file did come from, and otherwise by no dataset); a pattern entry, as for
+      a loose file, shall also match the name without its compression
+      suffix. It shall reach the same
+      validation verdict and the same error counts as the same bytes delivered
+      loose.
+    risk: high
+    category: functional
+    covers: [load_delivery, check]
+    source: R/loadDelivery.R (dta_delivery_claims); R/containerFiles.R
+  - id: REQ-CONT-003
+    text: >
+      Each member of a SAS transport library holding several datasets shall be
+      offered as a file named after the member in lower case with the extension
+      .xpt, and shall be read with exactly that member's observations and
+      variables and no other member's, in version 5 and version 8 files alike.
+      A transport file holding one dataset shall be matched by its own name.
+      A member whose file name would name a reserved Windows device (CON, AUX
+      and the like) shall be refused with a condition of class
+      dta_container_unsafe_member only when it is split out of a library for an
+      entry; a library member that no entry wants, and a transport file holding
+      one dataset that is read in place, shall not be refused for its name.
+    risk: high
+    category: integrity
+    covers: [load_delivery, DTAFileXPT, read_file]
+    source: R/containerFiles.R (dta_xpt_members, dta_xpt_split); R/loadDelivery.R
+    notes: >
+      haven::read_xpt() on a three-member library returned 102 rows of the first
+      member's columns (observed with haven 2.5.5 while the feature was
+      designed); the split is what prevents that.
+      Expected values are the literal frames the fixtures were written from and
+      the byte ranges of the library, never the reader's output.
+  - id: REQ-CONT-004
+    text: >
+      A DTAFileXPT handler given a transport file holding more than one dataset
+      shall refuse it with a condition of class dta_xpt_multiple_members whose
+      members field names every member, and shall return no table;
+      load_delivery() shall do the same, and not split the file, when a type
+      xpt entry names that file directly.
+    risk: high
+    category: integrity
+    covers: [DTAFileXPT, read_file, load_file, load_delivery]
+    source: R/DTAFileXPT-class.R (dta_read_xpt); R/loadDelivery.R (dta_delivery_visit)
+  - id: REQ-CONT-005
+    text: >
+      DTAFileXPT shall be constructible directly, through DTAFileFactory(type =
+      "xpt") and from a YAML file entry of type xpt, shall be accepted as a file
+      handler by DTADataSetTabular, and shall always be read into memory,
+      signalling a message of class dta_sas7bdat_in_memory when stream = "auto"
+      would have streamed it by its size.
+    risk: medium
+    category: interface
+    covers: [DTAFileXPT, DTAFileFactory, dta_file_handlers_from_list, DTADataSetTabular, load_file]
+    source: R/DTAFileXPT-class.R; R/00_helpers.R
+    notes: The memory consequence is the one recorded for .sas7bdat files (LIM-010).
+  - id: REQ-CONT-006
+    text: >
+      load_delivery() shall route a file to a file entry that declares a
+      container only when the file came out of a container whose name matches
+      the declaration, * matching any text and ? one character, and shall list
+      any other file that entry would take as unused with a reason naming the
+      container. An entry without a container shall accept the file loose or
+      from inside any container. A file that was delivered and then refused
+      (it could not be loaded, it duplicates another, or it exceeds a size
+      limit) was delivered: it shall not be reported as not in the delivery,
+      and its row of last_delivery shall keep the dataset and the entry it was
+      meant for.
+    risk: high
+    category: functional
+    covers: [DTAFile, DTAFileFactory, load_delivery]
+    source: R/DTAFile-class.R (dta_container_regex, dta_matches_container); R/loadDelivery.R
+  - id: REQ-CONT-007
+    text: >
+      An archive holding an entry whose name is empty, not valid text,
+      absolute (UNC names included), starts with a drive letter, or has an
+      empty, '.' or '..' path segment between slashes or backslashes, or an
+      entry that is a symbolic link, shall be refused as a whole with a
+      condition of class dta_container_unsafe_member before any entry is
+      extracted, whether or not any file entry claims it, and no file shall be
+      written. An entry whose name contains a colon, a control character or
+      one of < > " | ? *, has a path segment that ends in a dot or a space,
+      names a reserved Windows device, is longer than 255 bytes or has a name
+      of 511 bytes or more (which the zip library returns cut, so it cannot be
+      read in full) shall never be extracted: when a file entry claims it, or an entry declares it as a
+      container, the archive shall be refused with the same class and a
+      message saying that some file systems cannot write the name; otherwise
+      it shall be listed as unused, with the problem in its reason; a name of
+      511 bytes or more shall not count as a duplicate of another, and its
+      refusal shall say that the name cannot be read in full rather than that
+      it is unsafe. Names shall appear in messages with control characters
+      escaped.
+    risk: high
+    category: security
+    covers: [load_delivery]
+    source: R/containerFiles.R (dta_zip_entry_escape, dta_zip_entry_problem, dta_zip_inspect, dta_zip_refuse_unsafe); R/loadDelivery.R (dta_delivery_open_zip)
+    notes: >
+      zip::unzip() corrupted its own error text and once terminated the R
+      process on the entry a/../../evil.csv, and wrote an absolute entry name
+      below its target directory under the full path (observed with zip 3.0.2
+      while the feature was designed); the refusal happens before zip::unzip()
+      is called.
+  - id: REQ-CONT-008
+    text: >
+      An archive with an encrypted entry shall be refused with a condition of
+      class dta_container_encrypted. A delivery shall be refused with a
+      condition of class dta_container_too_large naming the option when an
+      archive has more entries than DTAtools.container_max_members (counted the
+      way the zip library counts them), a library more members, or the call
+      would create more files than that; when an archive declares more than
+      DTAtools.container_max_ratio times its size on disk, or the call would
+      write more than DTAtools.container_max_bytes; and when a file it would
+      extract from an archive (a transport library inside it included,
+      whether it is only probed for members or declared as a container) or
+      split out of a library, streamed or not, or a gzip file it would read
+      into memory, is larger than
+      DTAtools.container_max_member_bytes, the gzip file judged by what it
+      inflates to. A gzip-compressed transport
+      file that decompresses to more than DTAtools.container_max_bytes shall be
+      refused the same way when it is declared as a container or read by a type
+      xpt entry; one that no entry declares or claims is listed as unused with
+      that reason. An archive is refused before anything is extracted from it;
+      a library inside an archive is extracted before its members are counted.
+    risk: high
+    category: security
+    covers: [load_delivery, DTAFileXPT, read_file]
+    source: R/containerFiles.R (dta_container_limits, dta_zip_inspect, dta_xpt_members); R/loadDelivery.R (dta_delivery_charge, dta_delivery_check_inflated); R/DTAFileXPT-class.R (dta_read_xpt)
+  - id: REQ-CONT-009
+    text: >
+      An archive with two entries whose full names, or a transport library with
+      two members whose names, are equal once letter case is ignored shall be
+      refused with a condition of class dta_container_duplicate_member, and no
+      extracted file shall be reachable through another file's name. Two files
+      of one delivery that would be loaded as the same table or file of the
+      same dataset shall be refused with a condition of class
+      dta_delivery_duplicate_name, or with on_error = "skip" both listed as
+      refused while the rest is loaded.
+    risk: high
+    category: integrity
+    covers: [load_delivery]
+    source: R/containerFiles.R (dta_zip_inspect, dta_zip_extract); R/loadDelivery.R (dta_delivery_resolve_duplicates)
+  - id: REQ-CONT-010
+    text: >
+      A member whose extracted size differs from the size its archive declares
+      shall be refused with a condition of class dta_container_corrupt, and
+      nothing extracted from that archive shall remain; a .zip that is not a
+      readable archive shall be refused with a condition of class
+      dta_container_unreadable. A transport library that ends inside an 80-byte
+      record or inside a member's header records shall be refused with a
+      condition of class dta_container_corrupt and no member of it shall be
+      read, and a .xpt that is not a SAS transport file with a condition of
+      class dta_xpt_not_transport, when the file is declared as a container or
+      read by a type xpt entry; a .xpt that no entry declares or claims, and
+      whose scan fails, shall be listed as unused with that reason.
+    risk: high
+    category: integrity
+    covers: [load_delivery, DTAFileXPT, read_file]
+    source: R/containerFiles.R; R/loadDelivery.R (dta_delivery_visit)
+    notes: >
+      Version 5 transport files record neither a member count nor an
+      observation count, so a cut exactly at a member boundary or at a record
+      boundary inside a member's observations reads as fewer members or rows
+      (LIM-013); every other cut is refused.
+  - id: REQ-CONT-011
+    text: >
+      Entries under __MACOSX/, entries with a path segment that starts with
+      ".", and macOS Icon\r files (a segment of exactly "Icon" and a carriage
+      return) shall never be bound and shall be listed as ignored; directory entries
+      shall produce no row; a .zip inside a .zip shall not be opened, and is
+      listed as unused unless an entry takes it as a file; a .xpt inside a .zip
+      may be opened, when an entry declares it as a container or when the
+      archive holds no .xpt an entry names and some type xpt entry matches no
+      file of the archive; a .xpt not opened for that reason shall be listed
+      as unused with a reason that says so and names the declaration that
+      would open it. A .zip or .xpt that a type any entry takes as a file in
+      its own right (the entry names it, or lists its ending in extensions)
+      shall be bound as one file and shall not be opened, scanned or split,
+      unless an entry declares it as its container; its loaded row and the
+      summary shall say that it was kept as one file and how to have its
+      contents checked.
+    risk: medium
+    category: functional
+    covers: [load_delivery]
+    source: R/loadDelivery.R (dta_delivery_visit, dta_delivery_open_zip)
+  - id: REQ-CONT-012
+    text: >
+      With on_error = "abort", the default, a failure to load any routed file
+      shall abort with a condition of class dta_delivery_load_error and leave no
+      extracted file behind; with on_error = "skip", every other file shall be
+      bound, the failures listed as refused and one warning of class
+      dta_delivery_refused signalled. A delivery from which nothing can be bound
+      shall be refused with a condition of class dta_delivery_nothing_loaded in
+      both modes.
+    risk: high
+    category: integrity
+    covers: [load_delivery]
+    source: R/loadDelivery.R
+  - id: REQ-CONT-013
+    text: >
+      A member that several datasets bind shall be extracted once, into a
+      directory named after its container; a member loaded lazily shall remain
+      readable by check() after load_delivery() has returned; and stream =
+      "auto" shall decide on the size of the member, not of the archive.
+    risk: medium
+    category: functional
+    covers: [load_delivery, check, load_file]
+    source: R/loadDelivery.R; R/00_helpers.R (dta_resolve_stream_mode)
+  - id: REQ-CONT-014
+    text: >
+      The exported specification shall show a file entry's container in a
+      "Delivered In" column of the Files table when at least one entry of the
+      table declares one, and shall keep the five-column table otherwise.
+    risk: medium
+    category: documentation
+    covers: [write_dataset_metadata, write_dta]
+    source: R/documentData.R (.file_specs_df)
+  - id: REQ-CONT-015
+    text: >
+      lint_dta() shall report, as findings of severity error, a container that
+      is not a single .zip or .xpt file name (code file_container_invalid), a
+      file entry key its type does not take (code file_field_unknown) and a
+      container given on a dataset instead of a file entry (code
+      file_container_misplaced), and read_dta_from_yaml() shall refuse such a
+      document with a condition of class dta_lint_error.
+    risk: medium
+    category: interface
+    covers: [lint_dta, read_dta_from_yaml]
+    source: R/lintDTA.R (dta_lint_files_list); R/DTAFile-class.R (dta_container_value_problem)
+  - id: REQ-CONT-016
+    text: >
+      In the interactive application, a drop holding a .zip or .xpt on any
+      upload slot shall bind every file of the drop that matches a file entry
+      of the document, in every dataset, shall record the container with each
+      loaded file, shall ask before replacing a table that is already loaded,
+      and shall refuse, before asking about any replacement, a loose file
+      dropped on a slot whose entry declares a container. It shall delete
+      every extracted file no loaded file record names before each delivery,
+      after a file is removed or a dataset's files are discarded and after a
+      delivery is committed, the whole extraction of a cancelled or failed
+      delivery, and at session end every extracted file no file dataset uses,
+      so that a session's delivery budget is never exhausted by files it no
+      longer holds, whichever datasets one delivery filled.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R (handle_upload, handle_delivery, commit_delivery, do_remove_file, onSessionEnded)
+  - id: REQ-CONT-017
+    text: >
+      The application's file editor shall offer the type xpt for a tabular
+      dataset and an optional "Delivered inside" value that is saved as the
+      entry's container and written to the exported YAML.
+    risk: low
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/R/utils_dta.R (dta_set_handler, dta_handler_to_list)
+  - id: REQ-CONT-018
+    text: >
+      A SAS transport file read as a table shall be decoded as UTF-8: a variable
+      name or a text value that is not valid UTF-8 shall be refused with a
+      condition of class dta_xpt_read_error that names the column and the first
+      row (a variable name, its position) and does not repeat the bytes. The
+      number of rows shall be taken from the file's own layout: a trailing row
+      whose text values are all blank, which the decoder would drop as padding,
+      shall be counted when the file states the number of rows (a version 8
+      count, believed only when that many rows fit the bytes the observations
+      take, with less than one 80-byte record left over; otherwise, and for
+      version 5, the observation bytes divided by the row length when a row is
+      80 bytes or longer), so that a column declared nullable false reports the
+      blank rows as missing values; a version 8 count the bytes cannot hold
+      shall be ignored rather than create rows; a file whose stated number of
+      rows differs in any other way from the rows read shall be refused with
+      the same class.
+    risk: high
+    category: integrity
+    covers: [DTAFileXPT, read_file, load_delivery]
+    source: R/DTAFileXPT-class.R (dta_read_xpt); R/containerFiles.R (dta_xpt_expected_rows)
+    notes: >
+      A version 5 file whose rows are shorter than 80 bytes does not state how
+      many rows it holds, and a transport file records no encoding (LIM-017,
+      LIM-018). Expected values are the data frames the test files are written
+      from.

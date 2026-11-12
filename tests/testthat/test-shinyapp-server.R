@@ -11,71 +11,6 @@ skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
 
-# Path of `filename` inside library root `root`, routed by its kind suffix:
-# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
-# for everything else (creation and dataset templates, and the plain data
-# files that sit beside them, which resolve relative to the template).
-# Creates the folder, so a fixture can write straight to the returned path.
-lib_path <- function(root, filename) {
-  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
-    "parties"
-  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
-    "vocabulary"
-  } else {
-    "templates"
-  }
-  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
-  file.path(root, sub, filename)
-}
-
-# The app directory testServer() runs.
-app_server_dir <- function() .shiny_app_dir()
-
-# A shiny fileInput value for a bundled fixture.
-#
-# fileInput() hands the server a one-row data.frame; the upload observers read
-# `datapath` and `name` off it, so the fixture has to be presented the same way.
-app_file_input <- function(filename) {
-  path <- app_fixture_path(filename)
-  data.frame(
-    name = filename,
-    size = file.size(path),
-    type = "",
-    datapath = path,
-    stringsAsFactors = FALSE
-  )
-}
-
-# The app autosaves to a path in tempdir() keyed to the browser id reported by
-# the client (input$dta_client_id), and offers to restore it on start-up. A file
-# left by an earlier test would put the next server into "previous session
-# available" state, so every test clears them before starting. (Clearing up
-# front, rather than after, is what actually guarantees isolation — and it stays
-# correct no matter what order testthat runs these in. The files themselves die
-# with tempdir() at the end of the session.)
-#
-# testServer() reports no browser id unless a test sets one, so a server under
-# test writes nothing at all by default; this sweep covers the tests that do set
-# one, and any file left by an older build under the pre-2.x fixed name.
-clean_session_file <- function() {
-  f <- list.files(tempdir(),
-    pattern = "^dtatools_app_session.*\\.rds$",
-    full.names = TRUE
-  )
-  unlink(f, force = TRUE)
-  invisible(f)
-}
-
-# The rendered HTML of a renderUI output, as one string.
-#
-# renderUI yields list(html=, deps=); NULL from the render function leaves no
-# html at all, so collapse both shapes to a plain string. A renderUI output is
-# never evaluated unless a test reads it, so anything asserted about a UI gate
-# has to go through here.
-ui_text <- function(out) {
-  if (is.null(out) || is.null(out$html)) "" else paste(as.character(out$html), collapse = "")
-}
-
 # A rendered HTML string parsed as a fragment, for assertions about WHICH
 # element holds a value rather than whether the value appears somewhere.
 html_doc <- function(html) {
@@ -2330,5 +2265,41 @@ test_that("the dock download handlers refuse to write before a check", {
     csv <- output$dl_msgs_csv
     expect_true(file.exists(csv))
     expect_gt(length(readLines(csv, warn = FALSE)), 0)
+  })
+})
+
+test_that("the handler form offers SAS datasets and saves one without reader settings", {
+  # Reading output$file_modal_body is the point (see the encoding test above):
+  # the type control is only in the markup if the form actually builds.
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+    session$setInputs(edit_files = 1)
+    session$setInputs(file_add = 1)
+
+    html <- ui_text(output$file_modal_body)
+    expect_match(html, "value=\"sas7bdat\"", fixed = TRUE)
+    expect_match(html, "SAS dataset (.sas7bdat)", fixed = TRUE)
+    # The reader-settings panel is hidden for a SAS dataset, as for `any`
+    # (quotes in the condition are HTML-escaped, so allow for either form).
+    expect_match(html, "file_type != .{1,6}sas7bdat")
+
+    # The panel is hidden client-side, but its controls keep their values; the
+    # save must not forward them to a constructor that refuses them.
+    session$setInputs(
+      file_filename = "ae.sas7bdat", file_type = "sas7bdat",
+      file_pattern = FALSE, file_encoding = "latin1",
+      file_newlines_in_values = TRUE
+    )
+    session$setInputs(file_save = 1)
+
+    expect_null(rv$file_msg)
+    expect_equal(rv$file_view, "list")
+    hs <- DTAtools::datasets(rv$dta, "clinical_data")@files
+    expect_length(hs, 2)
+    expect_s3_class(hs[[2]], "DTAtools::DTAFileSAS7BDAT")
+    expect_equal(hs[[2]]@filename, "ae.sas7bdat")
   })
 })

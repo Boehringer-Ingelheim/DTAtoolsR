@@ -338,24 +338,57 @@ test_that(".report_import_expected_text/.report_import_actual_text show the decl
   expect_equal(.report_import_actual_text(row1), "unknown")
 })
 
-test_that(".report_rule_expected_text builds a plain-language description per rule type", {
-  range_text <- .report_rule_expected_text(DTARuleColRange(id = "r1", columns = "AGE", min = 18, max = 65))
-  expect_match(range_text, "AGE must be between 18 and 65")
+# Expected wording below is written by hand from the specification at the top
+# of R/rulePhrasing.R (quotes U+201C/U+201D are written as escapes).
+test_that(".report_rule_should_be states each rule type in the shared plain wording", {
+  expect_equal(
+    .report_rule_should_be(DTARuleColRange(id = "r1", columns = "AGE", min = 18, max = 65)),
+    "Every value in column AGE must be a number from 18 to 65, inclusive."
+  )
+  expect_equal(
+    .report_rule_should_be(DTARuleColRange(id = "r1", columns = "AGE", min = 18, max = Inf)),
+    "Every value in column AGE must be a number that is at least 18."
+  )
 
-  unique_text <- .report_rule_expected_text(DTARuleColUnique(id = "r2", columns = c("SUBJECT_ID", "VISIT")))
-  expect_match(unique_text, "SUBJECT_ID, VISIT must be unique")
+  # Unique means the combination of the columns, not each column on its own.
+  expect_equal(
+    .report_rule_should_be(DTARuleColUnique(id = "r2", columns = c("SUBJECT_ID", "VISIT"))),
+    "No two rows may have the same combination of values in columns SUBJECT_ID and VISIT."
+  )
+  expect_equal(
+    .report_rule_should_be(DTARuleColUnique(id = "r2", columns = "SUBJECT_ID")),
+    "No two rows may have the same value in column SUBJECT_ID."
+  )
 
-  # The "unequal" (not_equal) comparator specifically -- called out by name
-  # in the request that prompted this rework.
-  cond_text <- .report_rule_expected_text(DTARuleColCondition(
-    id = "r3",
-    condition = list(VISIT = list(equals = "V03")),
-    then = list(STATUS = list(not_equal = "DROPPED"))
-  ))
-  expect_match(cond_text, "IF VISIT = V03 THEN STATUS")
-  expect_true(grepl("&#8800; DROPPED", cond_text, fixed = TRUE))
+  # The "unequal" (not_equal) comparator specifically.
+  expect_equal(
+    .report_rule_should_be(DTARuleColCondition(
+      id = "r3",
+      condition = list(VISIT = list(equals = "V03")),
+      then = list(STATUS = list(not_equal = "DROPPED"))
+    )),
+    "When VISIT is equal to \u201cV03\u201d, STATUS must not be equal to \u201cDROPPED\u201d."
+  )
 
-  expect_match(.report_rule_expected_text(NULL), "not available")
+  expect_match(.report_rule_should_be(NULL), "not available", fixed = TRUE)
+  expect_match(.report_rule_should_be(NULL, html = FALSE), "not available", fixed = TRUE)
+})
+
+test_that(".report_rule_should_be escapes data values for HTML and leaves plain text alone", {
+  rule_def <- DTARuleColCondition(
+    id = "esc",
+    condition = list(A = list(equals = "x<y & \"z\"")),
+    then = list(B = list(min = 1))
+  )
+
+  html <- .report_rule_should_be(rule_def)
+  expect_true(grepl("x&lt;y &amp; &quot;z&quot;", html, fixed = TRUE))
+  expect_false(grepl("<y", html, fixed = TRUE))
+
+  plain <- .report_rule_should_be(rule_def, html = FALSE)
+  expect_true(grepl("x<y & \"z\"", plain, fixed = TRUE))
+  # No operator symbols and no entities: words only.
+  expect_false(grepl("&#|&gt;|&lt;|>=|<=|!=", plain))
 })
 
 test_that("group_condition rules get an elaborate explanation of conditions and constraints", {
@@ -378,13 +411,21 @@ test_that("group_condition rules get an elaborate explanation of conditions and 
 
   explain <- .report_rule_explain_html(rule_def)
 
-  expect_match(explain, "Grouped by")
-  expect_match(explain, "SUBJECT_ID")
-  expect_match(explain, "c_has_visit")
-  expect_match(explain, "VISIT is not empty")
-  expect_match(explain, "visit_requires_status")
-  expect_match(explain, "requires")
-  expect_match(explain, "Every visit needs a status\\.")
+  expect_match(explain, "Rows are grouped by the value in column SUBJECT_ID", fixed = TRUE)
+  expect_match(explain, "c_has_visit: a row in which VISIT is not empty", fixed = TRUE)
+  expect_match(explain, "c_has_status: a row in which STATUS is not empty", fixed = TRUE)
+  expect_match(
+    explain,
+    paste0(
+      "visit_requires_status: If at least one row of a group meets condition c_has_visit, ",
+      "then every row of that group must meet condition c_has_status."
+    ),
+    fixed = TRUE
+  )
+  # The author's text is the Purpose, shown once.
+  expect_equal(lengths(regmatches(explain, gregexpr("Every visit needs a status.", explain, fixed = TRUE))), 1L)
+  expect_match(explain, "<dt>Purpose</dt>", fixed = TRUE)
+  expect_false(grepl("<dt>Description</dt>", explain, fixed = TRUE))
 
   # failing_* columns: dta_inspect_tabular_message()'s group_condition branch
   # (R/validationReporting.R) previews group_by + every condition's columns,
@@ -408,12 +449,17 @@ test_that("group_condition rules get an elaborate explanation of conditions and 
   expect_false(grepl("see technical detail below", html, fixed = TRUE))
 })
 
-test_that(".report_condition_to_text renders EVERY operator on a column, not just the first", {
+test_that("every operator on a column is stated, not just the first", {
   # evaluate_condition() (R/evaluateRules.R) ANDs every operator supplied for
-  # one column -- e.g. a two-sided numeric band -- so the text must too.
-  text <- .report_condition_to_text(list(WEIGHT = list(min = 1, max = 2)))
-  expect_true(grepl("&gt;= 1", text, fixed = TRUE))
-  expect_true(grepl("&lt;= 2", text, fixed = TRUE))
+  # one column -- e.g. a two-sided numeric band -- so the wording must too.
+  # min + max read as one band, spelled out in words (no symbols).
+  text <- .report_rule_should_be(DTARuleColCondition(
+    id = "band",
+    condition = list(SEX = list(equals = "F")),
+    then = list(WEIGHT = list(min = 1, max = 2))
+  ))
+  expect_match(text, "WEIGHT must be from 1 to 2, inclusive", fixed = TRUE)
+  expect_false(grepl("&gt;|&lt;|>=|<=", text))
 })
 
 test_that("group_condition constraint scopes are rendered, with the runtime's actual defaults", {
@@ -438,10 +484,23 @@ test_that("group_condition constraint scopes are rendered, with the runtime's ac
 
   explain <- .report_rule_explain_html(rule_def)
 
-  expect_match(explain, "\"c1\" \\(all row")
-  expect_match(explain, "\"c2\" \\(any row")
-  expect_match(explain, "holds for any row")
-  expect_match(explain, "must hold for any row")
+  expect_match(
+    explain,
+    paste0(
+      "me1: Within a group, it must not happen that every row meets condition c1 ",
+      "and also at least one row meets condition c2."
+    ),
+    fixed = TRUE
+  )
+  # Unset scopes default to "any".
+  expect_match(
+    explain,
+    paste0(
+      "req1: If at least one row of a group meets condition c1, ",
+      "then at least one row of that group must meet condition c2."
+    ),
+    fixed = TRUE
+  )
 })
 
 test_that("the inspect panel drops the bracketed '[dataset/target]' headline from its summary", {
@@ -498,6 +557,181 @@ test_that("no inspect panel branch ever falls back to the generic '(see technica
   }
 })
 
+
+# ---------------------------------------------------------------------------
+# Rule wording in the report: one dataset, one failing rule of each type
+# ---------------------------------------------------------------------------
+
+four_rule_dta <- function() {
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      SUBJECT_ID = DTAColumnSpec(id = "SUBJECT_ID", type = "SAS Char", length = 20, nullable = FALSE),
+      VISIT = DTAColumnSpec(id = "VISIT", type = "SAS Char", length = 20, nullable = TRUE),
+      SEX = DTAColumnSpec(id = "SEX", type = "SAS Char", length = 20, nullable = TRUE),
+      AGE = DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = TRUE)
+    ),
+    rules = list(
+      DTARuleColRange(id = "age_range", columns = "AGE", range = c(18, 70), description = "Adults only"),
+      DTARuleColUnique(id = "visit_unique", columns = c("SUBJECT_ID", "VISIT")),
+      DTARuleColCondition(
+        id = "f_not_12",
+        condition = list(SEX = list(equals = "F")),
+        then = list(AGE = list(not_equal = 12))
+      ),
+      DTARuleGroupCondition(
+        id = "visit_needs_sex", group_by = "SUBJECT_ID",
+        conditions = list(
+          c_visit = list(VISIT = list(empty = FALSE)),
+          c_sex = list(SEX = list(empty = FALSE))
+        ),
+        constraints = list(list(
+          id = "visit_requires_sex", type = "requires",
+          `if` = "c_visit", `then` = "c_sex", if_scope = "any", then_scope = "all"
+        ))
+      )
+    )
+  )
+  path <- withr::local_tempfile(fileext = ".csv", .local_envir = parent.frame())
+  utils::write.csv(
+    data.frame(
+      SUBJECT_ID = c("S1", "S1", "S2"), VISIT = c("V1", "V1", "V2"),
+      SEX = c("F", "", ""), AGE = c("12", "30", "40")
+    ),
+    path,
+    row.names = FALSE, na = ""
+  )
+  ds <- DTADataSetTabular(id = "em", specs = specs, files = list(DTAFileCSV(filename = basename(path))))
+  ds <- load_file(ds, file = path, handler_index = 1, stream = "never")
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+  list(
+    dta = DTA(datasets = list(em = ds), metadata = DTAMetaData(title = "T")),
+    ds = ds, rules = specs@rules
+  )
+}
+
+panel_for_rule <- function(doc, ds, rule_id) {
+  msgs <- messages(ds, as_tibble = FALSE)
+  id <- msgs$id[msgs$rule_id %in% rule_id]
+  expect_length(id, 1L)
+  xml2::xml_find_first(doc, sprintf("//div[@id='inspect-panel-%d']", id))
+}
+
+test_that("the report's 'Should be' carries the shared rule wording for all four rule types", {
+  fx <- four_rule_dta()
+  out <- withr::local_tempfile(fileext = ".html")
+  write_validation_report(fx$dta, out, quiet = TRUE)
+  doc <- xml2::read_html(out)
+
+  should_be <- function(rule_id) {
+    panel <- panel_for_rule(doc, fx$ds, rule_id)
+    xml2::xml_text(xml2::xml_find_first(panel, ".//div[contains(@class,'inspect-expected')]/div[@class='inspect-box-body']"))
+  }
+
+  expect_equal(should_be("age_range"), "Every value in column AGE must be a number from 18 to 70, inclusive.")
+  expect_equal(
+    should_be("visit_unique"),
+    "No two rows may have the same combination of values in columns SUBJECT_ID and VISIT."
+  )
+  expect_equal(
+    should_be("f_not_12"),
+    "When SEX is equal to \u201cF\u201d, AGE must not be equal to 12."
+  )
+  group <- should_be("visit_needs_sex")
+  expect_match(group, "Rows are grouped by the value in column SUBJECT_ID", fixed = TRUE)
+  expect_match(
+    group,
+    paste0(
+      "visit_requires_sex: If at least one row of a group meets condition c_visit, ",
+      "then every row of that group must meet condition c_sex."
+    ),
+    fixed = TRUE
+  )
+
+  # Every rule's box is the one-line summary of the shared wording.
+  for (rule in fx$rules) {
+    expect_equal(should_be(rule@id), .rule_summary(rule))
+  }
+})
+
+test_that("the 'What this rule checks' box shows id, kind and the shared wording, once", {
+  fx <- four_rule_dta()
+  out <- withr::local_tempfile(fileext = ".html")
+  write_validation_report(fx$dta, out, quiet = TRUE)
+  doc <- xml2::read_html(out)
+
+  explain <- function(rule_id) {
+    panel <- panel_for_rule(doc, fx$ds, rule_id)
+    box <- xml2::xml_find_first(panel, ".//div[@class='inspect-explain']")
+    dts <- xml2::xml_text(xml2::xml_find_all(box, ".//dt"))
+    dds <- xml2::xml_text(xml2::xml_find_all(box, ".//dd"), trim = TRUE)
+    list(dt = dts, dd = dds, text = xml2::xml_text(box))
+  }
+
+  range <- explain("age_range")
+  expect_equal(range$dt[1:2], c("Rule ID", "Rule type"))
+  expect_equal(range$dd[1:2], c("age_range", "Range"))
+  # The author's description is the Purpose, shown once and not as "Description".
+  expect_true("Purpose" %in% range$dt)
+  expect_false("Description" %in% range$dt)
+  expect_equal(sum(range$dd == "Adults only"), 1L)
+  expect_match(range$text, "Every value in column AGE must be a number from 18 to 70, inclusive.", fixed = TRUE)
+  expect_true("Missing values" %in% range$dt)
+
+  expect_equal(explain("visit_unique")$dd[2], "Unique")
+  expect_equal(explain("f_not_12")$dd[2], "Conditional (IF/THEN)")
+  expect_equal(explain("visit_needs_sex")$dd[2], "Grouped condition")
+
+  # No back-reference to a definition that is no longer shown.
+  html <- paste(readLines(out, warn = FALSE), collapse = "\n")
+  expect_false(grepl("rule definition below", html, fixed = TRUE))
+})
+
+test_that("rule panels never show a rule as code", {
+  fx <- four_rule_dta()
+  out <- withr::local_tempfile(fileext = ".html")
+  write_validation_report(fx$dta, out, quiet = TRUE)
+  doc <- xml2::read_html(out)
+
+  for (rule in fx$rules) {
+    panel <- panel_for_rule(doc, fx$ds, rule@id)
+    expect_length(xml2::xml_find_all(panel, ".//code | .//pre"), 0L)
+    expect_false(grepl("`", xml2::xml_text(panel), fixed = TRUE))
+  }
+})
+
+test_that("Unique is worded as a combination of columns, not as each column on its own", {
+  # Regression: the old text read "Values in A, B must be unique across all
+  # rows", which says each column is unique by itself.
+  text <- .report_rule_should_be(DTARuleColUnique(id = "u", columns = c("A", "B")))
+  expect_match(text, "same combination of values in columns A and B", fixed = TRUE)
+  expect_false(grepl("must be unique", text, fixed = TRUE))
+  explain <- .report_rule_explain_html(DTARuleColUnique(id = "u", columns = c("A", "B")))
+  expect_match(explain, "same combination of values in columns A and B", fixed = TRUE)
+})
+
+test_that("values in rule wording are HTML-escaped in the explain box and the panel", {
+  rule_def <- DTARuleColCondition(
+    id = "esc",
+    description = "Purpose with <i> & more",
+    condition = list(A = list(equals = "x<y & \"z\"")),
+    then = list(B = list(min = 1))
+  )
+  inspect_rows <- data.frame(
+    id = 1L, type = "rule", message = "violated", headline = "violated",
+    rule_id = "esc", stringsAsFactors = FALSE
+  )
+
+  html <- .report_inspect_panel_html(inspect_rows, rule_def = rule_def)
+
+  expect_true(grepl("x&lt;y &amp; &quot;z&quot;", html, fixed = TRUE))
+  expect_true(grepl("Purpose with &lt;i&gt; &amp; more", html, fixed = TRUE))
+  expect_false(grepl("x<y", html, fixed = TRUE))
+  expect_false(grepl("<i>", html, fixed = TRUE))
+  # and the markup it produces is well-formed: the panel parses to one box.
+  doc <- xml2::read_html(paste0("<html><body>", html, "</body></html>"))
+  expect_length(xml2::xml_find_all(doc, "//div[@class='inspect-explain']"), 1L)
+  expect_length(xml2::xml_find_all(doc, "//i"), 0L)
+})
 
 # ---------------------------------------------------------------------------
 # A metadata import issue must not strip inspect detail from the report
@@ -728,4 +962,78 @@ test_that("write_validation_report validates the document and organisation argum
   expect_error(write_validation_report(dta, out, organisation = c("a", "b")), "organisation")
   expect_error(write_validation_report(dta, out, document_name = 1), "document_name")
   expect_false(file.exists(out))
+})
+
+test_that("write_validation_report leaves an existing file intact when writing fails", {
+  out <- tempfile(fileext = ".html")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  writeLines("precious", out)
+  testthat::local_mocked_bindings(
+    writeLines = function(text, con, ...) {
+      cat("partial\n", file = con)
+      stop("disk full")
+    },
+    .package = "base"
+  )
+  expect_error(
+    write_validation_report(create_example_DTA(), file = out, overwrite = TRUE, quiet = TRUE),
+    "disk full"
+  )
+  expect_identical(base::readLines(out, warn = FALSE), "precious")
+})
+
+test_that(".report_messages_table_html orders the dataset filter by bytes, whatever the locale", {
+  # sort()'s default follows the locale (German: a, b, B), so the same report
+  # differed between the dev machine and CI; byte order is the same everywhere.
+  # Needs a locale that really orders a, b, B (not byte order) to tell the two apart.
+  for (loc in c("de_DE.UTF-8", "de_DE", "German_Germany.utf8", "German")) {
+    old <- Sys.getlocale("LC_COLLATE")
+    if (!identical(Sys.setlocale("LC_COLLATE", loc), "") && identical(sort(c("b", "B", "a")), c("a", "b", "B"))) break
+    Sys.setlocale("LC_COLLATE", old)
+  }
+  withr::defer(Sys.setlocale("LC_COLLATE", old))
+  skip_if(!identical(sort(c("b", "B", "a")), c("a", "b", "B")), "no locale with non-byte collation")
+  ds <- c("b", "B", "\u00e4", "a")
+  msgs <- data.frame(
+    id = seq_along(ds), dataset = ds, target = "t", severity = "error",
+    source = "columnspec", rule_id = NA_character_, row = 1, column = "X",
+    keyword = "required", message = "m", stringsAsFactors = FALSE
+  )
+  html <- .report_messages_table_html(msgs)
+  sel <- regmatches(
+    html,
+    regexpr('(?s)data-filter-column="dataset".*?</select>', html, perl = TRUE)
+  )
+  opts <- regmatches(sel, gregexpr('(?<=<option value=")[^"]+', sel, perl = TRUE))[[1]]
+  expect_identical(opts, enc2utf8(c("B", "a", "b", "\u00e4")))
+})
+
+test_that(".report_messages_table_html sorts native-encoded non-ASCII filter values", {
+  # Names that come from list.files() or readLines() are non-ASCII strings with
+  # no encoding mark; a radix sort refuses those unless they are made UTF-8.
+  # The non-ASCII value comes first: that is the element the radix sort checks.
+  ds <- c("\u00e4", "b", "a")
+  tg <- c("\u00fc", "t2", "t1")
+  src <- c("\u00f6", "s", "r")
+  unmarked <- function(x) vapply(x, function(s) rawToChar(charToRaw(s)), "", USE.NAMES = FALSE)
+  ds <- unmarked(ds)
+  tg <- unmarked(tg)
+  src <- unmarked(src)
+  skip_if(any(Encoding(c(ds, tg, src)) == "UTF-8"), "cannot build unmarked strings")
+  msgs <- data.frame(
+    id = seq_along(ds), dataset = ds, target = tg, severity = "error",
+    source = src, rule_id = NA_character_, row = 1, column = "X",
+    keyword = "required", message = "m", stringsAsFactors = FALSE
+  )
+  html <- expect_no_error(.report_messages_table_html(msgs))
+  opts_for <- function(col) {
+    sel <- regmatches(
+      html,
+      regexpr(paste0('(?s)data-filter-column="', col, '".*?</select>'), html, perl = TRUE)
+    )
+    enc2utf8(regmatches(sel, gregexpr('(?<=<option value=")[^"]+', sel, perl = TRUE))[[1]])
+  }
+  expect_identical(opts_for("dataset"), enc2utf8(c("a", "b", "\u00e4")))
+  expect_identical(opts_for("target"), enc2utf8(c("t1", "t2", "\u00fc")))
+  expect_identical(opts_for("source"), enc2utf8(c("r", "s", "\u00f6")))
 })

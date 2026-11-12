@@ -9,8 +9,9 @@
 #' @param specs A DTAColumnSpecCollection object specifying the column specs.
 #' @param files A list of DTAFile objects specifying input file information.
 #'   Every handler must inherit \code{DTAFileTabular} (for example
-#'   \code{DTAFileCSV} or \code{DTAFileTSV}), because a tabular dataset parses
-#'   its files; a reader-less handler is rejected.
+#'   \code{DTAFileCSV} or \code{DTAFileTSV}) or be a \code{DTAFileSAS7BDAT} or
+#'   \code{DTAFileXPT}, because a tabular dataset parses its files; a
+#'   reader-less handler is rejected.
 #' @param tables A named list of tabular objects. A materialised entry
 #'   (data.frame or Arrow Table) is typed by `specs` and converted to an Arrow
 #'   Table before storage. A lazy entry (Arrow Dataset, `arrow_dplyr_query`, or
@@ -184,7 +185,9 @@ DTADataSetTabular <- S7::new_class(
     # A tabular dataset parses every file it is given, so each handler has to be
     # one that can actually read: it supplies the separator, header flag and
     # quoting `read_file()`/`open_file()` need, and only a DTAFileTabular
-    # carries them. A reader-less handler (DTAFileAny, or a bare DTAFile) would
+    # carries them. A SAS dataset is the other readable handler: it carries its
+    # own columns, so it has no such settings, but it has a reader. A
+    # reader-less handler (DTAFileAny, or a bare DTAFile) would
     # construct happily here and then abort deep inside the read with
     # "This method is not implemented", naming the wrong problem long after the
     # document that caused it was accepted.
@@ -196,7 +199,10 @@ DTADataSetTabular <- S7::new_class(
     if (length(self@files) > 0) {
       readable <- vapply(
         self@files,
-        function(file_info) inherits(file_info, "DTAtools::DTAFileTabular"),
+        function(file_info) {
+          inherits(file_info, "DTAtools::DTAFileTabular") ||
+            inherits(file_info, "DTAtools::DTAFileSAS7BDAT")
+        },
         logical(1)
       )
       if (!all(readable)) {
@@ -212,7 +218,7 @@ DTADataSetTabular <- S7::new_class(
         cli_abort(c(
           "A tabular dataset can only hold file handlers that can be read.",
           x = "Handler{?s} {.field {offending}} {?is/are} not tabular.",
-          i = "Use a {.cls DTAFileCSV} or {.cls DTAFileTSV} here, or declare the dataset as {.code type: file} if its files are not parsed."
+          i = "Use a {.cls DTAFileCSV}, {.cls DTAFileTSV}, {.cls DTAFileSAS7BDAT} or {.cls DTAFileXPT} here, or declare the dataset as {.code type: file} if its files are not parsed."
         ))
       }
     }
@@ -443,7 +449,10 @@ method(labels, DTADataSetTabular) <- function(object, ...) {
 #'   (\code{"\\t"}).
 #' @param na Character. The string to use for missing values in the data. Default is "".
 #' @param row.names Logical. Write row names.
-#' @param quote Logical. Quote character and factor fields.
+#' @param quote Logical. Quote character and factor fields. With the default
+#'   \code{FALSE}, a table holding a value (or column name) that contains the
+#'   separator, a line break or a leading quote character is refused rather than
+#'   written as a file that cannot be read back; use \code{quote = TRUE}.
 #' @param overwrite Logical. Whether to overwrite the file if it exists. Default
 #'   is FALSE, so a call against an existing path aborts unless `overwrite =
 #'   TRUE` is passed explicitly.
@@ -542,6 +551,32 @@ write_table_to_file <- function(
   # passed anyway to say so explicitly. Once table_data is already a
   # data.frame, write.table()'s guard above is a no-op.
   table_data <- as.data.frame(table_data, check.names = FALSE)
+
+  # Unquoted output is only a table again if no cell or column name contains
+  # the separator, a line break or a quote: write.table() writes them raw, and
+  # the file then reads back with extra fields or rows -- or not at all -- while
+  # the checksum sidecar vouches for it.
+  if (identical(quote, FALSE)) {
+    texts <- c(
+      names(table_data),
+      unlist(lapply(table_data, function(col) {
+        if (is.character(col) || is.factor(col)) as.character(col)
+      }), use.names = FALSE)
+    )
+    texts <- texts[!is.na(texts)]
+    # A quote only breaks reading where it opens a field; mid-cell (`5" pipe`)
+    # it is literal. An empty `sep` separates nothing, so it cannot be contained.
+    breaks_file <- (nzchar(sep) & grepl(sep, texts, fixed = TRUE)) |
+      grepl("[\r\n]|^\"", texts)
+    if (any(breaks_file)) {
+      example <- utils::head(texts[breaks_file], 1L)
+      cli::cli_abort(c(
+        "The table cannot be written without quoting.",
+        "x" = "{sum(breaks_file)} value{?s} contain the separator, a line break or a leading quote character, e.g. {.val {example}}.",
+        "i" = "Call {.fn write_table_to_file} with {.code quote = TRUE}."
+      ))
+    }
+  }
 
   # Check if the file exists and handle overwrite
   if (file.exists(filename) && !overwrite) {
@@ -813,7 +848,10 @@ method(print_short_info, DTADataSetTabular) <- function(x, ...) {
 #'       Loading under a name that is already bound drops that table's
 #'       validation state, so no report shows the replaced table's verdict.}
 #'     \item{stream}{whether to keep the file lazy rather than reading it into
-#'       memory. See \code{\link{load_file}}.}
+#'       memory. See \code{\link{load_file}}. A SAS dataset or transport file
+#'       (\code{\link{DTAFileSAS7BDAT}}, \code{\link{DTAFileXPT}}) cannot be
+#'       streamed: \code{"auto"} reads it into memory with a message, and
+#'       \code{"always"} is refused.}
 #'   }
 #' @return object of class DTADataSetTabular with loaded data
 #' @examples
@@ -897,7 +935,26 @@ method(load_file, DTADataSetTabular) <- function(
   #   unparseable cell turns a whole declared-numeric column into text. Applying
   #   the declared type makes the column a number, that one cell NA, and that one
   #   cell an import error.
-  if (dta_resolve_stream_mode(stream, file)) {
+  lazy <- dta_resolve_stream_mode(stream, file)
+
+  # A SAS dataset has no lazy reader. "auto" is a guess about size, not an
+  # instruction, so it falls back to reading into memory -- and says so, because
+  # that is the one case where the guess was "too big". An explicit
+  # `stream = "always"` is an instruction, and still reaches open_file(), whose
+  # base method refuses it.
+  if (
+    lazy &&
+      inherits(handler, "DTAtools::DTAFileSAS7BDAT") &&
+      !(isTRUE(stream) || identical(stream, "always"))
+  ) {
+    cli::cli_inform(
+      "Reading {.path {file}} into memory: a SAS dataset cannot be streamed.",
+      class = "dta_sas7bdat_in_memory"
+    )
+    lazy <- FALSE
+  }
+
+  if (lazy) {
     # Lazy: the table is a scan plan, not data. The second half of the read --
     # coercion, and the import issues it finds -- cannot happen here, because
     # there are no rows yet. It happens per batch inside check(), which is the
@@ -963,6 +1020,50 @@ dta_missing_table_files <- function(table) {
   files[!file.exists(files)]
 }
 
+# Whether a tabular dataset holds a number of files outside the bounds its
+# handlers declare. A tabular dataset keeps no file list of its own; each
+# `load_file()` binds one table, so the supplied count is `length(ds@tables)`.
+# NULL when there is nothing to judge (no handlers, no tables, not tabular) or
+# the count is within bounds; otherwise a list describing the mismatch.
+#' @keywords internal
+dta_tabular_file_count_finding <- function(ds) {
+  if (!inherits(ds, "DTAtools::DTADataSetTabular") ||
+    length(ds@files) == 0 ||
+    length(ds@tables) == 0) {
+    return(NULL)
+  }
+
+  n <- length(ds@tables)
+  # A bound that is missing, NaN or not a single number is no bound on that side
+  # (min -> 0, max -> Inf). `if (NA)` would otherwise abort the whole DTA check.
+  lo <- min_number_of_files(ds)
+  hi <- max_number_of_files(ds)
+  lo <- if (length(lo) != 1 || !is.numeric(lo) || is.na(lo)) 0 else lo
+  hi <- if (length(hi) != 1 || !is.numeric(hi) || is.na(hi)) Inf else hi
+  if (n >= lo && n <= hi) {
+    return(NULL)
+  }
+
+  fmt <- function(v) format(v, scientific = FALSE)
+  want <- if (lo == hi) {
+    fmt(lo)
+  } else if (is.infinite(hi)) {
+    paste0("at least ", fmt(lo))
+  } else {
+    paste0("between ", fmt(lo), " and ", fmt(hi))
+  }
+
+  list(
+    dataset = ds@id,
+    n_supplied = n,
+    min = lo,
+    max = hi,
+    message = paste0(
+      "Dataset '", ds@id, "' expects ", want, " file(s), got ", fmt(n), "."
+    )
+  )
+}
+
 # The status row of a table checked against zero column specs. There is nothing
 # to check it against, so it is neither valid nor invalid.
 #
@@ -1018,6 +1119,9 @@ dta_unspecified_validation_row <- function(table_name, target_type = "table") {
 #'   specification, \code{"unspecified"}; \code{ok} is \code{NA} for the last
 #'   two. A dataset with no tables yields a zero-row data.frame with the same
 #'   columns.
+#' @examples
+#' ds <- check(create_example_DTADataSetTabular(2))
+#' validation_status(ds)
 #' @usage validation_status(x, ...)
 #' @name validation_status
 #' @export
@@ -1095,6 +1199,9 @@ S7::method(validation_status, DTADataSetTabular) <- function(x, tables = NULL) {
 #' @return A list with detailed validation output, of class
 #'   \code{dta_validation_details}. Use \code{as.data.frame()} on it to get one
 #'   row per reported error.
+#' @examples
+#' ds <- check(create_example_DTADataSetTabular(2))
+#' validation_errors(ds, table = "tab1")
 #' @usage validation_errors(x, ...)
 #' @name validation_errors
 #' @export

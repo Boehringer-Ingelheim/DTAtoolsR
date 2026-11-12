@@ -18,7 +18,8 @@ DTAFileDelim(
   quote = "\\"",
   missing_values = "",
   newlines_in_values = FALSE,
-  encoding = "UTF-8"
+  encoding = "UTF-8",
+  container = NULL
 )
 }
 \arguments{
@@ -65,6 +66,13 @@ a line break. Default \code{FALSE}. See \code{\link{DTAFileTabular}}.}
 
 \item{encoding}{Character; the file's character encoding. Default
 \code{"UTF-8"}. See \code{\link{DTAFileTabular}}.}
+
+\item{container}{Character or \code{NULL}; the name of the \code{.zip}
+archive or \code{.xpt} SAS transport file this file arrives inside.
+\code{*} matches any text and \code{?} one character
+(\code{"sdtm_*.zip"}); the name is matched as a whole, independently of
+\code{pattern}. \code{NULL} (the default) accepts the file loose or inside
+any container. Only \code{\link{load_delivery}()} consults it.}
 }
 \value{
 An object of class \code{DTAFileDelim}.

@@ -13,8 +13,10 @@
 #'
 #' @section Restricting the file ending:
 #' \code{extensions} is an optional allow-list of endings. It is an **open**
-#' list rather than a fixed set of known formats, so a delivery of `.xpt`,
-#' `.sas7bdat` or `.e2b` files needs no change to this package.
+#' list rather than a fixed set of known formats, so a delivery of `.sas7bcat`
+#' or `.e2b` files needs no change to this package. To validate the contents of
+#' a `.sas7bdat` file, use \code{\link{DTAFileSAS7BDAT}} in a tabular dataset
+#' instead. To validate a SAS transport file, use \code{\link{DTAFileXPT}}.
 #'
 #' \describe{
 #'   \item{\code{NULL} (the default)}{Any ending is accepted. This is what
@@ -52,6 +54,12 @@
 #'   file.
 #' @param extensions Character vector or \code{NULL}; allowed file endings. See
 #'   the section above.
+#' @param container Character or \code{NULL}; the name of the \code{.zip}
+#'   archive or \code{.xpt} SAS transport file this file arrives inside.
+#'   \code{*} matches any text and \code{?} one character
+#'   (\code{"sdtm_*.zip"}); the name is matched as a whole, independently of
+#'   \code{pattern}. \code{NULL} (the default) accepts the file loose or inside
+#'   any container. Only \code{\link{load_delivery}()} consults it.
 #'
 #' @name DTAFileAny-class
 #' @return An object of class \code{DTAFileAny}.
@@ -86,7 +94,8 @@ DTAFileAny <- S7::new_class(
     min_number_of_files = NULL,
     max_number_of_files = NULL,
     info = NULL,
-    extensions = NULL
+    extensions = NULL,
+    container = NULL
   ) {
     new_object(
       .parent = DTAFile(
@@ -96,7 +105,8 @@ DTAFileAny <- S7::new_class(
         max_number_of_files = max_number_of_files,
         info = info,
         pattern = pattern,
-        pattern_description = pattern_description
+        pattern_description = pattern_description,
+        container = container
       ),
       extensions = dta_normalise_extensions(extensions)
     )

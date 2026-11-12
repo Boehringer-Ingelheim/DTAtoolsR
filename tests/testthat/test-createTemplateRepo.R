@@ -39,6 +39,29 @@ template_kinds <- function(dir) {
   )
 }
 
+# Content assertions for the three CI files, read back from disk. A GitHub
+# workflow must parse as YAML with a `jobs` map and a trigger map (YAML 1.1
+# readers turn the bare key `on` into TRUE, hence both spellings); a Bitbucket
+# file must parse with a `pipelines` map; a Jenkinsfile must be a non-empty
+# declarative pipeline.
+expect_github_workflow <- function(dir) {
+  path <- file.path(dir, ".github", "workflows", "validate-templates.yml")
+  expect_gt(file.size(path), 0)
+  wf <- yaml::read_yaml(path)
+  expect_true(is.list(wf$jobs) && length(wf$jobs) > 0)
+  expect_true(any(c("on", "TRUE") %in% names(wf)))
+}
+expect_bitbucket_pipeline <- function(dir) {
+  path <- file.path(dir, "bitbucket-pipelines.yml")
+  expect_gt(file.size(path), 0)
+  expect_true(is.list(yaml::read_yaml(path)$pipelines))
+}
+expect_jenkinsfile <- function(dir) {
+  path <- file.path(dir, "Jenkinsfile")
+  expect_gt(file.size(path), 0)
+  expect_match(paste(readLines(path, warn = FALSE), collapse = "\n"), "pipeline", fixed = TRUE)
+}
+
 # The files of a default (examples = TRUE) scaffold, apart from CI.
 scaffold_example_files <- c(
   "README.md", ".gitignore", "dta-app.yaml",
@@ -110,14 +133,14 @@ test_that("the starter creation template imports the starter dataset template by
 
 # ---- ci = TRUE / ci = FALSE --------------------------------------------------
 
-test_that("ci = TRUE writes .github/workflows/validate-templates.yml, naming validate_template", {
+test_that("ci = TRUE writes .github/workflows/validate-templates.yml, naming lint_template_repo", {
   dir <- withr::local_tempdir()
   create_template_repo(dir, ci = TRUE)
 
   workflow <- file.path(dir, ".github", "workflows", "validate-templates.yml")
   expect_true(file.exists(workflow))
   content <- paste(readLines(workflow), collapse = "\n")
-  expect_match(content, "validate_template", fixed = TRUE)
+  expect_match(content, "lint_template_repo", fixed = TRUE)
 })
 
 test_that("the GitHub workflow installs remotes, which its placeholder install examples call", {
@@ -135,7 +158,7 @@ test_that("the GitHub workflow installs remotes, which its placeholder install e
   expect_identical(deps, "any::remotes")
 
   runs <- vapply(steps, function(s) s$run %||% "", character(1))
-  expect_true(any(grepl("validate_template(\".\", strict = TRUE)", runs, fixed = TRUE)))
+  expect_true(any(grepl("lint_template_repo(\".\")", runs, fixed = TRUE)))
 })
 
 test_that("the Bitbucket and Jenkins assets install remotes, and Jenkins uses a writable user library", {
@@ -155,6 +178,19 @@ test_that("the Bitbucket and Jenkins assets install remotes, and Jenkins uses a 
   expect_match(jenkinsfile, "mkdir -p \"$R_LIBS\"", fixed = TRUE)
 })
 
+test_that("the Bitbucket and Jenkins assets run the repository linter", {
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, examples = FALSE, ci = c("bitbucket", "jenkins"))
+
+  call <- "DTAtools::lint_template_repo(\".\")"
+  pipeline <- yaml::read_yaml(file.path(dir, "bitbucket-pipelines.yml"))
+  script <- unlist(pipeline$definitions$steps[[1]]$step$script)
+  expect_true(any(grepl(call, script, fixed = TRUE)))
+
+  jenkinsfile <- paste(readLines(file.path(dir, "Jenkinsfile")), collapse = "\n")
+  expect_match(jenkinsfile, call, fixed = TRUE)
+})
+
 test_that("examples = FALSE does not suggest a validate_template() call that must fail", {
   # Whitespace (including cli's wrapping and non-breaking spaces) is squeezed
   # out so the assertions do not depend on where cli breaks the line.
@@ -170,11 +206,15 @@ test_that("examples = FALSE does not suggest a validate_template() call that mus
     gsub("[[:space:] ]+", "", paste(msgs, collapse = ""))
   }
 
-  # Positive control: the default scaffold does suggest the strict call.
-  expect_match(scaffold_message(), "strict=TRUE", fixed = TRUE)
+  # Positive control: the default scaffold suggests the repository linter,
+  # not the strict validator.
+  default <- scaffold_message()
+  expect_match(default, "DTAtools::lint_template_repo(\"", fixed = TRUE)
+  expect_no_match(default, "strict=TRUE", fixed = TRUE)
 
   bare <- scaffold_message(examples = FALSE)
   expect_match(bare, "no_templates", fixed = TRUE)
+  expect_no_match(bare, "lint_template_repo", fixed = TRUE)
   expect_no_match(bare, "strict=TRUE", fixed = TRUE)
 })
 
@@ -195,7 +235,7 @@ test_that("ci = TRUE (the default) writes only the GitHub workflow -- no Bitbuck
   dir <- withr::local_tempdir()
   create_template_repo(dir)
 
-  expect_true(file.exists(file.path(dir, ".github", "workflows", "validate-templates.yml")))
+  expect_github_workflow(dir)
   expect_false(file.exists(file.path(dir, "bitbucket-pipelines.yml")))
   expect_false(file.exists(file.path(dir, "Jenkinsfile")))
 })
@@ -204,9 +244,9 @@ test_that("ci = c(\"github\", \"bitbucket\", \"jenkins\") writes all three CI fi
   dir <- withr::local_tempdir()
   create_template_repo(dir, ci = c("github", "bitbucket", "jenkins"))
 
-  expect_true(file.exists(file.path(dir, ".github", "workflows", "validate-templates.yml")))
-  expect_true(file.exists(file.path(dir, "bitbucket-pipelines.yml")))
-  expect_true(file.exists(file.path(dir, "Jenkinsfile")))
+  expect_github_workflow(dir)
+  expect_bitbucket_pipeline(dir)
+  expect_jenkinsfile(dir)
 })
 
 test_that("a repository with all three CI files still validates clean", {
@@ -226,7 +266,7 @@ test_that("ci = \"jenkins\" writes the Jenkinsfile and creates no .github direct
   dir <- withr::local_tempdir()
   create_template_repo(dir, ci = "jenkins")
 
-  expect_true(file.exists(file.path(dir, "Jenkinsfile")))
+  expect_jenkinsfile(dir)
   expect_false(dir.exists(file.path(dir, ".github")))
 })
 
@@ -237,24 +277,30 @@ test_that("duplicate and reordered ci providers write exactly the canonical set 
   dir <- withr::local_tempdir()
   create_template_repo(dir, ci = c("jenkins", "github", "jenkins"))
 
-  expect_true(file.exists(file.path(dir, "Jenkinsfile")))
-  expect_true(file.exists(file.path(dir, ".github", "workflows", "validate-templates.yml")))
+  expect_jenkinsfile(dir)
+  expect_github_workflow(dir)
   expect_false(file.exists(file.path(dir, "bitbucket-pipelines.yml")))
   expect_length(list.files(dir, pattern = "^Jenkinsfile$"), 1)
 })
 
 test_that("an unknown ci provider aborts", {
   dir <- withr::local_tempdir()
-  expect_error(create_template_repo(dir, ci = "gitlab"), class = "rlang_error")
+  expect_error(create_template_repo(dir, ci = "gitlab"), regexp = "Unknown\\s+CI\\s+provider", class = "rlang_error")
+  # Nothing is written for a rejected provider.
+  expect_length(list_all_files(dir), 0)
 })
 
 test_that("ci = NA and ci = character(0) abort", {
   dir <- withr::local_tempdir()
-  expect_error(create_template_repo(dir, ci = NA), class = "rlang_error")
-  expect_error(create_template_repo(dir, ci = character(0)), class = "rlang_error")
+  # Anchored on the `ci` argument: the examples/overwrite aborts share the
+  # "single TRUE/FALSE" tail.
+  single_flag <- "`ci`\\s+must\\s+be\\s+a\\s+single"
+  expect_error(create_template_repo(dir, ci = NA), regexp = single_flag, class = "rlang_error")
+  expect_error(create_template_repo(dir, ci = character(0)), regexp = single_flag, class = "rlang_error")
+  expect_length(list_all_files(dir), 0)
 })
 
-test_that("the written bitbucket-pipelines.yml parses as YAML and the Jenkinsfile is a declarative pipeline that runs validate_template", {
+test_that("the written bitbucket-pipelines.yml parses as YAML and the Jenkinsfile is a declarative pipeline that runs lint_template_repo", {
   # Confirms the two new assets are what they claim to be, read back from the
   # files this function actually wrote -- never asserted via file.exists().
   dir <- withr::local_tempdir()
@@ -266,7 +312,7 @@ test_that("the written bitbucket-pipelines.yml parses as YAML and the Jenkinsfil
 
   jenkinsfile <- paste(readLines(file.path(dir, "Jenkinsfile")), collapse = "\n")
   expect_match(jenkinsfile, "pipeline {", fixed = TRUE)
-  expect_match(jenkinsfile, "validate_template", fixed = TRUE)
+  expect_match(jenkinsfile, "lint_template_repo", fixed = TRUE)
 })
 
 # ---- examples = FALSE --------------------------------------------------------
@@ -295,7 +341,7 @@ test_that("overwrite = FALSE on a populated directory aborts and leaves every ex
   create_template_repo(dir)
   before <- md5_snapshot(dir)
 
-  expect_error(create_template_repo(dir, overwrite = FALSE), class = "rlang_error")
+  expect_error(create_template_repo(dir, overwrite = FALSE), regexp = "already\\s+exist", class = "rlang_error")
 
   after <- md5_snapshot(dir)
   expect_equal(after, before)
@@ -311,6 +357,7 @@ test_that("overwrite = FALSE still aborts and leaves every file byte-identical w
 
   expect_error(
     create_template_repo(dir, ci = c("github", "jenkins"), overwrite = FALSE),
+    regexp = "already\\s+exist",
     class = "rlang_error"
   )
 
@@ -344,13 +391,17 @@ test_that("a path naming an existing file aborts", {
   file_path <- file.path(parent, "im_a_file")
   writeLines("not a directory", file_path)
 
-  expect_error(create_template_repo(file_path), class = "rlang_error")
+  expect_error(create_template_repo(file_path), regexp = "names\\s+an\\s+existing\\s+file", class = "rlang_error")
+  # The file is still a file with its original content.
+  expect_false(dir.exists(file_path))
+  expect_identical(readLines(file_path), "not a directory")
 })
 
 test_that("a non-scalar path aborts", {
-  expect_error(create_template_repo(character(0)), class = "rlang_error")
-  expect_error(create_template_repo(NA_character_), class = "rlang_error")
-  expect_error(create_template_repo(c("a", "b")), class = "rlang_error")
+  bad_path <- "single\\s+non-empty\\s+directory\\s+path"
+  expect_error(create_template_repo(character(0)), regexp = bad_path, class = "rlang_error")
+  expect_error(create_template_repo(NA_character_), regexp = bad_path, class = "rlang_error")
+  expect_error(create_template_repo(c("a", "b")), regexp = bad_path, class = "rlang_error")
 })
 
 # ---- The shipped skeleton itself -----------------------------------------------
@@ -429,6 +480,10 @@ test_that("dta-app.yaml is scaffolded in the root with the examples, is not a te
   bare <- withr::local_tempdir()
   create_template_repo(bare, ci = FALSE, examples = FALSE)
   expect_false(file.exists(file.path(bare, "dta-app.yaml")))
+  # No stray copy of the app config anywhere in the bare scaffold either.
+  expect_false(any(basename(list_all_files(bare)) == "dta-app.yaml"))
+  expect_false(any(basename(list_all_files(dir)) == "dta-app.yaml" &
+    dirname(list_all_files(dir)) != "."))
 })
 
 test_that("a scaffold file moved into the wrong folder is template_misplaced, pointing at the right one", {
@@ -510,6 +565,51 @@ test_that("a templates/ collision aborts before writing any scaffold file", {
   dir.create(file.path(dir, "templates"))
   writeLines("existing template", file.path(dir, "templates", "starter.dta-template.yaml"))
   before <- md5_snapshot(dir)
+  expect_error(create_template_repo(dir), "already\\s+exist", class = "rlang_error")
   expect_error(create_template_repo(dir), "starter.dta-template.yaml", fixed = TRUE)
   expect_identical(md5_snapshot(dir), before)
+  # The colliding file keeps its content and is the only file in the directory.
+  expect_identical(readLines(file.path(dir, "templates", "starter.dta-template.yaml")), "existing template")
+  expect_identical(list_all_files(dir), "templates/starter.dta-template.yaml")
+})
+
+test_that("overwrite = FALSE conflict message shows braces in a path literally", {
+  withr::local_options(cli.width = 500)
+  dir <- file.path(withr::local_tempdir(), "repo{1+1}")
+  create_template_repo(dir)
+  err <- expect_error(
+    create_template_repo(dir, overwrite = FALSE),
+    "already\\s+exist",
+    class = "rlang_error"
+  )
+  expect_match(conditionMessage(err), "repo{1+1}", fixed = TRUE)
+  expect_no_match(conditionMessage(err), "repo2", fixed = TRUE)
+})
+
+test_that("the Bitbucket and Jenkins assets install from a current repository, not a dated snapshot", {
+  # rocker/r-ver:4.4's default repos is frozen at 2025-04-10, before zip 3.0.0
+  # and S7 0.2.2 existed; the written CI files must override it.
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, examples = FALSE, ci = c("bitbucket", "jenkins"))
+  repos <- "options(repos = c(CRAN = \"https://p3m.dev/cran/__linux__/noble/latest\"))"
+  # The command that actually runs: a comment or a placeholder further down
+  # may quote the same string, so it is the install line itself that is read.
+  installs <- list(
+    jenkins = grep(
+      "install.packages(\"remotes\")", readLines(file.path(dir, "Jenkinsfile")),
+      fixed = TRUE, value = TRUE
+    ),
+    # The step is defined once and referenced by a YAML alias per pipeline.
+    bitbucket = unique(unname(grep(
+      "install.packages(\"remotes\")",
+      unlist(yaml::read_yaml(file.path(dir, "bitbucket-pipelines.yml"))),
+      fixed = TRUE, value = TRUE
+    )))
+  )
+  for (nm in names(installs)) {
+    expect_length(installs[[nm]], 1L)
+    expect_true(startsWith(trimws(installs[[nm]]), if (nm == "jenkins") "sh '" else "Rscript -e"), info = nm)
+    expect_true(grepl(repos, installs[[nm]], fixed = TRUE), info = nm)
+    expect_false(grepl("/[0-9]{4}-[0-9]{2}-[0-9]{2}\"", installs[[nm]]), info = nm)
+  }
 })

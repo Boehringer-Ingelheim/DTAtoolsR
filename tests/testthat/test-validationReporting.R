@@ -327,3 +327,51 @@ test_that("the row lookup finds the rows a grouped rule failed on", {
   # that unambiguously failed, because the lookup had no branch for this class.
   expect_equal(dta_rule_failure_row_indices(rule, df), c(1L, 2L))
 })
+
+# ---- review fixes: VAL-6 / VAL-8 -----------------------------------------------
+
+test_that("inspect() explains why a uniqueness rule's failing rows outnumber its message count", {
+  specs <- DTAColumnSpecCollection(
+    columns = list(DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)),
+    rules = list(DTARuleColUnique(id = "uniq", columns = "ID"))
+  )
+  table <- arrow::arrow_table(data.frame(ID = c("S1", "S2", "S2"), stringsAsFactors = FALSE))
+  ds <- DTADataSetTabular(id = "d", specs = specs, tables = list(tab = table))
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+
+  msgs <- messages(ds, as_tibble = FALSE)
+  rule_msgs <- msgs[msgs$source == "rule", , drop = FALSE]
+  expect_match(rule_msgs$message[[1]], "1 duplicate row", fixed = TRUE)
+
+  info <- inspect(ds, id = rule_msgs$id[[1]], as_tibble = FALSE)
+  # Every member of the duplicate set fails; the message counts the repeats only.
+  expect_equal(unique(info$failing_row_count), 2)
+  expect_match(unique(info$why), "duplicate set", fixed = TRUE)
+  expect_match(unique(info$why), "beyond the first", fixed = TRUE)
+})
+
+test_that("group violation rows past the 32-bit integer range are kept", {
+  big <- 3e9
+  df <- dta_group_violations_to_df(list(list(
+    group = "g", constraint_id = "c", message = "m", rows = c(5, big)
+  )))
+  expect_match(df$rows, "5,3000000000", fixed = TRUE)
+})
+
+test_that("messages() orders datasets and targets bytewise, whatever the session collation", {
+  skip_if_not_installed("withr")
+  withr::local_collate("German_Germany.utf8")
+  skip_if(
+    identical(sort(c("B", "a")), c("B", "a")),
+    "a non-C collation is not available here"
+  )
+  specs <- DTAColumnSpecCollection(
+    columns = list(DTAColumnSpec(id = "ID", type = "SAS Char", length = 1, nullable = FALSE))
+  )
+  bad <- arrow::arrow_table(data.frame(ID = c("toolong", "x"), stringsAsFactors = FALSE))
+  ds <- DTADataSetTabular(id = "d", specs = specs, tables = list(a = bad, B = bad))
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+  msgs <- messages(ds, as_tibble = FALSE)
+  # C order: "B" before "a" (session German collation would put "a" first).
+  expect_identical(unique(msgs$target), c("B", "a"))
+})

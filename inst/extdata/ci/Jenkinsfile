@@ -36,7 +36,7 @@ pipeline {
     // site library in R_LIBS unless R_LIBS is already set, and R searches
     // R_LIBS first, so install.packages() would still pick the unwritable
     // site library. It sits outside the workspace because an installed
-    // DTAtools carries template files of its own, which validate_template(".")
+    // DTAtools carries template files of its own, which lint_template_repo(".")
     // would otherwise find below the repository root and report.
     environment {
         R_LIBS = '/tmp/R-library'
@@ -48,9 +48,15 @@ pipeline {
                 // R drops a library directory from its path if it does not exist.
                 sh 'mkdir -p "$R_LIBS"'
 
+                // rocker/r-ver:4.4 pins its default `repos` to a Posit Package
+                // Manager snapshot dated 2025-04-10, which predates `zip >= 3.0.0`
+                // and `S7 >= 0.2.2` (both required by DTAtools). Every install
+                // below therefore sets the `latest` noble binary mirror (noble is
+                // that image's Ubuntu release) instead of trusting the default;
+                // a newer image tag alone would only move the snapshot date.
                 // `remotes` is only for the install examples below; DTAtools'
                 // own Imports come with DTAtools itself.
-                sh 'Rscript -e \'install.packages("remotes")\'' // skip if already baked into the image
+                sh 'Rscript -e \'options(repos = c(CRAN = "https://p3m.dev/cran/__linux__/noble/latest")); install.packages("remotes")\'' // skip if already baked into the image
 
                 /* -----------------------------------------------------------
                  * PLACEHOLDER: install DTAtools from your internal package
@@ -61,16 +67,16 @@ pipeline {
                  * specific to your organisation. Replace the line below with
                  * whichever of those applies. A couple of common shapes:
                  *
-                 *   Rscript -e 'remotes::install_git("https://bitbucket.example.com/scm/proj/DTAtoolsR.git")'
+                 *   Rscript -e 'options(repos = c(CRAN = "https://p3m.dev/cran/__linux__/noble/latest")); remotes::install_git("https://bitbucket.example.com/scm/proj/DTAtoolsR.git")'
                  *   Rscript -e 'install.packages("DTAtools", repos = "https://internal-rspm.example.com")'
                  * ----------------------------------------------------------- */
                 sh 'Rscript -e \'stop("Replace this step with an install of DTAtools from your internal package repository.")\''
             }
         }
 
-        stage('Validate templates') {
+        stage('Lint template repository') {
             steps {
-                sh 'Rscript -e \'DTAtools::validate_template(".", strict = TRUE)\''
+                sh 'Rscript -e \'DTAtools::lint_template_repo(".")\''
             }
         }
     }

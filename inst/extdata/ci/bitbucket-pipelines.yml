@@ -13,12 +13,15 @@
 # `*.dta-party.yaml` / `*.dta-vocabulary.yaml` files. Bitbucket clones the
 # repository automatically before running the steps below (there is no
 # separate checkout step, unlike GitHub Actions); this pipeline installs
-# DTAtools and runs `validate_template(".", strict = TRUE)` -- the same
-# structural checks (and, as a final step, an actual dry-run build of every
-# non-abstract creation template) the bundled Shiny app's own "Create new from
-# template" picker relies on, without starting the app. `strict = TRUE` makes
-# `validate_template()` raise an error naming every problem found whenever any
-# of them is severity "error", which is what turns this pipeline red.
+# DTAtools and runs `lint_template_repo(".")`. The linter runs every
+# `validate_template()` check -- the same structural checks (and, as a final
+# step, an actual dry-run build of every non-abstract creation template) the
+# bundled Shiny app's own "Create new from template" picker relies on -- plus
+# repository-format checks (folder-name case, id/file-name agreement, YAML
+# files the app would silently ignore), without starting the app. It prints
+# every finding and fails the build on any severity "error", which is what
+# turns this pipeline red. A team that wants warnings to fail it too passes
+# `fail_on = "warning"`.
 # -----------------------------------------------------------------------------
 
 image: rocker/r-ver:4.4 # any R image able to install DTAtools
@@ -28,9 +31,15 @@ definitions:
     - step: &validate-templates
         name: validate-templates
         script:
+          # rocker/r-ver:4.4 pins its default `repos` to a Posit Package Manager
+          # snapshot dated 2025-04-10, which predates `zip >= 3.0.0` and
+          # `S7 >= 0.2.2` (both required by DTAtools). Every install here
+          # therefore sets the `latest` noble binary mirror (noble is that
+          # image's Ubuntu release) instead of trusting the default; a newer
+          # image tag alone would only move the snapshot date.
           # `remotes` is only for the install examples below; DTAtools' own
           # Imports come with DTAtools itself.
-          - Rscript -e 'install.packages("remotes")' # skip if already baked into the image
+          - Rscript -e 'options(repos = c(CRAN = "https://p3m.dev/cran/__linux__/noble/latest")); install.packages("remotes")' # skip if already baked into the image
           # ---------------------------------------------------------------
           # PLACEHOLDER: install DTAtools from your internal package
           # repository. This is deliberately NOT filled in -- the source (an
@@ -40,11 +49,11 @@ definitions:
           # the line below with whichever of those applies. A couple of
           # common shapes:
           #
-          #   Rscript -e 'remotes::install_git("https://bitbucket.example.com/scm/proj/DTAtoolsR.git")'
+          #   Rscript -e 'options(repos = c(CRAN = "https://p3m.dev/cran/__linux__/noble/latest")); remotes::install_git("https://bitbucket.example.com/scm/proj/DTAtoolsR.git")'
           #   Rscript -e 'install.packages("DTAtools", repos = "https://internal-rspm.example.com")'
           # ---------------------------------------------------------------
           - Rscript -e 'stop("Replace this step with an install of DTAtools from your internal package repository.")'
-          - Rscript -e 'DTAtools::validate_template(".", strict = TRUE)'
+          - Rscript -e 'DTAtools::lint_template_repo(".")'
 
 pipelines:
   default:

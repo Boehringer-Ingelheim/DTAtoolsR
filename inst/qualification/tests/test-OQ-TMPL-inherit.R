@@ -7,7 +7,7 @@
 # each result is read back through validate_template()'s pass/fail signal
 # rather than assumed from reading the merge code.
 
-tmpl_fixture <- function(...) file.path(qa_suite_root(), "fixtures", "tpl", ...)
+tmpl_fixture <- function(...) file.path(qa_suite_root(), "fx", "t", ...)
 
 tmpl_severity <- function(result, code) {
   hit <- result$severity[result$code == code]
@@ -29,7 +29,7 @@ tmpl_rows_for <- function(result, basename_) {
 # ---- REQ-TMPL-019: extends_unresolved / extends_cycle ----------------------
 
 test_that("OQ-TMPL-033 | extends naming an unresolvable reference is a warning | REQ-TMPL-019", {
-  result <- validate_template(tmpl_fixture("codes", "extends_unres_instantiate"))
+  result <- validate_template(tmpl_fixture("c", "extends_unres_instantiate"))
   qa_step("severity is warning", "warning", tmpl_severity(result, "extends_unresolved"))
   qa_check(
     "naming the unresolvable reference",
@@ -38,7 +38,7 @@ test_that("OQ-TMPL-033 | extends naming an unresolvable reference is a warning |
 })
 
 test_that("OQ-TMPL-034 | a chain that revisits itself is a cycle, not an infinite loop | REQ-TMPL-019", {
-  result <- validate_template(tmpl_fixture("codes", "extends_cycle"))
+  result <- validate_template(tmpl_fixture("c", "extends_cycle"))
 
   a_row <- tmpl_rows_for(result, "a.dta-template.yaml")
   b_row <- tmpl_rows_for(result, "b.dta-template.yaml")
@@ -54,7 +54,7 @@ test_that("OQ-TMPL-034 | a chain that revisits itself is a cycle, not an infinit
 # ---- REQ-TMPL-020: instantiate_failed coupling + the abstract exemption ---
 
 test_that("OQ-TMPL-035 | an unresolved extends chain also fails the dry-run build | REQ-TMPL-020", {
-  result <- validate_template(tmpl_fixture("codes", "extends_unres_instantiate"))
+  result <- validate_template(tmpl_fixture("c", "extends_unres_instantiate"))
   qa_step("severity is error", "error", tmpl_severity(result, "instantiate_failed"))
   qa_step(
     "both rows report the same underlying cause",
@@ -63,7 +63,7 @@ test_that("OQ-TMPL-035 | an unresolved extends chain also fails the dry-run buil
 })
 
 test_that("OQ-TMPL-036 | an abstract template is exempt from the dry-run, even with a broken extends | REQ-TMPL-020", {
-  result <- validate_template(tmpl_fixture("inherit", "abstract-extends-unresolved"))
+  result <- validate_template(tmpl_fixture("inh", "abstract-extends-unresolved"))
   qa_step("exactly one row", 1L, nrow(result))
   qa_step(
     "extends_unresolved is still reported -- the reference really is broken",
@@ -113,7 +113,7 @@ test_that("OQ-TMPL-066 | metadata-only abstract bases require concrete children 
 # ---- REQ-TMPL-021: sealed_violation / sealed_path_unknown ------------------
 
 test_that("OQ-TMPL-037 | overriding a sealed path is reported, and fails the build | REQ-TMPL-021", {
-  result <- validate_template(tmpl_fixture("codes", "sealed_violation"))
+  result <- validate_template(tmpl_fixture("c", "sealed_violation"))
   qa_step("severity is warning", "warning", tmpl_severity(result, "sealed_violation"))
   qa_step("and also error, on instantiate_failed", "error", tmpl_severity(result, "instantiate_failed"))
   qa_check(
@@ -124,7 +124,7 @@ test_that("OQ-TMPL-037 | overriding a sealed path is reported, and fails the bui
 })
 
 test_that("OQ-TMPL-038 | a sealed path matching nothing is reported, not silently harmless | REQ-TMPL-021", {
-  result <- validate_template(tmpl_fixture("codes", "sealed_path_unknown"))
+  result <- validate_template(tmpl_fixture("c", "sealed_path_unknown"))
   qa_step("severity is warning", "warning", tmpl_severity(result, "sealed_path_unknown"))
   qa_check(
     "naming the path that protects nothing",
@@ -138,7 +138,7 @@ test_that("OQ-TMPL-061 | a child adding an option that writes a sealed field is 
   # create_dta_from_template() applies the new option's effect -- the seal
   # has to be checked against what an option WOULD write, not only against
   # base:'s own resolved value.
-  result <- validate_template(tmpl_fixture("codes", "sealed_violation_option"))
+  result <- validate_template(tmpl_fixture("c", "sealed_violation_option"))
   qa_step("severity is warning", "warning", tmpl_severity(result, "sealed_violation"))
   qa_step("and also error, on instantiate_failed", "error", tmpl_severity(result, "instantiate_failed"))
   qa_check(
@@ -151,7 +151,7 @@ test_that("OQ-TMPL-061 | a child adding an option that writes a sealed field is 
 # ---- REQ-TMPL-022: the four value states -----------------------------------
 
 test_that("OQ-TMPL-039 | an absent section inherits the parent's, and the build succeeds | REQ-TMPL-022", {
-  result <- validate_template(tmpl_fixture("inherit", "four-states"))
+  result <- validate_template(tmpl_fixture("inh", "four-states"))
   absent_rows <- tmpl_rows_for(result, "child_absent.dta-template.yaml")
   qa_step("zero issues -- fs_parent's own dataset carried the build", 0L, nrow(absent_rows))
 })
@@ -162,7 +162,7 @@ test_that("OQ-TMPL-040 | an explicit null and an empty collection both wipe the 
   # reads the merged value through `%||% list()`. Demonstrated on two
   # different section shapes -- datasets: (a sequence) and base: (a mapping)
   # -- so this is not an accident of one section's implementation.
-  result <- validate_template(tmpl_fixture("inherit", "four-states"))
+  result <- validate_template(tmpl_fixture("inh", "four-states"))
 
   drop_rows <- tmpl_rows_for(result, "child_drop.dta-template.yaml")
   empty_rows <- tmpl_rows_for(result, "child_empty.dta-template.yaml")
@@ -178,7 +178,7 @@ test_that("OQ-TMPL-040 | an explicit null and an empty collection both wipe the 
 })
 
 test_that("OQ-TMPL-041 | a value state's own new content is checked as if authored standalone | REQ-TMPL-022", {
-  result <- validate_template(tmpl_fixture("inherit", "four-states"))
+  result <- validate_template(tmpl_fixture("inh", "four-states"))
   value_rows <- tmpl_rows_for(result, "child_value.dta-template.yaml")
 
   qa_step(
@@ -191,7 +191,7 @@ test_that("OQ-TMPL-041 | a value state's own new content is checked as if author
 # ---- REQ-TMPL-023: multi-level chain ---------------------------------------
 
 test_that("OQ-TMPL-042 | a fix two levels up an extends chain reaches a grandchild that says nothing itself | REQ-TMPL-023", {
-  result <- validate_template(tmpl_fixture("inherit", "chain"))
+  result <- validate_template(tmpl_fixture("inh", "chain"))
 
   gp_rows <- tmpl_rows_for(result, "grandparent.dta-template.yaml")
   qa_step(
@@ -210,12 +210,12 @@ test_that("OQ-TMPL-042 | a fix two levels up an extends chain reaches a grandchi
 # ---- REQ-TMPL-024: vocabulary_invalid / _unresolved / _extends_failed -----
 
 test_that("OQ-TMPL-043 | a vocabulary with neither terms nor extends is invalid | REQ-TMPL-024", {
-  result <- validate_template(tmpl_fixture("codes", "vocabulary_invalid"))
+  result <- validate_template(tmpl_fixture("c", "vocabulary_invalid"))
   qa_step("severity is error", "error", tmpl_severity(result, "vocabulary_invalid"))
 })
 
 test_that("OQ-TMPL-044 | a vocabulary extending an absent parent is unresolved, not invalid | REQ-TMPL-024", {
-  result <- validate_template(tmpl_fixture("codes", "vocabulary_unresolved"))
+  result <- validate_template(tmpl_fixture("c", "vocabulary_unresolved"))
   qa_step("severity is warning", "warning", tmpl_severity(result, "vocabulary_unresolved"))
   qa_check(
     "naming the unresolved parent",
@@ -224,7 +224,7 @@ test_that("OQ-TMPL-044 | a vocabulary extending an absent parent is unresolved, 
 })
 
 test_that("OQ-TMPL-045 | a vocabulary extends cycle is reported on every file in it | REQ-TMPL-024", {
-  result <- validate_template(tmpl_fixture("codes", "vocabulary_extends_failed"))
+  result <- validate_template(tmpl_fixture("c", "vocabulary_extends_failed"))
   a_row <- tmpl_rows_for(result, "a.dta-vocabulary.yaml")
   b_row <- tmpl_rows_for(result, "b.dta-vocabulary.yaml")
   qa_step(
@@ -236,19 +236,19 @@ test_that("OQ-TMPL-045 | a vocabulary extends cycle is reported on every file in
 # ---- REQ-TMPL-018 (positive case): a clean binding, include/exclude -------
 
 test_that("OQ-TMPL-046 | a values_from binding that resolves cleanly is accepted without comment | REQ-TMPL-018", {
-  result <- validate_template(tmpl_fixture("inherit", "vocab-basic"))
+  result <- validate_template(tmpl_fixture("inh", "vocab-basic"))
   qa_step("zero issues", 0L, nrow(result))
 })
 
 test_that("OQ-TMPL-047 | include and exclude each select a clean subset of a vocabulary's terms | REQ-TMPL-018", {
-  result <- validate_template(tmpl_fixture("inherit", "vocab-incl-excl"))
+  result <- validate_template(tmpl_fixture("inh", "vocab-incl-excl"))
   qa_step("zero issues across both the include-based and the exclude-based binding", 0L, nrow(result))
 })
 
 # ---- REQ-TMPL-025: vocabulary term algebra (extends/remove_terms/add_terms)
 
 test_that("OQ-TMPL-048 | a child vocabulary's terms are the parent's, minus removed, plus added | REQ-TMPL-025", {
-  result <- validate_template(tmpl_fixture("inherit", "vocab-ext-chain"))
+  result <- validate_template(tmpl_fixture("inh", "vocab-ext-chain"))
 
   ok_rows <- tmpl_rows_for(result, "ds_ok.dta-dataset-template.yaml")
   qa_step(
@@ -276,7 +276,7 @@ test_that("OQ-TMPL-048 | a child vocabulary's terms are the parent's, minus remo
 # (the same parent without mixins) shows that they really did.
 
 test_that("OQ-TMPL-079 | a child composed from disjoint mixins carries their content and is valid | REQ-TMPL-038", {
-  result <- validate_template(tmpl_fixture("inherit", "mixins"))
+  result <- validate_template(tmpl_fixture("inh", "mixins"))
 
   child_rows <- tmpl_rows_for(result, "child.dta-template.yaml")
   qa_step(
@@ -312,7 +312,7 @@ test_that("OQ-TMPL-079 | a child composed from disjoint mixins carries their con
 })
 
 test_that("OQ-TMPL-080 | two mixins providing the same dataset key conflict, an error not an override | REQ-TMPL-039 REQ-TMPL-038", {
-  result <- validate_template(tmpl_fixture("codes", "mixin_conflict"))
+  result <- validate_template(tmpl_fixture("c", "mixin_conflict"))
   qa_step("mixin_conflict is an error", "error", tmpl_severity(result, "mixin_conflict"))
   qa_step("and the concrete template also fails the build", "error", tmpl_severity(result, "instantiate_failed"))
   msg <- tmpl_message(result, "mixin_conflict")
@@ -324,7 +324,7 @@ test_that("OQ-TMPL-080 | two mixins providing the same dataset key conflict, an 
 })
 
 test_that("OQ-TMPL-081 | a non-abstract mixin and a malformed mixins: value are mixin_invalid errors | REQ-TMPL-039", {
-  result <- validate_template(tmpl_fixture("codes", "mixin_invalid"))
+  result <- validate_template(tmpl_fixture("c", "mixin_invalid"))
 
   child <- tmpl_rows_for(result, "child.dta-template.yaml")
   qa_step("naming a concrete template as a mixin: error", "error", tmpl_severity(child, "mixin_invalid"))
@@ -346,7 +346,7 @@ test_that("OQ-TMPL-081 | a non-abstract mixin and a malformed mixins: value are 
 })
 
 test_that("OQ-TMPL-082 | an unresolvable mixin is a warning, and only a concrete template also fails the build | REQ-TMPL-039", {
-  result <- validate_template(tmpl_fixture("codes", "mixin_unresolved"))
+  result <- validate_template(tmpl_fixture("c", "mixin_unresolved"))
   concrete <- tmpl_rows_for(result, "concrete.dta-template.yaml")
   abstract <- tmpl_rows_for(result, "abstract.dta-template.yaml")
 
@@ -365,7 +365,7 @@ test_that("OQ-TMPL-083 | mixin content reaching an ancestor's sealed path is a s
   # Nothing in the child or the parent changes base.metadata.title: only the
   # mixin's option targets it, so the seal has to be enforced on what the
   # mixins add, not only on the child's own text.
-  result <- validate_template(tmpl_fixture("codes", "sealed_violation_mixin"))
+  result <- validate_template(tmpl_fixture("c", "sealed_violation_mixin"))
   qa_step("severity is warning", "warning", tmpl_severity(result, "sealed_violation"))
   qa_step("and also error, on instantiate_failed", "error", tmpl_severity(result, "instantiate_failed"))
   qa_check(
@@ -377,7 +377,7 @@ test_that("OQ-TMPL-083 | mixin content reaching an ancestor's sealed path is a s
 })
 
 test_that("OQ-TMPL-084 | a child may modify and remove mixin-provided entries like any inherited entry | REQ-TMPL-038", {
-  result <- validate_template(tmpl_fixture("inherit", "mixin_edit"))
+  result <- validate_template(tmpl_fixture("inh", "mixin_edit"))
 
   # Both mixin datasets (obs, extra) are keyed entries of the folded parent.
   # child_ok restates obs (same key, so a modification rather than an addition
@@ -397,7 +397,7 @@ test_that("OQ-TMPL-084 | a child may modify and remove mixin-provided entries li
 })
 
 test_that("OQ-TMPL-085 | re-listing a mixin an ancestor already mixes in is a conflict | REQ-TMPL-038 REQ-TMPL-039", {
-  result <- validate_template(tmpl_fixture("codes", "mixin_relist"))
+  result <- validate_template(tmpl_fixture("c", "mixin_relist"))
 
   child <- tmpl_rows_for(result, "child.dta-template.yaml")
   qa_step("mixin_conflict is an error", "error", tmpl_severity(child, "mixin_conflict"))

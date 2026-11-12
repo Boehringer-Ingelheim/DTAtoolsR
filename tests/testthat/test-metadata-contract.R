@@ -192,9 +192,16 @@ test_that("YAML rejects malformed study and section mappings", {
     "sections:\n    scope: {title: T}",
     "sections:\n    scope: {title: T, text: null}"
   )
-  for (block in malformed) {
-    writeLines(paste0("metadata:\n  title: Synthetic\n  version: '1.0'\n  ", block, "\ndatasets: []\n"), path)
-    expect_error(read_dta_from_yaml(path))
+  # The duplicate-key cases never reach DTAMetaData: the YAML parser refuses
+  # them first, so they carry a different finding code.
+  codes <- c(
+    "metadata_invalid", "yaml_unreadable", "metadata_invalid", "metadata_invalid",
+    "yaml_unreadable", "metadata_invalid", "metadata_invalid"
+  )
+  for (i in seq_along(malformed)) {
+    writeLines(paste0("metadata:\n  title: Synthetic\n  version: '1.0'\n  ", malformed[[i]], "\ndatasets: []\n"), path)
+    err <- expect_error(read_dta_from_yaml(path), class = "dta_lint_error")
+    expect_true(codes[[i]] %in% err$findings$code, info = malformed[[i]])
   }
 })
 

@@ -46,10 +46,19 @@ validated datasets having their \code{validation_index} and
 \describe{
 \item{\code{"last_validation_summary"}}{data.frame with one row per
 dataset and columns dataset, n_targets, n_validated, n_valid,
-n_invalid, n_skipped, n_unchecked, n_undelivered, n_import_errors.
+n_invalid, n_skipped, n_unchecked, n_undelivered, n_file_count_errors,
+n_import_errors.
 \code{n_undelivered} is 1 for a dataset that holds no target at all -
 it has no unchecked target to count, yet nothing about it was
-checked.}
+checked. \code{n_file_count_errors} is 1 for a dataset whose supplied
+file count is outside its declared bounds; it sits before
+\code{n_import_errors} in the frame.}
+\item{\code{"last_file_count_findings"}}{data.frame with columns dataset,
+n_supplied, min, max, message; one row per dataset whose file count is
+outside its declared bounds, zero rows when none. A check of a subset of
+datasets replaces the rows of the datasets it checked; a row of another
+dataset is kept while that dataset still exists and still holds a file
+count outside its bounds (it is judged again, not copied).}
 \item{\code{"last_metadata_summary"}}{one-row data.frame for the metadata
 axis, with columns scope, status, import_valid, n_import_errors, fields,
 ok. Metadata belongs to the \code{DTA} itself rather than to any
@@ -58,8 +67,9 @@ row of the per-dataset summary.}
 \item{\code{"last_validation_ok"}}{single logical, \code{TRUE} only when
 no dataset is invalid, no table has an import error, the metadata
 imported cleanly, no target -- e.g. a table checked against zero
-column specs -- was left unchecked, and every dataset had something to
-check in the first place.}
+column specs -- was left unchecked, every dataset had something to
+check in the first place, and no tabular dataset holds a number of
+files outside the bounds its handlers declare.}
 \item{\code{"benchmark"}}{Present only when \code{benchmark = TRUE}. A
 one-row data.frame of runtime/memory metrics; see
 \code{\link{validation_benchmark}}. \code{rows} is \code{NA} at this
@@ -123,6 +133,16 @@ so it cannot be counted by summing \code{n_invalid}. Left unaccounted for,
 the same "Validation PASSED" banner would print over a run that checked
 nothing at all; such targets are instead tallied as \code{n_unchecked} and
 surfaced as "Validation INCOMPLETE".
+
+The number of files supplied to a tabular dataset (its number of tables) is
+compared with the bounds its file handlers declare, taken as the dataset-wide
+SUM of the handlers' minima and maxima (a handler without a maximum makes the
+maximum unbounded), not handler by handler. A missing bound counts as no
+bound on that side. A count outside them signals a warning of class
+\code{dta_file_count_mismatch}, fails the run (\code{last_validation_ok} is
+\code{FALSE}) and is listed in the \code{"last_file_count_findings"}
+attribute. This applies only to a DTA-level check, not to a dataset checked
+alone, and a dataset with no handlers or no tables is not judged.
 }
 \section{Options that tune a scan}{
 

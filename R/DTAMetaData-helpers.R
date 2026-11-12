@@ -90,6 +90,12 @@
 #' @keywords internal
 .date_to_iso <- function(value) {
   if (inherits(value, "Date")) {
+    # An NA date would format to NA_character_, which YAML writes as
+    # `.na.character` and reads back as a string the constructor rejects. An
+    # unset date is NULL, which round-trips.
+    if (length(value) == 1L && is.na(value)) {
+      return(NULL)
+    }
     return(format(value, "%Y-%m-%d"))
   }
   value
@@ -340,7 +346,12 @@ get_version_history_df <- function(x) {
     if (is.null(value) || length(value) == 0) {
       return(NA_character_)
     }
-    as.character(value)[[1]]
+    value <- as.character(unlist(value))
+    if (!length(value)) {
+      return(NA_character_)
+    }
+    # Several change descriptions are one cell, joined as in the documents.
+    if (field == "changes") paste(value, collapse = "; ") else value[[1]]
   }
 
   data.frame(

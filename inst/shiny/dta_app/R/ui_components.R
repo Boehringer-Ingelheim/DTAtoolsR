@@ -816,13 +816,43 @@ brand_link <- function(href, label) {
   )
 }
 
+# The deployment's header tag (`header_tag:` in dta-app.yaml), e.g. "GxP": a
+# pill in the title line of the brand bar, which is static page chrome outside
+# output$main, so it shows on every page and in every state, start page
+# included. NULL without a label, so a library that sets none gets the bar
+# exactly as before. The label is escaped text like every config string here.
+# The colour goes into a style attribute, so it is re-checked as hex
+# (.cfg_color(), app_config.R) although the parser already did -- the same
+# defence in depth as bi_colors() -- and the text colour is computed from it
+# (bi_ink_on(), theme.R) so the label meets WCAG AA on any colour. No role:
+# static text, not a live region; the label, not the colour, carries meaning.
+header_tag_ui <- function(cfg = dta_app_config_defaults()) {
+  ht <- cfg$header_tag
+  label <- ht$label
+  if (!.cfg_is_scalar_chr(label) || !nzchar(label)) {
+    return(NULL)
+  }
+  style <- NULL
+  if (.cfg_color(ht$color)$ok) {
+    ink <- bi_ink_on(ht$color, bi_colors(cfg$colors)[["text"]])
+    # The outline is the text colour at low opacity: light on a dark fill, dark
+    # on a light one, so a fill close to the bar's own colour still reads as a
+    # pill, and the border survives forced-colors mode.
+    style <- sprintf(
+      "--tag-bg: %s; --tag-fg: %s; --tag-border: rgba(%s,.3);",
+      ht$color, ink, paste(bi_rgb(ink), collapse = ",")
+    )
+  }
+  span(class = "brand-tag", style = style, label)
+}
+
 brandbar_ui <- function(cfg = dta_app_config_defaults()) {
   b <- cfg$branding
   div(
     class = "app-brandbar",
     tags$img(class = "brand-logo", src = b$logo, alt = b$logo_alt),
     div(
-      div(class = "brand-title", b$app_title),
+      div(class = "brand-title", b$app_title, header_tag_ui(cfg)),
       if (nzchar(b$app_subtitle)) div(class = "brand-sub", b$app_subtitle)
     ),
     div(

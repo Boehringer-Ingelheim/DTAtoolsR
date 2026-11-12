@@ -400,6 +400,44 @@ deviations:
     opened: 2026-09-14
     closed: 2026-11-04
 
+  - id: DEV-017
+    title: A Word template export to a relative output path fails
+    status: closed
+    severity: minor
+    affects: [REQ-EXPORT-014, REQ-EXPORT-016]
+    observed: >
+      export_with_template(output = "out.docx") and write_dta(file =
+      "out.docx", template = <path>) -- an output path relative to the working
+      directory -- abort with "Template processing failed: The generated
+      document is not a valid DOCX" and write nothing, while the same call with
+      the absolute path of the same file succeeds. The staging archive is
+      packed with zip::zip(root = <unpacked template folder>), which resolves
+      the relative staging path inside that temporary folder, so the check
+      that follows looks for the staged document where it was never written.
+    expected: >
+      An output path relative to the working directory names the same file as
+      its absolute form: the filled document is written there.
+    impact: >
+      Fails loudly and safely: nothing is written and an existing file at the
+      destination is left alone, so no wrong document can reach a reader. The
+      cost is a template export that cannot be produced at all from a script
+      that names its output relative to the working directory, with an error
+      that points at the document rather than at the path.
+    workaround: >
+      Pass an absolute output path, for example normalizePath(dirname(file))
+      joined with basename(file), or file.path(getwd(), file).
+    resolution: >
+      Closed by making the destination absolute at the top of
+      .dta_write_staged(), so every staged writer packs its staging file at a
+      path that does not depend on the working directory. OQ-EXPORT-062
+      asserts the corrected behaviour.
+    reference: >
+      R/exportTemplateDocx.R (.replace_docx_placeholders -> .dta_write_staged,
+      .zip_docx_dir); inst/qualification/tests/test-OQ-EXPORT-documents.R
+      (OQ-EXPORT-062)
+    opened: 2026-11-08
+    closed: 2026-11-08
+
 limitations:
   - id: LIM-001
     title: A row whose every field is empty is dropped by the CSV reader
@@ -511,3 +549,149 @@ limitations:
       validate_file_stream() does supply the count for a single delivery. The
       qualification records throughput from the row count its own generator
       wrote, and the throughput_source column of performance.csv says so.
+
+  - id: LIM-010
+    title: A .sas7bdat delivery is always read into memory
+    affects: [REQ-FILE-039]
+    reference: R/DTADataSetTabular-class.R (load_file); R/DTAFile-class.R (open_file_execution)
+    consequence: >
+      The SAS reader decodes the whole dataset at once, so there is no lazy or
+      batched read for it. load_file(stream = "auto") reads a .sas7bdat into
+      memory however large it is, after signalling the message class
+      dta_sas7bdat_in_memory, and stream = "always" and open_file() are refused.
+      The peak is roughly three times the size of the data (the decoded
+      tibble, the Arrow table and the data frame made while the declared types
+      are applied), and a compressed dataset (CHAR or BINARY compression) can
+      expand well beyond its size on disk. A .sas7bdat.gz needs no separate
+      decompression step, but haven unpacks it to a temporary file in
+      tempdir() of the full uncompressed size, which is removed only when it
+      is garbage collected, so the disk there must hold that size as well. A
+      file near the application's 1 GB upload limit can therefore exhaust a
+      Connect worker. A session-wide options(DTAtools.stream = "always") makes
+      every SAS load fail until stream = "never" is passed.
+      validate_file_stream() and cache_as_parquet() are for delimited text and
+      refuse a SAS dataset with an error of class dta_sas7bdat_not_delimited
+      that points to load_file() and read_file().
+
+  - id: LIM-011
+    title: Numeric values under a w.d display format are checked as stored, not as displayed
+    affects: [REQ-VAL-031]
+    reference: R/columnSpecChecks.R (dta_sas_numeric_format_bad)
+    consequence: >
+      SAS keeps a number at full precision and only rounds it for display, so a
+      stored 0.3333333333333333 under the format 8.2 is shown as 0.33. The
+      format check reads the stored value, not the displayed one, and reports a
+      value with more decimals than the format shows as a format violation.
+      A column that SAS wrote with a w.d format and unrounded values therefore
+      fails the format check on every such row, although SAS would have printed
+      every one of them within the format. The delivery is rejected, not
+      corrected; the remedy is to round the data or to drop the format from the
+      specification. No rounding is applied by the reader.
+
+  - id: LIM-012
+    title: A declared length on a SAS Date, Time or DateTime column is checked against the rendered text
+    affects: [REQ-FILE-037, REQ-VAL-031]
+    reference: R/DTAFileSAS7BDAT-class.R (dta_sas7bdat_normalise); R/sasTemporalText.R
+    consequence: >
+      A temporal column read from a .sas7bdat holds the display text of its
+      format, and a declared length is compared with the length of that text.
+      A specification taken from PROC CONTENTS states length 8 for a SAS date,
+      which is the eight-byte numeric storage, and the text 15AUG2025 is nine
+      characters, so every non-missing value is reported as exceeding the
+      length. A length is not to be declared on a SAS Date, Time or DateTime
+      column; the format bounds the text.
+
+  - id: LIM-013
+    title: SAS transport members are found by their header records
+    affects: [REQ-CONT-003]
+    reference: R/containerFiles.R (dta_xpt_members)
+    consequence: >
+      The transport format marks a new member only by its header records.
+      Character values written on purpose to reproduce a member header, a
+      descriptor header and a NAMESTR header at 80-byte boundaries end the
+      preceding member there: its remaining observations are lost and an extra
+      member is listed as unused. A file that a type: xpt entry names directly
+      is never split, so it is refused instead. Version 5 files record neither
+      a member count nor an observation count, so a file cut exactly at a
+      member boundary, or at a record boundary inside a member's observations,
+      reads as a library with fewer members or rows; a gzip stream that ends
+      early at such a point does the same. Every other cut is refused, and no
+      cut gives a member more rows than it has.
+
+  - id: LIM-014
+    title: Extracted members stay on disk while they are used
+    affects: [REQ-CONT-013, REQ-CONT-016]
+    reference: R/loadDelivery.R; inst/shiny/dta_app/app.R
+    consequence: >
+      A lazily loaded member is scanned from its extracted copy, so in R the
+      copies stay under tempdir() (or exdir) until the session ends; a large
+      archive costs its uncompressed size in disk space each time it is loaded.
+      The application deletes an extracted file as soon as no loaded file
+      record names it (before each delivery, after a remove or discard, after a
+      later delivery replaces it), a cancelled or failed delivery's extraction
+      at once, and at session end keeps only the files a file dataset uses,
+      because "Restore previous session" re-reads file datasets from their
+      files while tables come back from the autosave's own copies. Those, and
+      anything a crash leaves, are removed by the 24-hour sweep. The
+      application's per-session budget (DTATOOLS_SESSION_DELIVERY_BYTES) bounds
+      one session, not the server: one R process serving several sessions, or
+      one user with several browser tabs, can hold that amount for each of them
+      under the same temporary directory. On Posit Connect, give the content a
+      disk quota per worker or point TMPDIR at a bounded volume, and lower the
+      budget together with the content's maximum connections per process. On
+      Windows, an extracted file that a lazy scan still holds open cannot be
+      deleted until the scan ends; it stays counted until the next cleanup
+      succeeds.
+
+  - id: LIM-015
+    title: Zip entry names without the UTF-8 flag are read as code page 437
+    affects: [REQ-CONT-002]
+    reference: R/containerFiles.R (dta_zip_inspect, dta_zip_extract)
+    consequence: >
+      The ZIP specification says an entry name without the UTF-8 flag is IBM
+      code page 437. A name written in another code page decodes to other
+      characters (Windows-1252 e-acute becomes a Greek capital theta). If no
+      file entry matches the decoded name the file is listed as unused under
+      it; if one does, the entry cannot be extracted under that name and is
+      refused, with a hint to re-create the archive with UTF-8 names.
+
+  - id: LIM-016
+    title: Files are matched by base name
+    affects: [REQ-CONT-009]
+    reference: R/loadDelivery.R (dta_delivery_resolve_duplicates)
+    consequence: >
+      Folders inside an archive are not part of matching. Two files of one
+      delivery with the same name in different folders (site1/ae.csv and
+      site2/ae.csv, or two define.xml files of an eCTD package) cannot both be
+      loaded into the entry that names them: with on_error = "abort" the
+      delivery is refused, with on_error = "skip" (the application) both are
+      refused and the rest is loaded.
+
+  - id: LIM-017
+    title: A version 5 transport file with short rows does not say how many rows it holds
+    affects: [REQ-CONT-018]
+    reference: R/containerFiles.R (dta_xpt_expected_rows); tests/test-OQ-CONT-xpt.R (OQ-CONT-031)
+    consequence: >
+      A version 5 transport file records no count of observations. The padding
+      that fills its last 80-byte record is indistinguishable from observations
+      that are blank in every column, so when a row is shorter than 80 bytes
+      the padding can hold a whole row and the number of rows cannot be known.
+      Trailing rows whose text values are all blank are then lost: a column
+      declared nullable false does not report them, and the table holds fewer
+      rows than the sender wrote, with no warning. A version 8 file records
+      its count, and a version 5 file whose rows are 80 bytes or longer
+      determines it, so both keep their trailing blank rows. A sender who needs
+      those rows checked should deliver a version 8 file or a .sas7bdat.
+
+  - id: LIM-018
+    title: A transport file records no character encoding, so only UTF-8 text is read
+    affects: [REQ-CONT-018]
+    reference: R/DTAFileXPT-class.R (dta_read_xpt); tests/test-OQ-CONT-xpt.R (OQ-CONT-030)
+    consequence: >
+      A SAS transport file stores text as bytes and names no encoding. DTAtools
+      reads that text as UTF-8, which includes ASCII. A file written by a SAS
+      session in Latin-1 or Windows-1252 that holds a character outside ASCII,
+      in a value or in a variable name, is refused with a message naming the
+      column and the first row; it is never read with guessed characters. The
+      sender should deliver the dataset as .sas7bdat, which records its
+      encoding, or write the transport file from a UTF-8 session.

@@ -96,6 +96,9 @@ write_validation_report <- function(
   # it too. Without this the summary cards and the verdict disagree, and the
   # cards are what a reader sees first.
   res <- .report_with_metadata_row(x, res)
+  # Likewise a file count outside the declared bounds (also folded into
+  # last_validation_ok by check()); its messages are added to the table below.
+  res <- .report_with_file_count_rows(x, res)
   msgs <- DTAtools::messages(x, as_tibble = FALSE)
 
   # Fetch inspect() detail for every message with ONE call, not one call per
@@ -191,6 +194,7 @@ write_validation_report <- function(
 
   # Build HTML document
   summary_html <- .report_summary_html(res)
+  msgs <- .report_with_file_count_messages(x, msgs)
   messages_html <- .report_messages_table_html(msgs, max_repeats = max_repeats)
   # The offset makes the moment unambiguous to a reader in another timezone.
   timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S %z")
@@ -254,7 +258,7 @@ write_validation_report <- function(
   )
 
   # Write file
-  writeLines(html_doc, con = file)
+  .dta_write_staged(file, function(stage) writeLines(html_doc, con = stage))
 
   # Report success
   if (!isTRUE(quiet)) {

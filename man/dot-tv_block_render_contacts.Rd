@@ -3,12 +3,14 @@
 \name{.tv_block_render_contacts}
 \alias{.tv_block_render_contacts}
 \title{\code{{SUPPLIER_CONTACTS_TABLE}} / \code{{RECEIVER_CONTACTS_TABLE}} block: contacts for
-one side of the agreement as a table}
+one side of the agreement, in the contact table of the built-in layout
+(\code{.build_party_contacts_table()})}
 \usage{
 .tv_block_render_contacts(doc, dta, arg, side)
 }
 \description{
 \code{{SUPPLIER_CONTACTS_TABLE}} / \code{{RECEIVER_CONTACTS_TABLE}} block: contacts for
-one side of the agreement as a table
+one side of the agreement, in the contact table of the built-in layout
+(\code{.build_party_contacts_table()})
 }
 \keyword{internal}

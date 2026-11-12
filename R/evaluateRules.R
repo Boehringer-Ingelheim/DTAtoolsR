@@ -70,6 +70,9 @@ dta_as_numeric_strict <- function(x) {
   # streaming path -- runs on that subset instead of the whole column.
   values <- suppressWarnings(as.numeric(raw_chr))
   missing <- is.na(raw_chr)
+  # as.numeric() also reads hex ("0x1A" is 26) and "Inf" spellings. That is
+  # deliberate: the oracle matrix (vc_numeric_edges) and the qualification
+  # matrix OQ-TYPE-numeric pin them as valid numbers.
   failed <- is.na(values) & !missing
   if (any(failed)) {
     idx <- which(failed)
@@ -253,6 +256,34 @@ dta_equality_bound <- function(x, value) {
   if (inherits(x, "integer64")) {
     return(value)
   }
+  # A list is judged member by member: unlist() would coerce the numbers in
+  # `[0.30000000000000004, "5"]` or `[0.30000000000000004, ~]` (the missing
+  # entry is NA_character_) to text, which keeps only 15 significant digits and
+  # drops the match of a value that needs 16 or 17. A number stays as written,
+  # text is parsed, a missing entry is a missing number; all-or-nothing as below.
+  if (is.list(value) && length(value) > 0L && all(lengths(value) == 1L)) {
+    kind <- vapply(value, function(el) {
+      if (is.na(el)) {
+        "na"
+      } else if (is.numeric(el)) {
+        "num"
+      } else if (is.character(el) || is.factor(el)) {
+        "chr"
+      } else {
+        "other"
+      }
+    }, character(1))
+    if (!any(kind == "other") && any(kind != "na")) {
+      parsed <- vapply(seq_along(value), function(i) {
+        switch(kind[[i]],
+          na = NA_real_,
+          num = as.numeric(value[[i]]),
+          chr = suppressWarnings(as.numeric(as.character(value[[i]])))
+        )
+      }, numeric(1))
+      return(if (any(is.na(parsed) & kind != "na")) value else parsed)
+    }
+  }
   values <- unlist(value, use.names = FALSE)
   if (is.numeric(values)) {
     return(values)
@@ -339,7 +370,10 @@ dta_range_target <- function(rule) {
   col <- dta_rule_target_columns(rule)
 
   if (length(col) != 1) {
-    cli::cli_abort("Range rules require exactly one target column.")
+    cli::cli_abort(
+      "Range rules require exactly one target column.",
+      class = "dta_rule_range_columns"
+    )
   }
 
   range <- rule_get_slot(rule, "range")
@@ -600,8 +634,9 @@ dta_check_condition_arity <- function(conditions, arg = "condition") {
         if (n != 2L || missing) "exactly two non-missing values, the lower and upper bound" else NULL
       } else if (operator %in% c("in", "not_in")) {
         # A missing member is allowed: `in: [A, ~]` deliberately selects the
-        # rows that are A or missing, through `%in%`'s own NA matching.
-        if (n < 1L) "one or more values" else NULL
+        # rows that are A or missing. Count list members, not the flattened
+        # vector: unlist() drops a YAML `~`, so `in: [~]` would count none.
+        if (length(value) < 1L) "one or more values" else NULL
       } else if (identical(operator, "empty")) {
         if (!(isTRUE(flat) || isFALSE(flat))) "a single TRUE or FALSE" else NULL
       } else {
@@ -665,6 +700,12 @@ dta_condition_mask <- function(column_name, operator, value, x, converted = NULL
   # narrowing decisions. A bound that does not parse as a number keeps the
   # string comparison exactly as before, and non-numeric columns (Char ids
   # with leading zeros above all) are never touched.
+  if (operator %in% c("in", "not_in") && is.list(value)) {
+    # YAML `~` reads as NULL: unlist() would drop it and `%in%` would match the
+    # text "NULL". Make it a missing member, so `in: [A, ~]` matches A or NA.
+    # Same as a missing text entry (YAML .na.character), which already works.
+    value[lengths(value) == 0L] <- list(NA_character_)
+  }
   if (operator %in% c("equals", "equal", "not_equals", "not_equal", "in", "not_in")) {
     value <- dta_equality_bound(x, value)
   }
@@ -1313,7 +1354,9 @@ rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
   groups_idx_cache <- NULL
   groups_idx <- function() {
     if (is.null(groups_idx_cache)) {
-      groups_idx_cache <<- split(seq_len(nrow(df)), gid)
+      # Every level present, so the list is positional: [[g]] is O(1), where a
+      # lookup by as.character(g) name was a linear scan per violating group.
+      groups_idx_cache <<- split(seq_len(nrow(df)), factor(gid, levels = seq_len(n_groups)))
     }
     groups_idx_cache
   }
@@ -1353,11 +1396,25 @@ rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
 
   # `hit` per condition, over the whole table -- the same truth value
   # `mask %in% TRUE` computed once per group before.
-  cond_hit <- lapply(cond_hits, function(mask) mask %in% TRUE)
+  #
+  # A condition used ONLY as the IF side of a `requires` constraint keeps the
+  # rows whose value is unconvertible in scope (as col_condition does), so bad
+  # data cannot exempt its group. Other roles need a determinate TRUE.
+  if_only <- dta_group_if_only_conditions(constraints)
+  cond_hit <- lapply(names(cond_hits), function(cond_name) {
+    mask <- cond_hits[[cond_name]]
+    if (cond_name %in% if_only) {
+      mask <- dta_condition_in_scope(conditions[[cond_name]], df, mask, numeric_cache)
+    }
+    mask %in% TRUE
+  })
+  names(cond_hit) <- names(cond_hits)
   # Rows where the condition holds, but only for groups that have at least one
   # such row: cheap, because it only touches the (usually few) matching rows,
   # not every group.
-  cond_rows_by_group <- lapply(cond_hit, function(hit) split(which(hit), gid[hit]))
+  cond_rows_by_group <- lapply(cond_hit, function(hit) {
+    split(which(hit), factor(gid[hit], levels = seq_len(n_groups)))
+  })
   cond_n_true <- lapply(cond_hit, function(hit) tabulate(gid[hit], nbins = n_groups))
   cond_any_true <- lapply(cond_n_true, function(n_true) n_true > 0)
   # Matches dta_group_scope_truth()'s "all": a group with no rows is not
@@ -1388,8 +1445,7 @@ rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
   }
 
   group_rows <- function(cond_name, g) {
-    rows <- cond_rows_by_group[[cond_name]][[as.character(g)]]
-    if (is.null(rows)) integer(0) else rows
+    cond_rows_by_group[[cond_name]][[g]]
   }
 
   # Evaluate each constraint's truth condition across ALL groups at once
@@ -1466,7 +1522,7 @@ rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
         then_scope <- constraint$then_scope %||% "any"
 
         if_rows <- group_rows(if_name, g)
-        row_idx <- groups_idx()[[as.character(g)]]
+        row_idx <- groups_idx()[[g]]
         then_failed <- if (identical(then_scope, "all")) {
           row_idx[!cond_hit[[then_name]][row_idx]]
         } else {
@@ -1679,4 +1735,21 @@ check_rule_class <- function(x) {
   } else {
     cli::cli_abort("Rule is not of class 'DTARule'")
   }
+}
+
+#' @title Conditions Used Only as the IF Side of a `requires` Constraint
+#' @param constraints The `constraints` slot of a group_condition rule.
+#' @return Character vector of condition names. Shared by the materialising
+#'   and streaming group paths so both give those conditions the same
+#'   unconvertible-value scope treatment (see [dta_condition_in_scope()]).
+#' @keywords internal
+#' @noRd
+dta_group_if_only_conditions <- function(constraints) {
+  role_names <- function(key) {
+    unlist(lapply(constraints, function(k) k[[key]]), use.names = FALSE)
+  }
+  setdiff(
+    unlist(lapply(constraints, function(k) if (identical(k$type, "requires")) k[["if"]]), use.names = FALSE),
+    c(role_names("then"), role_names("left"), role_names("right"))
+  )
 }

@@ -13,7 +13,8 @@ DTAFileAny(
   min_number_of_files = NULL,
   max_number_of_files = NULL,
   info = NULL,
-  extensions = NULL
+  extensions = NULL,
+  container = NULL
 )
 }
 \arguments{
@@ -40,6 +41,13 @@ file.}
 
 \item{extensions}{Character vector or \code{NULL}; allowed file endings. See
 the section above.}
+
+\item{container}{Character or \code{NULL}; the name of the \code{.zip}
+archive or \code{.xpt} SAS transport file this file arrives inside.
+\code{*} matches any text and \code{?} one character
+(\code{"sdtm_*.zip"}); the name is matched as a whole, independently of
+\code{pattern}. \code{NULL} (the default) accepts the file loose or inside
+any container. Only \code{\link{load_delivery}()} consults it.}
 }
 \value{
 An object of class \code{DTAFileAny}.
@@ -58,8 +66,10 @@ only ever asks whether the file arrived, is non-empty and can be opened.
 \section{Restricting the file ending}{
 
 \code{extensions} is an optional allow-list of endings. It is an \strong{open}
-list rather than a fixed set of known formats, so a delivery of \code{.xpt},
-\code{.sas7bdat} or \code{.e2b} files needs no change to this package.
+list rather than a fixed set of known formats, so a delivery of \code{.sas7bcat}
+or \code{.e2b} files needs no change to this package. To validate the contents of
+a \code{.sas7bdat} file, use \code{\link{DTAFileSAS7BDAT}} in a tabular dataset
+instead. To validate a SAS transport file, use \code{\link{DTAFileXPT}}.
 
 \describe{
 \item{\code{NULL} (the default)}{Any ending is accepted. This is what

@@ -42,7 +42,9 @@ checks, docs) says it's done.
   `DTAColumnSpecCollection` (named list of `DTAColumnSpec` + optional rules).
   Rules: `DTARule` → `DTARuleColCondition` / `DTARuleColRange` /
   `DTARuleColUnique` / `DTARuleGroupCondition`. File handlers: `DTAFile` →
-  `DTAFileTabular` → `DTAFileCSV` / `DTAFileTSV` / `DTAFileDelim`, and
+  `DTAFileTabular` → `DTAFileCSV` / `DTAFileTSV` / `DTAFileDelim`,
+  `DTAFile` → `DTAFileSAS7BDAT` (SAS datasets, via haven, in memory only) →
+  `DTAFileXPT` (SAS transport, one dataset, in memory), and
   `DTAFile` → `DTAFileAny` (non-tabular files).
 - Because R has no forward declarations, **`DESCRIPTION`'s `Collate:` field
   encodes load order** and must stay a valid topological order of class
@@ -51,6 +53,7 @@ checks, docs) says it's done.
   on and what depends on it.
 - Central entry points to know: `read_dta_from_yaml()`,
   `read_dataset_from_yaml()`, `import_specs_from_yaml()`, `load_file()`,
+  `load_delivery()` (loose files, `.zip` archives and SAS transport libraries),
   `check()` (always returns the updated object — callers must reassign,
   e.g. `x <- check(x)`), `results()`, `messages()`, `explain_messages()`,
   `inspect()`,

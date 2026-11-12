@@ -30,8 +30,9 @@ requirements:
 
   - id: REQ-META-003
     text: >
-      A version_history record's changes, when it is a character value, shall
-      not be an empty string.
+      A version_history record's changes shall be one or more change
+      descriptions (a character vector or a list of strings); an empty
+      collection, an empty string or an NA entry shall be rejected.
     risk: low
     category: functional
     covers: [DTAMetaData]
