@@ -28,7 +28,8 @@ the same from an already-parsed list. For a single dataset's columns,
 delivered file to the dataset that declares it. Its \code{stream}
 argument decides whether the file is read into memory or left on disk
 and scanned in batches, which is what lets a file larger than memory be
-validated at all.}
+validated at all. \code{\link{load_delivery}()} loads loose files,
+\code{.zip} archives and SAS transport libraries in one call.}
 \item{Validate}{\code{\link{check}()} evaluates every column
 specification and rule and records the verdict on the object. For a
 one-off check with no \code{DTA} around it, \code{\link{validate_table}()}
@@ -64,6 +65,7 @@ Each dataset declares its files through a \code{\link{DTAFile}} handler:
 \code{\link{DTAFileCSV}}, \code{\link{DTAFileTSV}} or
 \code{\link{DTAFileDelim}} for delimited text that is read,
 \code{\link{DTAFileSAS7BDAT}} for a SAS dataset that is read,
+\code{\link{DTAFileXPT}} for a SAS transport file that is read,
 \code{\link{DTAFileAny}} for something that is not.
 }
 

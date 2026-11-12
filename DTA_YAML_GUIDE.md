@@ -134,7 +134,7 @@ current shape in new files.
 
 | Key | Notes |
 | --- | --- |
-| `type` | **required**: `csv`, `tsv`, `sas7bdat` (for `tabular`), `any` (for `file`). |
+| `type` | **required**: `csv`, `tsv`, `sas7bdat`, `xpt` (for `tabular`), `any` (for `file`). |
 | `filename` | **required**. Literal name, or a regex if `pattern: true`. |
 | `pattern` | `true` → `filename` is a regex. Anchor it: `"^LAB_[0-9]{8}\\.csv$"`. |
 | `pattern_description` | Human wording of the regex (`LAB_<YYYYMMDD>.csv`). Always add it when `pattern: true`. |
@@ -145,16 +145,118 @@ current shape in new files.
 | `quote` | default `"`. |
 | `missing_values` | Extra token meaning "missing" besides empty, e.g. `"."` or `"NA"`. |
 | `newlines_in_values` | `true` if quoted cells may contain line breaks. |
-| `extensions` | `any` only: allowed endings, e.g. `[pdf, zip]`. |
+| `extensions` | `any` only: allowed endings, e.g. `[pdf, zip]`. A `.zip` or `.xpt` that such an entry accepts is kept as one file, not opened; to have its contents checked, name it as the `container` of their entries. |
+| `container` | Optional. The `.zip` or `.xpt` the file arrives inside; `*` and `?` are wildcards (`sdtm_*.zip`), and letter case must match (`sdtm.zip` does not match `SDTM.ZIP`). Quote a value that starts with `*` or contains ` #`: `container: "*_SDTM.zip"`. Leave it out when the file may come loose or in any container. |
 
 CSV is comma-separated, TSV tab-separated; `.gz` files are read transparently.
 
-`sas7bdat` reads a SAS dataset (the haven package does the decoding). It takes
-none of `encoding`, `has_header`, `quote`, `missing_values` and
-`newlines_in_values` — passing one to the factory fails with an unused-argument
-error — and the file is always read into memory, never streamed. A `sas7bdat`
-handler declared inside a `type: file` dataset is coerced to a reader-less `any`
-handler, since that dataset never parses its files.
+`sas7bdat` and `xpt` read a SAS dataset and a SAS transport file (the haven
+package does the decoding). They take none of `encoding`, `has_header`, `quote`,
+`missing_values` and `newlines_in_values` — passing one to the factory fails
+with an unused-argument error, and the lint reports it as an unknown file
+field — and the file is always read into memory, never streamed. A `sas7bdat`
+or `xpt` handler declared inside a `type: file` dataset is coerced to a
+reader-less `any` handler, since that dataset never parses its files.
+
+An `xpt` entry reads a transport file that holds exactly one dataset. A
+transport library that holds several is split by `load_delivery()` (below), so a
+specification declares one `type: xpt` entry per dataset, named after the
+dataset in lower case (`ae.xpt`).
+
+### Deliveries in a `.zip` or a SAS transport library
+
+A delivery often arrives as one `.zip`, or as one SAS transport library
+(`.xpt`) holding several datasets. Declare the datasets as if their files came
+loose: `load_delivery()` takes the archive or the library, looks at every file
+inside by name, and gives each one to the dataset whose file entry matches it.
+A delivery is loaded with `load_delivery()` or by dropping it in the app.
+
+One zip of CSV files, two datasets (columns omitted):
+
+```yaml
+datasets:
+  - id: ae
+    type: tabular
+    name: Adverse events
+    files:
+      filename: ae.csv
+      type: csv
+      container: sdtm.zip
+  - id: dm
+    type: tabular
+    name: Demographics
+    files:
+      filename: dm.csv
+      type: csv
+      container: sdtm.zip
+```
+
+One transport library `sdtm.xpt` holding the datasets AE, DM and VS: one entry
+per dataset (repeat it for `dm.xpt` and `vs.xpt`):
+
+```yaml
+  - id: ae
+    type: tabular
+    files:
+      filename: ae.xpt        # member AE of sdtm.xpt
+      type: xpt
+      container: sdtm.xpt
+```
+
+Sometimes a zip, sometimes loose files: leave `container` out.
+
+```yaml
+    files:
+      filename: ae.csv
+      type: csv
+```
+
+Dated archives (`STUDY123_SDTM_20251101.zip`, `STUDY123_SDTM_20251201.zip`):
+
+```yaml
+    files:
+      filename: ae.csv
+      type: csv
+      container: STUDY123_SDTM_*.zip
+```
+
+How a delivery is routed:
+
+- A library is split into one file per member, named after the member in lower
+  case: member `AE` is offered as `ae.xpt`, which an entry `filename: ae.xpt`
+  with `type: xpt` takes. A `.xpt` that holds a single dataset is a file like
+  any other and is matched by its own name.
+- A container never needs declaring; declaring one limits where the file may
+  come from. A specification that declares `ae.csv` already takes `ae.csv` from
+  inside any zip given to `load_delivery()`. With `container: sdtm.zip` the entry takes an `ae.csv` only
+  when it came out of a container whose name matches (or out of a container
+  around that one); a loose `ae.csv` is listed as unused, with the container it
+  expects. The name is matched as a whole and apart from `pattern`, which
+  governs `filename` only.
+- A `.zip` or `.xpt` that a `type: any` entry takes as a deliverable (by its
+  name, or because `extensions` lists `zip` or `xpt`) stays one file and is not
+  opened, unless an entry declares it as its `container`; the load summary and
+  the app say "kept as one file" for it.
+- In a zip that holds single-dataset `.xpt` files named by the specification, a
+  further `.xpt` library is opened only when an entry declares it as its
+  `container`; it is listed as not opened, with that remedy.
+- A file in the archive whose name cannot be written on the server (a `?` or a
+  colon in the name, a control character, a device name such as `CON`) is
+  skipped and listed when no entry asks for it, and refuses the archive when one
+  does; a name that would escape its folder (an absolute path, `..`) refuses the
+  archive always. macOS system files (`__MACOSX/`, `.DS_Store`, the Finder's
+  `Icon` file) are ignored.
+- Extracting needs free disk space for every file taken out of an archive, at
+  its full size, also when the table is then streamed: a 60 GB member needs
+  60 GB in R's temporary directory (or under `exdir`).
+- Validation results name the dataset and table. For a table read into memory
+  the validation report does not name the zip it came from; `load_delivery()`'s
+  summary and its `last_delivery` table do, and the app lists the archive under
+  Loaded files.
+
+Only `load_delivery()` consults `container`; `load_file()` binds the file it is
+given to the entry it is told to. The limits that bound one call, and the rest
+of the rules, are in `?load_delivery`.
 
 ---
 
@@ -191,7 +293,7 @@ import error; a decimal in an Int column fails), a declared `format`, `length`,
 by the type** — add a pattern, e.g. ISO 8601 date
 `"^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"`.
 
-For a `sas7bdat` delivery, a SAS date, datetime or time column arrives as the
+For a `sas7bdat` or `xpt` delivery, a SAS date, datetime or time column arrives as the
 display text of its declared format (`15AUG2025` under `DATE9.`) and as ISO 8601
 text when no format is declared. Do **not** declare `length` on such a column:
 it is checked against that text, so the `length: 8` that PROC CONTENTS reports
@@ -337,6 +439,9 @@ membership) and don't write rules that are always true. Each rule's
   quotes they are not (`'^\d+$'`). Prefer character classes (`[0-9]`) to avoid both.
 - Dates: write `2026-03-01` (ISO). No other date format is understood.
 - 2-space indentation, no tabs; lists with `- `; inline `[a, b]` is fine.
+- A value that starts with `*` is a YAML alias and stops the file from being
+  read; one that contains ` #` is cut at the `#`. Quote both:
+  `container: "*_SDTM.zip"`.
 
 ---
 
@@ -558,3 +663,4 @@ datasets:
 - [ ] Each tabular dataset has a key `col_unique` rule, ranges for measurements,
       and conditional rules for status/unit/result dependencies — each with a `description`.
 - [ ] Rule and constraint ids unique, no whitespace; rules reference declared columns only.
+- [ ] A `container:` value names a `.zip` or `.xpt` file (no folder), on the file entry.

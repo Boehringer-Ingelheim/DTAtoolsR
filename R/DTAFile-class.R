@@ -26,6 +26,12 @@
 #'   expected.
 #' @param info Character, list or \code{NULL}; free-text description of the
 #'   file.
+#' @param container Character or \code{NULL}; the name of the \code{.zip}
+#'   archive or \code{.xpt} SAS transport file this file arrives inside.
+#'   \code{*} matches any text and \code{?} one character
+#'   (\code{"sdtm_*.zip"}); the name is matched as a whole, independently of
+#'   \code{pattern}. \code{NULL} (the default) accepts the file loose or inside
+#'   any container. Only \code{\link{load_delivery}()} consults it.
 #'
 #' @return An object of class \code{DTAFile} containing file parsing
 #'   information.
@@ -51,7 +57,8 @@ DTAFile <- S7::new_class(
     number_of_files = NULL,
     min_number_of_files = NULL,
     max_number_of_files = NULL,
-    info = NULL
+    info = NULL,
+    container = NULL
   ) {
     if (is.null(pattern)) {
       pattern <- FALSE
@@ -115,6 +122,19 @@ DTAFile <- S7::new_class(
       max_number_of_files <- number_of_files
     }
 
+    # Checked here, before new_object(): S7 checks a property's TYPE before it
+    # runs the validator, so `container = 3`, `TRUE` or a list would otherwise
+    # be refused with a plain simpleError and no class. A list is refused, not
+    # flattened (the YAML lint refuses `container: [a.zip]` the same way).
+    problem <- dta_container_value_problem(container)
+    if (!is.null(problem)) {
+      cli::cli_abort(
+        "{problem}",
+        class = "dta_container_invalid",
+        container = container
+      )
+    }
+
     new_object(
       S7_object(),
       filename = filename,
@@ -122,7 +142,8 @@ DTAFile <- S7::new_class(
       pattern_description = pattern_description,
       min_number_of_files = min_number_of_files,
       max_number_of_files = max_number_of_files,
-      info = info
+      info = info,
+      container = container
     )
   },
   properties = list(
@@ -131,7 +152,8 @@ DTAFile <- S7::new_class(
     pattern_description = class_character_or_null,
     min_number_of_files = class_numeric_or_null,
     max_number_of_files = class_numeric_or_null,
-    info = class_character_or_list_or_null
+    info = class_character_or_list_or_null,
+    container = class_character_or_null
   ),
   validator = function(self) {
     # `self@filename == ""` was a length-1 test on a property documented as a
@@ -149,6 +171,18 @@ DTAFile <- S7::new_class(
     }
     if (!is.logical(self@pattern) || length(self@pattern) != 1) {
       cli::cli_abort("The 'pattern' property must be a single logical value.")
+    }
+
+    # The constructor checks the same thing; this is what refuses `h@container
+    # <- "x.tar"`, which never passes through the constructor.
+    container <- dta_handler_container(self)
+    problem <- dta_container_value_problem(container)
+    if (!is.null(problem)) {
+      cli::cli_abort(
+        "{problem}",
+        class = "dta_container_invalid",
+        container = container
+      )
     }
   }
 )
@@ -319,6 +353,54 @@ dta_matches_filename_base <- function(x, file) {
   }
 }
 
+# ---- container declarations ---------------------------------------------------
+# A handler may say which .zip archive or .xpt SAS transport file its file
+# arrives inside (`container`). Only load_delivery() consults it; read_file()
+# and open_file() work on the file they are given.
+
+# The regular expression for a container name: `*` is any text, `?` one
+# character, every other character is literal, and the whole name must match.
+dta_container_regex <- function(glob) {
+  esc <- gsub("([.+^$(){}|\\\\\\[\\]])", "\\\\\\1", glob, perl = TRUE)
+  paste0("^", gsub("?", ".", gsub("*", ".*", esc, fixed = TRUE), fixed = TRUE), "$")
+}
+
+# NULL when `value` is an acceptable container, else the sentence that says
+# why not. Shared by the constructor and the validator.
+dta_container_value_problem <- function(value) {
+  if (is.null(value)) {
+    return(NULL)
+  }
+  if (!is.character(value) || length(value) != 1 || is.na(value) || !nzchar(value)) {
+    return("The container of a file entry must be a single non-empty file name.")
+  }
+  if (grepl("[[:cntrl:]]", value) || !identical(value, trimws(value))) {
+    return(sprintf("The container '%s' must be a file name without control characters or leading or trailing spaces.", value))
+  }
+  if (grepl("[/\\\\]", value)) {
+    return(sprintf("The container '%s' must be a file name, not a path.", value))
+  }
+  if (is.na(dta_container_kind(value))) {
+    return(sprintf("The container '%s' must name a .zip archive or a .xpt SAS transport file.", value))
+  }
+  NULL
+}
+
+# The only reader of the property. A handler restored from an autosave written
+# before `container` existed has no such slot, and reads as "no container".
+dta_handler_container <- function(h) tryCatch(h@container, error = function(e) NULL)
+
+# TRUE when `names` (container file names) include one the handler's container
+# declaration matches. Letter case must match; a compression suffix is ignored.
+dta_matches_container <- function(x, names) {
+  declared <- dta_handler_container(x)
+  if (is.null(declared) || length(names) == 0) {
+    return(FALSE)
+  }
+  candidates <- unique(c(names, dta_strip_compression_extension(names)))
+  any(grepl(dta_container_regex(declared), candidates, perl = TRUE))
+}
+
 #' @keywords internal
 dta_assert_single_file_path <- function(file, .caller) {
   if (!is.character(file) || length(file) != 1 || is.na(file) || !nzchar(file)) {
@@ -375,10 +457,13 @@ dta_check_readable_file <- function(x, file, namecheck, .caller) {
   # after scanning for hours. Catching the extension here trades that for an
   # immediate, actionable message.
   if (tolower(tools::file_ext(file)) == "zip") {
-    cli::cli_abort(c(
-      ".zip archives are not supported.",
-      "i" = "Supply the file gzip-compressed (.gz) or uncompressed instead; Arrow reads both transparently."
-    ))
+    cli::cli_abort(
+      c(
+        ".zip archives are not read by a file handler.",
+        "i" = "Load the archive as a delivery (drop it in the app, or {.fn load_delivery} in R): each file inside is matched to the specification. A single file can also be read gzip-compressed ({.file .gz}) or uncompressed."
+      ),
+      class = "dta_zip_not_readable"
+    )
   }
 
   file
@@ -428,8 +513,10 @@ method(read_file_execution, DTAFile) <- function(x, ...) {
 #' @title Read a file based on DTAFile
 #' @description Reads a data file using the parameters specified in a
 #'   \code{DTAFile} object or one of its subclasses. A delimited file is parsed
-#'   by Arrow; a SAS dataset (\code{\link{DTAFileSAS7BDAT}}) is decoded by
-#'   \pkg{haven}.
+#'   by Arrow; a SAS dataset (\code{\link{DTAFileSAS7BDAT}}) or a SAS transport
+#'   file (\code{\link{DTAFileXPT}}) is decoded by \pkg{haven}. A
+#'   \code{container} declaration is not consulted here; see
+#'   \code{\link{load_delivery}()}.
 #'
 #' @param x A \code{DTAFile} object (or subclass) containing file reading
 #'   parameters.
@@ -550,8 +637,10 @@ method(open_file_execution, DTAFile) <- function(x, ...) {
 #' differ in when the data is read, not in what it is read as.
 #'
 #' Only the delimited handlers can be opened lazily. A SAS dataset
-#' (\code{\link{DTAFileSAS7BDAT}}) is decoded whole, so \code{open_file()} on it
-#' aborts and points to \code{stream = "never"}.
+#' (\code{\link{DTAFileSAS7BDAT}}) or SAS transport file
+#' (\code{\link{DTAFileXPT}}) is decoded whole, so \code{open_file()} on it
+#' aborts and points to \code{stream = "never"}. A \code{container} declaration
+#' is not consulted here; see \code{\link{load_delivery}()}.
 #'
 #' @section What a batch of a delimited scan actually is:
 #' Arrow splits a delimited file into fixed-size READ BLOCKS -- eight megabytes

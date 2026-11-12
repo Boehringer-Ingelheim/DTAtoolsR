@@ -25,3 +25,5 @@ inst/extdata/** -text
 *.gz   binary
 *.docx binary
 *.sas7bdat binary
+*.zip  binary
+*.xpt  binary

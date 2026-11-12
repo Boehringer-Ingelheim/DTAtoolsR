@@ -2,7 +2,7 @@
 % Please edit documentation in R/DTAFileTabular-class.R
 \name{dta_refuse_sas7bdat}
 \alias{dta_refuse_sas7bdat}
-\title{Refuse a SAS Dataset Offered to a Delimited-Text Reader}
+\title{Refuse a SAS Dataset or Transport File Offered to a Delimited-Text Reader}
 \usage{
 dta_refuse_sas7bdat(path)
 }
@@ -10,13 +10,13 @@ dta_refuse_sas7bdat(path)
 \item{path}{Character path.}
 }
 \value{
-\code{NULL}, invisibly, when \code{path} is not a SAS dataset.
+\code{NULL}, invisibly, when \code{path} is not a SAS dataset or transport file.
 }
 \description{
-Arrow does not reject a \code{.sas7bdat} outright: it tries to parse the binary
-as delimited text and fails with an opaque "Is this a 'csv' file?" schema
-error. Catching the extension (with or without a \code{.gz}) trades that for a
-message that names the real cause, the way the \code{.zip} guard in
+Arrow does not reject a \code{.sas7bdat} or \code{.xpt} outright: it tries to parse the
+binary as delimited text and fails with an opaque "Is this a 'csv' file?"
+schema error. Catching the extension (with or without a \code{.gz}) trades that
+for a message that names the real cause, the way the \code{.zip} guard in
 \code{dta_check_readable_file()} does.
 }
 \keyword{internal}

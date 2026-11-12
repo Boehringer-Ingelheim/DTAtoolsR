@@ -86,6 +86,22 @@ assessment:
       One case per handler property and per compression; explicit cases for
       empty, header-only, malformed and oddly-encoded files.
 
+  - area: CONT
+    title: Container deliveries (zip archives, SAS transport libraries)
+    severity: critical
+    probability: medium
+    detectability: low
+    rationale: >
+      A container decides which bytes reach a reader. A transport library read
+      as one table, or cut short, yields rows invented from header records and
+      other members' bytes, and a hostile archive entry can crash the process
+      or be written under an unexpected name. Neither shows up in a value
+      check, and the input is untrusted.
+    depth: >
+      One case per refusal rule with a hostile fixture; byte-level comparison of
+      split members against the library; truncation at every kind of boundary;
+      parity of verdict and counts between a zipped and a loose file.
+
   - area: PERF
     title: End-to-end workflows and behaviour at scale
     severity: critical

@@ -33,6 +33,9 @@ areas:
   - area: FILE
     title: File handlers and readers
     min_tests: 52
+  - area: CONT
+    title: Container deliveries (zip archives, SAS transport libraries)
+    min_tests: 26
   - area: STREAM
     title: Streaming validation and engine parity
     min_tests: 32

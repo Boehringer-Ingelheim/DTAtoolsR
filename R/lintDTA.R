@@ -413,7 +413,8 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
 #' `rule_column_undeclared`, `rule_range_non_numeric`,
 #' `rule_condition_operator_invalid`, `rule_condition_numeric_on_text`,
 #' `rule_condition_value_unfit`, `rule_condition_value_outside_values`,
-#' `group_constraint_unknown_condition`.
+#' `group_constraint_unknown_condition`, `file_container_invalid`,
+#' `file_field_unknown`, `file_container_misplaced`.
 #'
 #' Warnings: `rules_without_columns`, `rule_not_checkable`,
 #' `format_narrower_than_length`, `metadata_import_issue`, `version_unquoted`
@@ -491,9 +492,15 @@ dta_lint_path <- function(path) {
   }
   raw <- tryCatch(yaml::read_yaml(path), error = function(e) e)
   if (inherits(raw, "error")) {
+    text <- dta_condition_text(raw)
     return(dta_lint_row(
       "", "document", NA_character_, "error", "yaml_unreadable",
-      paste("The file is not valid YAML:", dta_condition_text(raw))
+      paste0(
+        "The file is not valid YAML: ", text,
+        if (grepl("alias", text, fixed = TRUE)) {
+          " A value that starts with * must be quoted, e.g. container: \"*_SDTM.zip\"."
+        }
+      )
     ))
   }
   if (!is.list(raw)) {
@@ -655,10 +662,69 @@ dta_lint_dataset_list <- function(d, label) {
       sprintf("Dataset type '%s' is not supported.", paste(type, collapse = ","))
     ))
     return(out)
-  } else if (!identical(type, "tabular")) {
-    return(out)
+  }
+  if (!is.null(type)) {
+    if (!is.null(d[["container"]])) {
+      out <- rbind(out, dta_lint_row(
+        label, "dataset", label, "error", "file_container_misplaced",
+        "'container' belongs to a file entry: write it under 'files:'."
+      ))
+    }
+    out <- rbind(out, dta_lint_files_list(d[["files"]], label))
+    if (!identical(type, "tabular")) {
+      return(out)
+    }
   }
   rbind(out, dta_lint_specs_lists(d[["columns"]], d[["rules"]], label))
+}
+
+# The file entries of a dataset, judged without building them: a key the
+# entry's constructor does not take, and a `container` that is not a single
+# .zip/.xpt file name. `files` is normalised as dta_file_handlers_from_list()
+# does (fully named = one entry, otherwise a list of entries).
+dta_lint_files_list <- function(files, dataset) {
+  out <- dta_lint_empty()
+  if (is.null(files) || length(files) == 0L || !is.list(files)) {
+    return(out)
+  }
+  nms <- names(files)
+  if (!is.null(nms) && all(nzchar(nms))) {
+    files <- list(files)
+  }
+  constructors <- list(
+    csv = DTAFileCSV, tsv = DTAFileTSV, any = DTAFileAny,
+    sas7bdat = DTAFileSAS7BDAT, xpt = DTAFileXPT
+  )
+  for (i in seq_along(files)) {
+    entry <- files[[i]]
+    if (!is.list(entry)) {
+      next
+    }
+    id <- if (is.null(entry[["filename"]])) {
+      paste0("#", i)
+    } else {
+      paste(unlist(entry[["filename"]]), collapse = ", ")
+    }
+    type <- entry[["type"]]
+    if (is.character(type) && length(type) == 1L && type %in% names(constructors)) {
+      unknown <- setdiff(names(entry), c("type", names(formals(constructors[[type]]))))
+      if (length(unknown) > 0L) {
+        out <- rbind(out, dta_lint_row(
+          dataset, "file", id, "error", "file_field_unknown",
+          sprintf("Unknown file field(s): %s.", paste(sQuote(unknown, FALSE), collapse = ", "))
+        ))
+      }
+    }
+    if (!is.null(entry[["container"]])) {
+      problem <- dta_container_value_problem(entry[["container"]])
+      if (!is.null(problem)) {
+        out <- rbind(out, dta_lint_row(
+          dataset, "file", id, "error", "file_container_invalid", problem
+        ))
+      }
+    }
+  }
+  out
 }
 
 # Builds every column and rule from its raw list, one by one, then runs the

@@ -172,7 +172,7 @@ test_that("the editor offers only the types a reader can restore", {
   # offering it would create a handler no document could be read back into.
   types <- app_fn("dta_handler_types")()
 
-  expect_equal(types, c("csv", "tsv", "sas7bdat"))
+  expect_equal(types, c("csv", "tsv", "sas7bdat", "xpt"))
 })
 
 test_that("only a pattern handler may carry several file names", {
@@ -611,9 +611,9 @@ test_that("dta_match_handlers on a rewritten handler reports it as gone", {
 # DTAFileAny / "any" type in the Shiny app helpers -- new tests
 # ---------------------------------------------------------------------------
 
-test_that("dta_handler_types() with no argument returns exactly c('csv','tsv','sas7bdat')", {
+test_that("dta_handler_types() with no argument returns exactly c('csv','tsv','sas7bdat','xpt')", {
   fn <- app_fn("dta_handler_types")
-  expect_equal(fn(), c("csv", "tsv", "sas7bdat"))
+  expect_equal(fn(), c("csv", "tsv", "sas7bdat", "xpt"))
 })
 
 test_that("dta_handler_types('file') offers 'any' and nothing else", {
@@ -675,7 +675,7 @@ test_that("dta_set_handler() rejects a parsing type when dataset_type is file", 
   ds <- DTAtools::DTADataSetFile(id = "reports")
   dta_obj <- DTAtools::DTA(datasets = list(reports = ds))
 
-  for (ty in c("csv", "tsv", "sas7bdat")) {
+  for (ty in c("csv", "tsv", "sas7bdat", "xpt")) {
     res <- fn(dta_obj, "reports",
       filename = "report.pdf", type = ty, dataset_type = "file"
     )

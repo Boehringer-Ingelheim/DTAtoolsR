@@ -322,7 +322,11 @@ test_that("IQ-ENV-020 | documented package options are in force at their default
     DTAtools.stream_arrow_numeric = TRUE,
     DTAtools.stream_arrow_numeric_min_rows = 20000L,
     DTAtools.stream_arrow_unique = TRUE,
-    DTAtools.progress_seconds = 30
+    DTAtools.progress_seconds = 30,
+    DTAtools.container_max_members = 10000L,
+    DTAtools.container_max_bytes = 1e13,
+    DTAtools.container_max_member_bytes = 1e13,
+    DTAtools.container_max_ratio = 1100
   )
   # The observed side is the default the installed package code itself
   # supplies, not the pinned value: with the option unset, every

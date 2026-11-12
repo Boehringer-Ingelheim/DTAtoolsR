@@ -600,3 +600,69 @@ limitations:
       characters, so every non-missing value is reported as exceeding the
       length. A length is not to be declared on a SAS Date, Time or DateTime
       column; the format bounds the text.
+
+  - id: LIM-013
+    title: SAS transport members are found by their header records
+    affects: [REQ-CONT-003]
+    reference: R/containerFiles.R (dta_xpt_members)
+    consequence: >
+      The transport format marks a new member only by its header records.
+      Character values written on purpose to reproduce a member header, a
+      descriptor header and a NAMESTR header at 80-byte boundaries end the
+      preceding member there: its remaining observations are lost and an extra
+      member is listed as unused. A file that a type: xpt entry names directly
+      is never split, so it is refused instead. Version 5 files record neither
+      a member count nor an observation count, so a file cut exactly at a
+      member boundary, or at a record boundary inside a member's observations,
+      reads as a library with fewer members or rows; a gzip stream that ends
+      early at such a point does the same. Every other cut is refused, and no
+      cut gives a member more rows than it has.
+
+  - id: LIM-014
+    title: Extracted members stay on disk while they are used
+    affects: [REQ-CONT-013, REQ-CONT-016]
+    reference: R/loadDelivery.R; inst/shiny/dta_app/app.R
+    consequence: >
+      A lazily loaded member is scanned from its extracted copy, so in R the
+      copies stay under tempdir() (or exdir) until the session ends; a large
+      archive costs its uncompressed size in disk space each time it is loaded.
+      The application deletes an extracted file as soon as no loaded file
+      record names it (before each delivery, after a remove or discard, after a
+      later delivery replaces it), a cancelled or failed delivery's extraction
+      at once, and at session end keeps only the files a file dataset uses,
+      because "Restore previous session" re-reads file datasets from their
+      files while tables come back from the autosave's own copies. Those, and
+      anything a crash leaves, are removed by the 24-hour sweep. The
+      application's per-session budget (DTATOOLS_SESSION_DELIVERY_BYTES) bounds
+      one session, not the server: one R process serving several sessions, or
+      one user with several browser tabs, can hold that amount for each of them
+      under the same temporary directory. On Posit Connect, give the content a
+      disk quota per worker or point TMPDIR at a bounded volume, and lower the
+      budget together with the content's maximum connections per process. On
+      Windows, an extracted file that a lazy scan still holds open cannot be
+      deleted until the scan ends; it stays counted until the next cleanup
+      succeeds.
+
+  - id: LIM-015
+    title: Zip entry names without the UTF-8 flag are read as code page 437
+    affects: [REQ-CONT-002]
+    reference: R/containerFiles.R (dta_zip_inspect, dta_zip_extract)
+    consequence: >
+      The ZIP specification says an entry name without the UTF-8 flag is IBM
+      code page 437. A name written in another code page decodes to other
+      characters (Windows-1252 e-acute becomes a Greek capital theta). If no
+      file entry matches the decoded name the file is listed as unused under
+      it; if one does, the entry cannot be extracted under that name and is
+      refused, with a hint to re-create the archive with UTF-8 names.
+
+  - id: LIM-016
+    title: Files are matched by base name
+    affects: [REQ-CONT-009]
+    reference: R/loadDelivery.R (dta_delivery_resolve_duplicates)
+    consequence: >
+      Folders inside an archive are not part of matching. Two files of one
+      delivery with the same name in different folders (site1/ae.csv and
+      site2/ae.csv, or two define.xml files of an eCTD package) cannot both be
+      loaded into the entry that names them: with on_error = "abort" the
+      delivery is refused, with on_error = "skip" (the application) both are
+      refused and the rest is loaded.

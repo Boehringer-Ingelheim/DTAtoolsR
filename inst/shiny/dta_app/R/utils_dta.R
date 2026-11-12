@@ -407,6 +407,13 @@ handler_endings <- function(h) {
   if (is.null(ext) || length(ext) == 0) "" else paste(ext, collapse = ", ")
 }
 
+# The .zip / .xpt a handler's file arrives inside ("sdtm_*.zip"), or "" when the
+# entry declares none -- or is an object that predates the property.
+handler_container <- function(h) {
+  ct <- tryCatch(h@container, error = function(e) NULL)
+  if (is.null(ct)) "" else ct
+}
+
 handler_hint <- function(h) {
   pd <- tryCatch(h@pattern_description, error = function(e) NULL)
   info <- tryCatch(h@info, error = function(e) NULL)
@@ -466,6 +473,14 @@ dta_stage_upload <- function(datapath, filename) {
     },
     error = function(e) datapath
   )
+}
+
+# Is a dropped file a delivery container? A .zip archive, or a SAS transport
+# file (.xpt, optionally gzip-compressed). Restates the package's internal
+# dta_container_kind() rule: the app does not call package internals (same
+# reason as dta_bound_item_name() below).
+dta_is_container_name <- function(name) {
+  grepl("\\.zip$|\\.xpt(\\.gz)?$", basename(as.character(name)), ignore.case = TRUE)
 }
 
 # List the data files bundled in inst/extdata that can populate an upload slot,
@@ -2516,10 +2531,12 @@ dta_yaml_blank_lines <- function(text, max_depth = 3L) {
   res
 }
 
-# Recover a handler's file-type token ("csv" / "tsv" / "sas7bdat" / "any") from
-# its S7 class. The SAS branch must come before the csv fallback: a
-# DTAFileSAS7BDAT is not tabular, and without its own token it would be saved
-# as `type: csv` and read back as a delimited-text handler.
+# Recover a handler's file-type token ("csv" / "tsv" / "sas7bdat" / "xpt" /
+# "any") from its S7 class. The SAS branches must come before the csv fallback:
+# a DTAFileSAS7BDAT is not tabular, and without its own token it would be saved
+# as `type: csv` and read back as a delimited-text handler. The transport
+# branch must come before the SAS one: DTAFileXPT extends DTAFileSAS7BDAT, so
+# testing the parent first would save every `type: xpt` entry as `sas7bdat`.
 #
 # KNOWN GAP, not reachable from the app: a DTAFileDelim reports "csv", which
 # discards its `sep`. DTAFileFactory() -- the only route from a document back to
@@ -2532,6 +2549,9 @@ dta_yaml_blank_lines <- function(text, max_depth = 3L) {
 dta_handler_type <- function(h) {
   if (inherits(h, "DTAtools::DTAFileAny")) {
     return("any")
+  }
+  if (inherits(h, "DTAtools::DTAFileXPT")) {
+    return("xpt")
   }
   if (inherits(h, "DTAtools::DTAFileSAS7BDAT")) {
     return("sas7bdat")
@@ -2646,6 +2666,8 @@ dta_handler_to_list <- function(h) {
   if (!is.null(pd) && length(pd) > 0 && any(nzchar(pd))) out$pattern_description <- pd
   info <- tryCatch(h@info, error = function(e) NULL)
   if (!is.null(info) && length(info) > 0) out$info <- info
+  ct <- handler_container(h)
+  if (nzchar(ct)) out$container <- ct
   ext <- tryCatch(h@extensions, error = function(e) NULL)
   if (!is.null(ext) && length(ext) > 0) {
     out$extensions <- if (length(ext) == 1) ext else as.list(ext)
@@ -3389,15 +3411,15 @@ dta_move_rule <- function(dta, dataset, index, direction) {
 # happens, and invite a user to declare a PDF or an archive as something it is
 # not.
 #
-# A TABULAR dataset is offered csv, tsv and sas7bdat, deliberately narrower than
-# the DTAFile class tree: DTAFileFactory() -- the only route from a YAML
-# document back to an object -- implements those three and `any`, so offering
-# `delim` would create a handler that cannot be read back.
+# A TABULAR dataset is offered csv, tsv, sas7bdat and xpt, deliberately
+# narrower than the DTAFile class tree: DTAFileFactory() -- the only route from
+# a YAML document back to an object -- implements those four and `any`, so
+# offering `delim` would create a handler that cannot be read back.
 dta_handler_types <- function(dataset_type = "tabular") {
   if (identical(dataset_type, "file")) {
     "any"
   } else {
-    c("csv", "tsv", "sas7bdat")
+    c("csv", "tsv", "sas7bdat", "xpt")
   }
 }
 
@@ -3421,6 +3443,7 @@ dta_handlers_overview <- function(dta, dataset) {
     data.frame(
       filename = handler_expected(h),
       type = dta_handler_type(h),
+      container = handler_container(h),
       pattern = if (handler_is_pattern(h)) "yes" else "no",
       files = handler_count_label(h),
       endings = handler_endings(h),
@@ -3505,6 +3528,7 @@ dta_handler_fields <- function(dta, dataset, index) {
     pattern_description = tryCatch(h@pattern_description, error = function(e) NULL) %||% "",
     info = paste(.dta_info_to_lines(info), collapse = "\n"),
     extensions = paste(tryCatch(h@extensions, error = function(e) NULL) %||% character(0), collapse = ", "),
+    container = handler_container(h),
     # Every reader setting the handler carries, in one nested list rather than
     # one field each. The form has controls for two of them; the rest are
     # invisible in the editor and are handed straight back to dta_set_handler()
@@ -3527,7 +3551,7 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
                             number_of_files = 1, min_number_of_files = 1,
                             max_number_of_files = 1, pattern_description = NULL,
                             info = NULL, extensions = NULL, dataset_type = "tabular",
-                            reader_settings = list()) {
+                            reader_settings = list(), container = NULL) {
   dta_try({
     # One name or pattern per line, so a multi-name handler survives the
     # fields -> form -> set round trip as several names rather than one.
@@ -3628,6 +3652,12 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
       is.null(v) || length(v) == 0 || (is.character(v) && !nzchar(v[1]))
     }, logical(1))]
     factory_args <- c(factory_args, settings)
+
+    # The .zip / .xpt the file is delivered inside; blank means "none". A value
+    # the class refuses (a path, another extension) fails in the DTAFile
+    # constructor, and its sentence comes back through dta_try() as the error.
+    ct <- trimws(as.character(container %||% "")[1])
+    if (!is.na(ct) && nzchar(ct)) factory_args$container <- ct
 
     handler <- do.call(DTAtools::DTAFileFactory, factory_args)
 
@@ -4160,4 +4190,209 @@ dta_export_stem <- function(dta, when = Sys.time()) {
   }
 
   paste0(base, "-v", ver_safe, "-", stamp)
+}
+
+# ---- Container deliveries ---------------------------------------------------
+# A delivery is one drop that holds a .zip or .xpt (loose files next to them are
+# routed with it): DTAtools::load_delivery() matches every file, and every file
+# inside an archive, to the dataset entries that name it. The helpers below
+# keep the app's limits, the extracted files on disk and the wording around
+# that one call.
+
+# Load a delivery into a copy of `dta`, under the app's own limits, for this
+# call only: they are never set for the R session, so a run_dta_app() inside a
+# user's session leaves its options alone. `bytes_left` is the session's room
+# for extracted files, `held` the bytes of extracted files it already holds.
+dta_load_delivery <- function(dta, paths, exdir, bytes_left, held = 0) {
+  # TRUE when the session's remaining room, not the app's cap, is the byte
+  # limit of this call AND the session holds extracted files it could free:
+  # dta_app_reason() then names the remedy the user has. With nothing held (a
+  # small session budget set by the administrator) neither remedy exists, so
+  # the refusal names the administrator's limit instead.
+  budget_limited <- held > 0 && bytes_left < getOption("DTAtools.container_max_bytes", 1e10)
+  op <- options(
+    DTAtools.container_max_bytes = min(getOption("DTAtools.container_max_bytes", 1e10), bytes_left),
+    DTAtools.container_max_member_bytes = getOption("DTAtools.container_max_member_bytes", 2e9)
+  )
+  on.exit(options(op), add = TRUE)
+  missing <- character(0)
+  res <- dta_try(withCallingHandlers(
+    DTAtools::load_delivery(dta, files = paths, exdir = exdir, on_error = "skip"),
+    warning = function(w) if (inherits(w, "dta_delivery_refused")) invokeRestart("muffleWarning"),
+    message = function(m) {
+      if (inherits(m, "dta_delivery_summary")) missing <<- m$missing %||% character(0)
+      if (inherits(m, c("dta_delivery_summary", "dta_sas7bdat_in_memory"))) invokeRestart("muffleMessage")
+    }
+  ))
+  res$missing <- missing
+  res$budget_limited <- budget_limited
+  res
+}
+
+# The most bytes of extracted deliveries one session may hold, from the
+# environment variable DTATOOLS_SESSION_DELIVERY_BYTES (default 2e10). A value
+# that is not a positive number, 0 included, means the default.
+dta_session_delivery_budget <- function() {
+  b <- suppressWarnings(as.numeric(Sys.getenv("DTATOOLS_SESSION_DELIVERY_BYTES", "2e10")))
+  if (is.na(b) || b <= 0) 2e10 else b
+}
+
+# Bytes of every file below those of `dirs` that are delivery directories
+# ("dta_upload_delivery_*"); staged uploads ("dta_upload_<random>") do not
+# count. Called after dta_delivery_cleanup(), it counts exactly the files the
+# upload records name. na.rm: a file deleted between listing and sizing must
+# not turn the budget into NA.
+dta_session_delivery_bytes <- function(dirs) {
+  dirs <- dirs[startsWith(basename(dirs), "dta_upload_delivery_")]
+  files <- list.files(dirs, recursive = TRUE, full.names = TRUE, all.files = TRUE)
+  sum(file.size(files), na.rm = TRUE)
+}
+
+# Deletes every file under the session's delivery directories that no upload
+# record names as its `path`, then every delivery directory left without a
+# file. The unit of bookkeeping is the bound file, not the delivery directory:
+# one delivery can fill several datasets, and removing or discarding the files
+# of one of them must free exactly those files. On Windows a file an Arrow scan
+# still holds is not deleted; the 24-hour sweep is the fallback.
+dta_delivery_cleanup <- function(dirs, uploads) {
+  dirs <- dirs[startsWith(basename(dirs), "dta_upload_delivery_")]
+  paths <- unlist(lapply(unlist(uploads, recursive = FALSE), `[[`, "path"), use.names = FALSE)
+  keep <- normalizePath(as.character(paths), winslash = "/", mustWork = FALSE)
+  files <- list.files(dirs, recursive = TRUE, full.names = TRUE, all.files = TRUE)
+  unlink(files[!normalizePath(files, winslash = "/", mustWork = FALSE) %in% keep])
+  for (d in dirs) {
+    if (!length(list.files(d, recursive = TRUE, all.files = TRUE))) unlink(d, recursive = TRUE)
+  }
+  invisible()
+}
+
+# The delivery directories ("dta_upload_delivery_*" directly below `base`) that
+# the `path` of an upload record lies under. A restored session re-reads files
+# from them, so it must own them again: the 24-hour sweep spares what a live
+# session owns, and cleanup and the budget only look at owned directories. A
+# record naming a path anywhere else (a staged upload, a forged session file)
+# yields nothing.
+dta_delivery_roots <- function(uploads, base = tempdir()) {
+  paths <- unlist(lapply(unlist(uploads, recursive = FALSE), `[[`, "path"), use.names = FALSE)
+  paths <- as.character(paths)
+  paths <- paths[!is.na(paths) & nzchar(paths)]
+  norm <- function(p) normalizePath(p, winslash = "/", mustWork = FALSE)
+  roots <- vapply(norm(paths), function(p) {
+    while (!startsWith(basename(p), "dta_upload_delivery_") && dirname(p) != p) p <- dirname(p)
+    p
+  }, character(1), USE.NAMES = FALSE)
+  roots <- roots[startsWith(basename(roots), "dta_upload_delivery_") & dirname(roots) == norm(base)]
+  unique(roots)
+}
+
+# The rows of a delivery plan that would replace a table already loaded:
+# data frame with the columns `dataset` and `item`, zero rows when none.
+dta_delivery_replaced <- function(dta, plan) {
+  loaded <- plan[plan$status == "loaded", , drop = FALSE]
+  hit <- vapply(seq_len(nrow(loaded)), function(i) {
+    loaded$item[i] %in% dta_dataset_table_names(dta_get_dataset(dta, loaded$dataset[i]))
+  }, logical(1))
+  data.frame(dataset = loaded$dataset[hit], item = loaded$item[hit], stringsAsFactors = FALSE)
+}
+
+# The one notification a committed delivery shows, as list(type, text). Plain
+# text: Shiny escapes it.
+dta_delivery_note <- function(plan, n_replaced = 0L, missing = character(0), budget_limited = FALSE) {
+  cap <- function(v, sep = ", ") {
+    if (length(v) > 5) paste0(paste(v[1:5], collapse = sep), ", and ", length(v) - 5, " more") else paste(v, collapse = sep)
+  }
+  why <- function(rows) {
+    paste0(rows$name, " (", vapply(rows$reason, dta_app_reason, character(1), budget_limited = budget_limited, USE.NAMES = FALSE), ")")
+  }
+  loaded <- plan[plan$status == "loaded", , drop = FALSE]
+  text <- sprintf(
+    "%s: loaded %d file(s) into %d dataset(s)",
+    paste(unique(plan$delivered), collapse = ", "), nrow(loaded), length(unique(loaded$dataset))
+  )
+  if (n_replaced > 0) text <- paste0(text, sprintf(" (%d replaced)", n_replaced))
+  text <- paste0(text, ".")
+  if (length(missing) > 0) text <- paste0(text, " Not in the delivery: ", cap(missing), ".")
+  unused <- plan[plan$status == "unused", , drop = FALSE]
+  if (nrow(unused) > 0) {
+    shown <- ifelse(
+      is.na(unused$reason) | unused$reason == "matches no file entry of the specification",
+      unused$name, paste0(unused$name, " (", unused$reason, ")")
+    )
+    text <- paste0(text, " Not used: ", cap(shown), ".")
+  }
+  refused <- plan[plan$status == "refused", , drop = FALSE]
+  if (nrow(refused) > 0) text <- paste0(text, " Refused: ", cap(why(refused), "; "), ".")
+  # An archive bound as a file whose contents could not be opened (skip mode):
+  # the file loaded, nothing inside it was checked.
+  failed <- plan[plan$status == "opened" & !is.na(plan$reason), , drop = FALSE]
+  failed$reason <- sub("^could not be opened: ", "", failed$reason)
+  if (nrow(failed) > 0) text <- paste0(text, " Could not open: ", cap(why(failed), "; "), ".")
+  # A deliverable archive kept closed because a `type: any` entry takes it as
+  # one file: loaded, its contents unchecked.
+  kept <- unique(loaded$name[!is.na(loaded$reason) & startsWith(loaded$reason, "kept as one file")])
+  if (length(kept) > 0) {
+    text <- paste0(text, " Kept closed: ", cap(kept), " (a deliverable; to have its files checked, name it as the container of their entries).")
+  }
+  text <- paste0(text, " Run Check to validate.")
+  list(type = if (nrow(refused) + nrow(failed) > 0) "warning" else "message", text = text)
+}
+
+# The one place a package message that names an R option is turned into app
+# wording. It rewrites only the phrases that name an option, so everything else
+# (file names, the sizes, the other reasons of a failed delivery) is kept. cli
+# wraps long lines, so a phrase may span a line break: the text is judged as one
+# line.
+dta_app_reason <- function(text, budget_limited = FALSE) {
+  if (!grepl("DTAtools.container_", text, fixed = TRUE)) {
+    return(text)
+  }
+  app <- "it is larger than this application accepts; deliver it in smaller parts or ask the application's administrator to raise the limit."
+  # The byte limit is the session's remaining room when that is the smaller one.
+  room <- if (budget_limited) {
+    "it is larger than the room this session has left for extracted deliveries; remove or discard files loaded from a delivery and drop again, or use Start over."
+  } else {
+    app
+  }
+  text <- gsub("\\s+", " ", text)
+  # The R hint goes, with its bullet symbol.
+  text <- gsub("\\S+ Raise the limit with `options\\(.*?\\)` in R if this delivery is genuine\\.", "", text, perl = TRUE)
+  text <- gsub("it exceeds `DTAtools.container_max_bytes`.", room, text, fixed = TRUE)
+  # One file over the cap cannot be delivered "in smaller parts".
+  text <- gsub(
+    "it exceeds `DTAtools.container_max_member_bytes`.",
+    "it is larger than this application accepts for one file; load it in R with load_delivery(), or ask the application's administrator to raise the limit.",
+    text,
+    fixed = TRUE
+  )
+  # More entries than the cap: smaller parts do cure it, but it is not a size.
+  text <- gsub(
+    "it exceeds `DTAtools.container_max_members`.",
+    "it holds more files than this application accepts; deliver it in smaller parts or ask the application's administrator to raise the limit.",
+    text,
+    fixed = TRUE
+  )
+  # Smaller parts do not cure a compression ratio.
+  text <- gsub(
+    "it exceeds `DTAtools.container_max_ratio`.",
+    "it is compressed far more than any genuine delivery and is refused as unsafe.",
+    text,
+    fixed = TRUE
+  )
+  text <- gsub("it exceeds `DTAtools\\.container_[a-z_]+`\\.", app, text)
+  # The routing's own reason for a member over the cap.
+  text <- gsub("than DTAtools\\.container_[a-z_]+ \\(([^)]*)\\)", "than this application accepts (\\1 bytes)", text)
+  trimws(text)
+}
+
+# The elements of `uploads` whose key's dataset is a file dataset of `dta`. Only
+# those extracted files outlive a session: "Restore previous session" re-reads
+# file datasets from their files, while tables come back from the autosave's
+# own copies.
+dta_file_dataset_uploads <- function(dta, uploads) {
+  keys <- names(uploads) %||% character(0)
+  is_file <- vapply(keys, function(k) {
+    id <- sub("\\|\\|.*$", "", k)
+    identical(tryCatch(dta_get_dataset(dta, id)@type, error = function(e) NA), "file")
+  }, logical(1), USE.NAMES = FALSE)
+  uploads[is_file]
 }

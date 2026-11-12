@@ -96,6 +96,7 @@ DTA                              ← top-level agreement container
     |   |   ├── DTAFileTSV           number of files, etc ..
     |   |   ├── DTAFileDelim
     |   |   └── DTAFileSAS7BDAT
+    │   │       ├── DTAFileXPT
     │   │       └── read_file()  → Arrow Table
     |   |
     │   ├── specs (DTAColumnSpecCollection)  ← column-level specs +
@@ -1201,6 +1202,114 @@ What the reader does with a SAS dataset:
   at garbage collection. The `.sas7bcat` format catalog is not read; ship it as
   a `type: file` deliverable.
 
+## Deliveries in a .zip or a SAS Transport Library {#containers}
+
+A delivery often arrives as one `.zip`, or as one SAS transport library
+(`.xpt`) holding several datasets. `load_delivery()` takes either, loose files,
+or a mix, and routes every file by name to the datasets whose file entries
+match it, exactly as if the files had been delivered loose. The example below
+puts the CSV file of the bundled clinical specification into a zip and loads the
+zip. The `last_delivery` attribute records what became of every file: loaded,
+opened (a container that was expanded), unused, ignored or refused.
+
+```{r delivery-zip}
+spec <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+dta <- read_dta_from_yaml(spec)
+
+# A delivery zip holding the data file.
+csv <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+zipfile <- file.path(tempdir(), "delivery.zip")
+zip::zip(zipfile, files = csv, mode = "cherry-pick")
+
+dta <- load_delivery(dta, zipfile)
+attr(dta, "last_delivery")[, c("name", "dataset", "status")]
+checked <- check(dta, quiet = TRUE, persist = FALSE)
+validation_status(datasets(checked, "clinical_data"))$ok
+
+# The same call takes the loose file.
+dta2 <- load_delivery(read_dta_from_yaml(spec), csv)
+names(tables(datasets(dta2, "clinical_data")))
+```
+
+Validation results name the dataset and table; for a table read into memory the
+validation report does not name the zip it came from, while `last_delivery`
+above does.
+
+A SAS transport library holds several datasets in one file. It is split into one
+file per member, named after the member in lower case: member `AE` is offered as
+`ae.xpt`, which a file entry `DTAFileXPT("ae.xpt")` (`type: xpt` in YAML) takes.
+The library below is one of the fixtures of the qualification suite and holds
+the members `AE`, `DM` and `VS`.
+
+```{r delivery-library}
+empty <- DTAColumnSpecCollection(columns = list())
+xpt_dta <- DTA(datasets = list(
+  DTADataSetTabular(id = "ae", specs = empty, files = list(DTAFileXPT("ae.xpt"))),
+  DTADataSetTabular(id = "dm", specs = empty, files = list(DTAFileXPT("dm.xpt"))),
+  DTADataSetTabular(id = "vs", specs = empty, files = list(DTAFileXPT("vs.xpt")))
+))
+library_file <- system.file("qualification", "fx", "container", "sdtm.xpt", package = "DTAtools")
+xpt_dta <- load_delivery(xpt_dta, library_file)
+attr(xpt_dta, "last_delivery")[, c("name", "member", "dataset", "status")]
+```
+
+Nothing has to be declared for a container: a specification that declares
+`clinical_data.csv` already takes that file from inside any zip passed to
+`load_delivery()`. A file entry may nevertheless say where its file must come
+from, with `container`; the entry then takes only files that came out of a
+container with a matching name (`*` and `?` are wildcards, and letter case must
+match). A file delivered loose is not used by such an entry, and is listed as
+unused with the container it expects.
+
+A `.zip` or `.xpt` that a `type: any` entry takes as a deliverable, by its name
+or because its `extensions` list `zip` or `xpt`, stays one file and is not
+opened, unless an entry declares it as its `container`; the load summary says
+"kept as one file" for it.
+
+```{r delivery-container}
+strict <- DTA(datasets = list(DTADataSetTabular(
+  id = "clinical_data", specs = DTAColumnSpecCollection(columns = list()),
+  files = list(DTAFileCSV("clinical_data.csv", container = "delivery.zip"))
+)))
+plan <- tryCatch(load_delivery(strict, csv), dta_delivery_nothing_loaded = function(e) e$plan)
+plan[, c("name", "status", "reason")]
+strict <- load_delivery(strict, zipfile)
+names(tables(datasets(strict, "clinical_data")))
+unlink(zipfile)
+```
+
+In a specification the same declaration is one more line on the file entry
+(columns omitted); quote a value that starts with `*` or contains ` #`, as in
+`container: "*_SDTM.zip"`:
+
+```yaml
+datasets:
+  - id: ae
+    type: tabular
+    name: Adverse events
+    files:
+      filename: ae.csv
+      type: csv
+      container: sdtm.zip
+  - id: dm
+    type: tabular
+    name: Demographics
+    files:
+      filename: dm.csv
+      type: csv
+      container: sdtm.zip
+```
+
+An archive is refused, before anything is extracted, when an entry name is
+absolute, climbs out with `..` or uses a drive letter, when an entry is a
+symbolic link or is encrypted, when two entries have the same name once letter
+case is ignored, and when it holds more entries or bytes than the limits
+allow. An entry whose name only cannot be written on some file systems (a
+device name, a colon, a character Windows does not allow) is skipped when
+nothing asks for it and refuses the archive when something does. A member whose
+extracted size differs from the size the archive declares is stopped and
+removed.
+
 ## Validating a File Too Large to Load
 
 Everything above reads the data into memory before checking it. For a file
@@ -1411,8 +1520,8 @@ unlink(stream_path)
 ## File-based Workflow
 
 When the DTA defines expected files, use `DTAFileCSV` (or `DTAFileTSV`,
-`DTAFileDelim`, or `DTAFileSAS7BDAT` for a SAS dataset) as file handlers inside
-the dataset. The `read_file()` function
+`DTAFileDelim`, `DTAFileSAS7BDAT` for a SAS dataset, or `DTAFileXPT` for a SAS
+transport file) as file handlers inside the dataset. The `read_file()` function
 reads data through the handler, returning an Arrow Table you can pass directly
 to `DTADataSetTabular`.
 
@@ -1534,11 +1643,11 @@ a file dataset accept a PDF, an archive or raw instrument output without
 pretending it is a table.
 
 Its optional `extensions` restricts which endings are accepted. The list is
-**open**, so a delivery of `.xpt`, `.sas7bcat` or `.e2b` files needs no change to
+**open**, so a delivery of `.sas7bcat` or `.e2b` files needs no change to
 this package, and the restriction is applied when the file is offered rather than
 at validation time. To validate the *contents* of a `.sas7bdat`, use
 `DTAFileSAS7BDAT` (`type: sas7bdat`) in a tabular dataset instead — see
-[SAS Datasets](#sas-datasets).
+[SAS Datasets](#sas-datasets). To validate a `.xpt`, use `type: xpt`.
 
 ```{r dataset_file_load}
 ds_declared <- DTADataSetFile(
@@ -2375,6 +2484,7 @@ datasets:
 | `DTAFileTSV`              | TSV file handler for `read_file()`                          |
 | `DTAFileDelim`            | Generic delimited-text file handler for `read_file()`        |
 | `DTAFileSAS7BDAT`         | SAS dataset (`.sas7bdat`) handler, read via haven, in memory only |
+| `DTAFileXPT`              | SAS transport (`.xpt`) handler, one dataset, read via haven, in memory only |
 | `DTAFileAny`              | Handler for a file that is never parsed; optional `extensions` |
 
 ### Key Functions
@@ -2386,6 +2496,7 @@ datasets:
 | `import_specs_from_yaml(file)` | Load bare column specs + rules from a standalone YAML     |
 | `columns_specs_from_word(file)` | Import column specs from a Word table                   |
 | `load_file(dta, dataset, file)` | Read a data file into a dataset using its YAML-defined handler |
+| `load_delivery(x, files, stream, on_error, exdir)` | Load loose files, `.zip` archives and SAS transport libraries into the datasets whose entries match them |
 | `read_file(handler, file)`  | Read a file using a file handler (`DTAFileCSV`, etc.)        |
 | `check(x, force, persist, quiet, …)` | Validate all datasets / tables; returns updated object |
 | `validate_file_stream(specs, path, …)` | Validate a delimited file by scanning it, without loading it |

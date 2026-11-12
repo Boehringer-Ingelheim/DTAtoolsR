@@ -8,6 +8,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- `load_delivery()` loads loose files, `.zip` archives and SAS transport
+  (`.xpt`) libraries in one call: every file is routed by name to the datasets
+  whose file entries match it, a library holding several datasets is split into
+  one file per dataset (member `AE` is offered as `ae.xpt`), and the result
+  carries a `last_delivery` table of what was loaded, opened, unused, ignored
+  or refused.
+- File type `xpt` (`DTAFileXPT`) reads a SAS transport file holding one dataset
+  through haven, normalised like a `.sas7bdat`, always in memory.
+- A file entry may declare `container: sdtm.zip` (`*` and `?` are wildcards,
+  e.g. `sdtm_*.zip`; letter case must match); `load_delivery()` then gives that
+  entry only files that came out of a matching container. Exported
+  specifications show it in a "Delivered In" column. A `.zip` or `.xpt` that a
+  `type: any` entry takes as a deliverable stays one file and is not opened,
+  unless an entry declares it as its container.
+- The app loads a `.zip` or `.xpt` dropped on any upload slot into every dataset
+  it belongs to, asks once before replacing loaded files, and its file editor
+  gains a "Delivered inside" field. Four options bound what one delivery may
+  extract or read into memory: `DTAtools.container_max_members`,
+  `DTAtools.container_max_bytes`, `DTAtools.container_max_member_bytes` and
+  `DTAtools.container_max_ratio`. In R the two byte limits default to `1e13`,
+  effectively off; the app sets its own, tighter ones. Extracting needs free
+  disk space for every member taken out, streamed or not.
 - `lint_template_repo()` checks a template repository: every
   `validate_template()` finding plus `folder_name_case`,
   `id_filename_mismatch` and `file_ignored`, printed one per line, and an
@@ -53,6 +75,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- `read_file()` and `open_file()` still refuse a `.zip`, and the message now
+  points to loading it as a delivery.
+- The specification lint reports file-entry keys a file type does not take
+  (`file_field_unknown`), a `container` written on a dataset
+  (`file_container_misplaced`) and an invalid container
+  (`file_container_invalid`).
+- `zip` 3.0.0 or later is required.
 - `export_with_template()` gains `overwrite` (default `FALSE`) and now aborts
   when `output` already exists, consistent with `write_dta()` and
   `export_column_value_table()`. Callers that relied on silent replacement must
@@ -217,6 +246,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Packaging: the unused `doconv` is dropped from `Suggests`, and a stray
   top-level markdown file is excluded from the tarball. `validation_status()`,
   `validation_errors()` and `as_json_schema_length()` gained runnable examples.
+
+### Security
+
+- Archives are inspected before anything is extracted, and refused as a whole
+  when an entry name is absolute, climbs out with `..` or uses a drive letter,
+  is a symbolic link or is encrypted, when two entries collide, or when the
+  archive exceeds the size limits; an entry whose name cannot be written on
+  some file systems (a device name, a colon, a character Windows does not
+  allow) refuses the archive when something needs it, saying so, and is
+  otherwise never extracted. Each needed entry is then extracted on its own
+  into a fresh directory. `zip::unzip()` does not refuse such names itself, and
+  writes absolute names below its target under their full path.
 
 ## [0.26.0] - 2026-11-07
 

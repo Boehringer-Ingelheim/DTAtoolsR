@@ -9,9 +9,9 @@
 #' @param specs A DTAColumnSpecCollection object specifying the column specs.
 #' @param files A list of DTAFile objects specifying input file information.
 #'   Every handler must inherit \code{DTAFileTabular} (for example
-#'   \code{DTAFileCSV} or \code{DTAFileTSV}) or be a \code{DTAFileSAS7BDAT},
-#'   because a tabular dataset parses its files; a reader-less handler is
-#'   rejected.
+#'   \code{DTAFileCSV} or \code{DTAFileTSV}) or be a \code{DTAFileSAS7BDAT} or
+#'   \code{DTAFileXPT}, because a tabular dataset parses its files; a
+#'   reader-less handler is rejected.
 #' @param tables A named list of tabular objects. A materialised entry
 #'   (data.frame or Arrow Table) is typed by `specs` and converted to an Arrow
 #'   Table before storage. A lazy entry (Arrow Dataset, `arrow_dplyr_query`, or
@@ -218,7 +218,7 @@ DTADataSetTabular <- S7::new_class(
         cli_abort(c(
           "A tabular dataset can only hold file handlers that can be read.",
           x = "Handler{?s} {.field {offending}} {?is/are} not tabular.",
-          i = "Use a {.cls DTAFileCSV}, {.cls DTAFileTSV} or {.cls DTAFileSAS7BDAT} here, or declare the dataset as {.code type: file} if its files are not parsed."
+          i = "Use a {.cls DTAFileCSV}, {.cls DTAFileTSV}, {.cls DTAFileSAS7BDAT} or {.cls DTAFileXPT} here, or declare the dataset as {.code type: file} if its files are not parsed."
         ))
       }
     }
@@ -848,9 +848,10 @@ method(print_short_info, DTADataSetTabular) <- function(x, ...) {
 #'       Loading under a name that is already bound drops that table's
 #'       validation state, so no report shows the replaced table's verdict.}
 #'     \item{stream}{whether to keep the file lazy rather than reading it into
-#'       memory. See \code{\link{load_file}}. A SAS dataset
-#'       (\code{\link{DTAFileSAS7BDAT}}) cannot be streamed: \code{"auto"} reads
-#'       it into memory with a message, and \code{"always"} is refused.}
+#'       memory. See \code{\link{load_file}}. A SAS dataset or transport file
+#'       (\code{\link{DTAFileSAS7BDAT}}, \code{\link{DTAFileXPT}}) cannot be
+#'       streamed: \code{"auto"} reads it into memory with a message, and
+#'       \code{"always"} is refused.}
 #'   }
 #' @return object of class DTADataSetTabular with loaded data
 #' @examples
