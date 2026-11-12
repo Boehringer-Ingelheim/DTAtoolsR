@@ -1145,3 +1145,22 @@ test_that("a reference to a file that was left outside its kind folder does not 
   expect_true("supplier_acme" %in% idx$id)
   expect_null(app_fn("template_index_resolver")(idx)("stray_party"))
 })
+
+test_that("a misplaced file is reported under a repository folder with a non-ASCII name", {
+  # list.files() returns native-encoded names; a radix sort refuses a
+  # non-ASCII one unless it is made UTF-8 first.
+  root <- file.path(withr::local_tempdir(), "J\u00fcrgen_repo")
+  dir.create(root)
+  setup_fixture(root)
+  writeLines(
+    c("kind: dta_party_profile", "id: stray_party", 'version: "1.0"', "role: supplier", "label: Stray"),
+    file.path(root, "templates", "stray_party.dta-party.yaml")
+  )
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+
+  expect_warning(idx <- app_fn("build_template_index")(), "belongs in parties/")
+  expect_true("supplier_acme" %in% idx$id)
+  expect_false("stray_party" %in% idx$id)
+})

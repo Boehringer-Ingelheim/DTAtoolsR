@@ -2036,3 +2036,193 @@ test_that("a template export to a path relative to the working directory lands t
   write_dta(dta, file = "viawrite.docx", template = template, quiet = TRUE)
   expect_identical(.docx_paragraphs(file.path(dir, "viawrite.docx")), expected)
 })
+
+# Regression (red-team E3): a vertical tab or form feed in an author's text
+# made libxml abort the whole built-in Word export ("PCDATA invalid Char").
+.ctrl_dta <- function(rule_description = "plain") {
+  yaml_file <- tempfile(fileext = ".yaml")
+  on.exit(unlink(yaml_file, force = TRUE), add = TRUE)
+  writeLines(c(
+    "metadata:",
+    "  title: \"Control characters\"",
+    "  version: \"0.1\"",
+    "  date: 2024-06-19",
+    "datasets:",
+    "  - id: ds",
+    "    type: tabular",
+    "    name: ds",
+    "    description: plain",
+    "    files:",
+    "      filename: \"x.csv\"",
+    "      number_of_files: 1",
+    "      type: \"csv\"",
+    "    columns:",
+    "      - id: NOTE",
+    "        label: Note",
+    "        type: SAS Char",
+    "        nullable: true",
+    "        description: free text",
+    "    rules:",
+    "      - id: r1",
+    "        type: col_condition",
+    paste0("        description: \"", rule_description, "\""),
+    "        condition:",
+    "          NOTE:",
+    "            equals: \"a\"",
+    "        then:",
+    "          NOTE:",
+    "            pattern: \"^a\""
+  ), yaml_file)
+  read_dta_from_yaml(yaml_file)
+}
+
+# The text of the document part: the surrounding text must survive, the
+# control characters (illegal in XML 1.0) must not.
+.docx_text <- function(dta) {
+  out_docx <- tempfile(fileext = ".docx")
+  exdir <- tempfile()
+  on.exit(unlink(c(out_docx, exdir), recursive = TRUE, force = TRUE), add = TRUE)
+  write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
+  utils::unzip(out_docx, "word/document.xml", exdir = exdir)
+  xml2::xml_text(xml2::read_xml(file.path(exdir, "word", "document.xml")))
+}
+
+test_that("write_dta docx survives control characters in a rule description", {
+  text <- .docx_text(.ctrl_dta("Rule\\vONE\\fTWO\\x1BTHREE"))
+  expect_true(grepl("RuleONETWOTHREE", gsub("\\s+", "", text), fixed = TRUE))
+  expect_false(grepl("[\x01-\x08\x0B\x0C\x0E-\x1F]", text, perl = TRUE))
+})
+
+test_that("write_dta docx survives control characters in a dataset description", {
+  dta <- .ctrl_dta()
+  dta@datasets[[1]]@description <- "Dataset\vFIRST\fSECOND\x01END"
+  text <- .docx_text(dta)
+  expect_true(grepl("DatasetFIRSTSECONDEND", gsub("\\s+", "", text), fixed = TRUE))
+  expect_false(grepl("[\x01-\x08\x0B\x0C\x0E-\x1F]", text, perl = TRUE))
+})
+
+# ---- E3 at the boundary: every author field, every Word entry point --------
+# An author's text reaches a Word part through dozens of sinks. `.xml_safe_deep()`
+# cleans it once where an export starts, so these tests put one control
+# character of each kind (vertical tab, form feed, SOH, ESC, U+FFFE) into every
+# kind of field and require each entry point to produce a document whose every
+# XML part parses and still carries the text around the control characters.
+
+.ctrl_dirty <- function(tag) {
+  paste0(tag, "\v", "a", "\f", "b", "\x01", "c", "\x1B", "d", "\uFFFE", "e")
+}
+
+.ctrl_tags <- c(
+  title = "TTL", version = "VER", receiver_name = "RCN", receiver_address = "RCA",
+  transmission_type = "TRT", transmission_frequency = "TRF",
+  section_title = "SCT", section_text = "SCX", dataset_name = "DSN",
+  dataset_description = "DSD", file_name = "FLN", column_label = "CLL",
+  column_description = "CLD", rule_description = "RLD"
+)
+
+.ctrl_all_dta <- function() {
+  dta <- read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
+  d <- .ctrl_dirty
+  dta@metadata@title <- d("TTL")
+  dta@metadata@version <- d("VER")
+  dta@metadata@receiver$contacts[[1]]$name <- d("RCN")
+  dta@metadata@receiver$contacts[[1]]$address <- d("RCA")
+  dta@metadata@transmission$type <- d("TRT")
+  dta@metadata@transmission$frequency <- d("TRF")
+  dta@metadata@sections <- list(scope = list(title = d("SCT"), text = d("SCX")))
+  ds <- dta@datasets[[1]]
+  ds@name <- d("DSN")
+  ds@description <- d("DSD")
+  ds@files[[1]]@filename <- d("FLN")
+  ds@specs@columns[[1]]@label <- d("CLL")
+  ds@specs@columns[[1]]@description <- d("CLD")
+  ds@specs@rules[[1]]@description <- d("RLD")
+  dta@datasets[[1]] <- ds
+  dta
+}
+
+# Whitespace-free text of every XML part of a .docx; an unparseable part is a
+# test failure, reported by name.
+.docx_all_text <- function(path) {
+  exdir <- tempfile()
+  on.exit(unlink(exdir, recursive = TRUE, force = TRUE), add = TRUE)
+  utils::unzip(path, exdir = exdir)
+  parts <- list.files(exdir, pattern = "\\.xml$", recursive = TRUE, full.names = TRUE)
+  texts <- vapply(parts, function(p) {
+    tryCatch(
+      xml2::xml_text(xml2::read_xml(p)),
+      error = function(e) {
+        testthat::fail(paste0("XML part does not parse: ", basename(p)))
+        ""
+      }
+    )
+  }, character(1))
+  gsub("\\s+", "", paste(texts, collapse = ""))
+}
+
+.expect_ctrl_survivors <- function(path, fields) {
+  expect_true(file.exists(path))
+  text <- .docx_all_text(path)
+  for (f in fields) {
+    expect_true(
+      grepl(paste0(.ctrl_tags[[f]], "abcde"), text, fixed = TRUE),
+      info = paste("field", f, "lost or corrupted")
+    )
+  }
+}
+
+test_that("write_dta docx survives control characters in every author field", {
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dta(.ctrl_all_dta(), out, format = "docx", quiet = TRUE)
+  .expect_ctrl_survivors(out, names(.ctrl_tags))
+})
+
+test_that("write_dataset_metadata docx survives control characters in every dataset field", {
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dataset_metadata(.ctrl_all_dta()@datasets[[1]], out, format = "docx", quiet = TRUE)
+  .expect_ctrl_survivors(
+    out,
+    c(
+      "dataset_name", "dataset_description", "file_name", "column_label",
+      "column_description", "rule_description"
+    )
+  )
+})
+
+test_that("export_with_template survives control characters in every author field", {
+  tpl <- system.file("extdata", "word-templates", "clinical_dta_template.docx", package = "DTAtools")
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  suppressWarnings(
+    export_with_template(.ctrl_all_dta(), tpl, out, quiet = TRUE, fallback = FALSE)
+  )
+  .expect_ctrl_survivors(out, names(.ctrl_tags))
+})
+
+test_that("a dataset description alone, with control characters, exports", {
+  dta <- .ctrl_dta()
+  dta@datasets[[1]]@description <- .ctrl_dirty("DSD")
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dataset_metadata(dta@datasets[[1]], out, format = "docx", quiet = TRUE)
+  .expect_ctrl_survivors(out, "dataset_description")
+})
+
+test_that(".add_text_paragraphs cleans control characters itself", {
+  # Called directly: the boundary sanitiser upstream cannot mask a missing
+  # clean-up here.
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  doc <- DTAtools:::.add_text_paragraphs(officer::read_docx(), .ctrl_dirty("PAR"))
+  print(doc, target = out)
+  text <- .docx_all_text(out)
+  expect_true(grepl("PARabcde", text, fixed = TRUE))
+})
+
+test_that(".tv_split_word_chunks drops U+FFFE and U+FFFF like the other C0 controls", {
+  chunks <- DTAtools:::.tv_split_word_chunks(.ctrl_dirty("CHK"))
+  values <- paste(vapply(chunks, function(ch) ch$value, ""), collapse = "")
+  expect_identical(gsub("\\s+", "", values), "CHKabcde")
+})

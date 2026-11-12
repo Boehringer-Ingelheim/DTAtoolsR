@@ -105,6 +105,9 @@ dta_template_misplaced_files <- function(root) {
       }
     }
   }
+  # enc2utf8(): a radix sort refuses native-encoded non-ASCII paths (a
+  # repository under C:/Users/J\u00fcrgen), which list.files() returns.
+  files <- enc2utf8(files)
   ord <- order(files, method = "radix")
   data.frame(
     file = files[ord], kind = found[ord], expected_dir = want[ord],

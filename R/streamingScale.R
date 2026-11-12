@@ -365,6 +365,23 @@ dta_stream_unique_precompute <- function(specs, source, rules_list) {
           # Cast to int32 like the per-batch coercion. Acero refuses what R
           # would turn into NA ("1.5", out-of-range), which routes the rule to
           # the per-batch accumulator instead of grouping on a wrong key.
+          #
+          # Two inputs get past that refusal and disagree with R: INT32_MIN
+          # (R reserves it as NA_integer_) and hex text above 0x7FFFFFFF, which
+          # Arrow wraps (0xFFFFFFFF -> -1). Flag both on the raw text, in this
+          # same scan, so the verdict below can be withdrawn for the R path.
+          query <- dplyr::mutate(
+            query,
+            dplyr::across(
+              dplyr::all_of(int_cols),
+              ~ dplyr::if_else(
+                grepl("^[[:space:]]*[-+]?0[xX]", .x) |
+                  as.integer(.x) == -2147483648,
+                1L, 0L
+              ),
+              .names = ".r_differs_{.col}"
+            )
+          )
           query <- dplyr::mutate(
             query,
             dplyr::across(dplyr::all_of(int_cols), ~ as.integer(.x))
@@ -389,11 +406,23 @@ dta_stream_unique_precompute <- function(specs, source, rules_list) {
         # reaches R.
         agg <- dplyr::summarise(
           dplyr::group_by(query, dplyr::across(dplyr::all_of(cols))),
-          .n = dplyr::n(), .groups = "drop"
+          .n = dplyr::n(),
+          dplyr::across(dplyr::starts_with(".r_differs_"), ~ max(.x, na.rm = TRUE)),
+          .groups = "drop"
         )
         counts <- dplyr::collect(
-          dplyr::summarise(agg, dups = sum(.n) - dplyr::n(), total = sum(.n))
+          dplyr::summarise(
+            agg,
+            dups = sum(.n) - dplyr::n(), total = sum(.n),
+            dplyr::across(dplyr::starts_with(".r_differs_"), ~ max(.x, na.rm = TRUE))
+          )
         )
+        if (length(int_cols) > 0 &&
+          any(unlist(counts[paste0(".r_differs_", int_cols)]) > 0, na.rm = TRUE)) {
+          # Arrow and R read some key differently: let the per-batch path,
+          # which uses R, answer.
+          return(NULL)
+        }
         # dups equals sum(duplicated(df[cols])) exactly for these keys.
         n <- as.double(counts$dups[[1]])
 

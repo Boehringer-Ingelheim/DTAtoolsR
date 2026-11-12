@@ -389,6 +389,129 @@ test_that("a legacy-encoded name cannot be extracted and says why", {
   expect_false(dir.exists(d))
 })
 
+test_that("the not-stored-as-UTF-8 hint is for a name the library cannot find, not any other failure", {
+  # A non-ASCII name whose entry is damaged is found, then fails to inflate:
+  # blaming the name there would send the user after the wrong cause.
+  src <- withr::local_tempdir()
+  nm <- "\u00e4e.csv"
+  writeLines(strrep("USUBJID,AETERM
+S-001,HEADACHE
+", 20), file.path(src, nm), useBytes = TRUE)
+  z <- file.path(withr::local_tempdir(), "damaged.zip")
+  zip::zip(z, files = nm, root = src)
+  b <- readBin(z, "raw", file.size(z))
+  # Local header: 30 bytes plus the name (7 bytes in UTF-8); flip data inside.
+  b[30 + 7 + 5] <- as.raw(bitwXor(as.integer(b[30 + 7 + 5]), 0xFF))
+  writeBin(b, z)
+  entry <- dta_zip_inspect(z)
+  e <- expect_error(
+    dta_zip_extract(z, entry$entry, entry$size, file.path(withr::local_tempdir(), "d")),
+    class = "dta_container_corrupt"
+  )
+  expect_false(grepl("UTF-8", conditionMessage(e), fixed = TRUE))
+})
+
+
+# --- Entry names of 511 bytes or more -----------------------------------------
+# zip::zip_list() returns at most 511 bytes of a name, so a longer one arrives
+# cut, perhaps inside a multi-byte character. Real files of that length cannot be
+# created on Windows, so these archives are assembled from bytes: `base` (a zip
+# made by zip::zip, holding the entries that carry data) plus empty stored
+# entries called `names`.
+zip_with_empty_entries <- function(base, names, env = parent.frame()) {
+  b <- readBin(base, "raw", file.size(base))
+  u16 <- function(n) as.raw(c(n %% 256, n %/% 256))
+  u32 <- function(n) as.raw(c(n %% 256, (n %/% 256) %% 256, (n %/% 65536) %% 256, n %/% 16777216))
+  e <- length(b) - 21 # the end record: no comment, so it is the last 22 bytes
+  expect_identical(b[e:(e + 3)], as.raw(c(0x50, 0x4b, 0x05, 0x06)))
+  count <- as.numeric(b[e + 10]) + 256 * as.numeric(b[e + 11])
+  cd_size <- sum(as.numeric(b[e + 12:15]) * c(1, 256, 65536, 16777216))
+  cd_off <- sum(as.numeric(b[e + 16:19]) * c(1, 256, 65536, 16777216))
+  local <- b[seq_len(cd_off)]
+  central <- b[cd_off + seq_len(cd_size)]
+  for (nm in names) {
+    raw_name <- charToRaw(enc2utf8(nm))
+    header_at <- length(local)
+    local <- c(
+      local, as.raw(c(0x50, 0x4b, 0x03, 0x04)), u16(20), u16(0x0800), u16(0), u16(0), u16(0x21),
+      u32(0), u32(0), u32(0), u16(length(raw_name)), u16(0), raw_name
+    )
+    central <- c(
+      central, as.raw(c(0x50, 0x4b, 0x01, 0x02)), u16(20), u16(20), u16(0x0800), u16(0), u16(0),
+      u16(0x21), u32(0), u32(0), u32(0), u16(length(raw_name)), u16(0), u16(0), u16(0), u16(0),
+      u32(0), u32(header_at), raw_name
+    )
+  }
+  out <- c(
+    local, central, as.raw(c(0x50, 0x4b, 0x05, 0x06)), u16(0), u16(0),
+    u16(count + length(names)), u16(count + length(names)),
+    u32(length(central)), u32(length(local)), u16(0)
+  )
+  cont_write("long.zip", out, env = env)
+}
+ae_only_dta <- function() {
+  DTA(datasets = list(DTADataSetTabular(
+    id = "ae", specs = cont_specs("ae"), files = list(DTAFileFactory(type = "csv", filename = "ae.csv"))
+  )))
+}
+long_umlaut_name <- function() {
+  # 530 bytes; zip_list() cuts it after the first byte of an umlaut.
+  paste0("r/", strrep("\u00e4", 120), "/", strrep("\u00e4", 120), "/", strrep("\u00e4", 21), ".txt")
+}
+
+test_that("a name of 511 bytes or more beside a needed entry does not refuse the archive", {
+  nm <- long_umlaut_name()
+  expect_gt(nchar(nm, type = "bytes"), 511)
+  z <- zip_with_empty_entries(cont_zip(list(ae.csv = CONT_AE_CSV)), nm)
+  # Precondition: the library really hands back a name that is not valid text.
+  expect_false(all(validUTF8(zip::zip_list(z)$filename)))
+
+  ins <- dta_zip_inspect(z)
+  expect_length(ins$entry, 2)
+  long <- nchar(ins$entry, type = "bytes") >= 511
+  expect_identical(sum(long), 1L)
+  expect_match(ins$problem[long], "511 bytes or more", fixed = TRUE)
+  expect_true(is.na(ins$problem[!long]))
+
+  res <- suppressMessages(load_delivery(ae_only_dta(), z, on_error = "abort", exdir = withr::local_tempdir()))
+  expect_identical(nrow(cont_table(res, "ae", "ae")), 2L)
+})
+
+test_that("two long names that differ only after byte 511 are not duplicates", {
+  stem <- paste0(strrep("a", 200), "/", strrep("b", 200), "/", strrep("c", 150), "/")
+  z <- zip_with_empty_entries(
+    cont_zip(list(ae.csv = CONT_AE_CSV)), paste0(stem, c("one.txt", "two.txt"))
+  )
+  expect_identical(nrow(dta_zip_inspect(z)), 3L)
+  res <- suppressMessages(load_delivery(ae_only_dta(), z, on_error = "abort", exdir = withr::local_tempdir()))
+  expect_identical(nrow(cont_table(res, "ae", "ae")), 2L)
+})
+
+test_that("a needed entry whose name cannot be read in full refuses the archive, plainly", {
+  # Exactly 511 bytes ending in /ae.csv: the specification needs it.
+  dirs <- paste0(strrep("d", 200), "/", strrep("e", 200), "/", strrep("f", 102))
+  nm <- paste0(dirs, "/ae.csv")
+  expect_identical(nchar(nm, type = "bytes"), 511L)
+  z <- zip_with_empty_entries(cont_zip(list(x.txt = "x")), nm)
+  e <- expect_error(
+    suppressMessages(load_delivery(ae_only_dta(), z, on_error = "abort", exdir = withr::local_tempdir())),
+    class = "dta_container_unsafe_member"
+  )
+  expect_match(e$problems, "511 bytes or more", fixed = TRUE)
+  expect_false(grepl("would be unsafe", flat_message(e), fixed = TRUE))
+})
+
+test_that("a '..' hidden past byte 511 is never extracted", {
+  nm <- paste0(strrep("a", 200), "/", strrep("b", 200), "/", strrep("c", 150), "/z/../../../../evil_long.txt")
+  expect_gt(nchar(nm, type = "bytes"), 511)
+  z <- zip_with_empty_entries(cont_zip(list(ae.csv = CONT_AE_CSV)), nm)
+  root <- withr::local_tempdir()
+  ex <- file.path(root, "a", "b", "ex")
+  res <- suppressMessages(load_delivery(ae_only_dta(), z, on_error = "abort", exdir = ex))
+  expect_identical(nrow(cont_table(res, "ae", "ae")), 2L)
+  expect_length(list.files(root, "evil_long", recursive = TRUE, all.files = TRUE), 0)
+})
+
 # --- Transport files ----------------------------------------------------------
 
 test_that("dta_xpt_members lists every member of a V5 library in file order", {
@@ -769,14 +892,40 @@ test_that("a failed extraction removes what the container already extracted", {
   expect_false(dir.exists(d))
 })
 
-test_that("a member named like a Windows device is refused", {
+test_that("a member named like a Windows device is listed, read in place, and refused only when split", {
+  # The device name matters only where the member is written as <name>.xpt.
   p <- file.path(withr::local_tempdir(), "lib.xpt")
   haven::write_xpt(data.frame(USUBJID = "S-001"), p, version = 5, name = "CON")
-  e <- expect_error(dta_xpt_members(p), class = "dta_container_unsafe_member")
+  m <- dta_xpt_members(p)
+  expect_identical(m$member, "CON")
+  # Read in place: nothing is written, so the name is harmless.
+  expect_identical(
+    as.data.frame(read_file(DTAFileXPT("lib.xpt"), p))$USUBJID,
+    "S-001"
+  )
+
+  # A two-member library is split into files, and one of them would be CON.xpt.
+  lib <- sdtm_with_member_name(charToRaw("CON     "))
+  dest <- file.path(withr::local_tempdir(), "split")
+  e <- expect_error(
+    dta_xpt_split(lib, dta_xpt_members(lib), dest),
+    class = "dta_container_unsafe_member"
+  )
   expect_identical(e$problems, "uses a reserved Windows device name")
-  m <- flat_message(e)
-  expect_match(m, "cannot write", fixed = TRUE)
-  expect_false(grepl("would be unsafe", m, fixed = TRUE))
+  msg <- flat_message(e)
+  expect_match(msg, "cannot write", fixed = TRUE)
+  expect_false(grepl("would be unsafe", msg, fixed = TRUE))
+  expect_false(dir.exists(dest))
+
+  # Through load_delivery(), the same refusal once an entry wants that member.
+  want_con <- DTA(datasets = list(DTADataSetTabular(
+    id = "con", specs = cont_specs("ae"), files = list(DTAFileXPT("con.xpt"))
+  )))
+  e2 <- expect_error(
+    suppressMessages(load_delivery(want_con, lib, on_error = "abort", exdir = withr::local_tempdir())),
+    class = "dta_container_unsafe_member"
+  )
+  expect_identical(e2$problems, "uses a reserved Windows device name")
 })
 
 # --- Names reach cli text only as values, never as format strings -------------

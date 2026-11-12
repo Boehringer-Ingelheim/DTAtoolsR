@@ -101,10 +101,65 @@ NULL
   }
 }
 
+#' Author text made safe for a Word part: a vertical tab or form feed reads as a
+#' line break, and every other C0 control character (all but tab, LF, CR) is
+#' dropped, because XML 1.0 forbids them and libxml aborts the whole export
+#' on one. Mirrors `.tv_split_word_chunks()`, which does the same for templates.
+#' @keywords internal
+.xml_safe_text <- function(text) {
+  text <- gsub("[\v\f]", "\n", text, perl = TRUE)
+  # U+FFFE and U+FFFF are not XML characters either.
+  gsub(paste0("[\x01-\x08\x0E-\x1F", "\uFFFE\uFFFF", "]"), "", text, perl = TRUE)
+}
+
+#' `.xml_safe_text()` applied to every piece of text inside an object about to
+#' be written to Word: a DTA, a dataset, a list of template variables. Author
+#' text reaches a document through dozens of sinks (headings, every table, the
+#' contact blocks, template placeholders), so it is made safe once, where an
+#' export starts, instead of in each of them. Bound data (`tables`) and
+#' validation state are never written to a document and are left alone.
+#' @keywords internal
+.xml_safe_deep <- function(x, depth = 0L) {
+  if (depth > 50L) {
+    return(x)
+  }
+  if (is.character(x)) {
+    if (!isTRUE(any(grepl(paste0("[\x01-\x08\x0B\x0C\x0E-\x1F", "\uFFFE\uFFFF", "]"), x, perl = TRUE)))) {
+      return(x)
+    }
+    x[] <- .xml_safe_text(x) # x[] keeps names and other attributes
+    return(x)
+  }
+  if (S7::S7_inherits(x)) {
+    skip <- c("tables", "validation_store", "validation_index", "file_paths", "file_handlers")
+    for (p in setdiff(S7::prop_names(x), skip)) {
+      v <- tryCatch(S7::prop(x, p), error = function(e) NULL)
+      if (is.null(v)) next
+      nv <- .xml_safe_deep(v, depth + 1L)
+      if (!identical(v, nv)) {
+        # check = FALSE: only text changes, and a read-only property is skipped.
+        x <- tryCatch(
+          {
+            S7::prop(x, p, check = FALSE) <- nv
+            x
+          },
+          error = function(e) x
+        )
+      }
+    }
+    return(x)
+  }
+  if (is.data.frame(x) || (is.list(x) && !is.object(x))) {
+    x[] <- lapply(x, .xml_safe_deep, depth = depth + 1L)
+  }
+  x
+}
+
 #' Author text as paragraphs: a blank line separates two paragraphs, a single
 #' line break inside a paragraph stays a line break.
 #' @keywords internal
 .add_text_paragraphs <- function(doc, text) {
+  text <- .xml_safe_text(text)
   text <- gsub("\r\n|\r", "\n", text)
   paragraphs <- strsplit(paste0(text, "\n\n"), "\n\n", fixed = TRUE)[[1]]
   for (paragraph in paragraphs) {

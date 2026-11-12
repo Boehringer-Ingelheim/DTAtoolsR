@@ -82,6 +82,9 @@ FONT_SIZES <- list(
                           align = "left") {
   text <- if (is.null(text) || length(text) == 0) "" else as.character(text)[1]
   if (is.na(text)) text <- ""
+  # A control character (a YAML "\v" in a description) is not allowed in XML
+  # and would make officer write a document Word cannot open.
+  text <- .xml_safe_text(text)
 
   officer::body_add_fpar(
     doc,

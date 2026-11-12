@@ -1206,3 +1206,351 @@ test_that("the Replace dialog shows table names as text and names the dataset", 
     expect_false(grepl("<code>ae&amp;1</code>", dialog, fixed = TRUE))
   })
 })
+
+# ---- Two tabs of one browser (red-team D1) ------------------------------------
+# 'Restore previous session' in a second tab makes both sessions own the same
+# delivery directory; either one's cleanup used to delete files the other still
+# reads. testServer() cannot nest, so tab B is the app's server function run in
+# a second MockShinySession, exactly as testServer() itself drives one.
+# `first` is the first tab's session. Each source of the app gets its own copy
+# of the live-session registry, while real tabs share one R process and so one
+# registry: the second tab is pointed at the first's.
+second_tab <- function(client_id, first) {
+  srv <- shiny::shinyAppDir(app_server_dir())$serverFuncSource()
+  holder <- function(e) {
+    while (!exists(".dta_live_session_paths", envir = e, inherits = FALSE)) e <- parent.env(e)
+    e
+  }
+  assign(".dta_live_session_paths", get(".dta_live_session_paths", envir = holder(first$env)),
+    envir = holder(environment(srv))
+  )
+  s <- shiny::MockShinySession$new()
+  shiny::withReactiveDomain(s, srv(input = s$input, output = s$output, session = s))
+  s$setInputs(dta_client_id = client_id)
+  s$setInputs(restore_session = 1)
+  s
+}
+
+test_that("a second tab that restores the session does not lose the first tab's streamed table", {
+  clean_session_file()
+  withr::defer(unlink(list.files(tempdir(), "^dtatools_app_session", full.names = TRUE), recursive = TRUE, force = TRUE))
+  # Stand-in for a member over the 512 MB streaming threshold.
+  withr::local_options(DTAtools.stream_threshold = 10)
+  spec <- dv_spec()
+  zipf <- cont_zip(list(ae.csv = CONT_AE_CSV, dm.csv = CONT_DM_CSV), name = "sdtm.zip")
+  id <- strrep("a", 32)
+  root <- NULL
+  withr::defer(unlink(root, recursive = TRUE))
+  mock_notifications()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_client_id = id)
+    session$setInputs(dta_file = fi(spec, "spec.yaml"))
+    session$setInputs(up_1_1 = fi(zipf, "sdtm.zip"))
+    ae_path <- rv$uploads[["ae||1"]][[1]]$path
+    root <<- delivery_root(ae_path)
+    expect_true(file.exists(ae_path))
+
+    tab_b <- second_tab(id, session)
+    tab_b$close()
+    expect_true(file.exists(ae_path))
+    session$setInputs(check_all = 1)
+    expect_identical(unlist(rv$status), c(ae = "pass", dm = "pass"))
+    expect_true(file.exists(ae_path))
+  })
+})
+
+test_that("a second tab that restores the session does not lose the first tab's file dataset", {
+  clean_session_file()
+  withr::defer(unlink(list.files(tempdir(), "^dtatools_app_session", full.names = TRUE), recursive = TRUE, force = TRUE))
+  spec <- dv_yaml(c(
+    dv_header, dv_ae(), dv_dm,
+    "  - id: define",
+    "    type: file",
+    "    files: {filename: define.xml, type: any}"
+  ))
+  zipf <- cont_zip(list(ae.csv = CONT_AE_CSV, dm.csv = CONT_DM_CSV, define.xml = "<define/>\n"), name = "sdtm.zip")
+  id <- strrep("b", 32)
+  root <- NULL
+  withr::defer(unlink(root, recursive = TRUE))
+  mock_notifications()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_client_id = id)
+    session$setInputs(dta_file = fi(spec, "spec.yaml"))
+    session$setInputs(up_1_1 = fi(zipf, "sdtm.zip"))
+    def_path <- rv$uploads[["define||1"]][[1]]$path
+    root <<- delivery_root(def_path)
+
+    tab_b <- second_tab(id, session)
+    tab_b$setInputs(check_all = 1)
+    # Tab A drops its own define.xml; tab B still binds the same file.
+    fid <- get_file_id("define", 1L, "define.xml")
+    do.call(session$setInputs, stats::setNames(list(1), paste0("rmfile_", fid)))
+    expect_true(file.exists(def_path))
+    tab_b$close()
+  })
+})
+
+test_that("without a second tab, removing the delivery's last file still deletes it", {
+  clean_session_file()
+  withr::defer(unlink(list.files(tempdir(), "^dtatools_app_session", full.names = TRUE), recursive = TRUE, force = TRUE))
+  spec <- dv_yaml(c(
+    dv_header, dv_ae(),
+    "  - id: define",
+    "    type: file",
+    "    files: {filename: define.xml, type: any}"
+  ))
+  zipf <- cont_zip(list(ae.csv = CONT_AE_CSV, define.xml = "<define/>\n"), name = "sdtm.zip")
+  mock_notifications()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_client_id = strrep("c", 32))
+    session$setInputs(dta_file = fi(spec, "spec.yaml"))
+    session$setInputs(up_1_1 = fi(zipf, "sdtm.zip"))
+    def_path <- rv$uploads[["define||1"]][[1]]$path
+    fid <- get_file_id("define", 1L, "define.xml")
+    do.call(session$setInputs, stats::setNames(list(1), paste0("rmfile_", fid)))
+    expect_false(file.exists(def_path))
+  })
+})
+
+# ---- The slot maximum (red-team D3, D4) ---------------------------------------
+dv_max1 <- function(env = parent.frame()) {
+  dv_yaml(c(
+    dv_header,
+    dv_ae("{filename: 'ae_.*\\.csv$', type: csv, pattern: true, min_number_of_files: 1, max_number_of_files: 1}"),
+    dv_dm
+  ), env)
+}
+
+test_that("a stray file named like a bound table does not get around the slot maximum", {
+  clean_session_file()
+  spec <- dv_max1()
+  a1 <- cont_write("ae_1.csv", CONT_AE_CSV)
+  a2 <- cont_write("ae_2.csv", CONT_AE_CSV)
+  stray <- cont_write("ae_1.tsv", CONT_AE_CSV)
+  mock_notifications()
+  mock_modals()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = fi(spec, "spec.yaml"))
+    session$setInputs(up_1_1 = fi(a1, "ae_1.csv"))
+    session$setInputs(up_1_1 = rbind(fi(a2, "ae_2.csv"), fi(stray, "ae_1.tsv")))
+    expect_length(modals, 0) # no "Overwrite ae_1?" for a file that cannot bind
+    expect_true(grepl("accepts at most 1 file(s)", utils::tail(shown, 1), fixed = TRUE))
+    expect_identical(vapply(rv$uploads[["ae||1"]], `[[`, "", "file"), "ae_1.csv")
+  })
+})
+
+test_that("a delivery that overfills a slot says so in its note", {
+  clean_session_file()
+  spec <- dv_max1()
+  z <- cont_zip(
+    list("ae_1.csv" = CONT_AE_CSV, "ae_2.csv" = CONT_AE_CSV, "ae_3.csv" = CONT_AE_CSV),
+    name = "ae.zip"
+  )
+  mock_notifications()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = fi(spec, "spec.yaml"))
+    session$setInputs(up_1_1 = fi(z, "ae.zip"))
+    note <- utils::tail(shown, 1)
+    expect_true(grepl("ae (3 files, at most 1)", note, fixed = TRUE))
+  })
+
+  # The helper, on a document whose slot accepts one file.
+  dta <- DTAtools::DTA(
+    datasets = list(DTAtools::DTADataSetTabular(
+      id = "ae", specs = cont_specs("ae"),
+      files = list(DTAtools::DTAFileCSV(filename = "ae_.*[.]csv$", pattern = TRUE, max_number_of_files = 1))
+    )),
+    metadata = DTAtools::create_example_DTAMetaData()
+  )
+  recs <- function(n) lapply(seq_len(n), function(i) list(file = paste0("ae_", i, ".csv"), table = paste0("ae_", i)))
+  over <- app_fn("dta_slots_over_max")
+  expect_identical(over(dta, list("ae||1" = recs(1))), character(0))
+  expect_identical(over(dta, list("ae||1" = recs(3))), "ae (3 files, at most 1)")
+  note <- app_fn("dta_delivery_note")(plan_row("ae.csv", "loaded", dataset = "ae", item = "ae"), over = "ae (3 files, at most 1)")
+  expect_identical(note$type, "warning")
+  expect_true(grepl("ae (3 files, at most 1)", note$text, fixed = TRUE))
+})
+
+# ---- Restoring a streamed delivery table ----------------------------------------
+# A table held as a lazy Arrow dataset over the extracted CSV must survive the
+# session dump: the extracted files are deleted when the session ends.
+test_that("a streamed delivery table comes back after the session ends and is restored", {
+  clean_session_file()
+  withr::defer(unlink(list.files(tempdir(), "^dtatools_app_session", full.names = TRUE), recursive = TRUE, force = TRUE))
+  withr::local_options(DTAtools.stream_threshold = 10)
+  spec <- dv_spec()
+  zipf <- cont_zip(list(ae.csv = CONT_AE_CSV, dm.csv = CONT_DM_CSV), name = "sdtm.zip")
+  id <- strrep("d", 32)
+  mock_notifications()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_client_id = id)
+    session$setInputs(dta_file = fi(spec, "spec.yaml"))
+    session$setInputs(up_1_1 = fi(zipf, "sdtm.zip"))
+    session$setInputs(check_all = 1) # an autosave follows the delivery
+    session$close()
+  })
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_client_id = id)
+    session$setInputs(restore_session = 1)
+    ae <- DTAtools::tables(DTAtools::datasets(rv$dta, "ae"))[["ae"]]
+    expect_false(is.null(ae))
+    expect_identical(sort(as.data.frame(ae)$USUBJID), c("S-001", "S-002"))
+  })
+})
+
+# ---- file_handlers stays in step with file_paths (C2) ---------------------------
+test_that("removing one file of a file dataset keeps the other entry's recorded handler", {
+  dir <- withr::local_tempdir()
+  for (f in c("a.pdf", "b.txt")) writeLines("x", file.path(dir, f))
+  ds <- DTAtools::DTADataSetFile(id = "docs", files = list(
+    DTAtools::DTAFileAny("[.]pdf$", pattern = TRUE),
+    DTAtools::DTAFileAny("[.]txt$", pattern = TRUE)
+  ))
+  ds <- DTAtools::load_file(ds, file = file.path(dir, "a.pdf"), handler_index = 1)
+  ds <- DTAtools::load_file(ds, file = file.path(dir, "b.txt"), handler_index = 2)
+  expect_identical(ds@file_handlers, c(1L, 2L))
+  dta <- DTAtools::DTA(datasets = list(ds), metadata = DTAtools::create_example_DTAMetaData())
+
+  out <- app_fn("dta_unload_table")(dta, "docs", "a.pdf")$value
+  d2 <- DTAtools::datasets(out, "docs")
+  expect_identical(basename(d2@file_paths), "b.txt")
+  expect_identical(d2@file_handlers, 2L)
+
+  # Out of step: the record is dropped, never misaligned.
+  ds@file_handlers <- integer(0)
+  dta@datasets[["docs"]] <- ds
+  d3 <- DTAtools::datasets(app_fn("dta_unload_table")(dta, "docs", "a.pdf")$value, "docs")
+  expect_identical(d3@file_handlers, integer(0))
+
+  # In step again: unloading everything must reset the record, not keep it.
+  in_step <- DTAtools::load_file(DTAtools::DTADataSetFile(id = "docs", files = list(
+    DTAtools::DTAFileAny("[.]pdf$", pattern = TRUE)
+  )), file = file.path(dir, "a.pdf"), handler_index = 1)
+  expect_identical(in_step@file_handlers, 1L)
+  dta@datasets[["docs"]] <- in_step
+  d4 <- DTAtools::datasets(app_fn("dta_unload_all")(dta, "docs")$value, "docs")
+  expect_identical(d4@file_handlers, integer(0))
+})
+
+# ---- file_handlers follows the handlers when they move (round 2) -----------------
+# A pdf entry wanting exactly 2 files and a txt entry wanting exactly 1: if the
+# recorded indices still point at the old positions, check() counts the files
+# under the wrong entry and reports a count that is not there.
+fh_fixture <- function(env = parent.frame()) {
+  dir <- withr::local_tempdir(.local_envir = env)
+  for (f in c("a1.pdf", "a2.pdf", "b.txt")) writeLines("x", file.path(dir, f))
+  pdf <- DTAtools::DTAFileAny("[.]pdf$", pattern = TRUE, min_number_of_files = 2, max_number_of_files = 2)
+  txt <- DTAtools::DTAFileAny("[.]txt$", pattern = TRUE, min_number_of_files = 1, max_number_of_files = 1)
+  list(dir = dir, pdf = pdf, txt = txt)
+}
+fh_load <- function(ds, dir, ...) {
+  at <- c(...) # handler index for a1.pdf, a2.pdf, b.txt
+  for (i in 1:3) {
+    ds <- DTAtools::load_file(ds, file = file.path(dir, c("a1.pdf", "a2.pdf", "b.txt")[i]), handler_index = at[i])
+  }
+  ds
+}
+fh_dta <- function(ds) DTAtools::DTA(datasets = list(ds), metadata = DTAtools::create_example_DTAMetaData())
+fh_messages <- function(dta) {
+  x <- DTAtools::check(DTAtools::datasets(dta, "docs"), persist = FALSE, quiet = TRUE)
+  m <- as.data.frame(DTAtools::messages(x))
+  if (nrow(m)) unique(as.character(m[[intersect(c("message", "msg", "text"), names(m))[1]]])) else character(0)
+}
+
+test_that("moving a handler moves the recorded handler of its files with it", {
+  fx <- fh_fixture()
+  ds <- fh_load(DTAtools::DTADataSetFile(id = "docs", files = list(fx$pdf, fx$txt)), fx$dir, 1, 1, 2)
+  dta <- fh_dta(ds)
+  expect_identical(fh_messages(dta), character(0))
+
+  moved <- app_fn("dta_move_handler")(dta, "docs", 1, "down")$value
+  expect_identical(DTAtools::datasets(moved, "docs")@file_handlers, c(2L, 2L, 1L))
+  expect_identical(fh_messages(moved), character(0))
+})
+
+test_that("removing an empty first handler shifts the recorded handlers of the rest", {
+  fx <- fh_fixture()
+  empty <- DTAtools::DTAFileAny("[.]doc$", pattern = TRUE, min_number_of_files = 0, max_number_of_files = 1)
+  ds <- fh_load(DTAtools::DTADataSetFile(id = "docs", files = list(empty, fx$pdf, fx$txt)), fx$dir, 2, 2, 3)
+  dta <- fh_dta(ds)
+  expect_identical(fh_messages(dta), character(0))
+
+  removed <- app_fn("dta_remove_handler")(dta, "docs", 1)$value
+  expect_identical(DTAtools::datasets(removed, "docs")@file_handlers, c(1L, 1L, 2L))
+  expect_identical(fh_messages(removed), character(0))
+})
+
+test_that("removing a handler that holds files leaves those files unknown, not misattributed", {
+  fx <- fh_fixture()
+  ds <- fh_load(DTAtools::DTADataSetFile(id = "docs", files = list(fx$pdf, fx$txt)), fx$dir, 1, 1, 2)
+  removed <- app_fn("dta_remove_handler")(fh_dta(ds), "docs", 1)$value
+  expect_identical(DTAtools::datasets(removed, "docs")@file_handlers, c(NA, NA, 1L))
+})
+
+test_that("applying a YAML that reorders `files:` re-keys the recorded handlers", {
+  fx <- fh_fixture()
+  old_ds <- fh_load(DTAtools::DTADataSetFile(id = "docs", files = list(fx$pdf, fx$txt)), fx$dir, 1, 1, 2)
+  parsed <- fh_dta(DTAtools::DTADataSetFile(id = "docs", files = list(fx$txt, fx$pdf)))
+
+  tr <- app_fn("dta_transfer_bound_data")(parsed, "docs", old_ds, keep_validation = FALSE)$value
+  expect_identical(DTAtools::datasets(tr, "docs")@file_handlers, c(2L, 2L, 1L))
+  expect_identical(fh_messages(tr), character(0))
+
+  # A handler that no longer exists in the YAML leaves its files unknown.
+  gone <- fh_dta(DTAtools::DTADataSetFile(id = "docs", files = list(fx$txt)))
+  tr2 <- app_fn("dta_transfer_bound_data")(gone, "docs", old_ds, keep_validation = FALSE)$value
+  expect_identical(DTAtools::datasets(tr2, "docs")@file_handlers, c(NA, NA, 1L))
+})
+
+# ---- Start over in one tab leaves the other tab's delivery alone ------------------
+test_that("Start over in a second tab does not delete the files the first tab streams", {
+  clean_session_file()
+  withr::defer(unlink(list.files(tempdir(), "^dtatools_app_session", full.names = TRUE), recursive = TRUE, force = TRUE))
+  withr::local_options(DTAtools.stream_threshold = 10)
+  spec <- dv_spec()
+  zipf <- cont_zip(list(ae.csv = CONT_AE_CSV, dm.csv = CONT_DM_CSV), name = "sdtm.zip")
+  id <- strrep("e", 32)
+  root <- NULL
+  withr::defer(unlink(root, recursive = TRUE))
+  mock_notifications()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_client_id = id)
+    session$setInputs(dta_file = fi(spec, "spec.yaml"))
+    session$setInputs(up_1_1 = fi(zipf, "sdtm.zip"))
+    ae_path <- rv$uploads[["ae||1"]][[1]]$path
+    root <<- delivery_root(ae_path)
+
+    tab_b <- second_tab(id, session)
+    tab_b$setInputs(confirm_reset = 1)
+    expect_true(file.exists(ae_path))
+    session$setInputs(check_all = 1)
+    expect_identical(unlist(rv$status), c(ae = "pass", dm = "pass"))
+    tab_b$close()
+  })
+})
+
+test_that("without a second tab, Start over still deletes the delivery", {
+  clean_session_file()
+  withr::defer(unlink(list.files(tempdir(), "^dtatools_app_session", full.names = TRUE), recursive = TRUE, force = TRUE))
+  spec <- dv_spec()
+  zipf <- cont_zip(list(ae.csv = CONT_AE_CSV, dm.csv = CONT_DM_CSV), name = "sdtm.zip")
+  mock_notifications()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_client_id = strrep("f", 32))
+    session$setInputs(dta_file = fi(spec, "spec.yaml"))
+    session$setInputs(up_1_1 = fi(zipf, "sdtm.zip"))
+    root <- delivery_root(rv$uploads[["ae||1"]][[1]]$path)
+    expect_true(dir.exists(root))
+    session$setInputs(confirm_reset = 1)
+    expect_false(dir.exists(root))
+  })
+})

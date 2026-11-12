@@ -67,6 +67,13 @@ The option \code{DTAtools.container_max_member_bytes} bounds the size of the
 dataset this handler reads, and \code{DTAtools.container_max_bytes} bounds
 what a gzip-compressed file inflates to, whether it is read through
 \code{read_file()}, \code{load_file()} or \code{load_delivery()}.
+
+A transport file records no character encoding, so its text is read as UTF-8
+and a file holding other bytes is refused (deliver such a dataset as
+\code{.sas7bdat}, which records its encoding). Rows are counted from the
+file's own layout, so trailing all-blank text rows are kept; a V5 file whose
+rows are shorter than 80 bytes does not say how many it holds, and its
+trailing blank rows are lost.
 }
 \examples{
 handler <- DTAFileXPT(filename = "ae.xpt")

@@ -1569,3 +1569,141 @@ test_that("names with control characters print as escapes in the messages", {
   )
   expect_false(grepl("[[:cntrl:]]", gsub("\n", "", conditionMessage(e))))
 })
+
+# --- Review fixes (0.27.0) ------------------------------------------------------
+
+test_that("a loose file a literal entry holds back for its container is not taken by a pattern elsewhere", {
+  mk <- function() {
+    dta_of(
+      tab_ds("ae", list(DTAFileCSV("ae.csv", container = "sdtm.zip")), empty_specs()),
+      tab_ds("listings", list(DTAFileCSV("[.]csv$", pattern = TRUE)), empty_specs())
+    )
+  }
+  ae <- cont_write("ae.csv", CONT_AE_CSV)
+  lb <- cont_write("lb.csv", "USUBJID,LBTEST\nS-001,ALT\n")
+  d <- ld(mk(), c(ae, lb))
+  plan <- plan_of(d)
+  row <- plan[plan$name == "ae.csv", ]
+  expect_identical(row$status, "unused")
+  expect_true(grepl("expects it inside sdtm.zip", row$reason, fixed = TRUE))
+  expect_identical(names(tables(datasets(d, "listings"))), "lb")
+  expect_length(tables(datasets(d, "ae")), 0)
+
+  # The same name inside the container still goes to its dataset.
+  z <- cont_zip(list("ae.csv" = CONT_AE_CSV), name = "sdtm.zip")
+  d <- ld(mk(), c(z, lb))
+  loaded <- rows_of(plan_of(d), "loaded")
+  expect_identical(loaded$dataset[loaded$name == "ae.csv"], "ae")
+  expect_identical(names(tables(datasets(d, "listings"))), "lb")
+})
+
+# Regression (round-2 review): holding a file back for a literal entry's
+# container must not take it from a pattern entry whose OWN container holds it.
+test_that("a literal entry blocked by its container leaves a pattern entry of the right container its file", {
+  mk <- function() {
+    dta_of(
+      file_ds("sdtm_docs", DTAFileAny("define.xml", container = "sdtm.zip")),
+      file_ds("adam_docs", DTAFileAny("[.]xml$", pattern = TRUE, container = "adam.zip"))
+    )
+  }
+  sdtm <- cont_zip(list("define.xml" = "<sdtm/>"), name = "sdtm.zip")
+  adam <- cont_zip(list("define.xml" = "<adam/>"), name = "adam.zip")
+  d <- ld(mk(), c(sdtm, adam))
+  loaded <- rows_of(plan_of(d), "loaded")
+  expect_setequal(loaded$dataset[loaded$name == "define.xml"], c("sdtm_docs", "adam_docs"))
+  expect_identical(nrow(rows_of(plan_of(d), "unused")), 0L)
+  expect_true(attr(check(d, quiet = TRUE), "last_validation_ok"))
+
+  # A loose copy is still held back, and the reason names the container the
+  # literal entry expects.
+  loose <- cont_write("define.xml", "<loose/>")
+  d <- ld(mk(), c(sdtm, adam, loose))
+  plan <- plan_of(d)
+  row <- plan[plan$name == "define.xml" & plan$status == "unused", ]
+  expect_identical(nrow(row), 1L)
+  expect_true(grepl("expects it inside sdtm.zip", row$reason, fixed = TRUE))
+})
+
+# Regression (round-3 review): the dataset's first matching entry, without a
+# container, hid a later entry of the same dataset whose container holds it.
+test_that("the entry whose container holds the file takes it, whatever its position", {
+  y <- cont_zip(list("ae.csv" = CONT_AE_CSV), name = "y.zip")
+  for (order in list(c(1, 2), c(2, 1))) {
+    pats <- list(
+      DTAFileCSV("[.]csv$", pattern = TRUE),
+      DTAFileCSV("[.]csv$", pattern = TRUE, container = "y.zip")
+    )[order]
+    dta <- dta_of(
+      tab_ds("ae", list(DTAFileCSV("ae.csv", container = "x.zip")), empty_specs()),
+      tab_ds("listings", pats, empty_specs())
+    )
+    loaded <- rows_of(plan_of(ld(dta, y)), "loaded")
+    expect_identical(loaded$dataset, "listings", info = paste(order, collapse = ","))
+    expect_identical(loaded$handler, as.integer(which(order == 2)), info = paste(order, collapse = ","))
+  }
+})
+
+test_that("a library probed or declared inside a zip is held to the per-member cap", {
+  lib <- cont_fx("sdtm.xpt")
+  z <- cont_zip(list("lib.xpt" = readBin(lib, "raw", file.size(lib))))
+  withr::local_options(DTAtools.container_max_member_bytes = 2000)
+  for (container in list(NULL, "lib.xpt")) {
+    dta <- dta_of(
+      tab_ds("ae", list(DTAFileFactory(type = "xpt", filename = "ae.xpt", container = container))),
+      tab_ds("dm", list(DTAFileFactory(type = "xpt", filename = "dm.xpt", container = container)))
+    )
+    e <- expect_error(ld(dta, z, exdir = withr::local_tempdir()), class = "dta_container_too_large")
+    expect_identical(e$limit, "DTAtools.container_max_member_bytes")
+
+    e <- expect_error(
+      suppressWarnings(ld(dta, z, on_error = "skip", exdir = withr::local_tempdir())),
+      class = "dta_delivery_nothing_loaded"
+    )
+    refused <- rows_of(e$plan, "refused")
+    expect_identical(refused$name, "lib.xpt")
+    expect_true(grepl("container_max_member_bytes", refused$reason, fixed = TRUE))
+  }
+})
+
+test_that("a refused file is not reported as missing and keeps its dataset and entry", {
+  dta <- dta_of(
+    tab_ds("ae", list(DTAFileSAS7BDAT("ae.sas7bdat", container = "sdtm.zip")), empty_specs()),
+    tab_ds("dm", list(DTAFileCSV("dm.csv", container = "sdtm.zip")), empty_specs())
+  )
+  z <- cont_zip(list("ae.sas7bdat" = "not a SAS dataset", "dm.csv" = CONT_DM_CSV), name = "sdtm.zip")
+  msg <- NULL
+  d <- withCallingHandlers(
+    suppressWarnings(load_delivery(dta, z, on_error = "skip")),
+    message = function(m) {
+      if (inherits(m, "dta_delivery_summary")) msg <<- m
+      invokeRestart("muffleMessage")
+    }
+  )
+  expect_false("ae.sas7bdat" %in% msg$missing)
+  r <- rows_of(plan_of(d), "refused")
+  expect_identical(r$name, "ae.sas7bdat")
+  expect_identical(r$dataset, "ae")
+  expect_identical(r$handler, 1L)
+
+  # A duplicate refusal names its dataset too.
+  dup <- dta_of(tab_ds("ae", list(DTAFileCSV("[.]csv$", pattern = TRUE)), empty_specs()))
+  dd <- suppressWarnings(ld(
+    dup, c(cont_write("x.csv", CONT_AE_CSV), cont_write("x.csv", CONT_AE_CSV), cont_write("y.csv", CONT_AE_CSV)),
+    on_error = "skip"
+  ))
+  dup_rows <- rows_of(plan_of(dd), "refused")
+  expect_identical(nrow(dup_rows), 2L)
+  expect_true(all(dup_rows$dataset == "ae" & dup_rows$handler == 1L))
+})
+
+test_that("a container name cut to a trailing dot or space still extracts", {
+  mk <- function() dta_of(tab_ds("ae", list(DTAFileCSV("ae.csv")), empty_specs()))
+  for (nm in c(paste0(strrep("x", 97), "   y.zip"), paste0(strrep("x", 97), "...y.zip"))) {
+    z <- cont_zip(list("ae.csv" = CONT_AE_CSV), name = nm)
+    d <- ld(mk(), z, exdir = withr::local_tempdir())
+    loaded <- rows_of(plan_of(d), "loaded")
+    expect_identical(nrow(loaded), 1L)
+    expect_true(file.exists(loaded$path))
+    expect_false(grepl("[. ]$", basename(dirname(dirname(loaded$path)))))
+  }
+})

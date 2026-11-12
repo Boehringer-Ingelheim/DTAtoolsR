@@ -301,3 +301,165 @@ test_that("OQ-CONT-012 | a single-dataset transport file is matched by its own n
   c1 <- cont_run(cont_dta("xpt", container = "adverse.xpt"), cont_fx("adverse.xpt"), exdir = cont_exdir("OQ-CONT-012"))
   qa_step("declared as a container, the file is opened and member AE fills ae", "ae", names(tables(datasets(c1$result, "ae"))))
 })
+
+# ---- text encoding and trailing blank rows ---------------------------------------------
+#
+# A transport file records no character encoding, so only UTF-8 (and ASCII) text is
+# read (LIM-018); and a V5 file whose rows are shorter than 80 bytes does not say how
+# many rows it holds (LIM-017). The files below are written with haven at test
+# time, so every expected value is the data frame written here.
+
+# A one-member transport file `ae.xpt` of the data frame `df`, in a fresh directory.
+xp_file <- function(df, version = 5, name = "AE", file = "ae.xpt", env = parent.frame()) {
+  p <- file.path(qa_tempdir(env), file)
+  haven::write_xpt(df, p, version = version, name = name)
+  p
+}
+
+# A library of one-member files: the first one's library header, then every
+# file's member blocks (the way the container fixtures are built).
+xp_library <- function(paths) {
+  bytes <- lapply(paths, function(p) readBin(p, "raw", file.size(p)))
+  c(bytes[[1]][1:240], unlist(lapply(bytes, function(b) b[241:length(b)])))
+}
+
+# SUBJID and TERM, both required.
+xp_required_specs <- function() {
+  DTAtools::DTAColumnSpecCollection(columns = list(
+    SUBJID = DTAtools::DTAColumnSpec(id = "SUBJID", type = "SAS Char", nullable = FALSE),
+    TERM = DTAtools::DTAColumnSpec(id = "TERM", type = "SAS Char", nullable = FALSE)
+  ))
+}
+
+test_that("OQ-CONT-030 | transport text that is not valid UTF-8 is refused naming the column and row, UTF-8 text is read | REQ-CONT-018", {
+  # "MXLLER" is written, then its second byte is overwritten by 0xDC, the Latin-1
+  # umlaut a Latin-1 SAS session writes: the file holds one non-UTF-8 value, in
+  # column NAME, row 2.
+  p <- xp_file(data.frame(SUBJ = c("S1", "S2"), NAME = c("ABC", "MXLLER"), stringsAsFactors = FALSE))
+  b <- readBin(p, "raw", file.size(p))
+  b[grepRaw("MXLLER", b, fixed = TRUE) + 1L] <- as.raw(0xDC)
+  writeBin(b, p)
+  e <- cont_catch(DTAtools::read_file(DTAtools::DTAFileXPT("ae.xpt"), p))
+  qa_step("a value that is not UTF-8 is refused as a transport read error", TRUE, cont_is(e, "dta_xpt_read_error"))
+  msg <- if (is.null(e)) "" else cont_flat(e)
+  qa_step(
+    "the message names column NAME, row 2 and the encoding",
+    list(column = TRUE, row = TRUE, encoding = TRUE),
+    list(column = grepl("NAME", msg, fixed = TRUE), row = grepl("row 2", msg, fixed = TRUE), encoding = grepl("UTF-8", msg, fixed = TRUE))
+  )
+  qa_step("the message is itself valid text, so it does not repeat the bad byte", TRUE, validUTF8(msg))
+  qa_step("and it names the file but not the directory it lies in", FALSE, grepl(dirname(p), msg, fixed = TRUE))
+
+  # A delivery of the same file aborts as a load error caused by that refusal.
+  d <- cont_run(cont_of(cont_tab("ae", list(DTAtools::DTAFileXPT("ae.xpt")), cont_empty_specs())), p, exdir = cont_exdir("OQ-CONT-030"))
+  qa_step(
+    "load_delivery() aborts as a load error whose cause is the transport read error",
+    list(class = TRUE, cause = TRUE),
+    list(class = cont_is(d$error, "dta_delivery_load_error"), cause = cont_is(d$error$parent, "dta_xpt_read_error"))
+  )
+
+  # A variable name that is not UTF-8 is refused as well: the name NAMX has its
+  # last letter overwritten wherever the file stores it.
+  pn <- xp_file(data.frame(NAMX = c("a", "b"), stringsAsFactors = FALSE), file = "ae.xpt")
+  bn <- readBin(pn, "raw", file.size(pn))
+  at <- grepRaw("NAMX", bn, fixed = TRUE, all = TRUE)
+  qa_check("the variable name is stored in the file", length(at) > 0)
+  for (h in at) bn[h + 3L] <- as.raw(0xDC)
+  writeBin(bn, pn)
+  en <- cont_catch(DTAtools::read_file(DTAtools::DTAFileXPT("ae.xpt"), pn))
+  qa_step("a variable name that is not UTF-8 is refused as a transport read error", TRUE, cont_is(en, "dta_xpt_read_error"))
+  qa_step(
+    "and the message says the name is not valid UTF-8 text",
+    TRUE, !is.null(en) && grepl("not valid UTF-8", cont_flat(en), fixed = TRUE)
+  )
+
+  # LIM-018 states the consequence; UTF-8 text with non-ASCII characters is read.
+  ok <- xp_file(data.frame(NAME = c("Müller", "Abc"), stringsAsFactors = FALSE))
+  qa_step(
+    "LIM-018: UTF-8 text with an umlaut is read as written",
+    c("Müller", "Abc"),
+    as.data.frame(DTAtools::read_file(DTAtools::DTAFileXPT("ae.xpt"), ok))$NAME
+  )
+})
+
+test_that("OQ-CONT-031 | trailing all-blank text rows are counted from the file's own layout, so a required column reports them | REQ-CONT-018", {
+  # Four rows are written, the last two all blank. haven alone returns fewer rows.
+  # The V8 header records the count; V5 does only when a row is 80 bytes or longer.
+  # Expected: 4 rows, with SUBJID c("S1", "S2", NA, NA) (a blank value is missing,
+  # REQ-FILE-036), and two missing values in each of two required columns, which
+  # are 4 column-specification errors.
+  written <- function(width) {
+    data.frame(SUBJID = c("S1", "S2", "", ""), TERM = c("A", strrep("x", width), "", ""), stringsAsFactors = FALSE)
+  }
+  dta <- cont_of(cont_tab("ae", list(DTAtools::DTAFileXPT("ae.xpt")), xp_required_specs()))
+  for (case in list(list(v = 5, w = 100), list(v = 8, w = 100), list(v = 8, w = 5))) {
+    label <- sprintf("version %d, a value of %d characters", case$v, case$w)
+    p <- xp_file(written(case$w), version = case$v)
+    qa_check(sprintf("%s: the file written holds more rows than haven alone returns", label), nrow(haven::read_xpt(p)) < 4)
+    t <- as.data.frame(DTAtools::read_file(DTAtools::DTAFileXPT("ae.xpt"), p))
+    qa_step(sprintf("%s: four rows are read", label), 4L, nrow(t))
+    qa_step(sprintf("%s: SUBJID holds S1, S2 and two missing values", label), c("S1", "S2", NA, NA), t$SUBJID)
+    r <- cont_run(dta, p, exdir = cont_exdir("OQ-CONT-031"))
+    qa_check(sprintf("%s: the delivery is accepted", label), is.null(r$error), r$error)
+    res <- suppressWarnings(DTAtools::check(r$result, quiet = TRUE, persist = FALSE))
+    qa_step(
+      sprintf("%s: the two blank rows are four column-specification errors", label),
+      4L,
+      sum(DTAtools::validation_status(DTAtools::datasets(res, "ae"))$n_columnspec_errors)
+    )
+  }
+
+  # A V8 count the bytes cannot hold is ignored: three one-character rows are
+  # written and the header's count (bytes 49-64 of the OBSV8 record) is replaced
+  # by 100 000 000, and by a placeholder 0. Expected: the three rows written.
+  for (cnt in c("100000000", "0")) {
+    p <- xp_file(data.frame(A = c("x", "y", "z"), stringsAsFactors = FALSE), version = 8)
+    b <- readBin(p, "raw", file.size(p))
+    at <- grepRaw("OBSV8   HEADER RECORD!!!!!!!", b, fixed = TRUE)
+    b[(at + 28L):(at + 43L)] <- charToRaw(formatC(cnt, width = 16))
+    writeBin(b, p)
+    qa_step(
+      sprintf("a V8 header that states %s rows for three written is ignored: the three rows are read", cnt),
+      c("x", "y", "z"),
+      as.data.frame(DTAtools::read_file(DTAtools::DTAFileXPT("ae.xpt"), p))$A
+    )
+  }
+
+  # LIM-017: a V5 row of 4 bytes cannot be told from the padding of the last 80-byte
+  # record, so the two trailing blank rows stay lost. Pinned, not endorsed.
+  short <- xp_file(written(2), version = 5)
+  qa_step(
+    "LIM-017: a V5 file with 4-byte rows reads without its two trailing blank rows",
+    2L,
+    nrow(DTAtools::read_file(DTAtools::DTAFileXPT("ae.xpt"), short))
+  )
+})
+
+test_that("OQ-CONT-032 | a library member named like a Windows device is refused only when it is split out for an entry, and a single-member file of that name is read in place | REQ-CONT-003", {
+  ae <- xp_file(data.frame(USUBJID = c("S-001", "S-002"), AETERM = c("HEADACHE", "NAUSEA"), stringsAsFactors = FALSE), name = "AE")
+  con <- xp_file(data.frame(X = c("a", "b"), stringsAsFactors = FALSE), name = "CON", file = "con.xpt")
+  lib <- cont_write("sdtm.xpt", xp_library(c(ae, con)))
+
+  # Nothing wants member CON: the library is split for ae and CON is not refused.
+  ex <- cont_exdir("OQ-CONT-032")
+  r <- cont_run(cont_of(cont_tab("ae", list(DTAtools::DTAFileXPT("ae.xpt")), cont_empty_specs())), lib, exdir = ex)
+  qa_check("a member nothing wants, named CON, does not refuse the library", is.null(r$error), r$error)
+  qa_step("the wanted member AE is loaded", "ae", cont_rows(r$plan, "loaded")$dataset)
+  qa_step("and the member CON is listed as unused", "con.xpt", cont_rows(r$plan, "unused")$name)
+  qa_step("only the member that was wanted is written", "ae.xpt", basename(list.files(ex, recursive = TRUE)))
+
+  # An entry wants member CON: it would be written as con.xpt, a device name.
+  ex <- cont_exdir("OQ-CONT-032")
+  w <- cont_run(cont_of(cont_tab("con", list(DTAtools::DTAFileXPT("con.xpt")), cont_empty_specs())), lib, exdir = ex)
+  qa_step("a wanted member named CON is refused as an unsafe member", TRUE, cont_is(w$error, "dta_container_unsafe_member"))
+  qa_step(
+    "the message says it is a reserved Windows device name",
+    TRUE, !is.null(w$error) && grepl("reserved Windows device name", cont_flat(w$error), fixed = TRUE)
+  )
+  qa_step("nothing is written", character(0), list.files(ex, recursive = TRUE))
+
+  # A one-member file is read where it lies, and nothing is written for it.
+  s <- cont_run(cont_of(cont_tab("con", list(DTAtools::DTAFileXPT("con.xpt")), cont_empty_specs())), con, exdir = cont_exdir("OQ-CONT-032"))
+  qa_check("a single-member file con.xpt is accepted", is.null(s$error), s$error)
+  qa_step("and read with its two rows", c("a", "b"), cont_table(s$result, "con", "con")$X)
+})

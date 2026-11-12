@@ -756,8 +756,12 @@ test_that("files() refuses an index that is not a single name or number", {
 })
 
 test_that("files() refuses several names that all exist instead of indexing recursively", {
-  ds <- create_example_DTADataSetTabular(2)
+  ds <- DTADataSet(
+    id = "two",
+    type = "file",
+    files = list(a = DTAFileAny("a.txt"), b = DTAFileAny("b.txt"))
+  )
   present <- names(files(ds))
-  skip_if(length(present) < 2L, "needs a named multi-handler dataset")
-  expect_error(files(ds, present[1:2]), "single")
+  expect_identical(present, c("a", "b"))
+  expect_error(files(ds, present), "single")
 })

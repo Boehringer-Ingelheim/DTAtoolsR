@@ -585,3 +585,31 @@ test_that("overwrite = FALSE conflict message shows braces in a path literally",
   expect_match(conditionMessage(err), "repo{1+1}", fixed = TRUE)
   expect_no_match(conditionMessage(err), "repo2", fixed = TRUE)
 })
+
+test_that("the Bitbucket and Jenkins assets install from a current repository, not a dated snapshot", {
+  # rocker/r-ver:4.4's default repos is frozen at 2025-04-10, before zip 3.0.0
+  # and S7 0.2.2 existed; the written CI files must override it.
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, examples = FALSE, ci = c("bitbucket", "jenkins"))
+  repos <- "options(repos = c(CRAN = \"https://p3m.dev/cran/__linux__/noble/latest\"))"
+  # The command that actually runs: a comment or a placeholder further down
+  # may quote the same string, so it is the install line itself that is read.
+  installs <- list(
+    jenkins = grep(
+      "install.packages(\"remotes\")", readLines(file.path(dir, "Jenkinsfile")),
+      fixed = TRUE, value = TRUE
+    ),
+    # The step is defined once and referenced by a YAML alias per pipeline.
+    bitbucket = unique(unname(grep(
+      "install.packages(\"remotes\")",
+      unlist(yaml::read_yaml(file.path(dir, "bitbucket-pipelines.yml"))),
+      fixed = TRUE, value = TRUE
+    )))
+  )
+  for (nm in names(installs)) {
+    expect_length(installs[[nm]], 1L)
+    expect_true(startsWith(trimws(installs[[nm]]), if (nm == "jenkins") "sh '" else "Rscript -e"), info = nm)
+    expect_true(grepl(repos, installs[[nm]], fixed = TRUE), info = nm)
+    expect_false(grepl("/[0-9]{4}-[0-9]{2}-[0-9]{2}\"", installs[[nm]]), info = nm)
+  }
+})

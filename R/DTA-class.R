@@ -774,7 +774,10 @@ dta_emit_summary_message <- function(summary_message) {
 #'       \code{n_import_errors} in the frame.}
 #'     \item{\code{"last_file_count_findings"}}{data.frame with columns dataset,
 #'       n_supplied, min, max, message; one row per dataset whose file count is
-#'       outside its declared bounds, zero rows when none.}
+#'       outside its declared bounds, zero rows when none. A check of a subset of
+#'       datasets replaces the rows of the datasets it checked; a row of another
+#'       dataset is kept while that dataset still exists and still holds a file
+#'       count outside its bounds (it is judged again, not copied).}
 #'     \item{\code{"last_metadata_summary"}}{one-row data.frame for the metadata
 #'       axis, with columns scope, status, import_valid, n_import_errors, fields,
 #'       ok. Metadata belongs to the \code{DTA} itself rather than to any
@@ -1074,7 +1077,36 @@ method(check, DTA) <- function(
   # `overall_ok` FALSE for the same reason.
   total_undelivered <- sum(summary_df$n_undelivered, na.rm = TRUE)
   total_unchecked <- sum(summary_df$n_unchecked, na.rm = TRUE) + total_undelivered
-  total_count_errors <- sum(summary_df$n_file_count_errors, na.rm = TRUE)
+  # Findings of datasets this run did NOT check stay in force: a subset check
+  # judges only its own datasets, so rebuilding the attribute from this run
+  # alone would silently un-fail every other dataset (and the report, which
+  # reads the attribute, would drop them from its Failed count). Re-checked
+  # datasets are replaced by this run's rows; a finding whose dataset has since
+  # been removed is dropped rather than reported as a ghost. The others are
+  # judged again rather than copied -- the finding depends on nothing but the
+  # dataset as it is now -- so one whose tables were fixed since is not kept.
+  prior_findings <- attr(x, "last_file_count_findings", exact = TRUE)
+  kept_findings <- NULL
+  if (is.data.frame(prior_findings) && "dataset" %in% names(prior_findings)) {
+    still <- setdiff(
+      intersect(unique(as.character(prior_findings$dataset)), names(x@datasets)),
+      target_datasets
+    )
+    rows <- Filter(Negate(is.null), lapply(still, function(d) {
+      dta_tabular_file_count_finding(x@datasets[[d]])
+    }))
+    if (length(rows)) {
+      kept_findings <- do.call(rbind, lapply(rows, function(f) {
+        data.frame(
+          dataset = as.character(f$dataset), n_supplied = as.integer(f$n_supplied),
+          min = as.numeric(f$min), max = as.numeric(f$max),
+          message = f$message, stringsAsFactors = FALSE
+        )
+      }))
+    }
+  }
+  total_count_errors <- sum(summary_df$n_file_count_errors, na.rm = TRUE) +
+    if (is.null(kept_findings)) 0L else nrow(kept_findings)
   overall_ok <- total_invalid == 0 && total_import_errors == 0 &&
     total_unchecked == 0 && total_count_errors == 0
 
@@ -1095,7 +1127,7 @@ method(check, DTA) <- function(
   attr(x, "last_validation_summary") <- summary_df
   attr(x, "last_metadata_summary") <- metadata_summary
   attr(x, "last_validation_ok") <- overall_ok
-  attr(x, "last_file_count_findings") <- if (length(count_findings) == 0) {
+  new_findings <- if (length(count_findings) == 0) {
     data.frame(
       dataset = character(0), n_supplied = integer(0),
       min = numeric(0), max = numeric(0), message = character(0),
@@ -1112,6 +1144,9 @@ method(check, DTA) <- function(
       )
     }))
   }
+  merged_findings <- rbind(kept_findings, new_findings)
+  rownames(merged_findings) <- NULL
+  attr(x, "last_file_count_findings") <- merged_findings
 
   # rows = NA_real_: there is no cheap, trustworthy row total across every
   # dataset at this level, and a guess would be worse than reporting unknown.

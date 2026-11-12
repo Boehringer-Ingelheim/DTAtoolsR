@@ -32,7 +32,10 @@ requirements:
       with slashes or backslashes; within a dataset to the first matching
       literal file entry, else the first matching pattern entry; to every
       dataset that matches it, except that a file some literal entry matches is
-      not routed to pattern entries of other datasets; a pattern entry, as for
+      not routed to pattern entries of other datasets, and that holds when
+      the literal entry declares a container the file did not come from (the
+      file is then taken only by a pattern entry that declares a container the
+      file did come from, and otherwise by no dataset); a pattern entry, as for
       a loose file, shall also match the name without its compression
       suffix. It shall reach the same
       validation verdict and the same error counts as the same bytes delivered
@@ -48,6 +51,11 @@ requirements:
       .xpt, and shall be read with exactly that member's observations and
       variables and no other member's, in version 5 and version 8 files alike.
       A transport file holding one dataset shall be matched by its own name.
+      A member whose file name would name a reserved Windows device (CON, AUX
+      and the like) shall be refused with a condition of class
+      dta_container_unsafe_member only when it is split out of a library for an
+      entry; a library member that no entry wants, and a transport file holding
+      one dataset that is read in place, shall not be refused for its name.
     risk: high
     category: integrity
     covers: [load_delivery, DTAFileXPT, read_file]
@@ -88,7 +96,11 @@ requirements:
       the declaration, * matching any text and ? one character, and shall list
       any other file that entry would take as unused with a reason naming the
       container. An entry without a container shall accept the file loose or
-      from inside any container.
+      from inside any container. A file that was delivered and then refused
+      (it could not be loaded, it duplicates another, or it exceeds a size
+      limit) was delivered: it shall not be reported as not in the delivery,
+      and its row of last_delivery shall keep the dataset and the entry it was
+      meant for.
     risk: high
     category: functional
     covers: [DTAFile, DTAFileFactory, load_delivery]
@@ -103,12 +115,16 @@ requirements:
       extracted, whether or not any file entry claims it, and no file shall be
       written. An entry whose name contains a colon, a control character or
       one of < > " | ? *, has a path segment that ends in a dot or a space,
-      names a reserved Windows device or is longer than 255 bytes shall never
-      be extracted: when a file entry claims it, or an entry declares it as a
+      names a reserved Windows device, is longer than 255 bytes or has a name
+      of 511 bytes or more (which the zip library returns cut, so it cannot be
+      read in full) shall never be extracted: when a file entry claims it, or an entry declares it as a
       container, the archive shall be refused with the same class and a
       message saying that some file systems cannot write the name; otherwise
-      it shall be listed as unused, with the problem in its reason. Names
-      shall appear in messages with control characters escaped.
+      it shall be listed as unused, with the problem in its reason; a name of
+      511 bytes or more shall not count as a duplicate of another, and its
+      refusal shall say that the name cannot be read in full rather than that
+      it is unsafe. Names shall appear in messages with control characters
+      escaped.
     risk: high
     category: security
     covers: [load_delivery]
@@ -129,8 +145,10 @@ requirements:
       would create more files than that; when an archive declares more than
       DTAtools.container_max_ratio times its size on disk, or the call would
       write more than DTAtools.container_max_bytes; and when a file it would
-      extract from an archive or split out of a library, streamed or not, or a
-      gzip file it would read into memory, is larger than
+      extract from an archive (a transport library inside it included,
+      whether it is only probed for members or declared as a container) or
+      split out of a library, streamed or not, or a gzip file it would read
+      into memory, is larger than
       DTAtools.container_max_member_bytes, the gzip file judged by what it
       inflates to. A gzip-compressed transport
       file that decompresses to more than DTAtools.container_max_bytes shall be
@@ -270,3 +288,29 @@ requirements:
     category: functional
     covers: [run_dta_app]
     source: inst/shiny/dta_app/R/utils_dta.R (dta_set_handler, dta_handler_to_list)
+  - id: REQ-CONT-018
+    text: >
+      A SAS transport file read as a table shall be decoded as UTF-8: a variable
+      name or a text value that is not valid UTF-8 shall be refused with a
+      condition of class dta_xpt_read_error that names the column and the first
+      row (a variable name, its position) and does not repeat the bytes. The
+      number of rows shall be taken from the file's own layout: a trailing row
+      whose text values are all blank, which the decoder would drop as padding,
+      shall be counted when the file states the number of rows (a version 8
+      count, believed only when that many rows fit the bytes the observations
+      take, with less than one 80-byte record left over; otherwise, and for
+      version 5, the observation bytes divided by the row length when a row is
+      80 bytes or longer), so that a column declared nullable false reports the
+      blank rows as missing values; a version 8 count the bytes cannot hold
+      shall be ignored rather than create rows; a file whose stated number of
+      rows differs in any other way from the rows read shall be refused with
+      the same class.
+    risk: high
+    category: integrity
+    covers: [DTAFileXPT, read_file, load_delivery]
+    source: R/DTAFileXPT-class.R (dta_read_xpt); R/containerFiles.R (dta_xpt_expected_rows)
+    notes: >
+      A version 5 file whose rows are shorter than 80 bytes does not state how
+      many rows it holds, and a transport file records no encoding (LIM-017,
+      LIM-018). Expected values are the data frames the test files are written
+      from.

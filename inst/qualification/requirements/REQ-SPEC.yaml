@@ -402,7 +402,7 @@ requirements:
     risk: medium
     category: functional
     covers: [lint_dta]
-    source: R/lintDTA.R (dta_specs_findings); CHANGELOG [Unreleased], Fixed
+    source: R/lintDTA.R (dta_specs_findings); CHANGELOG 0.27.0, Fixed
     notes: >
       A file read holds a date as text and a date is not a number, so the
       comparison means something other than what the author wrote. The

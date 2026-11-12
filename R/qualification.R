@@ -287,8 +287,9 @@ qual_discover_tests <- function(tests_dir) {
 # ---- running a stage --------------------------------------------------------
 
 # The test files of one stage that the run filter selects, by the name testthat
-# matches on (file name without `test-` and `.R`). The filter is applied to that
-# whole name, so an anchored filter such as "^OQ-VAL" works as written.
+# matches on (file name without `test-` and `.R`). The filter is a regular
+# expression searched for in that name, stage prefix included and unanchored
+# unless it anchors itself: "VAL", "OQ-VAL" and "^OQ-VAL" all select OQ-VAL-*.
 qual_stage_files <- function(stage, tests_dir, filter = NULL) {
   files <- list.files(tests_dir, pattern = "^test-.*\\.[Rr]$")
   nm <- sub("\\.[Rr]$", "", sub("^test-", "", files))
@@ -1816,7 +1817,7 @@ run_qualification <- function(output_dir,
   if (!is.character(formats) || !all(formats %in% qual_formats())) {
     cli::cli_abort("{.arg formats} must be a subset of {.val {qual_formats()}}.")
   }
-  if (!is.null(filter) && (!is.character(filter) || length(filter) != 1)) {
+  if (!is.null(filter) && (!is.character(filter) || length(filter) != 1 || is.na(filter))) {
     cli::cli_abort("{.arg filter} must be {.code NULL} or a single regular expression.")
   }
   for (pkg in c("testthat", "withr")) {

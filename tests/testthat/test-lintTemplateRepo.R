@@ -149,3 +149,47 @@ test_that("the report names each finding and says when there are none", {
   writeLines(lint_party_text(dir, "other_party"), file.path(dir, "parties", "acme.dta-party.yaml"))
   expect_message(lint_template_repo(dir), "id_filename_mismatch")
 })
+
+# ---- non-ASCII paths ----------------------------------------------------------
+
+# list.files() returns native-encoded names, and method = "radix" refuses
+# those unless they are UTF-8: the linter used to abort on any such file.
+lint_nonascii_repo <- function(file_name, id, repo_name = "repo") {
+  dir <- withr::local_tempdir(.local_envir = parent.frame())
+  root <- file.path(dir, repo_name)
+  suppressMessages(create_template_repo(root, examples = FALSE))
+  dir.create(file.path(root, "templates"), showWarnings = FALSE)
+  writeLines(
+    c(
+      "dta_template: 1", paste0("id: ", id), "version: '1.0'",
+      "kind: creation", "title: Test", "description: Test",
+      "base: {}"
+    ),
+    enc2utf8(file.path(root, "templates", file_name))
+  )
+  root
+}
+
+test_that("a template file with a non-ASCII name is linted, not aborted on", {
+  root <- lint_nonascii_repo("caf\u00e9.dta-template.yaml", "caf\u00e9")
+  res <- expect_no_error(lint_quiet(root, fail_on = "none"))
+  expect_identical(names(res), lint_columns)
+  expect_no_error(suppressMessages(validate_template(root)))
+  withr::local_dir(root)
+  expect_no_error(lint_quiet(".", fail_on = "none"))
+})
+
+test_that("a repository folder with a non-ASCII name is linted, not aborted on", {
+  root <- lint_nonascii_repo("starter.dta-template.yaml", "starter", "M\u00fcller_repo")
+  expect_no_error(lint_quiet(root, fail_on = "none"))
+})
+
+test_that("export templates under a non-ASCII repository folder are checked, not aborted on", {
+  root <- lint_nonascii_repo("starter.dta-template.yaml", "starter", "M\u00fcller_repo")
+  exp_dir <- file.path(root, "export-templates")
+  dir.create(exp_dir, showWarnings = FALSE)
+  file.copy(.make_template("No markers"), file.path(exp_dir, "plain_a.docx"))
+  file.copy(.make_template("No markers either"), file.path(exp_dir, "plain_b.docx"))
+  res <- expect_no_error(lint_quiet(root, fail_on = "none"))
+  expect_identical(sum(res$code == "export_template_no_placeholders"), 2L)
+})

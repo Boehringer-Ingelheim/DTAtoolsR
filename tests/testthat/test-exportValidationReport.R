@@ -981,3 +981,59 @@ test_that("write_validation_report leaves an existing file intact when writing f
   )
   expect_identical(base::readLines(out, warn = FALSE), "precious")
 })
+
+test_that(".report_messages_table_html orders the dataset filter by bytes, whatever the locale", {
+  # sort()'s default follows the locale (German: a, b, B), so the same report
+  # differed between the dev machine and CI; byte order is the same everywhere.
+  # Needs a locale that really orders a, b, B (not byte order) to tell the two apart.
+  for (loc in c("de_DE.UTF-8", "de_DE", "German_Germany.utf8", "German")) {
+    old <- Sys.getlocale("LC_COLLATE")
+    if (!identical(Sys.setlocale("LC_COLLATE", loc), "") && identical(sort(c("b", "B", "a")), c("a", "b", "B"))) break
+    Sys.setlocale("LC_COLLATE", old)
+  }
+  withr::defer(Sys.setlocale("LC_COLLATE", old))
+  skip_if(!identical(sort(c("b", "B", "a")), c("a", "b", "B")), "no locale with non-byte collation")
+  ds <- c("b", "B", "\u00e4", "a")
+  msgs <- data.frame(
+    id = seq_along(ds), dataset = ds, target = "t", severity = "error",
+    source = "columnspec", rule_id = NA_character_, row = 1, column = "X",
+    keyword = "required", message = "m", stringsAsFactors = FALSE
+  )
+  html <- .report_messages_table_html(msgs)
+  sel <- regmatches(
+    html,
+    regexpr('(?s)data-filter-column="dataset".*?</select>', html, perl = TRUE)
+  )
+  opts <- regmatches(sel, gregexpr('(?<=<option value=")[^"]+', sel, perl = TRUE))[[1]]
+  expect_identical(opts, enc2utf8(c("B", "a", "b", "\u00e4")))
+})
+
+test_that(".report_messages_table_html sorts native-encoded non-ASCII filter values", {
+  # Names that come from list.files() or readLines() are non-ASCII strings with
+  # no encoding mark; a radix sort refuses those unless they are made UTF-8.
+  # The non-ASCII value comes first: that is the element the radix sort checks.
+  ds <- c("\u00e4", "b", "a")
+  tg <- c("\u00fc", "t2", "t1")
+  src <- c("\u00f6", "s", "r")
+  unmarked <- function(x) vapply(x, function(s) rawToChar(charToRaw(s)), "", USE.NAMES = FALSE)
+  ds <- unmarked(ds)
+  tg <- unmarked(tg)
+  src <- unmarked(src)
+  skip_if(any(Encoding(c(ds, tg, src)) == "UTF-8"), "cannot build unmarked strings")
+  msgs <- data.frame(
+    id = seq_along(ds), dataset = ds, target = tg, severity = "error",
+    source = src, rule_id = NA_character_, row = 1, column = "X",
+    keyword = "required", message = "m", stringsAsFactors = FALSE
+  )
+  html <- expect_no_error(.report_messages_table_html(msgs))
+  opts_for <- function(col) {
+    sel <- regmatches(
+      html,
+      regexpr(paste0('(?s)data-filter-column="', col, '".*?</select>'), html, perl = TRUE)
+    )
+    enc2utf8(regmatches(sel, gregexpr('(?<=<option value=")[^"]+', sel, perl = TRUE))[[1]])
+  }
+  expect_identical(opts_for("dataset"), enc2utf8(c("a", "b", "\u00e4")))
+  expect_identical(opts_for("target"), enc2utf8(c("t1", "t2", "\u00fc")))
+  expect_identical(opts_for("source"), enc2utf8(c("r", "s", "\u00f6")))
+})

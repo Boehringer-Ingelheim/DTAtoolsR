@@ -185,6 +185,13 @@ write_dta <- function(
     return(invisible(file))
   }
 
+  # Every author text is made safe for XML once, here (see .xml_safe_deep()).
+  if (format %in% c("docx", "pdf")) {
+    x <- .xml_safe_deep(x)
+    signature_list <- .xml_safe_deep(signature_list)
+    yaml_text <- .xml_safe_deep(yaml_text)
+  }
+
   # Create document
   doc <- NULL
   if (format == "docx") {
@@ -1485,6 +1492,12 @@ write_dataset_metadata <- function(
 
   if (file.exists(file) && !overwrite) {
     cli::cli_abort("File '{file}' already exists. Set overwrite = TRUE to replace.")
+  }
+
+  # Every author text is made safe for XML once, here (see .xml_safe_deep()).
+  if (format %in% c("docx", "pdf")) {
+    x <- .xml_safe_deep(x)
+    signature_list <- .xml_safe_deep(signature_list)
   }
 
   if (format == "docx") {

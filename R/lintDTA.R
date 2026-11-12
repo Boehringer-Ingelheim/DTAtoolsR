@@ -414,7 +414,7 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
 #' `rule_condition_operator_invalid`, `rule_condition_numeric_on_text`,
 #' `rule_condition_value_unfit`, `rule_condition_value_outside_values`,
 #' `group_constraint_unknown_condition`, `file_container_invalid`,
-#' `file_field_unknown`, `file_container_misplaced`.
+#' `file_field_unknown`, `file_container_misplaced`, `file_count_bound_invalid`.
 #'
 #' Warnings: `rules_without_columns`, `rule_not_checkable`,
 #' `format_narrower_than_length`, `metadata_import_issue`, `version_unquoted`
@@ -722,6 +722,19 @@ dta_lint_files_list <- function(files, dataset) {
           dataset, "file", id, "error", "file_container_invalid", problem
         ))
       }
+    }
+    # The bounds the entry would be refused for when built (the DTAFile
+    # validator runs the same test), reported here instead of as an abort.
+    nf <- entry[["number_of_files"]]
+    lo <- entry[["min_number_of_files"]]
+    hi <- entry[["max_number_of_files"]]
+    # The constructor defaults an entry that declares no count to exactly 1.
+    if (is.null(nf) && is.null(lo) && is.null(hi)) nf <- 1
+    problem <- dta_file_count_bounds_problem(lo, hi, number = nf, pattern = isTRUE(entry[["pattern"]]))
+    if (!is.null(problem)) {
+      out <- rbind(out, dta_lint_row(
+        dataset, "file", id, "error", "file_count_bound_invalid", problem
+      ))
     }
   }
   out

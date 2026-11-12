@@ -317,6 +317,36 @@ test_that("OQ-CONT-022 | every limit refuses, before writing where it can | REQ-
     ex <- cont_exdir("OQ-CONT-022")
     gz <- cont_run(cont_dta("xpt", container = "bomb.xpt.gz"), bomb, exdir = ex)
     lim_step("a gzip transport file inflating to 10 MB against a byte limit of 1 MB", gz, "DTAtools.container_max_bytes", ex)
+
+    # The same file with no container declared: a type: xpt entry reads it and
+    # the limit applies the same way; a delivery whose entries are all type: csv
+    # claims it with none, so it is listed as unused and the reason names the limit.
+    ex <- cont_exdir("OQ-CONT-022")
+    claimed <- cont_run(cont_dta("xpt"), bomb, exdir = ex)
+    lim_step("the same gzip file read by a type: xpt entry", claimed, "DTAtools.container_max_bytes", ex)
+    ex <- cont_exdir("OQ-CONT-022")
+    unclaimed <- cont_run(cont_dta("csv"), bomb, exdir = ex)
+    unused <- cont_rows(unclaimed$plan, "unused")
+    qa_step("the same gzip file claimed by no entry is the one unused row", "bomb.xpt.gz", unused$name)
+    qa_step(
+      "and its reason names the byte limit",
+      TRUE,
+      grepl("DTAtools.container_max_bytes", unused$reason, fixed = TRUE)
+    )
+  })
+
+  # A library inside an archive is extracted to be probed for members, or because
+  # an entry declares it as a container: the cap applies to it as to any entry
+  # the call extracts. lib_in_zip.zip holds sdtm.xpt, 3280 bytes (see
+  # test-OQ-CONT-xpt.R), against a cap of 1000.
+  withr::with_options(list(DTAtools.container_max_member_bytes = 1000), {
+    ex <- cont_exdir("OQ-CONT-022")
+    probed <- cont_run(cont_dta("xpt"), cont_fx("lib_in_zip.zip"), exdir = ex)
+    lim_step("a library only probed for members, 3280 bytes against a member limit of 1000", probed, "DTAtools.container_max_member_bytes", ex)
+    qa_step("and the size counted is the library's 3280 bytes", 3280, probed$error$value, tolerance = 0)
+    ex <- cont_exdir("OQ-CONT-022")
+    declared <- cont_run(cont_dta("xpt", container = "sdtm.xpt"), cont_fx("lib_in_zip.zip"), exdir = ex)
+    lim_step("the same library declared as a container by the entries", declared, "DTAtools.container_max_member_bytes", ex)
   })
 
   # A gzip file is judged by what it inflates to, not by its size on disk. The
@@ -369,6 +399,52 @@ test_that("OQ-CONT-022 | every limit refuses, before writing where it can | REQ-
     list(class = TRUE, cause = TRUE),
     list(class = cont_is(sas_gz$error, "dta_delivery_load_error"), cause = cont_is(sas_gz$error$parent, "dta_container_too_large"))
   )
+})
+
+# ---- names the archive library cannot return in full --------------------------------
+
+test_that("OQ-CONT-027 | an entry name of 511 bytes or more is never extracted and refuses the archive only when something needs it | REQ-CONT-007", {
+  # zip::zip_list() returns at most 511 bytes of an entry name. The names below
+  # are written by cont_zip_add_empty(), as Windows cannot create such paths.
+  # An umlaut is two bytes: 2 + 240 + 1 + 240 + 1 + 42 + 4 = 530 bytes, cut by the
+  # library after the first byte of a two-byte character.
+  umlaut <- paste0("r/", strrep("ä", 120), "/", strrep("ä", 120), "/", strrep("ä", 21), ".txt")
+  qa_step("the long name is 530 bytes", 530L, nchar(umlaut, type = "bytes"))
+  base <- cont_zip(list(ae.csv = CONT_AE_CSV))
+
+  # Nothing needs the long entry: the archive is not refused, the needed sibling
+  # loads, the long entry is listed as unused with the reason, and is not written.
+  ex <- cont_exdir("OQ-CONT-027")
+  r <- cont_run(cont_dta("csv"), cont_zip_add_empty(base, umlaut), exdir = ex)
+  qa_check("an unneeded long entry does not refuse the archive", is.null(r$error), r$error)
+  qa_step("the sibling ae.csv is loaded into dataset ae", "ae", cont_rows(r$plan, "loaded")$dataset)
+  qa_step("holding the AETERM values of ae.csv", c("HEADACHE", "NAUSEA"), cont_table(r$result, "ae", "ae")$AETERM)
+  long_row <- cont_rows(r$plan, "unused")
+  qa_step("the long entry is the one unused row", 1L, nrow(long_row))
+  qa_step("its reason says the name cannot be read in full", TRUE, grepl("511 bytes or more", long_row$reason, fixed = TRUE))
+  qa_step("only ae.csv is written", "ae.csv", basename(list.files(ex, recursive = TRUE)))
+
+  # Two long names that differ only past the cut are not duplicates.
+  stem <- paste0(strrep("a", 200), "/", strrep("b", 200), "/", strrep("c", 150), "/")
+  d <- cont_run(cont_dta("csv"), cont_zip_add_empty(base, paste0(stem, c("one.txt", "two.txt"))), exdir = cont_exdir("OQ-CONT-027"))
+  qa_check("two long names differing only after byte 511 are not refused as duplicates", is.null(d$error), d$error)
+  qa_step("and the sibling is still loaded", "ae", cont_rows(d$plan, "loaded")$dataset)
+
+  # An entry the specification needs, 511 bytes exactly: 200 + 1 + 200 + 1 + 102 + 7.
+  needed <- paste0(strrep("d", 200), "/", strrep("e", 200), "/", strrep("f", 102), "/ae.csv")
+  qa_step("the needed name is 511 bytes", 511L, nchar(needed, type = "bytes"))
+  ex <- cont_exdir("OQ-CONT-027")
+  n <- cont_run(cont_dta("csv"), cont_zip_add_empty(cont_zip(list(x.txt = "x")), needed), exdir = ex)
+  qa_step("a needed entry whose name cannot be read in full refuses the archive as an unsafe member", TRUE, cont_is(n$error, "dta_container_unsafe_member"))
+  qa_step(
+    "the message says the name cannot be read in full",
+    TRUE, !is.null(n$error) && grepl("511 bytes or more, which cannot be read in full", cont_flat(n$error), fixed = TRUE)
+  )
+  qa_step(
+    "and does not say that the name would be unsafe",
+    FALSE, !is.null(n$error) && grepl("would be unsafe", cont_flat(n$error), fixed = TRUE)
+  )
+  qa_step("nothing is written", character(0), sf_listing(ex))
 })
 
 # ---- clashing names -----------------------------------------------------------------

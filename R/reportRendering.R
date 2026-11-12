@@ -594,21 +594,21 @@
   tbody_html <- paste0(table_rows, collapse = "\n")
 
   # Build filter select options for unique non-NA values
-  unique_datasets <- sort(unique(messages_df$dataset[!is.na(messages_df$dataset)]))
+  unique_datasets <- sort(enc2utf8(unique(messages_df$dataset[!is.na(messages_df$dataset)])), method = "radix")
   dataset_options <- paste0(
     '<option value="', .report_html_escape(unique_datasets), '">',
     .report_html_escape(unique_datasets), "</option>",
     collapse = "\n    "
   )
 
-  unique_targets <- sort(unique(messages_df$target[!is.na(messages_df$target)]))
+  unique_targets <- sort(enc2utf8(unique(messages_df$target[!is.na(messages_df$target)])), method = "radix")
   target_options <- paste0(
     '<option value="', .report_html_escape(unique_targets), '">',
     .report_html_escape(unique_targets), "</option>",
     collapse = "\n    "
   )
 
-  unique_sources <- sort(unique(messages_df$source[!is.na(messages_df$source)]))
+  unique_sources <- sort(enc2utf8(unique(messages_df$source[!is.na(messages_df$source)])), method = "radix")
   source_options <- paste0(
     '<option value="', .report_html_escape(unique_sources), '">',
     .report_html_escape(unique_sources), "</option>",

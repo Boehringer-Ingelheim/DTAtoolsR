@@ -213,6 +213,39 @@ test_that("checking one dataset by name does not judge the others", {
   expect_true(attr(out$res, "last_validation_ok"))
 })
 
+test_that("checking one dataset by name keeps another dataset's file-count failure", {
+  dta <- fc_dta(
+    fc_dataset("d_bad", 3, number_of_files = 2),
+    fc_dataset("d_ok", 2, number_of_files = 2)
+  )
+
+  full <- fc_check(dta)$res
+  expect_false(attr(full, "last_validation_ok"))
+
+  sub <- fc_check(full, datasets = "d_ok")
+  expect_length(sub$warnings, 0)
+  findings <- attr(sub$res, "last_file_count_findings")
+  expect_identical(findings$dataset, "d_bad")
+  expect_false(attr(sub$res, "last_validation_ok"))
+
+  # The report reads the same attribute, so its verdict must agree.
+  html <- tempfile(fileext = ".html")
+  write_validation_report(sub$res, html, overwrite = TRUE, quiet = TRUE)
+  expect_true(any(grepl("got 3", readLines(html, warn = FALSE), fixed = TRUE)))
+
+  # Re-checking the failing dataset replaces its row: fix it, and it clears.
+  fixed <- full
+  fixed@datasets[["d_bad"]] <- fc_dataset("d_bad", 2, number_of_files = 2)
+  again <- fc_check(fixed, datasets = "d_bad")
+  expect_equal(nrow(attr(again$res, "last_file_count_findings")), 0)
+  expect_true(attr(again$res, "last_validation_ok"))
+
+  # Fixed but NOT re-checked: the kept finding is judged again, not copied, so
+  # a check of the other dataset does not report a count that no longer holds.
+  other <- fc_check(fixed, datasets = "d_ok")
+  expect_equal(nrow(attr(other$res, "last_file_count_findings")), 0)
+})
+
 test_that("eager and streamed loading report the same file-count findings", {
   dir <- withr::local_tempdir()
   for (nm in c("x_a", "x_b", "x_c")) {
@@ -282,25 +315,16 @@ test_that("the bound is the SUM over all handlers, not a per-handler limit", {
   expect_equal(nrow(attr(fc_check(fc_dta(mk(2)))$res, "last_file_count_findings")), 0)
 })
 
-test_that("a missing (NA) bound is no bound and never aborts check()", {
-  ds <- tryCatch(
-    DTADataSetTabular(
-      id = "d", specs = fc_specs(),
-      tables = list(t1 = fc_frame("A"), t2 = fc_frame("B")),
-      files = list(DTAFileCSV(
-        filename = "x_.*[.]csv$", pattern = TRUE,
-        min_number_of_files = NA_real_, max_number_of_files = NA_real_
-      ))
+test_that("an NA bound never reaches check(): the handler refuses it", {
+  # An NA bound used to be accepted and silently meant "no bound". "No bound"
+  # is NULL; NA is now refused where the handler is built.
+  expect_error(
+    DTAFileCSV(
+      filename = "x_.*[.]csv$", pattern = TRUE,
+      min_number_of_files = NA_real_, max_number_of_files = NA_real_
     ),
-    error = function(e) NULL
+    class = "dta_file_count_bound_invalid"
   )
-  skip_if(is.null(ds), "the constructor rejects an NA bound")
-
-  expect_no_error(f <- dta_tabular_file_count_finding(ds))
-  expect_null(f)
-  out <- fc_check(fc_dta(ds))
-  expect_length(out$warnings, 0)
-  expect_equal(nrow(attr(out$res, "last_file_count_findings")), 0)
 })
 
 test_that("the report verdict and message table carry a file-count failure", {

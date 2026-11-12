@@ -313,6 +313,11 @@ test_that("bad arguments to the runner are rejected by name", {
     "`filter` must be `NULL` or a single regular expression",
     class = "rlang_error", fixed = TRUE
   )
+  expect_error(
+    run_qualification(tempfile(), filter = NA_character_),
+    "`filter` must be `NULL` or a single regular expression",
+    class = "rlang_error", fixed = TRUE
+  )
   # `scale` and `include_unit_tests` used base::match.arg(), whose failure is a
   # plain simpleError carrying a message in the system language -- so the only
   # thing assertable about it was "some base R error happened", which a typo in

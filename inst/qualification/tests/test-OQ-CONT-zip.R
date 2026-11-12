@@ -96,6 +96,18 @@ test_that("OQ-CONT-001 | a zip of CSVs is routed to every dataset whose entry ma
     run_dir <- dirname(dirname(dirname(ae_path)))
     qa_step("extracted clinical data is readable by its owner only", "700", format(file.info(run_dir)$mode))
   }
+
+  # A single dataset instead of a DTA: it takes the same archive, and the one
+  # dataset comes back with its file bound.
+  single <- cont_run(DTAtools::datasets(cont_dta("csv"), "ae"), cont_fx("sdtm_csv.zip"), exdir = cont_exdir("OQ-CONT-001"))
+  qa_check("a single DTADataSet is accepted with the archive", is.null(single$error), single$error)
+  qa_step("it comes back as the dataset ae", "ae", single$result@id)
+  qa_step("with the table ae loaded from the archive", "ae", names(DTAtools::tables(single$result)))
+  qa_step(
+    "holding the AETERM values of the archive's ae.csv",
+    c("HEADACHE", "NAUSEA"),
+    as.data.frame(DTAtools::tables(single$result)[["ae"]])$AETERM
+  )
 })
 
 test_that("OQ-CONT-002 | a zipped file gets the same verdict and counts as the same file loose | REQ-CONT-002", {

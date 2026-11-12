@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.27.0] - 2026-11-12
 
 ### Added
 
@@ -15,7 +15,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   carries a `last_delivery` table of what was loaded, opened, unused, ignored
   or refused.
 - File type `xpt` (`DTAFileXPT`) reads a SAS transport file holding one dataset
-  through haven, normalised like a `.sas7bdat`, always in memory.
+  through haven, normalised like a `.sas7bdat`, always in memory. A transport
+  file records no character encoding, so its text must be UTF-8 (or ASCII);
+  other bytes are refused with `dta_xpt_read_error`. Trailing rows whose values
+  are all blank, which haven drops, are restored from the row count the file
+  itself records (a V8 file, or a V5 file whose rows are 80 bytes or longer).
 - A file entry may declare `container: sdtm.zip` (`*` and `?` are wildcards,
   e.g. `sdtm_*.zip`; letter case must match); `load_delivery()` then gives that
   entry only files that came out of a matching container. Exported
@@ -55,17 +59,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `stream = "always"` is refused. A `.sas7bdat.gz` needs no separate
   decompression step, but haven unpacks it to a temporary file of the
   uncompressed size in `tempdir()`. The `.sas7bcat` format catalog is not read;
-  ship it as a `type: file` deliverable.
+  ship it as a `type: file` deliverable. Text that is not valid in the encoding
+  the file declares is refused with `dta_sas7bdat_read_error`, naming the column
+  and row.
 - The app's file editor offers `sas7bdat` as a file type for a tabular dataset.
-- `check()` on a `DTA` now enforces the file count its tabular datasets'
-  handlers declare. The bound is the dataset-wide sum over all its handlers,
+- **Breaking:** `check()` on a `DTA` now enforces the file count its tabular
+  datasets' handlers declare, so a delivery that passed before can fail. The bound is the dataset-wide sum over all its handlers,
   not checked per handler. A dataset holding more or fewer tables than the
   declared bounds signals a warning of class `dta_file_count_mismatch`, adds an
   `n_file_count_errors` column (placed before `n_import_errors`) to
   `last_validation_summary`, is listed in the new `last_file_count_findings`
   attribute, sets `last_validation_ok` to `FALSE`, is named in the console
   summary alongside other failures, and turns the HTML validation report's
-  overview and messages to failed. A dataset checked on its own is unaffected.
+  overview and messages to failed. Checking some datasets by name keeps the
+  findings of the others, each judged again on the dataset as it now is (a
+  dataset fixed since is no longer reported); a dataset that had no finding is
+  judged only when it is checked. A dataset checked on its own is unaffected.
 - `dta-app.yaml` gains `header_tag:`. `label` (plain text, at most 32
   characters) is shown as a pill beside the app title on every page, the start
   page included; `color` (a quoted hex value) fills it, with an automatically
@@ -82,26 +91,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   (`file_container_misplaced`) and an invalid container
   (`file_container_invalid`).
 - `zip` 3.0.0 or later is required.
-- `export_with_template()` gains `overwrite` (default `FALSE`) and now aborts
-  when `output` already exists, consistent with `write_dta()` and
-  `export_column_value_table()`. Callers that relied on silent replacement must
-  pass `overwrite = TRUE`.
-- `export_column_value_table()` gained an `overwrite` argument, default
-  `FALSE`: it now refuses to overwrite an existing file, as the other export
-  functions do. Pass `overwrite = TRUE` for the old behaviour.
-- The qualification runner's `filter` now matches the whole test name, not a
-  fragment of it, so `"IQ-ENV-01"` no longer selects `IQ-ENV-010` to `-019`.
+- **Breaking:** `export_with_template()` gains `overwrite` (default `FALSE`)
+  and now aborts when `output` already exists, consistent with `write_dta()`
+  and `export_column_value_table()`. Callers that relied on silent replacement
+  must pass `overwrite = TRUE`.
+- **Breaking:** `export_column_value_table()` gained an `overwrite` argument,
+  default `FALSE`: it now refuses to overwrite an existing file, as the other
+  export functions do. Pass `overwrite = TRUE` for the old behaviour.
+- The qualification runner's `filter` is now matched against the test file
+  name (`IQ-ENV`, `OQ-VAL-check`), so a filter that contains the stage prefix
+  or is anchored, such as `"OQ-VAL"` or `"^OQ-VAL"`, selects its files; before,
+  it selected nothing. The match is still unanchored unless you anchor it.
 - `run_qualification()` removes the half-written evidence bundle when its
   `filter` matches no test and it aborts.
-- `DTARuleColRange()` now rejects a rule naming more than one column at
-  construction (condition class `dta_rule_range_columns`), instead of only when
-  the rule is evaluated.
+- **Breaking:** `DTARuleColRange()` now rejects a rule naming more than one
+  column at construction (condition class `dta_rule_range_columns`), instead of
+  only when the rule is evaluated, so a specification holding such a rule no
+  longer loads.
+- **Breaking:** a file entry's `number_of_files`, `min_number_of_files` and
+  `max_number_of_files` must each be a non-negative whole number, and the
+  minimum may not exceed the maximum (condition class
+  `dta_file_count_bound_invalid`; `lint_dta()` reports such bounds as
+  `file_count_bound_invalid`). Such bounds used to be accepted, and since
+  `check()` enforces file counts they would fail every delivery.
 - `load_file(stream = "never")` refuses a UTF-16 or UTF-32 file with the same
   advice as the streaming readers (convert to UTF-8 first), instead of failing
   in the Arrow reader with an unrelated message.
-
-### Changed
-
 - **Breaking:** Word, PDF and Markdown exports (including the
   `{VALIDATION_RULES}` and `{DATASETS}` template blocks and
   `write_dataset_metadata()`) no longer show a rule's exact definition as YAML
@@ -172,7 +187,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - An empty YAML entry in an `in` or `not_in` list (`in: [A, ~]`) now matches a
   missing value, as documented. It used to be dropped on numeric columns and,
   on text columns, to match the literal text `"NULL"` instead of a missing
-  value, so such a rule passed or failed the wrong rows.
+  value, so such a rule passed or failed the wrong rows. A number in a list
+  that also holds text or a missing entry keeps its full precision on a
+  numeric column (`in: [0.30000000000000004, "5"]` used to match 0.3).
 - `export_with_template()` and `write_dta(template = )` write to a relative
   output path. They used to fail with "not a valid DOCX" (or, with the default
   `fallback = TRUE`, fall back to the built-in layout with a warning), because
@@ -203,7 +220,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - `write_table_to_file()` refuses unquoted cells that would not read back (a
   leading quote, the separator, CR or LF).
 - `DTADataSetFile` no longer keeps stale "not delivered" rows and now enforces
-  `min_number_of_files` / `max_number_of_files` for pattern handlers. An
+  `min_number_of_files` / `max_number_of_files` for pattern handlers. Each
+  pattern entry counts the files routed to it: a literal entry beside it, or an
+  entry that differs only in its `container`, keeps its own files out of the
+  count. A pattern entry with `min_number_of_files: 0` is optional. An
   unbounded maximum file count prints as open-ended.
 - Rule evaluation: group conditions look groups up by position (it was
   quadratic); an unconvertible `IF` value no longer exempts a group (eager and
@@ -220,12 +240,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   rejects non-dataset entries; an `NA` transmission date round-trips through
   YAML; `nullable` and range `min`/`max` are validated; unnamed column
   collections are rejected; `check()` stubs on rules abort instead of returning
-  `NULL`; YAML values written unquoted as `Y`/`N` get a quoting hint; the
+  `NULL`; YAML values written unquoted as `Y`/`N` get a quoting hint, also in a
+  list of allowed values that holds other entries (`[Y, N, U]`); the
   `create_example_*()` index is guarded.
 - Export: `export_specs_table()`, the column value table and the validation
   report write through the staged writer; empty `colnames` gives the `cli`
   error; markdown export escapes author text; the LibreOffice profile argument
-  is quoted; the HTML report no longer loses capped rows after sort and filter.
+  is quoted; the HTML report no longer loses capped rows after sort and filter,
+  and lists its filter choices in the same order in every locale. A character
+  XML does not allow (`\v`, `\f`, another control character, U+FFFE) anywhere
+  in an author's text -- a title, a contact, a column label, a description --
+  no longer aborts the Word or PDF export of `write_dta()`,
+  `write_dataset_metadata()` or `export_with_template()`.
+- `validate_template()`, `lint_template_repo()`, `collect_full_errors()` and
+  the app's template list no longer abort with "Character encoding must be
+  UTF-8, Latin-1 or bytes" on a template file, repository folder, package
+  library or temporary directory whose path holds a non-ASCII character.
+- The Jenkins and Bitbucket CI files written by `create_template_repo()`
+  install from Posit Package Manager's current snapshot. The
+  `rocker/r-ver:4.4` image they use is frozen at a 2025 snapshot that lacks
+  `zip` 3.0.0 and `S7` 0.2.2, so installing DTAtools there failed.
 - Template DOCX: substitution keeps tabs, breaks and other text in a run; text
   boxes no longer leak into the outer paragraph; `\v`, `\f` and control
   characters no longer produce an invalid DOCX. `create_template_repo()`
@@ -255,7 +289,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   archive exceeds the size limits; an entry whose name cannot be written on
   some file systems (a device name, a colon, a character Windows does not
   allow) refuses the archive when something needs it, saying so, and is
-  otherwise never extracted. Each needed entry is then extracted on its own
+  otherwise never extracted. A name of 511 bytes or more, which the zip library
+  cannot read in full, is treated the same way. Each needed entry is then
+  extracted on its own
   into a fresh directory. `zip::unzip()` does not refuse such names itself, and
   writes absolute names below its target under their full path.
 
@@ -4913,7 +4949,8 @@ All of the following belong to the manifest verification work above.
 
 - Initial internal release
 
-[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.23.0...v0.24.0

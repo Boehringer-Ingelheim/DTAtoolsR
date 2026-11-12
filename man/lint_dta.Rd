@@ -39,7 +39,7 @@ Errors: \code{yaml_unreadable}, \code{metadata_invalid}, \code{dataset_invalid},
 \code{rule_condition_operator_invalid}, \code{rule_condition_numeric_on_text},
 \code{rule_condition_value_unfit}, \code{rule_condition_value_outside_values},
 \code{group_constraint_unknown_condition}, \code{file_container_invalid},
-\code{file_field_unknown}, \code{file_container_misplaced}.
+\code{file_field_unknown}, \code{file_container_misplaced}, \code{file_count_bound_invalid}.
 
 Warnings: \code{rules_without_columns}, \code{rule_not_checkable},
 \code{format_narrower_than_length}, \code{metadata_import_issue}, \code{version_unquoted}

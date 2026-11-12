@@ -296,6 +296,30 @@ sync_manifest <- function() {
 
 # --- CHANGELOG ---------------------------------------------------------------
 #
+# The link block at the foot of the changelog has `[Unreleased]` comparing the
+# last release against HEAD. Promoting the heading must also define `[<v>]` as
+# that comparison closed at `v<v>`, and move `[Unreleased]` on to `v<v>...HEAD`.
+# Stops loudly when the block is not in that shape; does nothing when `[<v>]`
+# is already defined.
+promote_unreleased_link <- function(lines, v) {
+  if (any(startsWith(lines, sprintf("[%s]: ", v)))) {
+    return(lines)
+  }
+  i <- sole_match(lines, "^\\[Unreleased\\]: ", "[Unreleased]: link definition in CHANGELOG.md")
+  shape <- "^\\[Unreleased\\]: (.*/compare/)v([0-9]+\\.[0-9]+\\.[0-9]+)\\.\\.\\.HEAD$"
+  if (!grepl(shape, lines[i])) {
+    fail("the [Unreleased] link in CHANGELOG.md is not a 'compare/v<last>...HEAD' URL.")
+  }
+  base <- sub(shape, "\\1", lines[i])
+  last <- sub(shape, "\\2", lines[i])
+  c(
+    lines[seq_len(i - 1L)],
+    sprintf("[Unreleased]: %sv%s...HEAD", base, v),
+    sprintf("[%s]: %sv%s...v%s", v, base, last, v),
+    lines[seq_len(length(lines) - i) + i]
+  )
+}
+#
 # Write-only, and idempotent. The documented workflow (CLAUDE.md) is that
 # changes accumulate under `## [Unreleased]`, so a bump promotes that heading to
 # the released version. Falls back to inserting a fresh stanza when there is
@@ -315,6 +339,7 @@ update_changelog <- function(v) {
   unreleased <- grep("^## \\[Unreleased\\]", lines)
   if (length(unreleased) == 1L) {
     lines[unreleased] <- heading
+    lines <- promote_unreleased_link(lines, v)
     write_lines_utf8(lines, path)
     cat("  CHANGELOG.md          promoted [Unreleased] ->", heading, "\n")
     return(invisible(TRUE))

@@ -504,6 +504,28 @@ test_that("OQ-FILE-063 | a zero-byte or non-SAS file is refused with the path, a
       )
     )
   }
+  # A text value that is not valid in the encoding the file declares (haven
+  # writes UTF-8; the byte 0xDC of a Latin-1 umlaut is patched into the second
+  # value) is refused, naming the column and the first row it is in.
+  enc <- file.path(dir, "enc.sas7bdat")
+  suppressWarnings(haven::write_sas(data.frame(NAME = c("ABC", "MXLLER"), stringsAsFactors = FALSE), enc))
+  b <- readBin(enc, "raw", file.size(enc))
+  at <- grepRaw("MXLLER", b, fixed = TRUE)
+  qa_check("the written value is stored once, verbatim", length(at) == 1L, length(at))
+  b[at + 1L] <- as.raw(0xDC)
+  writeBin(b, enc)
+  cnd <- tryCatch(read_file(fs_handler("enc.sas7bdat"), enc), error = function(e) e)
+  msg <- if (inherits(cnd, "condition")) gsub("[[:space:]]+", " ", conditionMessage(cnd)) else ""
+  qa_step(
+    "text that is not valid in the declared encoding is refused, naming column NAME and row 2",
+    list(class = TRUE, column = TRUE, row = TRUE),
+    list(
+      class = inherits(cnd, "dta_sas7bdat_read_error"),
+      column = grepl("NAME", msg, fixed = TRUE),
+      row = grepl("row 2", msg, fixed = TRUE)
+    )
+  )
+
   # No observations is a dataset, not an error.
   empty <- read_file(fs_handler("empty.sas7bdat"), fs_fx("empty.sas7bdat"))
   qa_step(
