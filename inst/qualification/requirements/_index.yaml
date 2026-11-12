@@ -9,7 +9,7 @@
 # written for one version of the software say nothing certain about another.
 
 suite_revision: 1
-package_version: 0.26.0
+package_version: 0.27.0
 
 areas:
   - area: CORE
