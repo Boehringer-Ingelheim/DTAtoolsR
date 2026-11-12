@@ -305,3 +305,89 @@ test_that("OQ-FILE-054 | check() reports every declared pattern with no delivere
   qa_step("exactly one message is recorded, for the pattern that never arrived", 1L, nrow(msgs))
   qa_step("its text names that pattern", TRUE, grepl("^b_.*\\.pdf$", msgs$message[[1]], fixed = TRUE))
 })
+
+# ---- file counts of a file dataset ------------------------------------------------------
+
+# The check() status of a file dataset: one row per target (a delivered file,
+# or an entry whose count is wrong or that was not delivered).
+fh_status <- function(ds) validation_status(check(ds, quiet = TRUE, persist = FALSE))
+
+# A file dataset `d` in a DTA, with the files delivered by load_delivery(), and
+# its status. The files are written under qa_tempdir() by the caller.
+fh_delivered_status <- function(ds, files) {
+  r <- cont_run(cont_of(ds), files, exdir = cont_exdir("OQ-FILE-065"))
+  stopifnot(is.null(r$error))
+  fh_status(DTAtools::datasets(r$result, "d"))
+}
+
+test_that("OQ-FILE-065 | each entry of a file dataset counts the files routed to it, and an entry with a minimum of zero is optional | REQ-FILE-041", {
+  pdf <- function(...) DTAFileAny("[.]pdf$", pattern = TRUE, ...)
+
+  # A literal entry beside a pattern entry. The pattern also matches x.pdf, but
+  # x.pdf is named by the literal entry, so it is that entry's file: the pattern
+  # entry (1 to 1 files) counts y.pdf alone, then y.pdf and z.pdf.
+  ds <- DTADataSetFile(id = "d", files = list(
+    DTAFileAny("x.pdf", number_of_files = 1), pdf(min_number_of_files = 1, max_number_of_files = 1)
+  ))
+  s1 <- fh_delivered_status(ds, c(cont_write("x.pdf", "a"), cont_write("y.pdf", "b")))
+  qa_step("x.pdf (literal) and y.pdf (pattern, 1 of 1) are each fine", c(TRUE, TRUE), s1$ok)
+  s2 <- fh_delivered_status(ds, c(cont_write("x.pdf", "a"), cont_write("y.pdf", "b"), cont_write("z.pdf", "c")))
+  qa_step("with z.pdf as well the pattern entry holds 2 files against a maximum of 1: it alone fails", "[.]pdf$", s2$table[!s2$ok])
+
+  # Two entries that differ only in their container each count their own files:
+  # one pdf in a.zip and one in b.zip, one file each.
+  per_container <- DTADataSetFile(id = "d", files = list(
+    pdf(container = "a.zip", number_of_files = 1), pdf(container = "b.zip", number_of_files = 1)
+  ))
+  archives <- c(cont_zip(list(p.pdf = "a"), name = "a.zip"), cont_zip(list(q.pdf = "b"), name = "b.zip"))
+  spc <- fh_delivered_status(per_container, archives)
+  qa_step("each archive's entry holds its one file, so both files are fine and nothing else is reported", c("p.pdf", "q.pdf"), spc$table[spc$ok])
+  qa_step("with no failure", 0L, sum(!spc$ok))
+
+  # A minimum of zero makes the entry optional; a maximum still applies.
+  optional <- DTADataSetFile(id = "d", files = list(pdf(min_number_of_files = 0, max_number_of_files = 1)))
+  qa_step("an entry with a minimum of 0 and nothing delivered reports nothing", 0L, nrow(fh_status(optional)))
+  required <- DTADataSetFile(id = "d", files = list(pdf(min_number_of_files = 1, max_number_of_files = 1)))
+  sr <- fh_status(required)
+  qa_step("while the same entry with a minimum of 1 reports the missing file", list("[.]pdf$", FALSE), list(sr$table, sr$ok))
+  so <- fh_delivered_status(optional, c(cont_write("p.pdf", "a"), cont_write("q.pdf", "b")))
+  qa_step("and an optional entry given two files against a maximum of 1 fails", "[.]pdf$", so$table[!so$ok])
+})
+
+test_that("OQ-FILE-066 | a file count bound must be a single non-negative whole number, with the minimum no greater than the maximum | REQ-FILE-042", {
+  csv <- function(...) DTAFileCSV(filename = "x_.*[.]csv$", pattern = TRUE, ...)
+  refused <- function(label, expr) {
+    e <- cont_catch(expr)
+    qa_step(sprintf("%s is refused as an invalid file count bound", label), TRUE, cont_is(e, "dta_file_count_bound_invalid"))
+  }
+  refused("a minimum of 3 above a maximum of 2", csv(min_number_of_files = 3, max_number_of_files = 2))
+  refused("a minimum of -1", csv(min_number_of_files = -1))
+  refused("a maximum of -1", csv(max_number_of_files = -1))
+  refused("a minimum of 1.5", csv(min_number_of_files = 1.5))
+  refused("a maximum of 1.5", csv(max_number_of_files = 1.5))
+  refused("a minimum of NA", csv(min_number_of_files = NA_real_))
+  refused("a maximum of NA", csv(max_number_of_files = NA_real_))
+  refused("a minimum of Inf", csv(min_number_of_files = Inf))
+  refused("a maximum of Inf", csv(max_number_of_files = Inf))
+  refused("a minimum of two numbers", csv(min_number_of_files = c(1, 2)))
+  refused("number_of_files of -1", csv(number_of_files = -1))
+  refused("number_of_files of 1.5", csv(number_of_files = 1.5))
+  refused("number_of_files of NA", csv(number_of_files = NA_real_))
+  refused("number_of_files of Inf", csv(number_of_files = Inf))
+  h <- csv(max_number_of_files = 2)
+  refused("a minimum of 5 assigned to a handler with a maximum of 2", {
+    h@min_number_of_files <- 5
+  })
+
+  # Valid forms are accepted with the bounds as given (NULL for a bound left out).
+  accepted <- function(label, h, min, max) {
+    qa_step(sprintf("%s is accepted, with the bounds as given", label), list(min, max), list(h@min_number_of_files, h@max_number_of_files))
+  }
+  accepted("a minimum of 0", csv(min_number_of_files = 0), 0, NULL)
+  accepted("0 to 0", csv(min_number_of_files = 0, max_number_of_files = 0), 0, 0)
+  accepted("number_of_files of 0", csv(number_of_files = 0), 0, 0)
+  accepted("2 to 2", csv(min_number_of_files = 2, max_number_of_files = 2), 2, 2)
+  accepted("a minimum of 2 alone", csv(min_number_of_files = 2), 2, NULL)
+  accepted("a maximum of 4 alone", csv(max_number_of_files = 4), NULL, 4)
+  accepted("number_of_files of 3", csv(number_of_files = 3), 3, 3)
+})

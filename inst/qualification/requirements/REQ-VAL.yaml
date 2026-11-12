@@ -457,7 +457,7 @@ requirements:
     risk: high
     category: functional
     covers: [check]
-    source: "R/DTA-class.R check() roxygen, paragraph on files supplied to a tabular dataset; CHANGELOG [Unreleased]"
+    source: "R/DTA-class.R check() roxygen, paragraph on files supplied to a tabular dataset; CHANGELOG 0.27.0"
     notes: >
       Refines REQ-VAL-032 for the two directions of violation: too few and too
       many are distinct failures with distinct counts.
@@ -516,3 +516,22 @@ requirements:
     category: functional
     covers: [check]
     source: "R/DTA-class.R check() roxygen: applies only to a DTA-level check, not to a dataset checked alone"
+
+  - id: REQ-VAL-038
+    text: >
+      When check() is applied to a DTA with the datasets argument naming some of
+      its datasets, the last_file_count_findings attribute shall replace the
+      rows of the datasets checked now with the findings of this run and keep
+      a row for each dataset not checked now that had one, still exists in the
+      DTA and still holds a file count outside its bounds (judged again on the
+      dataset as it now is, so a dataset fixed since has no row), and
+      last_validation_ok shall be FALSE while any row remains. A dataset that
+      had no row is judged only when it is checked.
+    risk: high
+    category: functional
+    covers: [check]
+    source: "R/DTA-class.R (check), paragraph on last_file_count_findings"
+    notes: >
+      A check of a subset judges only its own datasets; rebuilding the finding
+      table from that run alone would turn a dataset that exceeds its file count
+      into a passing one.

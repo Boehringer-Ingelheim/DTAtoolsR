@@ -2500,3 +2500,89 @@ test_that("group_condition then_scope 'all' reports exactly the failing rows as 
   expect_equal(as.integer(res$details[[1]]$rows), c(1L, 2L, 4L))
   expect_false(res$details[[1]]$rows_truncated)
 })
+
+# Regression (red-team F3): a YAML `~` in an `in` list was replaced by
+# NA_character_, so unlist() coerced the whole bound to text and members that
+# need 16-17 significant digits stopped matching a numeric column.
+test_that("a `~` in an in-list does not change how the other members compare", {
+  num <- c(0.30000000000000004, 9007199254740994)
+  df <- data.frame(
+    K = c(format(num, digits = 17), "", "42"),
+    FLAG = "Y",
+    stringsAsFactors = FALSE
+  )
+  specs <- DTAColumnSpecCollection(columns = list(
+    K = DTAColumnSpec(id = "K", type = "SAS Num", nullable = TRUE),
+    FLAG = DTAColumnSpec(id = "FLAG", type = "SAS Char", nullable = FALSE)
+  ))
+  failing_rows <- function(members) {
+    rule <- DTARuleColCondition(
+      id = "k_flag",
+      condition = list(K = list(`in` = members)),
+      then = list(FLAG = list(equals = "N"))
+    )
+    specs@rules <- list(rule)
+    ds <- DTADataSetTabular(id = "d", specs = specs, tables = list(t = df))
+    ck <- suppressMessages(check(ds, quiet = TRUE, persist = FALSE))
+    dta_rule_failure_row_indices(rule, as.data.frame(ck@tables[["t"]]))
+  }
+  plain <- failing_rows(list(num[[1]], num[[2]]))
+  expect_identical(as.integer(plain), 1:2)
+  with_null <- failing_rows(list(num[[1]], num[[2]], NULL))
+  expect_identical(as.integer(with_null), 1:3)
+})
+
+# Regression (red-team F3, generalised): the bound of an in-list is judged
+# member by member. Whatever else the list holds -- a text number, a `~` --
+# a number that needs 16-17 significant digits keeps matching its cell.
+test_that("an in-list compares each member against a numeric column, whatever else the list holds", {
+  num <- 0.30000000000000004
+  x <- c(num, 0.3, 5, 1, NA)
+  mask <- function(members, op = "in") dta_condition_mask("K", op, members, x)
+
+  expect_identical(mask(list(num, "5")), c(TRUE, FALSE, TRUE, FALSE, FALSE))
+  expect_identical(mask(list(num, "5", NULL)), c(TRUE, FALSE, TRUE, FALSE, TRUE))
+  expect_identical(mask(list(num, "5"), "not_in"), c(FALSE, TRUE, FALSE, TRUE, TRUE))
+  expect_identical(dta_equality_bound(x, list(num, "5")), c(num, 5))
+
+  # A member that is text and not a number: the comparison stays textual, so
+  # the numeric member still matches its cell and nothing is parsed.
+  expect_identical(dta_equality_bound(x, list(1, "UNK")), list(1, "UNK"))
+  expect_identical(mask(list(1, "UNK")), c(FALSE, FALSE, FALSE, TRUE, FALSE))
+})
+
+test_that("the in-memory and the streamed check agree on an in-list of mixed members", {
+  frame <- data.frame(
+    K = c("0.30000000000000004", "0.30000000000000004", "0.3", "5", "1", ""),
+    FLAG = "Y",
+    stringsAsFactors = FALSE
+  )
+  path <- file.path(withr::local_tempdir(), "f3.csv")
+  utils::write.csv(frame, path, row.names = FALSE, na = "")
+  num <- 0.30000000000000004
+  failed_rows <- function(members, mode) {
+    rule <- DTARuleColCondition(
+      id = "r", condition = list(K = list(`in` = members)),
+      then = list(FLAG = list(equals = "N"))
+    )
+    specs <- DTAColumnSpecCollection(
+      columns = list(
+        K = DTAColumnSpec(id = "K", type = "SAS Num", nullable = TRUE),
+        FLAG = DTAColumnSpec(id = "FLAG", type = "SAS Char", nullable = FALSE)
+      ),
+      rules = list(rule)
+    )
+    ds <- DTADataSetTabular(id = "d", specs = specs, files = list(DTAFileCSV(filename = "f3.csv")))
+    ds <- load_file(ds, file = path, handler_index = 1, stream = mode)
+    ck <- suppressMessages(suppressWarnings(check(ds, quiet = TRUE, persist = FALSE)))
+    errors <- as.data.frame(validation_errors(ck, names(tables(ck))[[1]]))
+    msg <- errors$message[errors$rule_id == "r"]
+    if (length(msg) == 0L) 0L else as.integer(sub("^.*violated: ([0-9]+) rows? failed.*$", "\\1", msg[[1]]))
+  }
+  for (mode in c("never", "always")) {
+    # rows 1, 2 and the "5" row
+    expect_identical(failed_rows(list(num, "5"), mode), 3L, info = mode)
+    # ... and the missing row
+    expect_identical(failed_rows(list(num, "5", NULL), mode), 4L, info = mode)
+  }
+})

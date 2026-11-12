@@ -55,7 +55,10 @@ file count is outside its declared bounds; it sits before
 \code{n_import_errors} in the frame.}
 \item{\code{"last_file_count_findings"}}{data.frame with columns dataset,
 n_supplied, min, max, message; one row per dataset whose file count is
-outside its declared bounds, zero rows when none.}
+outside its declared bounds, zero rows when none. A check of a subset of
+datasets replaces the rows of the datasets it checked; a row of another
+dataset is kept while that dataset still exists and still holds a file
+count outside its bounds (it is judged again, not copied).}
 \item{\code{"last_metadata_summary"}}{one-row data.frame for the metadata
 axis, with columns scope, status, import_valid, n_import_errors, fields,
 ok. Metadata belongs to the \code{DTA} itself rather than to any

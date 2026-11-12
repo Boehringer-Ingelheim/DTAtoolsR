@@ -84,7 +84,7 @@
   if (!dir.exists(r_dir)) {
     cli::cli_abort("Found {.file {app_dir}} but it has no {.file R/} directory of engine code.")
   }
-  files <- sort(list.files(r_dir, pattern = "[.][Rr]$", full.names = TRUE), method = "radix")
+  files <- sort(enc2utf8(list.files(r_dir, pattern = "[.][Rr]$", full.names = TRUE)), method = "radix")
   if (length(files) == 0) {
     cli::cli_abort("Found {.file {r_dir}} but it contains no {.file .R} files.")
   }
@@ -192,7 +192,7 @@
   # output (which file "wins" a duplicate-id@version, which file the strict
   # abort lists first) must not depend on which machine ran it. See the
   # project's own "locale collation diverges from CI" lesson.
-  sort(unique(files), method = "radix")
+  sort(enc2utf8(unique(files)), method = "radix")
 }
 
 # Recursive counterpart to .dta_template_list_dir(), used ONLY to find files the
@@ -1396,7 +1396,7 @@
   if (nrow(hits) == 0) {
     return(.dta_template_validation_empty())
   }
-  hits <- hits[order(hits$file, method = "radix"), , drop = FALSE]
+  hits <- hits[order(enc2utf8(hits$file), method = "radix"), , drop = FALSE]
 
   # A kind folder passed as `path`: every file in it is "misplaced" relative to
   # a root that is not there. One row naming the real mistake beats N rows.
@@ -1497,7 +1497,7 @@
     strsplit(rel, "[/\\]"),
     function(p) any(grepl("^[.]", utils::head(p, -1L))), logical(1)
   )
-  for (f in file.path(path, sort(rel[!under_dotdir], method = "radix"))) {
+  for (f in file.path(path, sort(enc2utf8(rel[!under_dotdir]), method = "radix"))) {
     row(
       f, "error", "app_config_misplaced",
       "App configuration file belongs in the repository root, directly next to templates/, parties/ and vocabulary/; the app reads only the root, so this file is invisible. Move it there (or delete it)."
@@ -1522,7 +1522,7 @@
   }
   dir <- file.path(path, .dta_template_engine_get("dta_export_templates_subdir")())
   files <- list.files(dir, full.names = TRUE, recursive = FALSE)
-  files <- sort(files[!dir.exists(files)], method = "radix")
+  files <- sort(enc2utf8(files[!dir.exists(files)]), method = "radix")
   base <- basename(files)
   bad <- !grepl("[.]docx$", base, ignore.case = TRUE) &
     !grepl("^README([.](md|txt))?$|^~[$]", base, ignore.case = TRUE)
@@ -1761,7 +1761,7 @@ validate_template <- function(path, strict = FALSE, kinds = NULL) {
   if (nrow(result) > 0) {
     # Deterministic order across locales/OSes -- see the "locale collation
     # diverges from CI" lesson referenced in .dta_template_list_dir().
-    result <- result[order(result$file, result$code, method = "radix"), , drop = FALSE]
+    result <- result[order(enc2utf8(result$file), result$code, method = "radix"), , drop = FALSE]
   }
   rownames(result) <- NULL
 

@@ -436,6 +436,12 @@ test_that("an empty or non-SAS file is refused with a condition carrying its pat
     )
     expect_s3_class(cnd, "dta_sas7bdat_read_error")
     expect_identical(cnd$path, path)
+
+    # The server path stays with the condition; the message shows the base name
+    # once, never the directory (the reason must not repeat it either).
+    msg <- gsub("[[:space:]]+", " ", conditionMessage(cnd))
+    expect_false(grepl(dirname(path), msg, fixed = TRUE))
+    expect_true(grepl(basename(path), msg, fixed = TRUE))
   }
 })
 
@@ -604,7 +610,7 @@ test_that("only a SAS handler gets the 'cannot be streamed' message", {
 # ---- two pinned limitations --------------------------------------------------
 
 test_that("LIM-011: a number under a w.d format is checked as stored, not as displayed", {
-  # KNOWN DEFECT, pinned rather than endorsed. SAS would display 1/3 under 8.2
+  # Registered limitation (LIM-011), pinned as documented behaviour. SAS would display 1/3 under 8.2
   # as 0.33, which fits; the value is checked as stored, so it is a format
   # error. If rounding is ever added, switch this to expect 0 errors.
   specs <- DTAColumnSpecCollection(columns = list(
@@ -618,7 +624,7 @@ test_that("LIM-011: a number under a w.d format is checked as stored, not as dis
 })
 
 test_that("LIM-012: a declared length on a SAS date is checked against the rendered text", {
-  # KNOWN DEFECT, pinned rather than endorsed. A spec taken from PROC CONTENTS
+  # Registered limitation (LIM-012), pinned as documented behaviour. A spec taken from PROC CONTENTS
   # carries length 8, the bytes SAS stores a date in; the check sees the 9
   # characters of "15AUG2025" instead, so every row fails. If the length of a
   # temporal column stops being checked against the text, switch this to expect
@@ -644,4 +650,24 @@ test_that("LIM-012: a declared length on a SAS date is checked against the rende
   # Five of the six rows hold a date; the sixth is missing.
   expect_identical(nrow(errors), 5L)
   expect_true(all(errors$keyword == "maxLength"))
+})
+
+# Regression (round-2 review): a header that names the wrong encoding hands
+# haven bytes that are not UTF-8; they used to reach the checks as values.
+test_that("text that is not valid UTF-8 is refused, naming the column and row but not the bytes", {
+  p <- file.path(withr::local_tempdir(), "ae.sas7bdat")
+  suppressWarnings(haven::write_sas(
+    data.frame(NAME = c("ABC", "MXLLER"), stringsAsFactors = FALSE), p
+  ))
+  b <- readBin(p, "raw", file.size(p))
+  at <- grepRaw("MXLLER", b, fixed = TRUE)
+  skip_if(length(at) != 1L, "the placeholder is not stored verbatim by this haven")
+  b[at + 1L] <- as.raw(0xDC)
+  writeBin(b, p)
+
+  e <- expect_error(read_file(DTAFileSAS7BDAT("ae.sas7bdat"), p), class = "dta_sas7bdat_read_error")
+  m <- gsub("[[:space:]]+", " ", conditionMessage(e))
+  expect_match(m, "NAME", fixed = TRUE)
+  expect_match(m, "row 2", fixed = TRUE)
+  expect_false(grepl(dirname(p), m, fixed = TRUE))
 })

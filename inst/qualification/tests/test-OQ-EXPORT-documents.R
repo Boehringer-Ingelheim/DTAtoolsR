@@ -2498,3 +2498,103 @@ test_that("OQ-EXPORT-072 | export_with_template keeps an existing output unless 
   export_with_template(et_dta(), template, out, quiet = TRUE, overwrite = TRUE)
   qa_step("overwrite = TRUE replaces it", "Title: Clinical Data Specification", qa_docx_text(out))
 })
+
+test_that("OQ-EXPORT-073 | a group condition used only as an IF is worded with the outcomes of an IF, and an in test of an empty entry is not called unevaluable | REQ-EXPORT-036", {
+  # Expected sentences from the notes of REQ-EXPORT-036 (and the wording block of
+  # R/rulePhrasing.R). Rule r_ifonly uses every IF condition only as an IF;
+  # rule r_left uses adult as an IF and as the left side of a constraint, so it
+  # keeps the plain group wording. Columns: AGE a number, the others text.
+  cols <- c("USUBJID", "AGE", "ARM", "GFSTAT")
+  adult <- list(AGE = list(greater = 17))
+  rules <- list(
+    DTARuleGroupCondition(
+      id = "r_ifonly", group_by = "USUBJID",
+      conditions = list(
+        adult = adult, mixed = list(AGE = list(greater = 17), ARM = list(equals = "ACTIVE")),
+        consented = list(GFSTAT = list(equals = "Y"))
+      ),
+      constraints = list(
+        list(type = "requires", id = "a", `if` = "adult", then = "consented"),
+        list(type = "requires", id = "b", `if` = "mixed", then = "consented")
+      )
+    ),
+    DTARuleGroupCondition(
+      id = "r_left", group_by = "USUBJID",
+      conditions = list(adult = adult, consented = list(GFSTAT = list(equals = "Y"))),
+      constraints = list(
+        list(type = "requires", id = "a", `if` = "adult", then = "consented"),
+        list(type = "mutually_exclusive", id = "x", left = "adult", right = "consented")
+      )
+    ),
+    DTARuleColCondition(
+      id = "r_in", condition = list(ARM = list(equals = "ACTIVE")), then = list(GFSTAT = list(`in` = list(NULL)))
+    ),
+    DTARuleColCondition(
+      id = "r_notin", condition = list(ARM = list(equals = "ACTIVE")), then = list(GFSTAT = list(not_in = list(NULL)))
+    )
+  )
+  specs <- DTAColumnSpecCollection(
+    columns = stats::setNames(lapply(cols, function(nm) {
+      if (nm == "AGE") {
+        DTAColumnSpec(id = nm, type = "SAS Num", nullable = TRUE)
+      } else {
+        DTAColumnSpec(id = nm, type = "SAS Char", length = 8, nullable = TRUE)
+      }
+    }), cols),
+    rules = rules
+  )
+  dta <- DTA(datasets = list(DTADataSetTabular(id = "d", specs = specs, files = list())), metadata = DTAMetaData(title = "Rule wording", version = "1.0"))
+  md <- file.path(qa_tempdir(), "rules.md")
+  write_dta(dta, file = md, format = "md", quiet = TRUE)
+  plain <- et_md_plain(readLines(md, warn = FALSE, encoding = "UTF-8"))
+
+  # The lines under a rule's heading, up to the next heading.
+  section <- function(id) {
+    start <- match(paste("#####", id), plain)
+    if (is.na(start)) {
+      return(character(0))
+    }
+    rest <- plain[-seq_len(start)]
+    stop_at <- which(grepl("^#", rest) | rest == "---")[1]
+    if (is.na(stop_at)) rest else rest[seq_len(stop_at - 1L)]
+  }
+  has <- function(lines, text) any(grepl(text, lines, fixed = TRUE))
+
+  s <- section("r_ifonly")
+  qa_check("rule r_ifonly is in the document", length(s) > 0)
+  qa_check(
+    "IF-only, one column: a missing value does not meet the condition",
+    has(s, "A row in which AGE is missing does not meet condition adult.")
+  )
+  qa_check(
+    "IF-only, a value that is not a number does not by itself keep the row from meeting the condition",
+    has(s, "A value in AGE that is not a number does not by itself keep the row from meeting condition adult.")
+  )
+  qa_check(
+    "IF-only, two columns: a missing ARM does not meet the condition unless another column holds a non-number",
+    has(s, paste0(
+      "A row in which ARM is missing does not meet condition mixed, unless another column of the condition ",
+      "holds a value that is not a number and no other test of the condition fails."
+    ))
+  )
+  qa_check(
+    "the THEN-only condition keeps the plain group wording for a missing value",
+    has(s, "A row in which GFSTAT is missing does not meet condition consented.")
+  )
+  qa_check("and nothing says that a row is not checked", !has(s, "not checked"))
+
+  l <- section("r_left")
+  qa_check("rule r_left is in the document", length(l) > 0)
+  qa_check(
+    "a condition that is also a left side: a value that is not a number does not meet it",
+    has(l, "A value in AGE that is not a number does not meet condition adult.")
+  )
+  qa_check("and has no IF wording", !has(l, "by itself keep the row"))
+
+  for (id in c("r_in", "r_notin")) {
+    r <- section(id)
+    qa_check(sprintf("rule %s is in the document", id), length(r) > 0)
+    qa_check(sprintf("%s: an in/not_in test of an empty entry is not called unevaluable", id), !has(r, "cannot be evaluated") && !has(r, "Problem:"))
+    qa_check(sprintf("%s: it is worded as a list that holds only a missing entry", id), has(r, "one of the entries of a list that holds only a missing entry"))
+  }
+})

@@ -53,8 +53,12 @@ appearance.
 package (the ReadStat library inside it), a hard dependency since the SAS
 reader was added. Decoding is a dependency's job and out of scope as above, but
 the package's use of it is not: the suite checks what is made of the decoded
-values (names, blanks, dates and times, types) against a dataset written by SAS
-itself and against byte-level facts about the fixture files. A SAS dataset is
+values (names, blanks, dates and times, types) against `delivery.sas7bdat`, which
+was written by `haven::write_sas` -- the same codec that reads it, so that
+check shows the package passes the decoded values on faithfully, not that the
+codec agrees with SAS -- and against byte-level facts about the SAS epoch.
+Only `iris.sas7bdat` was written by SAS itself, and it holds no dates or
+blanks. A SAS dataset is
 read into memory only, which LIM-010 records.
 
 **Container deliveries.** A delivery may be a `.zip` archive or a SAS
@@ -65,7 +69,10 @@ on its own, and splits a transport library into single-dataset files that
 haven then reads. Area CONT checks the refusals against hostile fixtures, the
 split byte for byte, truncated libraries, and that a file inside a container
 is validated exactly as the same file delivered loose. Decompression itself
-is the `zip` package's job and out of scope, as decoding is for haven.
+is the `zip` package's job and out of scope, as decoding is for haven. What
+the package makes of a transport file's decoded values is in scope: its text
+is read as UTF-8 only, and a version 5 file with rows under 80 bytes cannot
+say how many rows it holds (LIM-017, LIM-018).
 
 ## 3. Evidence and its properties
 

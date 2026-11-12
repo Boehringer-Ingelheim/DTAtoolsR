@@ -183,7 +183,11 @@ load_delivery <- function(x, files, stream = getOption("DTAtools.stream", "auto"
           dataset = dataset, file = file, container = container
         )
       }
-      dta_delivery_row(st, b$cand, files, "refused", reason = dta_delivery_reason(res, b$cand))
+      # Dataset and entry stay on the row: the file was delivered, so it is not
+      # "missing" from the entry it was meant for.
+      dta_delivery_row(st, b$cand, files, "refused",
+        dataset = b$dataset, handler = b$handler, reason = dta_delivery_reason(res, b$cand)
+      )
     } else {
       x <- res
       dta_delivery_row(st, b$cand, files, "loaded",
@@ -218,7 +222,7 @@ load_delivery <- function(x, files, stream = getOption("DTAtools.stream", "auto"
   n <- nrow(loaded)
   k <- length(unique(loaded$dataset))
   unused <- plan$name[plan$status == "unused"]
-  missing <- dta_delivery_missing(slots, st$opened, loaded)
+  missing <- dta_delivery_missing(slots, st$opened, plan[plan$status %in% c("loaded", "refused"), , drop = FALSE])
   kept <- unique(loaded$name[loaded$reason %in% `__DTAtools_delivery_kept__`])
   cap <- function(v) if (length(v) > 10) c(v[1:10], paste("and", length(v) - 10, "more")) else v
   unused_shown <- cap(encodeString(unused))
@@ -300,35 +304,59 @@ dta_delivery_item <- function(type, name) {
 dta_delivery_claims <- function(slots, cand, kind) {
   claims <- list()
   mismatch <- NULL
-  for (ds in unique(vapply(slots, `[[`, "", "dataset"))) {
+  # A literal entry names this file but wants it inside another container. It
+  # still outranks every pattern entry that does not name a container, so no
+  # other dataset may take the loose (or wrongly packed) file; a pattern entry
+  # whose own container holds the file keeps its claim.
+  lit_blocked <- FALSE
+  lit_mismatch <- NULL
+  # Two passes: which entries of each dataset match, then (knowing whether a
+  # literal entry was held back) which one each dataset picks -- otherwise a
+  # dataset's first match, without a container, would hide a later entry of
+  # the same dataset whose container does hold the file.
+  per <- lapply(unique(vapply(slots, `[[`, "", "dataset")), function(ds) {
     ss <- Filter(function(s) identical(s$dataset, ds), slots)
     ok <- vapply(ss, function(s) {
       if (!isTRUE(any(matches_filename(s$h, cand$name)))) {
         return(FALSE)
       }
+      kind_ok <- !(identical(kind, "zip") && !s$any) && !(identical(kind, "xpt") && !(s$any || s$xpt))
       if (!is.null(s$container) && !dta_matches_container(s$h, cand$chain)) {
-        if (is.null(mismatch)) mismatch <<- list(dataset = ds, container = s$container, chain = cand$chain)
+        this <- list(dataset = ds, container = s$container, chain = cand$chain)
+        if (is.null(mismatch)) mismatch <<- this
+        if (s$literal && kind_ok) {
+          lit_blocked <<- TRUE
+          if (is.null(lit_mismatch)) lit_mismatch <<- this
+        }
         return(FALSE)
       }
-      if (identical(kind, "zip") && !s$any) {
-        return(FALSE)
-      }
-      if (identical(kind, "xpt") && !(s$any || s$xpt)) {
-        return(FALSE)
-      }
-      TRUE
+      kind_ok
     }, logical(1))
+    list(ds = ds, ss = ss, ok = ok, lit = ok & vapply(ss, `[[`, TRUE, "literal"))
+  })
+  any_lit <- any(vapply(per, function(p) any(p$lit), logical(1)))
+  # A literal entry held back for its container: only an entry through a
+  # container that holds the file may take it (its container matched, or it
+  # would not be ok), and the reason names the container the literal expects.
+  contained_only <- !any_lit && lit_blocked
+  for (p in per) {
+    ok <- p$ok
+    if (contained_only) ok <- ok & vapply(p$ss, function(s) !is.null(s$container), logical(1))
     if (!any(ok)) next
-    lit <- which(ok & vapply(ss, `[[`, TRUE, "literal"))
+    lit <- which(ok & p$lit)
     pick <- if (length(lit)) lit[[1]] else which(ok)[[1]]
-    s <- ss[[pick]]
+    s <- p$ss[[pick]]
     claims[[length(claims) + 1]] <- list(
-      dataset = ds, handler = s$handler, item = dta_delivery_item(s$type, cand$name),
+      dataset = p$ds, handler = s$handler, item = dta_delivery_item(s$type, cand$name),
       literal = s$literal, xpt = s$xpt,
       deliverable = s$any && (s$literal || isTRUE(kind %in% s$ext))
     )
   }
-  if (any(vapply(claims, `[[`, TRUE, "literal"))) claims <- Filter(function(c) c$literal, claims)
+  if (any_lit) {
+    claims <- Filter(function(c) c$literal, claims)
+  } else if (lit_blocked) {
+    mismatch <- lit_mismatch
+  }
   list(claims = claims, mismatch = mismatch)
 }
 
@@ -405,8 +433,19 @@ dta_delivery_reason <- function(e, cand) {
     cand$path
   ))
   ps <- gsub("\\s+", " ", ps[order(-nchar(ps))])
-  for (p in ps) msg <- gsub(p, label, msg, fixed = TRUE)
-  msg
+  # Through a placeholder, so the base name below is not found again inside
+  # the label written for a full path.
+  hole <- "\001"
+  for (p in ps) msg <- gsub(p, hole, msg, fixed = TRUE)
+  # The readers name a file by its base name only (a server path must not
+  # reach a message), so that is where the label goes as well -- as a whole
+  # name, not as the tail of another one ("data.csv" holds "a.csv").
+  bn <- basename(cand$path)
+  if (nzchar(bn)) {
+    rx <- gsub("([][{}()+*^$|\\\\?.])", "\\\\\\1", bn)
+    msg <- gsub(paste0("(?<![\\w.-])", rx, "(?![\\w-]|\\.\\w)"), hole, msg, perl = TRUE)
+  }
+  gsub(hole, label, msg, fixed = TRUE)
 }
 
 # A gzip file that will be read into memory (a SAS dataset, or a delimited file
@@ -454,6 +493,9 @@ dta_delivery_new_dir <- function(st, exdir, label) {
   # NTFS's 255 characters; <k> keeps cut names apart.
   lab <- label
   while (nchar(lab, type = "bytes") > 100) lab <- substr(lab, 1, nchar(lab) - 1)
+  # Windows drops a trailing dot or space from a directory name, so the path
+  # built from the cut name would no longer be the one that was created.
+  lab <- sub("[. ]+$", "", lab)
   d <- file.path(st$run_dir, paste0(st$k, "-", lab))
   dir.create(d, showWarnings = FALSE, mode = "0700")
   if (!dir.exists(d)) {
@@ -591,7 +633,7 @@ dta_delivery_unused_reason <- function(cl, cand, kind, slots) {
     return("is a .zip inside a .zip, which is not opened")
   }
   if (!is.null(cand$problem) && !is.na(cand$problem)) {
-    return(sprintf("matches no file entry of the specification, and its name %s, so it is not extracted", cand$problem))
+    return(sprintf("matches no file entry of the specification, and it %s, so it is not extracted", cand$problem))
   }
   if (isTRUE(cand$unprobed)) {
     return(sprintf(
@@ -650,8 +692,9 @@ dta_delivery_open_zip <- function(cand, slots, st, limits, exdir, on_error, file
   forced <- (claimed | declared) & !is.na(problem)
   if (any(forced)) dta_zip_refuse_unsafe(cand$path, ins$entry[keep][forced], problem[forced], hostile = FALSE)
   need <- claimed | declared | (kinds %in% "xpt" & xpt_wanted & is.na(problem))
-  # The per-member cap applies to every entry something will bind.
-  big <- claimed & ins$size[keep] > limits$max_member_bytes
+  # The per-member cap applies to every entry this call extracts, a library
+  # that is only probed or declared as a container included.
+  big <- need & ins$size[keep] > limits$max_member_bytes
   if (any(big)) {
     if (on_error == "abort") {
       i <- keep[which(big)[[1]]]
@@ -659,7 +702,12 @@ dta_delivery_open_zip <- function(cand, slots, st, limits, exdir, on_error, file
     }
     for (j in which(big)) {
       i <- keep[[j]]
+      # The entry it was meant for, when a file entry claims it (a library that
+      # was only probed has none).
+      cl <- dta_delivery_claims_cached(st, slots, mk(i, ""), kinds[[j]], maybe = maybe[[j]])$claims
       dta_delivery_row(st, mk(i, NA_character_), files, "refused",
+        dataset = if (length(cl)) cl[[1]]$dataset else NA_character_,
+        handler = if (length(cl)) cl[[1]]$handler else NA_integer_,
         reason = sprintf(
           "is larger (%s bytes) than DTAtools.container_max_member_bytes (%s)",
           dta_format_count(ins$size[[i]]), dta_format_count(limits$max_member_bytes)
@@ -701,7 +749,10 @@ dta_delivery_open_xpt <- function(cand, xmem, slots, st, limits, exdir, on_error
       dta_container_too_large(cand$path, "DTAtools.container_max_member_bytes", size[[r]], limits$max_member_bytes)
     }
     for (r in which(big)) {
+      cl <- dta_delivery_claims_cached(st, slots, mk(r, ""), "xpt")$claims
       dta_delivery_row(st, mk(r, NA_character_), files, "refused",
+        dataset = if (length(cl)) cl[[1]]$dataset else NA_character_,
+        handler = if (length(cl)) cl[[1]]$handler else NA_integer_,
         reason = sprintf(
           "is larger (%s bytes) than DTAtools.container_max_member_bytes (%s)",
           dta_format_count(size[[r]]), dta_format_count(limits$max_member_bytes)
@@ -748,7 +799,7 @@ dta_delivery_resolve_duplicates <- function(st, on_error, files) {
     )
   }
   for (b in bind[clash]) {
-    dta_delivery_row(st, b$cand, files, "refused", reason = sprintf(
+    dta_delivery_row(st, b$cand, files, "refused", dataset = b$dataset, handler = b$handler, reason = sprintf(
       "is one of several files of the delivery that would be loaded as '%s' into dataset '%s'", b$item, b$dataset
     ))
   }
@@ -756,12 +807,13 @@ dta_delivery_resolve_duplicates <- function(st, on_error, files) {
 }
 
 # File entries that declare a container this call opened but received nothing.
+# `loaded` holds the rows of delivered files: a refused file was delivered too.
 dta_delivery_missing <- function(slots, opened, loaded) {
   out <- character()
   for (s in slots) {
     if (is.null(s$container) || !length(opened)) next
     if (!dta_matches_container(s$h, opened)) next
-    got <- any(loaded$dataset == s$dataset & loaded$handler == s$handler)
+    got <- any(loaded$dataset == s$dataset & loaded$handler == s$handler, na.rm = TRUE)
     if (!got) out <- c(out, if (s$literal) s$h@filename else (s$h@pattern_description %||% s$h@filename))
   }
   unique(out)

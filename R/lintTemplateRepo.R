@@ -62,7 +62,7 @@ lint_template_repo <- function(path = ".", fail_on = "error") {
     .dta_lint_id_filename(path),
     .dta_lint_file_ignored(path)
   ))
-  findings <- findings[order(findings$file, findings$code, method = "radix"), , drop = FALSE]
+  findings <- findings[order(enc2utf8(findings$file), findings$code, method = "radix"), , drop = FALSE]
   rownames(findings) <- NULL
 
   .dta_lint_template_report(findings, path)

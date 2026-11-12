@@ -177,3 +177,40 @@ cont_filedata <- function(id, ...) DTAtools::DTADataSetFile(id = id, files = lis
 
 # A DTA of the given datasets.
 cont_of <- function(...) DTAtools::DTA(datasets = list(...))
+
+# A copy of the zip `base` with extra EMPTY stored entries called `names` added
+# to it, written to a temp file called `name`. Entry names of 511 bytes or more
+# cannot be created on Windows and zip::zip() would not write them, so the
+# entries are appended as bytes: a local header and a central-directory record
+# each (UTF-8 flag set, stored, no data), then a new end record. `base` must be
+# a zip without a comment, as zip::zip() writes.
+cont_zip_add_empty <- function(base, names, name = "long.zip", env = parent.frame()) {
+  b <- readBin(base, "raw", file.size(base))
+  u16 <- function(n) as.raw(c(n %% 256, n %/% 256))
+  u32 <- function(n) as.raw(c(n %% 256, (n %/% 256) %% 256, (n %/% 65536) %% 256, n %/% 16777216))
+  num <- function(r) sum(as.numeric(r) * 256^(seq_along(r) - 1))
+  e <- length(b) - 21 # the end record is the last 22 bytes
+  stopifnot(identical(b[e:(e + 3)], as.raw(c(0x50, 0x4b, 0x05, 0x06))))
+  count <- num(b[e + 10:11])
+  local <- b[seq_len(num(b[e + 16:19]))]
+  central <- b[num(b[e + 16:19]) + seq_len(num(b[e + 12:15]))]
+  for (nm in names) {
+    raw_name <- charToRaw(enc2utf8(nm))
+    header_at <- length(local)
+    local <- c(
+      local, as.raw(c(0x50, 0x4b, 0x03, 0x04)), u16(20), u16(0x0800), u16(0), u16(0), u16(0x21),
+      u32(0), u32(0), u32(0), u16(length(raw_name)), u16(0), raw_name
+    )
+    central <- c(
+      central, as.raw(c(0x50, 0x4b, 0x01, 0x02)), u16(20), u16(20), u16(0x0800), u16(0), u16(0),
+      u16(0x21), u32(0), u32(0), u32(0), u16(length(raw_name)), u16(0), u16(0), u16(0), u16(0),
+      u32(0), u32(header_at), raw_name
+    )
+  }
+  out <- c(
+    local, central, as.raw(c(0x50, 0x4b, 0x05, 0x06)), u16(0), u16(0),
+    u16(count + length(names)), u16(count + length(names)),
+    u32(length(central)), u32(length(local)), u16(0)
+  )
+  cont_write(name, out, env = env)
+}

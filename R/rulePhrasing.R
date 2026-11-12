@@ -119,8 +119,16 @@
 #     checked." (the evaluator skips it; the rule itself still runs).
 #   Missing values, first item: "A missing value in a grouping column counts
 #   as a value of its own: rows missing it are grouped together."; then per
-#   condition column (no exception for values that are not numbers: a test
-#   that is not decided never meets a group condition):
+#   condition column. A condition used only as the IF of a `requires` constraint
+#   (dta_group_if_only_conditions()) has the outcomes of the IF of a
+#   conditional rule (notes below), because the validator keeps a row with a
+#   value that is not a number in scope there; it is worded as a named group
+#   condition ("A row in which C is missing does not meet condition N, unless
+#   another column of the condition holds a value that is not a number and no
+#   other test of the condition fails."; "A value in C that is not a number
+#   does not by itself keep the row from meeting condition N."). Any other group condition
+#   (also a THEN, left or right) needs a decided test, so a test that is not
+#   decided never meets it:
 #     test fails on missing: "A row in which C is missing does not meet
 #                             condition N."
 #     test holds, one column: "A row in which C is missing meets condition N."
@@ -312,10 +320,14 @@
     return("0")
   }
 
+  # sprintf() is correctly rounded everywhere, but as.numeric() is not (macOS
+  # arm64 has no extended long double and misreads some decimals by one ulp),
+  # so the read-back goes through jsonlite, whose parser uses the C library's
+  # strtod. It yields Inf on overflow and may return an integer; `==` copes.
   sci <- NULL
   for (digits in 15:17) {
     sci <- sprintf("%.*e", digits - 1L, x)
-    if (as.numeric(sci) == x) {
+    if (isTRUE(jsonlite::parse_json(paste0("[", sci, "]"))[[1]] == x)) {
       break
     }
   }
@@ -668,14 +680,18 @@
     not_equals = ,
     not_equal = be_not(paste0("equal to ", .rule_value(flat)), "undecided"),
     `in` = {
-      if (n < 1L) {
+      # Count the members as written: unlist() drops a YAML `~`, so `in: [~]`
+      # would count none, while the evaluator counts it as one member.
+      if (length(value) < 1L) {
         return(invalid("one or more values"))
       }
       set <- .rule_set_values(value, col)
       be(set$text, set$missing)
     },
     not_in = {
-      if (n < 1L) {
+      # Count the members as written: unlist() drops a YAML `~`, so `in: [~]`
+      # would count none, while the evaluator counts it as one member.
+      if (length(value) < 1L) {
         return(invalid("one or more values"))
       }
       set <- .rule_set_values(value, col)
@@ -737,9 +753,16 @@
   }
   dep <- intersect(c("depends", "depends_not"), kinds)
   if (length(dep) > 0L) {
-    # A "depends" test next to an undecided one gives no or undecided; both
-    # leave the row out, so the safe reading is "no".
-    return(if (all(kinds %in% c(dep[[1]], "yes"))) dep[[1]] else "no")
+    if (all(kinds %in% c(dep[[1]], "yes"))) {
+      return(dep[[1]])
+    }
+    # A "depends" test next to an undecided one: the row stays in scope only
+    # when the depends test says yes (depends: the column holds numbers;
+    # depends_not: it does not) AND, as for any undecided test, another column
+    # of the condition holds a value that is not a number and no test fails
+    # (dta_condition_in_scope()). Only depends and depends_not together leave
+    # nothing to say but "no".
+    return(if ("undecided" %in% kinds && length(dep) == 1L) paste0(dep[[1]], "_undecided") else "no")
   }
   if ("undecided" %in% kinds) {
     return("undecided")
@@ -878,7 +901,60 @@
       next
     }
     col <- .rule_name(p$column)
-    if (identical(form, "if")) {
+    # A depends (or depends_not) test next to an undecided one: the exception
+    # of an undecided test, which holds only while the depends test says yes.
+    combo <- function(dep) {
+      if (!any(numeric_cols[-k])) {
+        return("")
+      }
+      paste0(
+        ", unless ", col, if (identical(dep, "depends")) " holds numbers" else " does not hold numbers",
+        ", another column of the condition holds a value that is not a number",
+        " and no other test of the condition fails"
+      )
+    }
+    if (identical(form, "group_if")) {
+      # The outcomes of an IF (the validator keeps such a row in scope, see
+      # dta_group_if_only_conditions()), in the words of a group condition:
+      # a group rule names its conditions and checks groups, not rows.
+      cond <- .rule_name(condition_name)
+      met <- if (several) {
+        paste0("this part of condition ", cond, " counts as met")
+      } else {
+        paste0("the row meets condition ", cond)
+      }
+      not_met <- paste0("A row in which ", col, " is missing does not meet condition ", cond)
+      missing <- c(missing, switch(p$missing,
+        yes = if (several) {
+          paste0("If ", col, " is missing, ", met, ".")
+        } else {
+          paste0("A row in which ", col, " is missing meets condition ", cond, ".")
+        },
+        undecided = paste0(
+          not_met,
+          if (any(numeric_cols[-k])) {
+            paste0(
+              ", unless another column of the condition holds a value that",
+              " is not a number and no other test of the condition fails"
+            )
+          },
+          "."
+        ),
+        depends = paste0(not_met, unless_list(col), met, "."),
+        depends_not = paste0(
+          "If ", col, " is missing, ", met, unless_list(col), "the row does not meet condition ", cond, "."
+        ),
+        depends_undecided = paste0(not_met, combo("depends"), "."),
+        depends_not_undecided = paste0(not_met, combo("depends_not"), "."),
+        paste0(not_met, ".")
+      ))
+      if (p$numeric) {
+        nonnum <- c(nonnum, paste0(
+          "A value in ", col, " that is not a number does not by itself keep the row from meeting condition ",
+          cond, "."
+        ))
+      }
+    } else if (identical(form, "if")) {
       part <- if (several) "this part of the condition" else "the condition"
       met <- paste0(part, " counts as met")
       not_met <- "the condition is not met and the row is not checked"
@@ -896,6 +972,8 @@
         ),
         depends = paste0("If ", col, " is missing, ", not_met, unless_list(col), met, "."),
         depends_not = paste0("If ", col, " is missing, ", met, unless_list(col), not_met, "."),
+        depends_undecided = paste0("If ", col, " is missing, ", not_met, combo("depends"), "."),
+        depends_not_undecided = paste0("If ", col, " is missing, ", not_met, combo("depends_not"), "."),
         paste0("If ", col, " is missing, ", not_met, ".")
       ))
       if (p$numeric) {
@@ -1219,6 +1297,11 @@
   }
   conditions <- rule@conditions %||% list()
   cond_names <- names(conditions) %||% rep("", length(conditions))
+  # A malformed constraint is described as a problem further down, not here.
+  if_only <- tryCatch(
+    dta_group_if_only_conditions(rule@constraints %||% list()),
+    error = function(e) character(0)
+  )
 
   problems <- character(0)
   defects <- character(0)
@@ -1234,7 +1317,12 @@
     ))
     problems <- c(problems, unlist(lapply(parts, function(p) p$problems), use.names = FALSE))
     defects <- c(defects, unlist(lapply(parts, function(p) p$defects), use.names = FALSE))
-    notes <- .rule_clause_notes(parts, "group", cond_names[[i]])
+    # An IF-only condition keeps non-number rows in scope in the validator, so
+    # it gets the outcomes of a conditional rule's IF (see
+    # dta_group_if_only_conditions()), worded for a named group condition.
+    notes <- .rule_clause_notes(
+      parts, if (cond_names[[i]] %in% if_only) "group_if" else "group", cond_names[[i]]
+    )
     missing <- c(missing, notes$missing)
     nonnum <- c(nonnum, notes$nonnum)
   }
@@ -1460,7 +1548,8 @@
       chunks[[length(chunks) + 1L]] <- flextable::as_chunk("\n")
     }
     label <- lines$label[[i]]
-    text <- lines$text[[i]]
+    # The author's Purpose is verbatim; see .xml_safe_text().
+    text <- .xml_safe_text(lines$text[[i]])
     if (lines$bullet[[i]]) {
       chunks[[length(chunks) + 1L]] <- flextable::as_chunk(paste0(.RULE_BULLET, " ", text))
     } else if (nzchar(label)) {

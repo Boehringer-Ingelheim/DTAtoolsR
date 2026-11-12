@@ -611,7 +611,10 @@ dta_load_file <- function(dta, dataset, file, handler_index, name = NULL) {
 # Run validation for all datasets or one named dataset. Returns dta_try()
 # result whose value (on success) is the UPDATED dta object.
 dta_check <- function(dta, dataset = NULL) {
-  prior <- dta_file_count_findings(dta)
+  # check(datasets = ) keeps the file-count findings of the datasets it does
+  # not check (re-judged on the datasets as they are now), so the attribute it
+  # returns is already complete; merging the prior rows in here as well would
+  # count them twice and keep rows a fix has made stale.
   out <- dta_try({
     # check() warns (class `dta_file_count_mismatch`) when a dataset's file
     # count is outside its declared bounds. Muffling that one class is safe:
@@ -629,23 +632,6 @@ dta_check <- function(dta, dataset = NULL) {
       }
     )
   })
-  # A per-dataset check overwrites the findings attribute with only the
-  # re-checked datasets' rows, which would silently un-fail every other
-  # dataset. Keep the prior rows for datasets that were NOT re-checked.
-  if (isTRUE(out$ok) && !is.null(dataset) && !is.null(prior)) {
-    kept <- prior[!(prior$dataset %in% dataset), , drop = FALSE]
-    new <- attr(out$value, "last_file_count_findings", exact = TRUE)
-    merged <- if (is.data.frame(new)) {
-      keep_cols <- c("dataset", "message")
-      tryCatch(
-        rbind(kept[, keep_cols, drop = FALSE], new[, keep_cols, drop = FALSE]),
-        error = function(e) kept
-      )
-    } else {
-      kept
-    }
-    attr(out$value, "last_file_count_findings") <- merged
-  }
   out
 }
 
@@ -1256,7 +1242,12 @@ dta_unload_table <- function(dta, dataset, table) {
     ty <- tryCatch(ds@type, error = function(e) NA_character_)
     if (identical(ty, "file")) {
       fp <- tryCatch(ds@file_paths, error = function(e) character(0)) %||% character(0)
-      ds@file_paths <- fp[basename(fp) != table]
+      fh <- tryCatch(ds@file_handlers, error = function(e) NULL)
+      keep <- basename(fp) != table
+      ds@file_paths <- fp[keep]
+      # The recorded handler of each file moves with it; a record that is not in
+      # step with the paths is dropped (the package then matches by name).
+      ds@file_handlers <- if (length(fh) == length(fp)) fh[keep] else integer(0)
     } else {
       tabs <- tryCatch(ds@tables, error = function(e) list()) %||% list()
       tabs[[table]] <- NULL
@@ -1281,6 +1272,7 @@ dta_unload_all <- function(dta, dataset) {
     ty <- tryCatch(ds@type, error = function(e) NA_character_)
     if (identical(ty, "file")) {
       ds@file_paths <- character(0)
+      ds@file_handlers <- integer(0)
     } else {
       ds@tables <- list()
     }
@@ -1641,33 +1633,20 @@ dta_md_decode <- function(x) {
 
 dta_md_split_cells <- function(row) {
   s <- trimws(as.character(row)[1])
-  chars <- strsplit(s, "")[[1]]
-  cells <- character(0)
-  cur <- character(0)
-  ended_on_pipe <- FALSE
-  i <- 1L
-  n <- length(chars)
-  while (i <= n) {
-    ch <- chars[[i]]
-    ended_on_pipe <- FALSE
-    if (ch == "\\" && i < n) {
-      cur <- c(cur, ch, chars[[i + 1L]])
-      i <- i + 2L
-      next
-    }
-    if (ch == "|") {
-      cells <- c(cells, paste(cur, collapse = ""))
-      cur <- character(0)
-      ended_on_pipe <- TRUE
-    } else {
-      cur <- c(cur, ch)
-    }
-    i <- i + 1L
-  }
-  # The outer pipes of "| a | b |" leave an empty first and an empty last
-  # piece; only a pipe that really is the last character closes the row.
-  if (!ended_on_pipe) {
-    cells <- c(cells, paste(cur, collapse = ""))
+  # A "|" separates cells unless an odd number of backslashes precedes it: a
+  # backslash escapes the next character, so a pair of them before a pipe
+  # leaves it a separator. One regex pass finds every separator and
+  # regmatches(invert = TRUE) cuts the cells out. Both work on BYTES: character
+  # offsets into UTF-8 text are recomputed from the start of the row, which made
+  # a long non-ASCII row quadratic. "|" and "\\" are ASCII, so no multibyte
+  # character is ever split. (Growing a vector one character at a time was
+  # quadratic too.)
+  m <- gregexpr("(?<!\\\\)(?:\\\\\\\\)*\\K\\|", s, perl = TRUE, useBytes = TRUE)
+  cells <- regmatches(s, m, invert = TRUE)[[1]]
+  Encoding(cells) <- Encoding(s)
+  # Only a pipe that really is the last character closes the row.
+  if (endsWith(s, "|") && m[[1]][length(m[[1]])] == nchar(s, "bytes")) {
+    cells <- cells[-length(cells)]
   }
   if (startsWith(s, "|") && length(cells) > 0) {
     cells <- cells[-1L]
@@ -3676,6 +3655,27 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
   })
 }
 
+# Re-point the recorded handler of each bound file after the handlers moved:
+# `map` is old index -> new index (dta_handler_index_map(), dta_match_handlers());
+# NA, or an entry the map has no row for, leaves the file unknown, which the
+# package resolves by name. A record out of step with the paths is dropped.
+dta_remap_file_handlers <- function(ds, map) {
+  if (!identical(tryCatch(ds@type, error = function(e) NA_character_), "file")) {
+    return(ds)
+  }
+  fh <- tryCatch(ds@file_handlers, error = function(e) NULL)
+  if (length(fh) != length(ds@file_paths) || length(fh) == 0L) {
+    ds@file_handlers <- integer(0)
+    return(ds)
+  }
+  fh <- as.integer(fh)
+  ok <- !is.na(fh) & fh >= 1L & fh <= length(map)
+  out <- rep(NA_integer_, length(fh))
+  out[ok] <- as.integer(unname(map)[fh[ok]])
+  ds@file_handlers <- out
+  ds
+}
+
 # Remove one file handler by index. Removing the LAST handler is allowed: the
 # dataset then declares no expected files, which the reader and the app both
 # handle, and is the only way back out of a handler added by mistake.
@@ -3685,6 +3685,7 @@ dta_remove_handler <- function(dta, dataset, index) {
     hs <- dta_handlers(ds)
     idx <- suppressWarnings(as.integer(index))[1]
     if (is.na(idx) || idx < 1 || idx > length(hs)) stop("File handler not found.")
+    ds <- dta_remap_file_handlers(ds, dta_handler_index_map(length(hs), "remove", index = idx))
     hs[[idx]] <- NULL
     ds@files <- unname(hs)
     dta@datasets[[dataset]] <- ds
@@ -3703,6 +3704,7 @@ dta_move_handler <- function(dta, dataset, index, direction) {
     idx <- suppressWarnings(as.integer(index))[1]
     target <- if (identical(direction, "up")) idx - 1L else idx + 1L
     if (!is.na(idx) && idx >= 1L && idx <= n && target >= 1L && target <= n) {
+      ds <- dta_remap_file_handlers(ds, dta_handler_index_map(n, "move", index = idx, direction = direction))
       hs[c(idx, target)] <- hs[c(target, idx)]
       ds@files <- unname(hs)
       dta@datasets[[dataset]] <- ds
@@ -3900,6 +3902,10 @@ dta_transfer_bound_data <- function(dta, dataset, old_ds, keep_validation = TRUE
     ty <- tryCatch(old_ds@type, error = function(e) NA_character_)
     if (identical(ty, "file")) {
       new_ds@file_paths <- tryCatch(old_ds@file_paths, error = function(e) character(0)) %||% character(0)
+      fh <- tryCatch(old_ds@file_handlers, error = function(e) NULL)
+      # Each file keeps the entry that took it, wherever the YAML put that entry.
+      new_ds@file_handlers <- if (length(fh) == length(new_ds@file_paths)) as.integer(fh) else integer(0)
+      new_ds <- dta_remap_file_handlers(new_ds, dta_match_handlers(old_ds, new_ds))
     } else {
       new_ds@tables <- tryCatch(old_ds@tables, error = function(e) list()) %||% list()
     }
@@ -4248,14 +4254,26 @@ dta_session_delivery_bytes <- function(dirs) {
   sum(file.size(files), na.rm = TRUE)
 }
 
+# `paths` without those another live session (any token but `token`) owns.
+dta_not_owned_elsewhere <- function(paths, token) {
+  others <- as.list(.dta_live_session_paths)
+  others <- unlist(others[setdiff(names(others), token)], use.names = FALSE)
+  norm <- function(p) normalizePath(as.character(p), winslash = "/", mustWork = FALSE)
+  paths[!norm(paths) %in% norm(others)]
+}
+
 # Deletes every file under the session's delivery directories that no upload
 # record names as its `path`, then every delivery directory left without a
 # file. The unit of bookkeeping is the bound file, not the delivery directory:
 # one delivery can fill several datasets, and removing or discarding the files
 # of one of them must free exactly those files. On Windows a file an Arrow scan
 # still holds is not deleted; the 24-hour sweep is the fallback.
-dta_delivery_cleanup <- function(dirs, uploads) {
+dta_delivery_cleanup <- function(dirs, uploads, token = shiny::getDefaultReactiveDomain()$token) {
   dirs <- dirs[startsWith(basename(dirs), "dta_upload_delivery_")]
+  # A second tab that restored the autosave owns the same directory and may
+  # still read its files; whichever session ends or frees files first must not
+  # delete them. The last owner (or the 24-hour sweep) frees the directory.
+  dirs <- dta_not_owned_elsewhere(dirs, token)
   paths <- unlist(lapply(unlist(uploads, recursive = FALSE), `[[`, "path"), use.names = FALSE)
   keep <- normalizePath(as.character(paths), winslash = "/", mustWork = FALSE)
   files <- list.files(dirs, recursive = TRUE, full.names = TRUE, all.files = TRUE)
@@ -4295,9 +4313,26 @@ dta_delivery_replaced <- function(dta, plan) {
   data.frame(dataset = loaded$dataset[hit], item = loaded$item[hit], stringsAsFactors = FALSE)
 }
 
+# Datasets whose slots hold more files than their entry declares as a maximum,
+# as "ae (3 files, at most 1)". load_delivery() routes every file by design and
+# check() reports the excess; the delivery note says so up front.
+dta_slots_over_max <- function(dta, uploads) {
+  out <- character(0)
+  for (k in names(uploads)) {
+    id <- sub("\\|\\|.*$", "", k)
+    hi <- suppressWarnings(as.integer(sub("^.*\\|\\|", "", k)))
+    h <- tryCatch(dta_handlers(dta_get_dataset(dta, id))[[hi]], error = function(e) NULL)
+    mx <- if (is.null(h)) NA_real_ else handler_max(h)
+    n <- length(uploads[[k]])
+    if (!is.na(mx) && n > mx) out <- c(out, sprintf("%s (%d files, at most %d)", id, n, as.integer(mx)))
+  }
+  out
+}
+
 # The one notification a committed delivery shows, as list(type, text). Plain
 # text: Shiny escapes it.
-dta_delivery_note <- function(plan, n_replaced = 0L, missing = character(0), budget_limited = FALSE) {
+dta_delivery_note <- function(plan, n_replaced = 0L, missing = character(0), budget_limited = FALSE,
+                              over = character(0)) {
   cap <- function(v, sep = ", ") {
     if (length(v) > 5) paste0(paste(v[1:5], collapse = sep), ", and ", length(v) - 5, " more") else paste(v, collapse = sep)
   }
@@ -4333,8 +4368,9 @@ dta_delivery_note <- function(plan, n_replaced = 0L, missing = character(0), bud
   if (length(kept) > 0) {
     text <- paste0(text, " Kept closed: ", cap(kept), " (a deliverable; to have its files checked, name it as the container of their entries).")
   }
+  if (length(over) > 0) text <- paste0(text, " More files than a slot accepts: ", cap(over), ".")
   text <- paste0(text, " Run Check to validate.")
-  list(type = if (nrow(refused) + nrow(failed) > 0) "warning" else "message", text = text)
+  list(type = if (nrow(refused) + nrow(failed) + length(over) > 0) "warning" else "message", text = text)
 }
 
 # The one place a package message that names an R option is turned into app

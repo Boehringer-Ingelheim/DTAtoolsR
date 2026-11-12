@@ -736,7 +736,9 @@ collect_full_errors <- function(details, axis = c("columnspec", "import", "impor
 
   parts <- unlist(
     lapply(existing, function(d) {
-      sort(list.files(d, pattern = "^part-\\d+\\.rds$", full.names = TRUE), method = "radix")
+      # enc2utf8(): a radix sort refuses a native-encoded non-ASCII string, and
+      # tempdir() holds the user name (C:/Users/J\u00fcrgen/...).
+      sort(enc2utf8(list.files(d, pattern = "^part-\\d+\\.rds$", full.names = TRUE)), method = "radix")
     }),
     use.names = FALSE
   )

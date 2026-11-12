@@ -187,9 +187,9 @@ DTA                              ← top-level agreement container
     │   │   ├── DTAFileCSV           which can have patterns,
     |   |   ├── DTAFileTSV           number of files, etc ..
     |   |   ├── DTAFileDelim
-    |   |   └── DTAFileSAS7BDAT
-    │   │       ├── DTAFileXPT
-    │   │       └── read_file()  → Arrow Table
+    |   |   ├── DTAFileSAS7BDAT
+    |   |   └── DTAFileXPT       (a DTAFileSAS7BDAT subclass)
+    |   |   read_file(handler, file)  → Arrow Table
     |   |
     │   ├── specs (DTAColumnSpecCollection)  ← column-level specs +
     |   |   |                                   cross-column rules

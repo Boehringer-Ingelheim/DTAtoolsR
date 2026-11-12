@@ -555,7 +555,8 @@ dta_app_config_discover_word_templates <- function(roots, listed_paths = charact
     if (!dir.exists(file.path(root, sub))) next
     files <- list.files(file.path(root, sub), pattern = "\\.docx$", ignore.case = TRUE)
     files <- files[!startsWith(files, ".") & !startsWith(files, "~$")]
-    for (f in sort(files, method = "radix")) {
+    # enc2utf8(): a radix sort refuses native-encoded non-ASCII file names.
+    for (f in sort(enc2utf8(files), method = "radix")) {
       r <- .cfg_file_in_dir(file.path(sub, f), root)
       if (!r$ok) next
       key <- tolower(basename(r$value))

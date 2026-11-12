@@ -166,8 +166,11 @@ export_with_template <- function(
     cli::cli_abort("{.arg variables} must be a named list or NULL.")
   }
 
+  # Every author text, in the placeholders and in the table blocks alike, is
+  # made safe for XML once, here (see .xml_safe_deep()).
+  dta <- .xml_safe_deep(dta)
   dta_vars <- .extract_template_variables(dta)
-  user_vars <- .normalize_template_variables(variables)
+  user_vars <- .xml_safe_deep(.normalize_template_variables(variables))
   all_vars <- utils::modifyList(dta_vars, user_vars)
 
   tryCatch(
@@ -1287,7 +1290,7 @@ dta_template_placeholders <- function(dta = NULL) {
   # Vertical tab / form feed read as line breaks; every other C0 control is
   # forbidden in XML 1.0 and would make the part unparseable, so drop it.
   text <- gsub("[\v\f]", "\n", text, perl = TRUE)
-  text <- gsub("[\x01-\x08\x0E-\x1F]", "", text, perl = TRUE)
+  text <- gsub("[\x01-\x08\x0E-\x1F￾￿]", "", text, perl = TRUE)
 
   marks <- gregexpr("[\n\t]", text, perl = TRUE)[[1]]
   if (length(marks) == 1L && marks[[1]] == -1L) {

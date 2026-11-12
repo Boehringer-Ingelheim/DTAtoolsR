@@ -993,7 +993,7 @@ server <- function(input, output, session) {
     # autosave's own Arrow copies (dta_restore_session(), dta_table_store()). So
     # only the extracted files a file dataset uses are kept for "Restore previous session".
     keep <- dta_file_dataset_uploads(isolate(rv$dta), isolate(rv$uploads))
-    dta_delivery_cleanup(owned$upload, keep)
+    dta_delivery_cleanup(owned$upload, keep, session$token)
     # A delivery still waiting in the Replace dialog: its staged copies go too
     # (its extraction is under a delivery directory no record names).
     pending <- isolate(rv$pending_upload)$delivery
@@ -2491,10 +2491,19 @@ server <- function(input, output, session) {
     tbl_of <- function(nm) dta_bound_item_name(ds_type, nm)
     existing <- dta_dataset_table_names(ds) # dataset-wide bound items
 
+    # Only files that can actually bind (non-empty, name matches the handler)
+    # take part in the overwrite and count gates: a stray file that merely
+    # shares a bound table's stem must neither prompt an overwrite nor remove
+    # that table from the slot's count.
+    candidate <- vapply(seq_len(nrow(fileinfo)), function(i) {
+      sz <- suppressWarnings(as.numeric(fileinfo$size[i]))
+      !is.na(sz) && sz > 0 && isTRUE(handler_matches(h, fileinfo$name[i]))
+    }, logical(1))
+
     # Overwrite gate: if a dropped file targets an already-bound table and the
     # user has not confirmed, ask first -- never silently replace bound data.
     if (!isTRUE(overwrite)) {
-      dropped_tbls <- vapply(as.character(fileinfo$name), tbl_of, character(1))
+      dropped_tbls <- vapply(as.character(fileinfo$name)[candidate], tbl_of, character(1))
       conflicts <- unique(dropped_tbls[dropped_tbls %in% existing])
       if (length(conflicts) > 0) {
         rv$pending_upload <- list(ds_idx = ds_idx, hi = hi, fileinfo = fileinfo)
@@ -2517,14 +2526,9 @@ server <- function(input, output, session) {
     mx <- handler_max(h)
     slot_recs <- rv$uploads[[key]] %||% list()
     slot_tbls <- vapply(slot_recs, function(r) r$table %||% "", character(1))
-    dropped_tbls <- vapply(as.character(fileinfo$name), tbl_of, character(1))
+    dropped_tbls <- vapply(as.character(fileinfo$name)[candidate], tbl_of, character(1))
     kept_after <- length(setdiff(slot_tbls, dropped_tbls))
-    # Only files that can actually bind count: stray (name-mismatch / empty)
-    # files are rejected later and must not push a valid one over the limit.
-    n_candidates <- sum(vapply(seq_len(nrow(fileinfo)), function(i) {
-      sz <- suppressWarnings(as.numeric(fileinfo$size[i]))
-      !is.na(sz) && sz > 0 && isTRUE(handler_matches(h, fileinfo$name[i]))
-    }, logical(1)))
+    n_candidates <- sum(candidate)
     if (!is.na(mx) && (kept_after + n_candidates) > mx) {
       showNotification(
         sprintf(
@@ -2610,7 +2614,7 @@ server <- function(input, output, session) {
       rv$uploads <- up
       # A delivery's extracted file this upload just replaced is named by no
       # record any more.
-      dta_delivery_cleanup(owned$upload, rv$uploads)
+      dta_delivery_cleanup(owned$upload, rv$uploads, session$token)
       st <- rv$status
       st[[dsname]] <- "pending"
       rv$status <- st
@@ -2677,7 +2681,7 @@ server <- function(input, output, session) {
     fileinfo <- fileinfo[ok, , drop = FALSE]
     # Extracted files no record names any more go first, so the budget below
     # counts only what is in use, and "remove or discard, then drop again" works.
-    dta_delivery_cleanup(owned$upload, rv$uploads)
+    dta_delivery_cleanup(owned$upload, rv$uploads, session$token)
     held <- dta_session_delivery_bytes(owned$upload)
     left <- dta_session_delivery_budget() - held
     if (left <= 0) {
@@ -2761,9 +2765,11 @@ server <- function(input, output, session) {
     # extracted file no record names any more: the files this delivery
     # replaced, and whatever an earlier removal could not delete.
     unlink(dirname(setdiff(d$copies, loaded$path)), recursive = TRUE)
-    dta_delivery_cleanup(owned$upload, up)
+    dta_delivery_cleanup(owned$upload, up, session$token)
     autosave()
-    note <- dta_delivery_note(d$plan, d$n_replaced, d$missing, d$budget_limited)
+    note <- dta_delivery_note(d$plan, d$n_replaced, d$missing, d$budget_limited,
+      over = dta_slots_over_max(rv$dta, up)
+    )
     showNotification(note$text, type = note$type, duration = if (identical(note$type, "message")) 5 else 10)
   }
 
@@ -2899,7 +2905,7 @@ server <- function(input, output, session) {
     up <- rv$uploads
     up[[key]] <- Filter(function(x) !identical(x$table, table), up[[key]] %||% list())
     rv$uploads <- up
-    dta_delivery_cleanup(owned$upload, rv$uploads)
+    dta_delivery_cleanup(owned$upload, rv$uploads, session$token)
     cnt <- dta_dataset_content_count(dta_get_dataset(rv$dta, dsname))
     st <- rv$status
     st[[dsname]] <- if (cnt == 0) "nodata" else "pending"
@@ -2961,7 +2967,7 @@ server <- function(input, output, session) {
       pref <- paste0(rv$active, "||")
       for (k in names(up)) if (startsWith(k, pref)) up[[k]] <- list()
       rv$uploads <- up
-      dta_delivery_cleanup(owned$upload, rv$uploads)
+      dta_delivery_cleanup(owned$upload, rv$uploads, session$token)
       st <- rv$status
       st[[rv$active]] <- "nodata"
       rv$status <- st
@@ -8158,7 +8164,10 @@ server <- function(input, output, session) {
     # goes now rather than at the end of the retention window.
     try(unlink(session_file() %||% character(0)), silent = TRUE)
     try(session_tables()$clear(), silent = TRUE)
-    unlink(c(owned$upload, owned$export), recursive = TRUE, force = TRUE)
+    # ... except what a second tab that restored the same autosave still owns.
+    unlink(dta_not_owned_elsewhere(c(owned$upload, owned$export), session$token),
+      recursive = TRUE, force = TRUE
+    )
     owned$upload <<- character(0)
     owned$export <<- character(0)
     own("autosave", character(0)) # re-register what is left

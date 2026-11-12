@@ -80,44 +80,17 @@ DTAFile <- S7::new_class(
       number_of_files <- 1
     }
 
-    # A non-pattern handler names one exact file, so every count it declares
-    # must be 1 -- whichever of the three arguments it used to say so. Testing
-    # `number_of_files != 1` alone left two holes: a min/max pair was never
-    # checked at all, and with only a min/max set `number_of_files` is NULL, so
-    # the comparison was on a zero-length value and errored with a message about
-    # the wrong thing.
-    if (!pattern) {
-      declared <- c(number_of_files, min_number_of_files, max_number_of_files)
-      if (length(declared) > 0 && any(declared != 1)) {
-        cli::cli_abort(
-          "if pattern is FALSE, then number_of_files must be 1. Then only one file can exist for this filename."
-        )
-      }
+    # Every rule on the declared counts lives in dta_file_count_bounds_problem(),
+    # which lint_dta() runs on the raw YAML as well, so the lint flags exactly
+    # what this constructor refuses.
+    problem <- dta_file_count_bounds_problem(
+      min_number_of_files, max_number_of_files,
+      number = number_of_files, pattern = pattern
+    )
+    if (!is.null(problem)) {
+      cli::cli_abort("{problem}", class = "dta_file_count_bound_invalid")
     }
-
-    # Length 0 (e.g. `numeric(0)`) is caught here too, not just length > 1:
-    # both are "not a single number". They used to be reported by two
-    # separate checks with two different messages; folding length 0 in here
-    # removes the second one, which was live only for that one case.
-    if (!is.null(number_of_files) && length(number_of_files) != 1) {
-      cli::cli_abort("'number_of_files' can only be length 1.")
-    }
-
-    if (
-      !is.null(number_of_files) &&
-        (!is.null(min_number_of_files) || !is.null(max_number_of_files))
-    ) {
-      cli::cli_abort(
-        "You must not set both 'number_of_files' and 'min_number_of_files'/'max_number_of_files'. Choose one approach."
-      )
-    }
-
     if (!is.null(number_of_files)) {
-      if (!is.numeric(number_of_files)) {
-        cli::cli_abort(
-          "'number_of_files' must be a non-negative integer or NULL."
-        )
-      }
       min_number_of_files <- number_of_files
       max_number_of_files <- number_of_files
     }
@@ -171,6 +144,18 @@ DTAFile <- S7::new_class(
     }
     if (!is.logical(self@pattern) || length(self@pattern) != 1) {
       cli::cli_abort("The 'pattern' property must be a single logical value.")
+    }
+
+    # Bounds are counts of files: NULL (no bound) or one non-negative whole
+    # number. NA and Inf are refused -- "no bound" is NULL, and an unbounded
+    # maximum is expressed by leaving it unset. Here rather than in the
+    # constructor so `h@min_number_of_files <- 5` is checked as well.
+    problem <- dta_file_count_bounds_problem(
+      self@min_number_of_files, self@max_number_of_files,
+      pattern = self@pattern
+    )
+    if (!is.null(problem)) {
+      cli::cli_abort("{problem}", class = "dta_file_count_bound_invalid")
     }
 
     # The constructor checks the same thing; this is what refuses `h@container
@@ -367,6 +352,46 @@ dta_container_regex <- function(glob) {
 
 # NULL when `value` is an acceptable container, else the sentence that says
 # why not. Shared by the constructor and the validator.
+# Why a file entry's count bounds cannot hold, or NULL. Each bound is NULL (no
+# bound) or one finite non-negative whole number -- an unbounded maximum is an
+# unset one, so NA and Inf are refused -- and the minimum is not above the
+# maximum. `number` (number_of_files) is the exact count, set instead of the
+# two bounds, and a literal entry (`pattern` FALSE) names one file, so every
+# count it declares must be 1. Shared by the DTAFile constructor and validator
+# and by lint_dta(), which judges the raw YAML, so they can never disagree.
+dta_file_count_bounds_problem <- function(min, max, number = NULL, pattern = TRUE) {
+  whole <- function(b) is.null(b) || (is.numeric(b) && length(b) == 1L && is.finite(b) && b >= 0 && b == round(b))
+  if (!is.null(number)) {
+    if (!is.null(min) || !is.null(max)) {
+      return("You must not set both 'number_of_files' and 'min_number_of_files'/'max_number_of_files'. Choose one approach.")
+    }
+    if (!whole(number)) {
+      return("'number_of_files' must be NULL or a single non-negative whole number.")
+    }
+    min <- number
+    max <- number
+  }
+  if (!isTRUE(pattern)) {
+    declared <- c(min, max)
+    if (length(declared) > 0 && !isTRUE(all(declared == 1))) {
+      return("if pattern is FALSE, then number_of_files must be 1. Then only one file can exist for this filename.")
+    }
+  }
+  if (!whole(min)) {
+    return("'min_number_of_files' must be NULL or a single non-negative whole number.")
+  }
+  if (!whole(max)) {
+    return("'max_number_of_files' must be NULL or a single non-negative whole number.")
+  }
+  if (!is.null(min) && !is.null(max) && min > max) {
+    return(sprintf(
+      "'min_number_of_files' (%s) exceeds 'max_number_of_files' (%s).",
+      format(min, scientific = FALSE), format(max, scientific = FALSE)
+    ))
+  }
+  NULL
+}
+
 dta_container_value_problem <- function(value) {
   if (is.null(value)) {
     return(NULL)

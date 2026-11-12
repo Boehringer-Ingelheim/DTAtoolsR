@@ -666,3 +666,32 @@ limitations:
       loaded into the entry that names them: with on_error = "abort" the
       delivery is refused, with on_error = "skip" (the application) both are
       refused and the rest is loaded.
+
+  - id: LIM-017
+    title: A version 5 transport file with short rows does not say how many rows it holds
+    affects: [REQ-CONT-018]
+    reference: R/containerFiles.R (dta_xpt_expected_rows); tests/test-OQ-CONT-xpt.R (OQ-CONT-031)
+    consequence: >
+      A version 5 transport file records no count of observations. The padding
+      that fills its last 80-byte record is indistinguishable from observations
+      that are blank in every column, so when a row is shorter than 80 bytes
+      the padding can hold a whole row and the number of rows cannot be known.
+      Trailing rows whose text values are all blank are then lost: a column
+      declared nullable false does not report them, and the table holds fewer
+      rows than the sender wrote, with no warning. A version 8 file records
+      its count, and a version 5 file whose rows are 80 bytes or longer
+      determines it, so both keep their trailing blank rows. A sender who needs
+      those rows checked should deliver a version 8 file or a .sas7bdat.
+
+  - id: LIM-018
+    title: A transport file records no character encoding, so only UTF-8 text is read
+    affects: [REQ-CONT-018]
+    reference: R/DTAFileXPT-class.R (dta_read_xpt); tests/test-OQ-CONT-xpt.R (OQ-CONT-030)
+    consequence: >
+      A SAS transport file stores text as bytes and names no encoding. DTAtools
+      reads that text as UTF-8, which includes ASCII. A file written by a SAS
+      session in Latin-1 or Windows-1252 that holds a character outside ASCII,
+      in a value or in a variable name, is refused with a message naming the
+      column and the first row; it is never read with guessed characters. The
+      sender should deliver the dataset as .sas7bdat, which records its
+      encoding, or write the transport file from a UTF-8 session.

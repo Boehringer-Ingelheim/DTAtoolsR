@@ -40,7 +40,10 @@ dta_normalise_spec_values <- function(values) {
   # YAML 1.1 reads an unquoted Y, N, yes or no as a logical, so
   # `values: [Y, N]` arrives here as TRUE/FALSE and would then fail the
   # property type with no hint as to why.
-  if (is.logical(result)) {
+  # Tested on the elements as well: a mixed list such as `[Y, N, U]` is
+  # list(TRUE, FALSE, "U"), and flattening it above has already turned the
+  # logicals into the text "TRUE" and "FALSE".
+  if (is.logical(result) || (is.list(values) && any(vapply(values, is.logical, logical(1))))) {
     cli_abort(
       c(
         "Permitted values or examples were read as logical, not as text.",

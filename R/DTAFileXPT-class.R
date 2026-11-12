@@ -17,6 +17,13 @@
 #' what a gzip-compressed file inflates to, whether it is read through
 #' \code{read_file()}, \code{load_file()} or \code{load_delivery()}.
 #'
+#' A transport file records no character encoding, so its text is read as UTF-8
+#' and a file holding other bytes is refused (deliver such a dataset as
+#' \code{.sas7bdat}, which records its encoding). Rows are counted from the
+#' file's own layout, so trailing all-blank text rows are kept; a V5 file whose
+#' rows are shorter than 80 bytes does not say how many it holds, and its
+#' trailing blank rows are lost.
+#'
 #' @param filename Character vector of file names or regular expression patterns
 #'   to match files.
 #' @param pattern Logical; if \code{TRUE}, \code{filename} is treated as a regex
@@ -144,7 +151,7 @@ dta_read_xpt <- function(path, specs = NULL) {
     },
     error = function(e) {
       # No `parent`: the bullet already carries haven's text, path reduced.
-      reason <- gsub(path, shown, conditionMessage(e), fixed = TRUE)
+      reason <- dta_zip_reason(e, path) # every spelling of the path, not only the given one
       cli::cli_abort(
         c(
           "Cannot read {.file {shown}} as a SAS transport file.",
@@ -154,6 +161,45 @@ dta_read_xpt <- function(path, specs = NULL) {
         path = path
       )
     }
+  )
+  unreadable <- function(...) {
+    cli::cli_abort(
+      c("Cannot read {.file {shown}} as a SAS transport file.", ...),
+      class = "dta_xpt_read_error",
+      path = path,
+      .envir = parent.frame()
+    )
+  }
+
+  # ReadStat takes trailing all-blank observations for the padding that fills
+  # the last 80-byte record and drops them, so a delivery would lose rows that
+  # nullable: false must see. The member's own layout says how many there are;
+  # blank text rows are restored so they take the same road as blank values
+  # read from the file. Anything else that disagrees is not guessed at.
+  expected <- dta_xpt_expected_rows(path, members$start, members$end, members$version)
+  if (!is.na(expected) && nrow(df) != expected) {
+    missing <- expected - nrow(df)
+    if (missing > 0 && length(df) > 0 && all(vapply(df, is.character, logical(1)))) {
+      cols <- lapply(df, function(x) {
+        x[nrow(df) + seq_len(missing)] <- ""
+        x
+      })
+      df <- structure(cols, class = class(df), row.names = .set_row_names(expected))
+    } else {
+      got <- nrow(df)
+      unreadable(
+        "x" = "The file header announces {expected} row{?s}, but {got} could be read."
+      )
+    }
+  }
+
+  # A transport file records no character encoding. haven hands the bytes over
+  # as they are, and text that is not UTF-8 would crash the checks later, far
+  # from its cause: refuse it here, and never print the bad bytes.
+  dta_sas_refuse_invalid_utf8(
+    df, path, "Cannot read {.file {shown}} as a SAS transport file.",
+    "A transport file records no character encoding and DTAtools reads its text as UTF-8; ask for a file written by a UTF-8 (or ASCII-only) SAS session, or deliver the dataset as .sas7bdat, which records its encoding.",
+    class = "dta_xpt_read_error"
   )
   arrow::as_arrow_table(as.data.frame(dta_sas7bdat_normalise(df, specs)))
 }

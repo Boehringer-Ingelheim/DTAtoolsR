@@ -219,7 +219,10 @@ dta_zip_reason <- function(e, path) {
     full, gsub("\\", "/", full, fixed = TRUE), gsub("/", "\\", full, fixed = TRUE)
   ))
   reason <- conditionMessage(e)
-  for (s in spellings[nzchar(spellings)]) reason <- gsub(s, basename(path), reason, fixed = TRUE)
+  # Longest first: a relative path is also a piece of its absolute spelling,
+  # and replacing it there first would leave the rest of the directory behind.
+  spellings <- spellings[nzchar(spellings)]
+  for (s in spellings[order(-nchar(spellings))]) reason <- gsub(s, basename(path), reason, fixed = TRUE)
   sub(" @[^ ]+:[0-9]+ \\([^()]*\\)$", "", reason)
 }
 
@@ -242,6 +245,13 @@ dta_zip_inspect <- function(path, limits = dta_container_limits()) {
   }
   if (nrow(l) > limits$max_members) dta_container_too_large(path, "DTAtools.container_max_members", nrow(l), limits$max_members)
   entry <- enc2utf8(as.character(l$filename))
+  # zip_list() returns at most 511 bytes of a name, cutting a longer one, perhaps
+  # inside a multi-byte character. The visible prefix is real, so the hostile
+  # checks below still apply to it, but the whole is unknown: make the text safe
+  # for sub() and strsplit(), and never extract such an entry (it counts as a
+  # problem, so routing refuses the archive only if something needs it).
+  long <- nchar(entry, type = "bytes") >= 511L
+  entry[long] <- iconv(entry[long], "UTF-8", "UTF-8", sub = "\ufffd")
   type <- as.character(l$type)
   # A hostile name or a symbolic link refuses the archive before anything else.
   escape <- vapply(entry, dta_zip_entry_escape, character(1), USE.NAMES = FALSE)
@@ -250,6 +260,7 @@ dta_zip_inspect <- function(path, limits = dta_container_limits()) {
   # Any other problem goes with the entry; routing refuses the archive only if
   # something needs that entry (dta_delivery_open_zip()).
   problems <- vapply(entry, dta_zip_entry_problem, character(1), USE.NAMES = FALSE)
+  problems[long] <- "has a name of 511 bytes or more, which cannot be read in full"
   enc <- as.character(l$encryption)
   if (any(enc != "none")) {
     members <- entry[enc != "none"]
@@ -265,7 +276,9 @@ dta_zip_inspect <- function(path, limits = dta_container_limits()) {
   is_dir <- type == "directory" | grepl("[/\\\\]$", entry)
   files <- entry[!is_dir]
   key <- tolower(gsub("\\", "/", files, fixed = TRUE))
-  dup <- key %in% key[duplicated(key)]
+  # Cut names collide falsely (they may differ only past the cut): leave them out.
+  key[long[!is_dir]] <- NA_character_
+  dup <- !is.na(key) & key %in% key[duplicated(key) & !is.na(key)]
   if (any(dup)) {
     members <- files[dup]
     shown <- encodeString(members)
@@ -336,7 +349,11 @@ dta_zip_extract <- function(path, entries, sizes, dest) {
       reason <- dta_zip_reason(err, path)
       at <- regexpr(paste0("`", basename(path), "`: "), reason, fixed = TRUE)
       if (at > 0) reason <- substring(reason, at + attr(at, "match.length"))
-      hint <- if (any(utf8ToInt(member) > 127, na.rm = TRUE)) {
+      # Only the library's not-found failure points at the name: a name stored in
+      # a legacy code page is decoded to another one, so the entry is not found.
+      # Any other failure (a damaged or unsupported entry) found it by name.
+      not_found <- grepl("`: file not found( @|$)", conditionMessage(err))
+      hint <- if (not_found && any(utf8ToInt(member) > 127, na.rm = TRUE)) {
         c("i" = "Its name is not stored as UTF-8 in the archive; re-create the archive with a tool that writes UTF-8 names.")
       }
       cli::cli_abort(
@@ -532,19 +549,6 @@ dta_xpt_members <- function(path, limits = dta_container_limits(), chunk = `__DT
           path = path, members = "<member name>", problems = "is not a SAS dataset name"
         )
       }
-      # The member becomes a file <name>.xpt: a member named CON or COM1 would
-      # name a device on Windows, so the zip entry rules apply to it too.
-      bad <- dta_zip_entry_problem(paste0(tolower(nm), ".xpt"))
-      if (!is.na(bad)) {
-        cli::cli_abort(
-          c(
-            "{.file {basename(path)}} is refused: a member would be written under a name that some file systems (Windows) cannot write.",
-            "x" = "Member {.val {nm}} {bad}."
-          ),
-          class = c("dta_container_unsafe_member", "dta_container_error"),
-          path = path, members = nm, problems = bad
-        )
-      }
       # The previous member's OBS header must lie before this member's header.
       if (awaiting && !any(obs_positions() >= starts[length(starts)] + 400 & obs_positions() < off)) {
         corrupt(members[length(members)], "A member has no OBS header record: the file is truncated or damaged.")
@@ -596,6 +600,24 @@ dta_xpt_members <- function(path, limits = dta_container_limits(), chunk = `__DT
 dta_xpt_split <- function(path, members, dest, chunk = `__DTAtools_container_chunk__`) {
   dir.create(dest, recursive = TRUE, showWarnings = FALSE, mode = "0700")
   out <- file.path(dest, members$name)
+  # A member becomes a file <name>.xpt: one named CON or COM1 would name a device
+  # on Windows, so the zip entry rules apply to it. Only splitting writes the
+  # name; reading a one-member file in place does not, so the scanner lets it by.
+  for (k in seq_len(nrow(members))) {
+    bad <- dta_zip_entry_problem(members$name[k])
+    if (!is.na(bad)) {
+      nm <- members$member[k]
+      unlink(dest, recursive = TRUE)
+      cli::cli_abort(
+        c(
+          "{.file {basename(path)}} is refused: a member would be written under a name that some file systems (Windows) cannot write.",
+          "x" = "Member {.val {nm}} {bad}."
+        ),
+        class = c("dta_container_unsafe_member", "dta_container_error"),
+        path = path, members = nm, problems = bad
+      )
+    }
+  }
   corrupt <- function(member, why = NULL) {
     unlink(dest, recursive = TRUE)
     cli::cli_abort(
@@ -650,4 +672,89 @@ dta_xpt_split <- function(path, members, dest, chunk = `__DTAtools_container_chu
     }
   }
   out
+}
+
+# How many observations the member at `start` (a position in the inflated
+# stream; `end` is where the next member or the stream ends) holds, read from
+# its own layout, or NA when the file does not say. haven cannot tell: ReadStat
+# takes trailing all-blank observations for the padding of the last 80-byte
+# record (SAS XPORT, V5 and V8: member header, descriptor header, two descriptor
+# records, NAMESTR header whose bytes 55-58 count the variables, 140-byte NAMESTR
+# records padded to 80, optional label records, OBS header, observations).
+# V8 writes the count into the OBS header record (bytes 49-64, right-justified);
+# V5 has none, so the count is the observation bytes over the row length, which
+# is exact only when the padding (under 80 bytes) cannot hold a whole row.
+dta_xpt_expected_rows <- function(path, start, end, version) {
+  # A damaged header may hold NUL bytes, which rawToChar() refuses.
+  txt <- function(b) if (any(b == as.raw(0))) "" else rawToChar(b)
+  con <- gzfile(path, "rb")
+  on.exit(close(con))
+  skip <- start
+  while (skip > 0) {
+    b <- dta_read_stream(con, min(skip, `__DTAtools_container_chunk__`))
+    if (!length(b)) {
+      return(NA_real_)
+    }
+    skip <- skip - length(b)
+  }
+  head <- dta_read_stream(con, 400)
+  if (length(head) < 400) {
+    return(NA_real_)
+  }
+  # Digits only: as.numeric() would also take "1e7 ", which ReadStat reads as 1
+  # variable while this would ask for 1.4 GB of NAMESTR records.
+  nvar_txt <- trimws(txt(head[375:378]))
+  if (!grepl("^[0-9]{1,4}$", nvar_txt)) {
+    return(NA_real_)
+  }
+  nvar <- as.numeric(nvar_txt)
+  # The variables' lengths: nlng, a 2-byte big-endian integer at offset 4 of
+  # each NAMESTR record. Never more than the member holds.
+  namestr_bytes <- nvar * 140
+  if (start + 400 + namestr_bytes > end) {
+    return(NA_real_)
+  }
+  records <- dta_read_stream(con, namestr_bytes)
+  if (length(records) < namestr_bytes) {
+    return(NA_real_)
+  }
+  row_length <- 0
+  for (i in seq_len(nvar)) {
+    at <- (i - 1) * 140
+    row_length <- row_length + as.numeric(records[at + 5]) * 256 + as.numeric(records[at + 6])
+  }
+  # Past the NAMESTR records to the next 80-byte boundary, then record by
+  # record to the OBS header (label records may come first).
+  pos <- start + 400 + namestr_bytes
+  pad <- -pos %% 80
+  if (pad > 0 && length(dta_read_stream(con, pad)) < pad) {
+    return(NA_real_)
+  }
+  pos <- pos + pad
+  obs <- charToRaw(sprintf("HEADER RECORD*******%s HEADER RECORD!!!!!!!", if (version == 5L) "OBS    " else "OBSV8  "))
+  repeat {
+    if (pos + 80 > end) {
+      return(NA_real_)
+    }
+    rec <- dta_read_stream(con, 80)
+    if (length(rec) < 80) {
+      return(NA_real_)
+    }
+    pos <- pos + 80
+    if (identical(rec[1:48], obs)) break
+  }
+  obs_bytes <- end - pos
+  # A count is believed only when that many rows fit the bytes that follow:
+  # they take at most all of them, and what is left is less than one 80-byte
+  # record of padding. A header cannot invent rows (or ask for a vector of
+  # three billion) that the file does not hold, and a writer's placeholder
+  # count falls back to the layout.
+  fits <- function(n) row_length > 0 && n * row_length <= obs_bytes && obs_bytes - n * row_length < 80
+  if (version == 8L) {
+    count <- trimws(txt(rec[49:64]))
+    if (grepl("^[0-9]+$", count) && fits(as.numeric(count))) {
+      return(as.numeric(count))
+    }
+  }
+  if (row_length >= 80) floor(obs_bytes / row_length) else NA_real_
 }

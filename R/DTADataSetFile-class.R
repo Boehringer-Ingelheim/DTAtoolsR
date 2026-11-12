@@ -97,6 +97,7 @@ DTADataSetFile <- S7::new_class(
         description = description
       ),
       file_paths = paths,
+      file_handlers = integer(),
       validation_index = list(),
       validation_store = list(),
       validation_artifact_dir = NULL
@@ -104,6 +105,18 @@ DTADataSetFile <- S7::new_class(
   },
   properties = list(
     file_paths = S7::new_property(S7::class_character, default = character()),
+    # Which entry of @files took each element of @file_paths, as load_file()
+    # recorded it (its handler_index). The file count of a pattern entry is
+    # taken from it, so two entries that differ only in their `container`, or a
+    # literal entry beside a pattern one, each count the files routed to them.
+    # Only meaningful while its length equals that of @file_paths; code that
+    # edits @file_paths directly and leaves it out of step makes the count fall
+    # back to matching names. An index is also disbelieved once its entry no
+    # longer takes the file by name, but code that reorders or inserts into
+    # @files must remap or clear this as well (the app does): two entries that
+    # differ only in their `container` both still match. Deliberately no length
+    # check in the validator: S7 validates after every single property assignment.
+    file_handlers = S7::new_property(S7::class_integer, default = integer()),
     validation_index = S7::new_property(S7::class_list, default = list()),
     validation_store = S7::new_property(S7::class_list, default = list()),
     # Same contract as DTADataSetTabular: remembers where check(persist = TRUE)
@@ -227,6 +240,12 @@ dta_file_dataset_targets <- function(x) {
   declared_names <- unlist(lapply(x@files, function(handler) {
     names_i <- handler@filename
 
+    # A minimum of zero makes the entry optional: nothing delivered is no
+    # failure (a count above the maximum still is).
+    if (isTRUE(handler@min_number_of_files == 0)) {
+      return(NULL)
+    }
+
     if (length(paths) == 0) {
       return(names_i)
     }
@@ -270,7 +289,30 @@ dta_file_dataset_targets <- function(x) {
 
   count_failures <- character()
   if (length(paths) > 0) {
-    for (handler in x@files) {
+    # Handlers recorded by load_file(), when they are in step with the paths.
+    fh <- x@file_handlers
+    in_step <- length(fh) == length(paths)
+    # A file that a literal entry of this dataset names is that entry's, as
+    # load_delivery() routes it, whichever pattern also matches it.
+    # A record is believed only while it names an entry that still takes the
+    # file: entries removed or reordered after load_file() (by the app, or by
+    # editing @files) leave indices that point elsewhere.
+    trusted <- if (in_step) {
+      vapply(seq_along(paths), function(i) {
+        k <- fh[[i]]
+        !is.na(k) && k >= 1L && k <= length(x@files) &&
+          isTRUE(any(matches_filename(x@files[[k]], basename(paths[[i]]))))
+      }, logical(1))
+    } else {
+      logical(0)
+    }
+    literal_hit <- vapply(paths, function(p) {
+      any(vapply(x@files, function(h) {
+        !isTRUE(h@pattern) && isTRUE(any(matches_filename(h, basename(p))))
+      }, logical(1)))
+    }, logical(1))
+    for (h_idx in seq_along(x@files)) {
+      handler <- x@files[[h_idx]]
       if (!isTRUE(handler@pattern) || any(handler@filename %in% missing_names)) {
         next
       }
@@ -280,7 +322,10 @@ dta_file_dataset_targets <- function(x) {
         m
       }))
       hit <- matrix(hit, nrow = length(paths))
-      counts <- sum(rowSums(hit) > 0)
+      by_name <- rowSums(hit) > 0 & !literal_hit
+      # Count what was routed here; a path with no record falls back to its name.
+      routed <- if (in_step) ifelse(trusted, fh == h_idx, by_name) else by_name
+      counts <- sum(routed)
       labels <- paste(handler@filename, collapse = " | ")
       lo <- handler@min_number_of_files
       hi <- handler@max_number_of_files
@@ -593,10 +638,18 @@ method(load_file, DTADataSetFile) <- function(
     slot <- match(name, dta_file_target_keys(x@file_paths))
   }
 
+  # Which entry took each path (see the property). A restored legacy object
+  # may hand back NULL or a vector of another length: start over, unknown.
+  if (length(x@file_handlers) != length(x@file_paths)) {
+    x@file_handlers <- rep(NA_integer_, length(x@file_paths))
+  }
+
   if (is.na(slot)) {
     x@file_paths <- c(x@file_paths, file)
+    x@file_handlers <- c(x@file_handlers, as.integer(handler_index))
   } else {
     x@file_paths[[slot]] <- file
+    x@file_handlers[[slot]] <- as.integer(handler_index)
     # The previous file's verdict describes a file that is no longer there.
     # Left behind, check() would compare the new file against the old
     # fingerprint, find them different, and revalidate -- but until it ran, every

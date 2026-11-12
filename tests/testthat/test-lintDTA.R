@@ -535,6 +535,53 @@ test_that("file datasets are linted as well", {
   expect_identical(out$code, "file_container_invalid")
 })
 
+test_that("file_count_bound_invalid flags bounds the file entry would be refused for", {
+  lint_files <- function(...) {
+    lint_dta(list(datasets = list(list(
+      id = "ae", type = "tabular",
+      files = list(c(list(type = "csv", filename = "ae_.*[.]csv$", pattern = TRUE), list(...)))
+    ))))
+  }
+  bad <- list(
+    list(min_number_of_files = 3, max_number_of_files = 2),
+    list(number_of_files = -1),
+    list(number_of_files = 2.5),
+    list(max_number_of_files = Inf),
+    list(number_of_files = "2")
+  )
+  for (b in bad) {
+    out <- do.call(lint_files, b)
+    expect_identical(out$code, "file_count_bound_invalid", info = names(b)[[1]])
+    expect_identical(out$severity, "error")
+    # And the class refuses exactly what the lint flags.
+    expect_error(
+      do.call(DTAFileCSV, c(list(filename = "ae_.*[.]csv$", pattern = TRUE), b)),
+      class = "dta_file_count_bound_invalid"
+    )
+  }
+  expect_match(lint_files(number_of_files = -1)$message, "'number_of_files'", fixed = TRUE)
+  # Round-3 review: the two rules the constructor kept to itself.
+  both <- lint_files(number_of_files = 2, min_number_of_files = 1)
+  expect_identical(both$code, "file_count_bound_invalid")
+  lit <- function(...) {
+    lint_dta(list(datasets = list(list(
+      id = "ae", type = "tabular",
+      files = list(c(list(type = "csv", filename = "ae.csv"), list(...)))
+    ))))
+  }
+  for (b in list(list(number_of_files = 2), list(number_of_files = 0), list(min_number_of_files = 0, max_number_of_files = 0))) {
+    expect_identical(do.call(lit, b)$code, "file_count_bound_invalid", info = paste(names(b), b, collapse = " "))
+    expect_error(do.call(DTAFileCSV, c(list(filename = "ae.csv"), b)), class = "dta_file_count_bound_invalid")
+  }
+  expect_false(any(lit(number_of_files = 1)$code == "file_count_bound_invalid"))
+  h <- DTAFileCSV(filename = "ae.csv")
+  expect_error(h@max_number_of_files <- 5, class = "dta_file_count_bound_invalid")
+  for (ok in list(list(number_of_files = 0), list(min_number_of_files = 1, max_number_of_files = 3), list())) {
+    out <- do.call(lint_files, ok)
+    expect_false(any(out$code == "file_count_bound_invalid"))
+  }
+})
+
 test_that("read_dta_from_yaml stops on an invalid container", {
   p <- withr::local_tempfile(fileext = ".yaml")
   writeLines(container_yaml_lines("container: deliveries/sdtm.zip"), p)

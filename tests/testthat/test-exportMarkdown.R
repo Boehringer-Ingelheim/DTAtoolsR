@@ -1008,3 +1008,35 @@ test_that(".md_table(drop_empty = TRUE) leaves out columns without any content",
   expect_identical(.md_table(df)[1], "| A | B | C | D |")
   expect_identical(.md_table(data.frame(B = c("", NA)), drop_empty = TRUE), character(0))
 })
+
+# ---- pandoc's own Markdown dialect -------------------------------------------
+
+test_that(".md_escape protects line starts that pandoc's Markdown reads as structure", {
+  # Example list, fancy ordered lists (letters, Roman numerals, parentheses),
+  # definition lists and fenced divs. A backslash before ASCII punctuation is
+  # a valid CommonMark escape, so GFM output is unchanged.
+  expect_identical(.md_escape("(@) example"), "(\\@) example")
+  expect_identical(.md_escape("a) option"), "a\\) option")
+  expect_identical(.md_escape("B. option"), "B\\. option")
+  expect_identical(.md_escape("iv. option"), "iv\\. option")
+  expect_identical(.md_escape("(a) option"), "(a\\) option")
+  expect_identical(.md_escape("(1) option"), "(1\\) option")
+  expect_identical(.md_escape("Term\n: definition"), "Term\n\\: definition")
+  expect_identical(.md_escape("::: warning"), "\\::: warning")
+  # Ordinary prose is left alone.
+  expect_identical(.md_escape("e.g. this"), "e.g. this")
+  expect_identical(.md_escape("a (b) c"), "a (b) c")
+})
+
+test_that("escaped pandoc-dialect line starts render as one literal paragraph", {
+  mdt_skip_without_pandoc()
+  text <- "a) option\n(@) example\nTerm\n: definition\n::: warning"
+  esc <- .md_escape(text)
+  for (from in c("gfm", "markdown")) {
+    html <- paste(mdt_pandoc(esc, "html", from), collapse = "\n")
+    expect_false(grepl("<ol|<dl|<div", html), info = from)
+    expect_equal(lengths(regmatches(html, gregexpr("<p>", html, fixed = TRUE))), 1L, info = from)
+    plain <- mdt_norm(paste(mdt_pandoc(esc, "plain", from), collapse = "\n"))
+    expect_identical(plain, mdt_norm(gsub("\n", " ", text)), info = from)
+  }
+})

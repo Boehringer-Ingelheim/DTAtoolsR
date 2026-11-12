@@ -155,11 +155,13 @@ requirements:
     risk: medium
     category: functional
     covers: [run_qualification]
-    source: R/qualification.R (qual_stage_files, qual_run_stage); CHANGELOG [Unreleased], Changed
+    source: R/qualification.R (qual_stage_files, qual_run_stage); CHANGELOG 0.27.0, Changed
     notes: >
-      A fragment match let "IQ-ENV-01" select IQ-ENV-010 to -019, so a run
-      meant to cover one test file covered others and was still recorded as
-      the run of that one.
+      Before 0.27.0 the filter was wrapped as "^<stage>-.*(<filter>)", so a
+      filter that contained the stage prefix ("OQ-VAL") or was anchored
+      ("^OQ-VAL") selected nothing. The match is against the file name and is
+      unanchored: a fragment such as "VAL" still selects every file whose name
+      contains it, so anchor the filter to select exactly one file.
 
   - id: REQ-CORE-013
     text: >

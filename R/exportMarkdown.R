@@ -133,7 +133,19 @@
     return(text)
   }
   text <- sub("^([ \t]*)([-+])", "\\1\\\\\\2", text, perl = TRUE)
-  text <- sub("^([ \t]*[0-9]+)([.)])(?=[ \t]|$)", "\\1\\\\\\2", text, perl = TRUE)
+  # Ordered-list markers, including pandoc's own: a single letter or a Roman
+  # numeral ("a)", "B.", "iv."), optionally parenthesised ("(a)", "(1)").
+  # A backslash before ASCII punctuation is a valid CommonMark escape, so
+  # GFM renders the same text.
+  text <- sub(
+    "^([ \t]*\\(?(?:[0-9]+|[A-Za-z]|[ivxlcdmIVXLCDM]+))([.)])(?=[ \t]|$)",
+    "\\1\\\\\\2", text,
+    perl = TRUE
+  )
+  # pandoc's example list "(@)", its definition list (": def") and its fenced
+  # div (":::"), which all start with something GFM leaves alone.
+  text <- sub("^([ \t]*\\()@", "\\1\\\\@", text, perl = TRUE)
+  text <- sub("^([ \t]*):", "\\1\\\\:", text, perl = TRUE)
   # A line of "=" alone would underline the line above as a heading.
   text <- sub("^([ \t]*)(=+[ \t]*)$", "\\1\\\\\\2", text, perl = TRUE)
   # Visible indentation must not open an indented code block: non-breaking

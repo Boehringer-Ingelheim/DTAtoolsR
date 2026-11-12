@@ -297,3 +297,22 @@ test_that("print of a column spec shows the id even when there is no label", {
   out <- cli::cli_fmt(print(DTAColumnSpec(id = "NOLABEL", type = "SAS Char")))
   expect_true(any(grepl("NOLABEL", out, fixed = TRUE)))
 })
+
+test_that("a mixed list holding a YAML-logical Y/N still gets the quoting hint", {
+  # `[Y, N, U]` parses to list(TRUE, FALSE, "U"); flattening it first turned
+  # the logicals into the text "TRUE"/"FALSE" with no complaint.
+  parsed <- yaml::yaml.load("values: [Y, N, U]")$values
+  expect_error(DTAColumnSpec(id = "X", values = parsed), class = "dta_spec_logical_values")
+
+  yml <- tempfile(fileext = ".yaml")
+  writeLines(
+    c("columns:", "  FLAG:", "    id: FLAG", "    type: SAS Char", "    nullable: false", "    values: [Y, N, U]"),
+    yml
+  )
+  # The YAML entry point lints first and wraps the same hint.
+  expect_error(import_specs_from_yaml(yml), class = "dta_lint_error")
+
+  # Quoted, the same list is plain text and is kept as written.
+  ok <- DTAColumnSpec(id = "X", values = list("Y", "N", "U"))
+  expect_identical(ok@values, c("Y", "N", "U"))
+})

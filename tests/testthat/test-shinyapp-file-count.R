@@ -186,3 +186,20 @@ test_that("check_all marks a dataset with a count violation as fail", {
     expect_identical(unname(rv$status[["d_bad"]]), "fail")
   })
 })
+
+# Regression (round-3 review): the app merged the prior findings in itself
+# after check() had started keeping them, so every per-dataset Validate added
+# another copy of the other datasets' rows.
+test_that("repeated per-dataset checks keep one finding per failing dataset", {
+  dta_check <- app_fn("dta_check")
+  three <- fcs_dta(
+    fcs_dataset("d_a", 3, number_of_files = 2),
+    fcs_dataset("d_b", 3, number_of_files = 2),
+    fcs_dataset("d_c", 3, number_of_files = 2)
+  )
+  res <- dta_check(three)
+  for (i in 1:3) res <- dta_check(res$value, "d_a")
+  findings <- attr(res$value, "last_file_count_findings", exact = TRUE)
+  expect_setequal(findings$dataset, c("d_a", "d_b", "d_c"))
+  expect_identical(nrow(findings), 3L)
+})

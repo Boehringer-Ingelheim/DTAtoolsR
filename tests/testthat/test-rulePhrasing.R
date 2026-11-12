@@ -19,6 +19,16 @@ cond_rule <- function(condition, then, id = "r1", description = NULL) {
 
 first_line <- function(rule) strsplit(.rule_text(rule), "\n", fixed = TRUE)[[1]][[1]]
 
+# R's own parser is not correctly rounded on every platform (macOS arm64 reads
+# the literal 5e300 as a neighbouring double), so numbers that matter here are
+# read through the C library's strtod via jsonlite, which is.
+exact <- function(s) {
+  as.double(jsonlite::parse_json(
+    paste0("[", paste(s, collapse = ","), "]"),
+    simplifyVector = TRUE
+  ))
+}
+
 # --- Notation ---------------------------------------------------------------
 
 test_that(".rule_number gives the shortest exact decimal form", {
@@ -29,11 +39,11 @@ test_that(".rule_number gives the shortest exact decimal form", {
   expect_identical(.rule_number(1e-7), "0.0000001")
   expect_identical(.rule_number(1e21), "1 times 10 to the power of 21")
   expect_identical(.rule_number(1e20), "100000000000000000000")
-  expect_identical(.rule_number(5e300), "5 times 10 to the power of 300")
+  expect_identical(.rule_number(exact("5e300")), "5 times 10 to the power of 300")
   expect_identical(.rule_number(1e-8), "1 times 10 to the power of minus 8")
   expect_identical(.rule_number(-1e-8), "minus 1 times 10 to the power of minus 8")
   expect_identical(.rule_number(-2.5e-9), "minus 2.5 times 10 to the power of minus 9")
-  expect_identical(.rule_number(-5e300), "minus 5 times 10 to the power of 300")
+  expect_identical(.rule_number(exact("-5e300")), "minus 5 times 10 to the power of 300")
   expect_identical(.rule_number(-0), "0")
   expect_identical(.rule_number(18L), "18")
   expect_identical(.rule_number(18), .rule_number(18L))
@@ -53,8 +63,22 @@ test_that(".rule_number reads back exactly and never uses e-notation", {
     -exp(runif(100, log(1e-7), log(1e20)))
   )
   out <- vapply(x, .rule_number, character(1))
-  expect_identical(as.numeric(out), x)
+  expect_identical(exact(out), x)
   expect_false(any(grepl("e", out, fixed = TRUE)))
+})
+
+test_that(".rule_number checks the read-back with a correctly rounded parser", {
+  # Just above the midpoint of 1 and its successor, so it reads as
+  # 1.0000000000000002; a parser that rounds it down to 1 would stop at 16
+  # digits or fewer and print "1".
+  x <- exact("1.00000000000000011102230246251565404236316680908203126")
+  expect_identical(.rule_number(x), "1.0000000000000002")
+
+  # A value whose shortest exact form is 15 digits, but which R's own parser
+  # (at least on Windows x86_64) reads back as a different double. Checking the
+  # 15-digit candidate with as.numeric() rejects it and prints 17 digits.
+  big <- exact("3.71221702484612e177")
+  expect_identical(.rule_number(big), "3.71221702484612 times 10 to the power of 177")
 })
 
 test_that(".rule_value distinguishes text, numbers, logicals and missing", {
@@ -780,18 +804,127 @@ test_that("the missing-value notes match what the evaluator does", {
     expect_identical(says_not_checked, !in_scope, info = names(op)[[1]])
     expect_identical(says_counts, in_scope, info = names(op)[[1]])
 
-    # Group condition: a missing value meets the condition or not.
-    group <- DTARuleGroupCondition(
+    # Group condition used as the IF only: the outcomes of an IF, worded as
+    # a named group condition (see the dedicated test below for the
+    # non-number cases).
+    if_only <- DTARuleGroupCondition(
       id = "g", group_by = "G",
       conditions = list(c1 = list(B = op), c2 = list(A = list(equals = "never"))),
       constraints = list(list(type = "requires", `if` = "c1", then = "c2"))
     )
     gdf <- data.frame(G = "1", A = "x", B = b_missing, stringsAsFactors = FALSE)
+    scoped <- !rule_check_group_condition(if_only, gdf)$valid
+    if_text <- .rule_text(if_only)
+    expect_identical(
+      grepl("A row in which B is missing does not meet condition c1.", if_text, fixed = TRUE),
+      !scoped,
+      info = names(op)[[1]]
+    )
+    expect_identical(
+      grepl("A row in which B is missing meets condition c1.", if_text, fixed = TRUE),
+      scoped,
+      info = names(op)[[1]]
+    )
+
+    # Group condition that is also a `left`: a missing value meets the
+    # condition or not.
+    group <- DTARuleGroupCondition(
+      id = "g", group_by = "G",
+      conditions = list(c1 = list(B = op), c2 = list(A = list(equals = "never"))),
+      constraints = list(
+        list(type = "requires", `if` = "c1", then = "c2"),
+        list(type = "mutually_exclusive", left = "c1", right = "c2", id = "x")
+      )
+    )
     met <- !rule_check_group_condition(group, gdf)$valid
     says_not_met <- grepl("A row in which B is missing does not meet condition c1.", .rule_text(group), fixed = TRUE)
     says_meets <- grepl("A row in which B is missing meets condition c1.", .rule_text(group), fixed = TRUE)
     expect_identical(says_not_met, !met, info = names(op)[[1]])
     expect_identical(says_meets, met, info = names(op)[[1]])
+  }
+})
+
+# A missing entry that is not a text (`.na`) matches a missing value only in a
+# column of numbers: `in` "depends" on the column, and `not_in` is its mirror.
+# The IF-only wording must pick the right one of the two sentences, and the
+# validator is the judge of which that is.
+test_that("an IF-only group condition words a depends / depends_not test as the validator acts", {
+  if_only <- function(op) {
+    DTARuleGroupCondition(
+      id = "g", group_by = "G",
+      conditions = list(c1 = list(B = op), c2 = list(A = list(equals = "never"))),
+      constraints = list(list(type = "requires", `if` = "c1", then = "c2"))
+    )
+  }
+  scoped <- function(rule, b) {
+    !rule_check_group_condition(rule, data.frame(G = "1", A = "x", B = b, stringsAsFactors = FALSE))$valid
+  }
+  depends <- paste0(
+    "A row in which B is missing does not meet condition c1, ",
+    "unless B holds numbers; then the row meets condition c1."
+  )
+  depends_not <- paste0(
+    "If B is missing, the row meets condition c1, ",
+    "unless B holds numbers; then the row does not meet condition c1."
+  )
+
+  r_in <- if_only(list(`in` = list(5, NA)))
+  expect_true(scoped(r_in, NA_real_))
+  expect_false(scoped(r_in, NA_character_))
+  expect_true(grepl(depends, .rule_text(r_in), fixed = TRUE))
+  expect_false(grepl(depends_not, .rule_text(r_in), fixed = TRUE))
+
+  r_not <- if_only(list(not_in = list(5, NA)))
+  expect_false(scoped(r_not, NA_real_))
+  expect_true(scoped(r_not, NA_character_))
+  expect_true(grepl(depends_not, .rule_text(r_not), fixed = TRUE))
+  expect_false(grepl(depends, .rule_text(r_not), fixed = TRUE))
+})
+
+# A `depends` test next to an undecided one on the same column (`in` with a
+# `greater`): the undecided test keeps a row in scope exactly when another
+# column of the condition holds a value that is not a number. The wording is
+# the undecided one, and it must agree with the validator.
+# Round-3 review: a depends (or depends_not) test next to an undecided one
+# keeps the row in scope only while the depends test says yes, which turns on
+# how N1 is stored. Every storage and operator, against both validators.
+test_that("a depends test next to an undecided one names the storage it turns on", {
+  for (op in c("in", "not_in")) {
+    cond <- list(N1 = setNames(list(list(5, NA), 0), c(op, "greater")), N2 = list(greater = 0))
+    holds <- if (op == "in") "holds numbers" else "does not hold numbers"
+    tail <- paste0(
+      ", unless N1 ", holds, ", another column of the condition holds a value",
+      " that is not a number and no other test of the condition fails."
+    )
+    col_rule <- DTARuleColCondition(id = "r", condition = cond, then = list(Z = list(equals = "never")))
+    group_rule <- DTARuleGroupCondition(
+      id = "g", group_by = "G",
+      conditions = list(c1 = cond, never = list(Z = list(equals = "never"))),
+      constraints = list(list(type = "requires", `if` = "c1", then = "never"))
+    )
+    expect_true(grepl(
+      paste0("If N1 is missing, the condition is not met and the row is not checked", tail),
+      .rule_text(col_rule),
+      fixed = TRUE
+    ), info = op)
+    expect_true(grepl(
+      paste0("A row in which N1 is missing does not meet condition c1", tail),
+      .rule_text(group_rule),
+      fixed = TRUE
+    ), info = op)
+    # N2 holds a non-number and N1 is missing: in scope exactly when N1 is
+    # stored as the sentence says.
+    for (n1 in list(NA_real_, NA_character_)) {
+      df <- data.frame(G = "1", Z = "x", N1 = n1, N2 = "abc", stringsAsFactors = FALSE)
+      said <- if (op == "in") is.numeric(n1) else !is.numeric(n1)
+      info <- paste(op, class(n1))
+      expect_identical(any(dta_condition_violated(col_rule, df)), said, info = info)
+      expect_identical(!rule_check_group_condition(group_rule, df)$valid, said, info = info)
+    }
+    # N2 a number: never in scope.
+    df <- data.frame(G = "1", Z = "x", N1 = NA_real_, N2 = 3, stringsAsFactors = FALSE)
+    expect_false(any(dta_condition_violated(col_rule, df)), info = op)
+    expect_true(rule_check_group_condition(group_rule, df)$valid, info = op)
   }
 })
 
@@ -807,6 +940,16 @@ test_that("'this part of' appears only when a clause has several columns", {
     id = "g", group_by = "G",
     conditions = list(c1 = list(B = list(empty = TRUE), C = list(empty = TRUE)), c2 = list(A = list(equals = "x"))),
     constraints = list(list(type = "requires", `if` = "c1", then = "c2"))
+  )
+  expect_true(grepl("If B is missing, this part of condition c1 counts as met.", .rule_text(group), fixed = TRUE))
+  # Used elsewhere as well (here as `left`), the same words.
+  group <- DTARuleGroupCondition(
+    id = "g", group_by = "G",
+    conditions = list(c1 = list(B = list(empty = TRUE), C = list(empty = TRUE)), c2 = list(A = list(equals = "x"))),
+    constraints = list(
+      list(type = "requires", `if` = "c1", then = "c2"),
+      list(type = "mutually_exclusive", left = "c1", right = "c2", id = "x")
+    )
   )
   expect_true(grepl("If B is missing, this part of condition c1 counts as met.", .rule_text(group), fixed = TRUE))
 })
@@ -1571,7 +1714,119 @@ test_that("the reading guide states the evaluation conventions once", {
 
 test_that("the source of the wording is ASCII", {
   path <- test_path("..", "..", "R", "rulePhrasing.R")
-  skip_if_not(file.exists(path), "R sources not available (installed package)")
+  skip_if_no_source_tree()
   bytes <- readBin(path, "raw", file.info(path)$size)
   expect_false(any(as.integer(bytes) > 127L))
+})
+
+# Regression (red-team E1): a condition used only as the IF of a `requires`
+# constraint keeps rows with a value that is not a number (and, in a
+# multi-test condition, a missing value in another column) in scope, so bad
+# data cannot exempt the group. The wording must say what the validator does.
+test_that("an IF-only group condition has an IF's outcomes, and agrees with the validator", {
+  group_rule <- function(conds, constraints) {
+    DTARuleGroupCondition(
+      id = "g", group_by = "S", conditions = conds, constraints = constraints
+    )
+  }
+  adult <- list(AGE = list(greater = 17))
+  consented <- list(CONSENT = list(equals = "Y"))
+  if_only <- group_rule(
+    list(adult = adult, consented = consented),
+    list(list(type = "requires", `if` = "adult", then = "consented"))
+  )
+  also_left <- group_rule(
+    list(adult = adult, consented = consented),
+    list(
+      list(type = "requires", `if` = "adult", then = "consented"),
+      list(type = "mutually_exclusive", left = "adult", right = "consented", id = "x")
+    )
+  )
+  in_scope <- function(rule, df) !rule_check_group_condition(rule, df)$valid
+  says_exempt_not <- function(rule) {
+    grepl(
+      "that is not a number does not by itself keep the row from meeting condition adult",
+      .rule_text(rule),
+      fixed = TRUE
+    )
+  }
+  says_not_met <- function(rule) {
+    grepl("that is not a number does not meet condition adult", .rule_text(rule), fixed = TRUE)
+  }
+
+  # A value that is not a number, group has CONSENT = N.
+  df <- data.frame(S = "s", AGE = "abc", CONSENT = "N", stringsAsFactors = FALSE)
+  expect_true(in_scope(if_only, df))
+  expect_true(says_exempt_not(if_only))
+  expect_false(says_not_met(if_only))
+  expect_false(in_scope(also_left, df))
+  expect_true(says_not_met(also_left))
+  expect_false(says_exempt_not(also_left))
+
+  # Missing in the tested column: not met either way, one column.
+  df <- data.frame(S = "s", AGE = NA_character_, CONSENT = "N", stringsAsFactors = FALSE)
+  expect_false(in_scope(if_only, df))
+  expect_true(grepl(
+    "A row in which AGE is missing does not meet condition adult.",
+    .rule_text(if_only),
+    fixed = TRUE
+  ))
+  # A group rule checks groups: no IF wording about rows that are not checked.
+  expect_false(grepl("the row is not checked", .rule_text(if_only), fixed = TRUE))
+  expect_false(in_scope(also_left, df))
+  expect_true(grepl(
+    "A row in which AGE is missing does not meet condition adult.",
+    .rule_text(also_left),
+    fixed = TRUE
+  ))
+
+  # Two tests: SEX missing, AGE not a number -> still in scope for an IF-only
+  # condition; a condition used as `left` does not meet it.
+  two <- list(AGE = list(greater = 17), SEX = list(equals = "F"))
+  if_only2 <- group_rule(
+    list(c_if = two, c_then = consented),
+    list(list(type = "requires", `if` = "c_if", then = "c_then"))
+  )
+  left2 <- group_rule(
+    list(c_if = two, c_then = consented),
+    list(
+      list(type = "requires", `if` = "c_if", then = "c_then"),
+      list(type = "mutually_exclusive", left = "c_if", right = "c_then", id = "x")
+    )
+  )
+  df <- data.frame(
+    S = "s", AGE = "abc", SEX = NA_character_, CONSENT = "N", stringsAsFactors = FALSE
+  )
+  unless <- "unless another column of the condition holds a value that is not a number"
+  expect_true(in_scope(if_only2, df))
+  expect_true(grepl(unless, .rule_text(if_only2), fixed = TRUE))
+  expect_true(grepl(
+    "A row in which SEX is missing does not meet condition c_if, unless another column",
+    .rule_text(if_only2),
+    fixed = TRUE
+  ))
+  expect_false(in_scope(left2, df))
+  expect_false(grepl(unless, .rule_text(left2), fixed = TRUE))
+  expect_true(grepl("A row in which SEX is missing does not meet condition c_if", .rule_text(left2), fixed = TRUE))
+})
+
+# Regression (red-team E2): `in: [~]` reads as list(NULL); unlist() drops the
+# NULL, so counting the flattened values called a valid test unevaluable.
+test_that("in/not_in with only an empty YAML entry is worded as a missing-value test", {
+  for (op in c("in", "not_in")) {
+    y <- yaml::yaml.load("v: [~]")$v
+    expect_identical(y, list(NULL))
+    rule <- cond_rule(list(A = list(equals = "x")), setNames(list(setNames(list(y), op)), "B"))
+    text <- .rule_text(rule)
+    expect_false(grepl("cannot be evaluated", text, fixed = TRUE), info = op)
+    expect_true(.rule_describe(rule)$valid, info = op)
+
+    # The evaluator agrees: the test is evaluable and a missing B satisfies
+    # `in` (and violates `not_in`).
+    df <- data.frame(A = "x", B = c(NA, "z"), stringsAsFactors = FALSE)
+    verdict <- dta_condition_violated(rule, df)
+    expect_identical(verdict, if (op == "in") c(FALSE, TRUE) else c(TRUE, FALSE), info = op)
+  }
+  rule <- cond_rule(list(A = list(equals = "x")), list(B = list(`in` = list(NULL))))
+  expect_match(first_line(rule), "B must be one of the entries of a list that holds only a missing entry")
 })

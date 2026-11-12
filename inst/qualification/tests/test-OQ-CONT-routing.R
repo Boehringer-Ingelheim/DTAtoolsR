@@ -393,3 +393,80 @@ test_that("OQ-CONT-018 | the exported Files table shows Delivered In only when d
     list(columns = ncol(w_plain), delivered_in = "Delivered In" %in% unlist(w_plain[1, ]))
   )
 })
+
+# ---- a literal entry outranks pattern entries, container or not -----------------
+
+test_that("OQ-CONT-028 | a file a literal entry names, but expects inside another container, is taken by no pattern entry | REQ-CONT-002 REQ-CONT-006", {
+  # Dataset ae names ae.csv literally but only inside sdtm.zip; dataset listings
+  # takes every .csv by pattern. The loose ae.csv is named by a literal entry, so
+  # no pattern entry of another dataset may take it; lb.csv, named by no literal
+  # entry, goes to listings.
+  dta <- cont_of(
+    cont_tab("ae", list(DTAtools::DTAFileCSV("ae.csv", container = "sdtm.zip")), cont_empty_specs()),
+    cont_tab("listings", list(DTAtools::DTAFileCSV("[.]csv$", pattern = TRUE)), cont_empty_specs())
+  )
+  loose <- c(cont_write("ae.csv", CONT_AE_CSV), cont_write("lb.csv", "A,B\n1,2\n"))
+  r <- cont_run(dta, loose, exdir = cont_exdir("OQ-CONT-028"))
+  qa_check("the delivery is accepted, as lb.csv can be bound", is.null(r$error), r$error)
+  loaded <- cont_rows(r$plan, "loaded")
+  qa_step("only lb.csv is loaded, into dataset listings", list(name = "lb.csv", dataset = "listings"), list(name = loaded$name, dataset = loaded$dataset))
+  qa_step("dataset listings holds the one table lb", "lb", names(DTAtools::tables(DTAtools::datasets(r$result, "listings"))))
+  unused <- cont_rows(r$plan, "unused")
+  qa_step("ae.csv is the one unused file", "ae.csv", unused$name)
+  qa_step("with the reason that dataset ae expects it inside sdtm.zip", "matches the file entry of dataset 'ae', which expects it inside sdtm.zip", unused$reason)
+  qa_step("and no dataset took it", NA_character_, unused$dataset)
+  qa_step("dataset ae holds no table", 0L, cont_ntab(r$result, "ae"))
+
+  # Control: the same name inside the archive it expects is taken by ae, and the
+  # pattern entry still takes the member of another name.
+  z <- cont_run(dta, cont_zip(list(ae.csv = CONT_AE_CSV, lb.csv = "A,B\n1,2\n"), name = "sdtm.zip"), exdir = cont_exdir("OQ-CONT-028"))
+  zl <- cont_rows(z$plan, "loaded")
+  qa_step(
+    "inside sdtm.zip, ae.csv goes to ae and lb.csv to listings",
+    list(ae = "ae.csv", listings = "lb.csv"),
+    list(ae = zl$name[zl$dataset == "ae"], listings = zl$name[zl$dataset == "listings"])
+  )
+
+  # A pattern entry that declares the container the file did come from keeps
+  # it: sdtm_docs names define.xml literally inside sdtm.zip, adam_docs takes
+  # every .xml inside adam.zip, and each archive holds a define.xml.
+  docs <- cont_of(
+    cont_filedata("sdtm_docs", DTAtools::DTAFileAny("define.xml", container = "sdtm.zip")),
+    cont_filedata("adam_docs", DTAtools::DTAFileAny("[.]xml$", pattern = TRUE, container = "adam.zip"))
+  )
+  both <- c(
+    cont_zip(list(define.xml = "<sdtm/>"), name = "sdtm.zip"),
+    cont_zip(list(define.xml = "<adam/>"), name = "adam.zip")
+  )
+  d <- cont_run(docs, both, exdir = cont_exdir("OQ-CONT-028"))
+  dl <- cont_rows(d$plan, "loaded")
+  qa_step(
+    "each define.xml goes to the dataset whose entry names its archive",
+    c("adam_docs", "sdtm_docs"),
+    sort(dl$dataset[dl$name == "define.xml"], method = "radix")
+  )
+  qa_step("no file is left unused", 0L, nrow(cont_rows(d$plan, "unused")))
+})
+
+# ---- a refused file was delivered ------------------------------------------------
+
+test_that("OQ-CONT-029 | a file that was delivered but refused is not reported missing and keeps its dataset and entry | REQ-CONT-006 REQ-CONT-012", {
+  # Three entries each expect their file inside sdtm_csv.zip. The archive holds
+  # ae.csv (53 bytes) and dm.csv (30 bytes) and no vs.csv. With a member limit of
+  # 40 bytes ae.csv is refused and dm.csv loads.
+  entries <- function(id) cont_tab(id, list(DTAtools::DTAFileCSV(paste0(id, ".csv"), container = "sdtm_csv.zip")), cont_specs(id))
+  dta <- cont_of(entries("ae"), entries("dm"), entries("vs"))
+  r <- withr::with_options(
+    list(DTAtools.container_max_member_bytes = 40),
+    cont_run(dta, cont_fx("sdtm_csv.zip"), on_error = "skip", exdir = cont_exdir("OQ-CONT-029"))
+  )
+  qa_check("skip mode: the delivery is accepted", is.null(r$error), r$error)
+  ae <- r$plan[r$plan$name == "ae.csv", ]
+  qa_step("ae.csv is listed as refused", "refused", ae$status)
+  qa_step("with the dataset and the entry (the first) it was meant for", list(dataset = "ae", handler = 1L), list(dataset = ae$dataset, handler = ae$handler))
+  qa_step("dm.csv is loaded", "dm", cont_rows(r$plan, "loaded")$dataset)
+  qa_step(
+    "only vs.csv, which the archive does not hold, is reported as not in the delivery",
+    "vs.csv", r$summary$missing
+  )
+})

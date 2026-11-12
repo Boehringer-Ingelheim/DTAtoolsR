@@ -606,7 +606,18 @@ requirements:
       wording, by design: equals/equal, not_equals/not_equal,
       greater_equal/min, less_equal/max, range/min with max; integer and
       double storage of the same number read the same (18L and 18 are both
-      "18").
+      "18"). A group condition used only as the IF of a requires constraint
+      keeps a row with a value that is not a number in scope, so it is worded
+      with the outcomes of an IF: "A row in which C is missing does not meet
+      condition N." (or, when another column of the condition can hold a
+      value that is not a number, "..., unless another column of the condition
+      holds a value that is not a number and no other test of the condition
+      fails.") and "A value in C that is not a number does not by itself keep
+      the row from meeting condition N."; a condition also used as a THEN or
+      as a left or right side keeps "A value in C that is not a number does
+      not meet condition N.". An in or not_in test whose list holds only an
+      empty YAML entry is a test of a missing value, described as such and
+      never as one that cannot be evaluated.
 
   - id: REQ-EXPORT-037
     text: >

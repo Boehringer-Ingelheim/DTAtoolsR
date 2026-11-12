@@ -1500,3 +1500,90 @@ test_that("two library Word templates with one file name: the first is offered a
     fixed = TRUE
   )
 })
+
+# ---- dta_md_split_cells(): equal to the character-loop version, and linear ----
+# ORACLE: the implementation the app shipped in 0.27.0, kept verbatim so the
+# one-pass version can be compared with it. It grows a vector one character at a
+# time, which is quadratic; its behaviour is the reference.
+split_cells_oracle <- function(row) {
+  s <- trimws(as.character(row)[1])
+  chars <- strsplit(s, "")[[1]]
+  cells <- character(0)
+  cur <- character(0)
+  ended_on_pipe <- FALSE
+  i <- 1L
+  n <- length(chars)
+  while (i <= n) {
+    ch <- chars[[i]]
+    ended_on_pipe <- FALSE
+    if (ch == "\\" && i < n) {
+      cur <- c(cur, ch, chars[[i + 1L]])
+      i <- i + 2L
+      next
+    }
+    if (ch == "|") {
+      cells <- c(cells, paste(cur, collapse = ""))
+      cur <- character(0)
+      ended_on_pipe <- TRUE
+    } else {
+      cur <- c(cur, ch)
+    }
+    i <- i + 1L
+  }
+  if (!ended_on_pipe) {
+    cells <- c(cells, paste(cur, collapse = ""))
+  }
+  if (startsWith(s, "|") && length(cells) > 0) {
+    cells <- cells[-1L]
+  }
+  trimws(cells)
+}
+
+test_that("dta_md_split_cells equals the character-loop version on random rows", {
+  split <- app_fn("dta_md_split_cells")
+  set.seed(20261112)
+  alphabet <- c(
+    "|", "|", "\\", "\\", "`", " ", " ", "a", "b", "<br>", "\u00e4", "\\|", "\\\\",
+    "\u00e9", "\u65e5\u672c", "\U0001F600", "\r\n"
+  )
+  rows <- c(
+    "", " ", "|", "||", "\\", "a\\", "|\\", "\\|", "\\\\|", "\\\\\\|", "| a |", "a|", "|a",
+    vapply(seq_len(400), function(i) {
+      paste(sample(alphabet, sample(1:30, 1), replace = TRUE), collapse = "")
+    }, character(1))
+  )
+  for (r in rows) {
+    expect_identical(split(r), split_cells_oracle(r), info = encodeString(r, quote = "'"))
+  }
+})
+
+test_that("a row whose encoding is bytes still splits", {
+  row <- "| a | b |"
+  Encoding(row) <- "bytes"
+  expect_identical(app_fn("dta_md_split_cells")(row), c("a", "b"))
+})
+
+test_that("dta_md_split_cells costs time in proportion to the row", {
+  skip_on_cran()
+  split <- app_fn("dta_md_split_cells")
+  # One 10k-character cell, and a row of many short cells (the allowed-values
+  # column), ASCII and not: character offsets in UTF-8 were quadratic on their own.
+  one_cell <- function(n) paste0("| ", strrep("x", n), " |")
+  many <- function(n) paste0("| ", paste(rep("v", n / 2), collapse = " | "), " |")
+  many_utf8 <- function(n) paste0("| ", paste(rep("é", n / 2), collapse = " | "), " |")
+  # Windows timers tick at ~10 ms, so one call is too short to measure: time 20
+  # calls together, and take the median of three such measurements.
+  med <- function(row) {
+    stats::median(vapply(1:3, function(i) {
+      unname(system.time(for (j in 1:20) split(row))[["elapsed"]])
+    }, numeric(1)))
+  }
+  for (mk in list(one_cell, many, many_utf8)) {
+    small <- max(med(mk(10000)), 0.05)
+    big <- med(mk(40000))
+    # Linear is 4x; quadratic is 16x. 8x leaves room for CI noise.
+    expect_lt(big, 8 * small)
+  }
+  expect_length(split(many(40000)), 20000)
+  expect_length(split(many_utf8(40000)), 20000)
+})

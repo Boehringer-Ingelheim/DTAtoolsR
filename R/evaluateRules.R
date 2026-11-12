@@ -256,6 +256,34 @@ dta_equality_bound <- function(x, value) {
   if (inherits(x, "integer64")) {
     return(value)
   }
+  # A list is judged member by member: unlist() would coerce the numbers in
+  # `[0.30000000000000004, "5"]` or `[0.30000000000000004, ~]` (the missing
+  # entry is NA_character_) to text, which keeps only 15 significant digits and
+  # drops the match of a value that needs 16 or 17. A number stays as written,
+  # text is parsed, a missing entry is a missing number; all-or-nothing as below.
+  if (is.list(value) && length(value) > 0L && all(lengths(value) == 1L)) {
+    kind <- vapply(value, function(el) {
+      if (is.na(el)) {
+        "na"
+      } else if (is.numeric(el)) {
+        "num"
+      } else if (is.character(el) || is.factor(el)) {
+        "chr"
+      } else {
+        "other"
+      }
+    }, character(1))
+    if (!any(kind == "other") && any(kind != "na")) {
+      parsed <- vapply(seq_along(value), function(i) {
+        switch(kind[[i]],
+          na = NA_real_,
+          num = as.numeric(value[[i]]),
+          chr = suppressWarnings(as.numeric(as.character(value[[i]])))
+        )
+      }, numeric(1))
+      return(if (any(is.na(parsed) & kind != "na")) value else parsed)
+    }
+  }
   values <- unlist(value, use.names = FALSE)
   if (is.numeric(values)) {
     return(values)

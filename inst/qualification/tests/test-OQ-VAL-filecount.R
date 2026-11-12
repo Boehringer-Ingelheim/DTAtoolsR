@@ -154,3 +154,41 @@ test_that("OQ-VAL-050 | a dataset checked on its own is not judged on its table 
   qa_step("and all three tables are validated", 3L, nrow(status))
   qa_check("with every table valid", all(status$ok))
 })
+
+test_that("OQ-VAL-051 | a check of some datasets keeps the file-count findings of the others and replaces those it re-checks | REQ-VAL-038", {
+  handlers <- list(vf_handler(number_of_files = 2))
+  chk <- function(x, ...) suppressWarnings(check(x, persist = FALSE, quiet = TRUE, ...))
+  dta <- DTA(
+    datasets = list(d_bad = vf_dataset("d_bad", 3, handlers), d_ok = vf_dataset("d_ok", 2, handlers)),
+    metadata = DTAMetaData(title = "File count", version = "1.0")
+  )
+
+  # Both datasets: d_bad holds 3 tables against exactly 2, d_ok holds 2.
+  all <- chk(dta)
+  qa_step("checking both datasets: the one finding is d_bad, 3 tables against 2..2", list("d_bad", c(3, 2, 2)), {
+    f <- attr(all, "last_file_count_findings")
+    list(f$dataset, c(f$n_supplied, f$min, f$max))
+  })
+  qa_step("and the run is not valid", FALSE, attr(all, "last_validation_ok"))
+
+  # Only d_ok: d_bad is not judged now, but its finding still stands.
+  only_ok <- chk(all, datasets = "d_ok")
+  f <- attr(only_ok, "last_file_count_findings")
+  qa_step("checking only d_ok keeps the finding of d_bad, with its counts", list("d_bad", c(3, 2, 2)), list(f$dataset, c(f$n_supplied, f$min, f$max)))
+  qa_step("and the run is still not valid", FALSE, attr(only_ok, "last_validation_ok"))
+
+  # d_bad is corrected to 2 tables and only d_ok is checked: the kept finding
+  # is judged again on d_bad as it now is, so it is no longer reported.
+  only_ok@datasets[["d_bad"]] <- vf_dataset("d_bad", 2, handlers)
+  rejudged <- chk(only_ok, datasets = "d_ok")
+  qa_step("a corrected d_bad is no longer reported by a check of d_ok alone", 0L, nrow(attr(rejudged, "last_file_count_findings")))
+
+  # d_bad checked alone: its finding is replaced.
+  fixed <- chk(only_ok, datasets = "d_bad")
+  qa_step("re-checking d_bad alone after it holds 2 tables clears its finding", 0L, nrow(attr(fixed, "last_file_count_findings")))
+  qa_check("and the run is valid", isTRUE(attr(fixed, "last_validation_ok")))
+
+  # A first check of d_ok alone judges only d_ok: nothing was known about d_bad.
+  first <- chk(dta, datasets = "d_ok")
+  qa_step("a first check of d_ok alone reports no finding", 0L, nrow(attr(first, "last_file_count_findings")))
+})

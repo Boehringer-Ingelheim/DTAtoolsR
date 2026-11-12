@@ -1647,3 +1647,33 @@ test_that("a CR-only block is cut into pieces, not carried as one unbounded span
   expect_identical(spans$starts[-1], spans$ends[-length(spans$ends)] + 1L)
   expect_true(all(block[spans$ends[-length(spans$ends)]] == as.raw(0x0d)))
 })
+
+test_that("impossible file-count bounds are refused with a class", {
+  mk <- function(...) DTAFile("x_.*[.]csv$", pattern = TRUE, ...)
+
+  expect_error(
+    mk(min_number_of_files = 3, max_number_of_files = 2),
+    class = "dta_file_count_bound_invalid"
+  )
+  expect_error(mk(number_of_files = -1), class = "dta_file_count_bound_invalid")
+  expect_error(mk(min_number_of_files = -2), class = "dta_file_count_bound_invalid")
+  expect_error(mk(max_number_of_files = 1.5), class = "dta_file_count_bound_invalid")
+  expect_error(mk(number_of_files = NA_real_), class = "dta_file_count_bound_invalid")
+  expect_error(mk(max_number_of_files = Inf), class = "dta_file_count_bound_invalid")
+  expect_error(mk(min_number_of_files = c(1, 2)), class = "dta_file_count_bound_invalid")
+
+  # Assigning after construction goes through the validator too.
+  ok <- mk(min_number_of_files = 1, max_number_of_files = 2)
+  expect_error(ok@min_number_of_files <- 5, class = "dta_file_count_bound_invalid")
+})
+
+test_that("valid file-count bounds are still accepted", {
+  mk <- function(...) DTAFile("x_.*[.]csv$", pattern = TRUE, ...)
+
+  expect_equal(max_number_of_files(mk(number_of_files = 0)), 0)
+  expect_equal(min_number_of_files(mk(number_of_files = 2L)), 2)
+  h <- mk(min_number_of_files = 2, max_number_of_files = 2)
+  expect_equal(max_number_of_files(h), 2)
+  expect_null(max_number_of_files(mk(min_number_of_files = 1)))
+  expect_equal(min_number_of_files(mk()), 1) # the documented default
+})

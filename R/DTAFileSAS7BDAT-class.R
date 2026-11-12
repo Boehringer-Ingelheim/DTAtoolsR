@@ -184,22 +184,61 @@ dta_read_sas7bdat <- function(path, specs = NULL) {
       df
     },
     error = function(e) {
-      reason <- conditionMessage(e)
+      # No `parent`: it would print haven's text a second time, with the full
+      # server path. The bullet carries that text, path reduced to the base name.
+      shown <- basename(path)
+      reason <- dta_zip_reason(e, path) # every spelling of the path, not only the given one
       cli::cli_abort(
         c(
-          "Cannot read {.path {path}} as a SAS dataset.",
+          "Cannot read {.file {shown}} as a SAS dataset.",
           "x" = "{reason}",
           "i" = "A duplicate column name, or an empty, truncated or encrypted file, or one that is not a {.file .sas7bdat}, is the usual cause."
         ),
         class = "dta_sas7bdat_read_error",
-        path = path,
-        parent = e
+        path = path
       )
     }
   )
 
+  # The file names its encoding and haven converts from it, but a header that
+  # names the wrong one hands over bytes that are not UTF-8, and those would
+  # be reported later as wrong values (or crash a check) far from the cause.
+  dta_sas_refuse_invalid_utf8(
+    df, path, "Cannot read {.file {shown}} as a SAS dataset.",
+    "The file's header names a character encoding its text does not use; ask for the dataset to be written again with its encoding set correctly (UTF-8 is safest).",
+    class = "dta_sas7bdat_read_error"
+  )
+
   df <- dta_sas7bdat_normalise(df, specs)
   arrow::as_arrow_table(as.data.frame(df))
+}
+
+# Refuses a freshly read SAS data frame whose variable names or text values are
+# not valid UTF-8, naming the first column and row but never printing the bad
+# bytes. `heading` is a cli template interpolating `shown` (the base name).
+dta_sas_refuse_invalid_utf8 <- function(df, path, heading, hint, class) {
+  shown <- basename(path)
+  bad_names <- which(!validUTF8(names(df)))
+  if (length(bad_names)) {
+    at <- bad_names[[1]]
+    cli::cli_abort(
+      c(heading, "x" = "Variable number {at} has a name that is not valid UTF-8 text.", "i" = "{hint}"),
+      class = class, path = path
+    )
+  }
+  for (col in names(df)) {
+    x <- df[[col]]
+    if (!is.character(x)) next
+    row <- which(!validUTF8(x) & !is.na(x))
+    if (length(row)) {
+      row <- row[[1]]
+      cli::cli_abort(
+        c(heading, "x" = "Column {.field {col}} holds text that is not valid UTF-8, first in row {row}.", "i" = "{hint}"),
+        class = class, path = path
+      )
+    }
+  }
+  invisible(df)
 }
 
 
