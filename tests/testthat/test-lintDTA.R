@@ -341,14 +341,20 @@ test_that("read_dataset_from_yaml lints first and reports every finding at once"
 })
 
 test_that("a list or file without datasets still builds an empty DTA, with warnings only", {
-  for (x in list(list(), list(foo = 1))) {
-    expect_identical(nrow(lint_dta(x)), 0L)
-    expect_length(suppressMessages(dta_from_list(x))@datasets, 0L)
+  expect_identical(nrow(lint_dta(list())), 0L)
+  expect_length(suppressMessages(dta_from_list(list()))@datasets, 0L)
+  # An unknown top-level key is the one warning (document_field_unknown, section
+  # 4.13); it blocks nothing.
+  for (x in list(list(foo = 1))) {
+    out <- lint_dta(x)
+    expect_identical(out$code, "document_field_unknown")
+    expect_identical(out$severity, "warning")
+    expect_length(suppressWarnings(suppressMessages(dta_from_list(x)))@datasets, 0L)
   }
   path <- withr::local_tempfile(fileext = ".yaml")
   writeLines("foo: 1", path)
-  expect_identical(nrow(lint_dta(path)), 0L)
-  expect_length(suppressMessages(read_dta_from_yaml(path))@datasets, 0L)
+  expect_identical(lint_dta(path)$code, "document_field_unknown")
+  expect_length(suppressWarnings(suppressMessages(read_dta_from_yaml(path)))@datasets, 0L)
   # An empty file never loaded: it stays an unreadable-document error.
   writeLines("", path)
   expect_identical(lint_dta(path)$code, "yaml_unreadable")
@@ -637,4 +643,244 @@ test_that("a container value with braces is shown as written", {
   writeLines(container_yaml_lines('container: "{1+1}.tar"'), p)
   e <- expect_error(read_dta_from_yaml(p), class = "dta_lint_error")
   expect_match(conditionMessage(e), "{1+1}", fixed = TRUE)
+})
+
+# ---- containers (D16, section 4.13) -----------------------------------------------
+
+# A document of one tabular dataset per entry of `files` (a list of `files`
+# values), with the given containers section.
+lint_doc <- function(containers = NULL, files = list(list(type = "csv", filename = "ae.csv")),
+                     extra = list()) {
+  datasets <- lapply(seq_along(files), function(i) {
+    list(id = paste0("ds", i), type = "tabular", files = files[[i]])
+  })
+  doc <- c(list(metadata = list(title = "T", version = "1"), datasets = datasets), extra)
+  if (!is.null(containers)) doc$containers <- containers
+  lint_dta(doc)
+}
+row_of <- function(out, code) out[out$code == code, , drop = FALSE]
+
+test_that("container_invalid is an error on a container row", {
+  bad_id <- row_of(lint_doc(list(list(id = "1a", filename = "x.zip"))), "container_invalid")
+  expect_identical(nrow(bad_id), 1L)
+  expect_identical(bad_id$severity, "error")
+  expect_identical(bad_id$object, "container")
+  expect_identical(bad_id$id, "1a")
+  expect_identical(bad_id$dataset, "")
+
+  for (containers in list(
+    list(id = "a", filename = "a.zip"), # a mapping, not a list of mappings
+    list(list(id = "a")), # no filename
+    list(list(id = "a", filename = "a.zip", colour = "red")), # unknown field
+    list(list(id = "a", filename = "a.tar")), # not a .zip/.xpt name
+    list("a.zip") # not a mapping
+  )) {
+    out <- row_of(lint_doc(containers), "container_invalid")
+    expect_identical(nrow(out), 1L)
+    expect_identical(out$severity, "error")
+    expect_identical(out$object, "container")
+  }
+})
+
+test_that("container_duplicate covers ids, file names and several defaults", {
+  dup_id <- lint_doc(list(
+    list(id = "a", filename = "a.zip"), list(id = "a", filename = "b.zip")
+  ))
+  expect_identical(row_of(dup_id, "container_duplicate")$id, "a")
+  dup_file <- lint_doc(list(
+    list(id = "a", filename = "a.zip"), list(id = "b", filename = "a.zip")
+  ))
+  expect_identical(nrow(row_of(dup_file, "container_duplicate")), 1L)
+  two_defaults <- lint_doc(list(
+    list(id = "a", filename = "a.zip", default = TRUE),
+    list(id = "b", filename = "b.zip", default = TRUE)
+  ))
+  hit <- row_of(two_defaults, "container_duplicate")
+  expect_identical(nrow(hit), 1L)
+  expect_identical(hit$severity, "error")
+  expect_identical(hit$object, "container")
+})
+
+test_that("container_unused is a warning for an explicit, non-default, unreferenced container", {
+  files <- list(list(type = "csv", filename = "ae.csv", container = "used"))
+  out <- lint_doc(
+    list(
+      list(id = "used", filename = "u.zip"),
+      list(id = "idle", filename = "i.zip"),
+      list(id = "dflt", filename = "d.zip", default = TRUE)
+    ),
+    files = files
+  )
+  hit <- row_of(out, "container_unused")
+  expect_identical(nrow(hit), 1L)
+  expect_identical(hit$id, "idle")
+  expect_identical(hit$severity, "warning")
+  expect_identical(hit$object, "container")
+  # a reference by file name counts as a use
+  by_file <- lint_doc(
+    list(list(id = "idle", filename = "i.zip")),
+    files = list(list(type = "csv", filename = "ae.csv", container = "i.zip"))
+  )
+  expect_identical(nrow(row_of(by_file, "container_unused")), 0L)
+})
+
+test_that("file_container_unknown names an undotted reference nobody defines", {
+  files <- list(list(type = "csv", filename = "ae.csv", container = "sdtm"))
+  none_defined <- row_of(lint_doc(files = files), "file_container_unknown")
+  expect_identical(nrow(none_defined), 1L)
+  expect_identical(none_defined$severity, "error")
+  expect_identical(none_defined$object, "file")
+  expect_identical(none_defined$dataset, "ds1")
+  expect_identical(none_defined$id, "ae.csv")
+  defined <- lint_doc(list(list(id = "sdtm", filename = "s.zip")), files = files)
+  expect_identical(nrow(row_of(defined, "file_container_unknown")), 0L)
+  # "none" and file names are never unknown
+  for (ref in c("none", "x.zip")) {
+    out <- lint_doc(files = list(list(type = "csv", filename = "ae.csv", container = ref)))
+    expect_identical(nrow(row_of(out, "file_container_unknown")), 0L)
+  }
+})
+
+test_that("a dataset linted on its own skips file_container_unknown", {
+  out <- lint_dta(list(
+    id = "ae", type = "tabular",
+    files = list(type = "csv", filename = "ae.csv", container = "sdtm")
+  ))
+  expect_identical(nrow(row_of(out, "file_container_unknown")), 0L)
+})
+
+test_that("an undotted value that is no id is file_container_invalid", {
+  out <- lint_doc(files = list(list(type = "csv", filename = "ae.csv", container = "bad id!")))
+  hit <- row_of(out, "file_container_invalid")
+  expect_identical(nrow(hit), 1L)
+  expect_identical(hit$severity, "error")
+  expect_match(hit$message, "container id", fixed = TRUE)
+})
+
+test_that("document_field_unknown is a warning per unexpected top-level key", {
+  out <- lint_doc(extra = list(colour = "red"))
+  hit <- row_of(out, "document_field_unknown")
+  expect_identical(nrow(hit), 1L)
+  expect_identical(hit$severity, "warning")
+  expect_identical(hit$object, "document")
+  expect_identical(hit$id, "colour")
+  expect_identical(nrow(row_of(lint_doc(), "document_field_unknown")), 0L)
+})
+
+test_that("container_reference_by_filename fires on YAML input", {
+  p <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(c(
+    "metadata:", "  title: T", "  version: '1'",
+    "containers:", "  - id: sdtm", "    filename: sdtm.zip",
+    "datasets:",
+    "  - id: ae", "    type: tabular", "    files:",
+    "      type: csv", "      filename: ae.csv", "      container: sdtm.zip"
+  ), p)
+  hit <- row_of(lint_dta(p), "container_reference_by_filename")
+  expect_identical(nrow(hit), 1L)
+  expect_identical(hit$severity, "warning")
+  expect_identical(hit$object, "file")
+  expect_identical(hit$dataset, "ae")
+  expect_identical(hit$id, "ae.csv")
+  expect_match(hit$message, "'sdtm'", fixed = TRUE)
+})
+
+test_that("container_reference_by_filename fires on the object form after @<-", {
+  dta <- cont_dta(container = "sdtm", containers = list(DTAtools::DTAContainer("sdtm", "sdtm.zip")))
+  expect_identical(nrow(row_of(lint_dta(dta), "container_reference_by_filename")), 0L)
+  dta@datasets[[1]]@files[[1]]@container <- "sdtm.zip"
+  hit <- row_of(lint_dta(dta), "container_reference_by_filename")
+  expect_identical(nrow(hit), 1L)
+  expect_identical(hit$severity, "warning")
+  expect_identical(hit$dataset, "ae")
+})
+
+test_that("container_unused fires on the object form", {
+  dta <- cont_dta(containers = list(DTAtools::DTAContainer("idle", "idle.zip")))
+  hit <- row_of(lint_dta(dta), "container_unused")
+  expect_identical(nrow(hit), 1L)
+  expect_identical(hit$id, "idle")
+})
+
+test_that("a 0.27.0 document without overlaps or extra keys lints as before", {
+  out <- lint_doc(files = list(
+    list(type = "csv", filename = "ae.csv", container = "sdtm_*.zip"),
+    list(type = "csv", filename = "dm.csv")
+  ))
+  expect_identical(nrow(out), 0L)
+})
+
+conflict_doc <- function(container_dm = NULL) {
+  dm <- list(type = "csv", filename = "^.*e[.]csv$", pattern = TRUE)
+  if (!is.null(container_dm)) dm$container <- container_dm
+  list(
+    metadata = list(title = "T", version = "1"),
+    datasets = list(
+      list(id = "ae", type = "tabular", files = list(type = "csv", filename = "^a.*[.]csv$", pattern = TRUE)),
+      list(id = "dm", type = "tabular", files = dm)
+    )
+  )
+}
+
+test_that("file_name_conflict is a warning with the section 4.14 sentence", {
+  out <- lint_dta(conflict_doc())
+  expect_identical(nrow(out), 1L)
+  expect_identical(out$code, "file_name_conflict")
+  expect_identical(out$severity, "warning")
+  expect_identical(out$dataset, "ae")
+  expect_identical(out$object, "file")
+  expect_identical(out$id, "ae[1] / dm[1]")
+  expect_identical(
+    out$message,
+    paste0(
+      "Datasets 'ae' (^a.*[.]csv$) and 'dm' (^.*e[.]csv$) could both take a file named 'ae.csv'. ",
+      "Make their file names distinct so every file belongs to one dataset."
+    )
+  )
+  # the document still reads; the conflict is a warning
+  p <- withr::local_tempfile(fileext = ".yaml")
+  yaml::write_yaml(conflict_doc(), p)
+  dta <- NULL
+  expect_warning(dta <- read_dta_from_yaml(p), class = "dta_lint_warning")
+  expect_s3_class(dta, "DTAtools::DTA")
+  # and the object form reports the same pair
+  obj <- lint_dta(dta)
+  expect_identical(obj$code, "file_name_conflict")
+  expect_identical(obj$message, out$message)
+})
+
+test_that("conflicts are not looked for while the document has lint errors", {
+  out <- lint_dta(conflict_doc(container_dm = "sdtm"))
+  expect_identical(out$code, "file_container_unknown")
+})
+
+test_that("a malformed container flags only itself, not the files that name it", {
+  files <- list(list(type = "csv", filename = "ae.csv", container = "sdtm"))
+  out <- lint_doc(list(list(id = "sdtm")), files = files) # no filename
+  expect_identical(out$code, "container_invalid")
+  expect_identical(out$id, "sdtm")
+  expect_identical(out$dataset, "")
+})
+
+test_that("the container_reference_by_filename message says it works but is rename-unsafe", {
+  p <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(c(
+    "metadata:", "  title: T", "  version: '1'",
+    "containers:", "  - id: sdtm", "    filename: sdtm.zip",
+    "datasets:",
+    "  - id: ae", "    type: tabular", "    files:",
+    "      type: csv", "      filename: ae.csv", "      container: sdtm.zip"
+  ), p)
+  expect_identical(
+    row_of(lint_dta(p), "container_reference_by_filename")$message,
+    "Entry refers to container 'sdtm' by its file name 'sdtm.zip'; it works, but refer to it as 'sdtm' so renaming the file keeps it."
+  )
+})
+
+test_that("document-level container rows carry an empty dataset, never NA", {
+  out <- lint_doc(list(list(id = "a", filename = "a.zip"), list(id = "b", filename = "b.zip")))
+  unused <- row_of(out, "container_unused")
+  expect_identical(nrow(unused), 2L)
+  expect_identical(unused$dataset, c("", ""))
+  expect_false(anyNA(out$dataset))
 })

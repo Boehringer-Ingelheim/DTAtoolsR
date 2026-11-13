@@ -16,7 +16,8 @@
     "{VERSION_HISTORY_TABLE}" = "Version history as a table",
     "{STUDY_TABLE}" = "Study and protocol identity as a table; omitted when empty",
     "{AGREEMENT_SECTIONS}" = "Ordered agreement headings and plain narrative paragraphs; omitted when empty",
-    "{AUTHORIZED_CORRECTIONS_LIST}" = "Authorized-for-corrections names as a bulleted list"
+    "{AUTHORIZED_CORRECTIONS_LIST}" = "Authorized-for-corrections names as a bulleted list",
+    "{CONTAINERS_TABLE}" = "Delivery containers: intro sentence and table; omitted when there are none"
   )
 }
 
@@ -424,12 +425,13 @@
   if (length(sets) == 0) {
     return(.add_body_par(doc, "No datasets.", italic = TRUE, color = THEME_COLORS$gray_mid))
   }
+  ctx <- .container_ctx(dta)
   for (nm in names(sets)) {
     if (isTRUE(heading)) {
       doc <- .tv_block_heading(doc, paste0("Files \u2014 ", dta_dataset_heading(sets[[nm]])), level = 2)
     }
     doc <- .tv_block_table(
-      doc, .build_file_specs_table(sets[[nm]]@files, width = NULL),
+      doc, .build_file_specs_table(sets[[nm]]@files, width = NULL, ctx = ctx, dataset = sets[[nm]]@id),
       "No files specified."
     )
   }
@@ -446,6 +448,7 @@
   if (length(sets) == 0) {
     return(.add_body_par(doc, "No datasets.", italic = TRUE, color = THEME_COLORS$gray_mid))
   }
+  ctx <- .container_ctx(dta)
   for (nm in names(sets)) {
     ds <- sets[[nm]]
 
@@ -461,7 +464,7 @@
     doc <- .tv_block_table(doc, .kv_table(.dataset_facts(ds)), "")
 
     doc <- .tv_block_heading(doc, "Files", level = 3)
-    doc <- .tv_block_table(doc, .build_file_specs_table(ds@files, width = NULL), "No files specified.")
+    doc <- .tv_block_table(doc, .build_file_specs_table(ds@files, width = NULL, ctx = ctx, dataset = ds@id), "No files specified.")
 
     if (inherits(ds, "DTAtools::DTADataSetTabular")) {
       doc <- .tv_block_heading(doc, "Column Specifications", level = 3)
@@ -530,6 +533,18 @@
   .add_spacer(doc)
 }
 
+#' `{CONTAINERS_TABLE}` block: the intro sentence and the Containers table; nothing
+#' when no container is in effect
+#' @keywords internal
+.tv_block_render_containers <- function(doc, dta, arg) {
+  ctx <- .container_ctx(dta)
+  if (nrow(.containers_df(ctx)) == 0) {
+    return(doc)
+  }
+  doc <- .add_body_par(doc, .containers_intro(ctx))
+  .tv_block_table(doc, .build_containers_table(ctx, width = NULL), "")
+}
+
 #' Render one block placeholder at the cursor
 #' @param heading Logical. Passed through to the four dataset-block renderers:
 #'   `FALSE` renders the dataset content without its generated heading (used
@@ -549,6 +564,7 @@
     "{STUDY_TABLE}" = .add_study_section(doc, dta@metadata@study, heading = .tv_block_heading),
     "{AGREEMENT_SECTIONS}" = .add_agreement_sections(doc, dta@metadata@sections, heading = .tv_block_heading),
     "{AUTHORIZED_CORRECTIONS_LIST}" = .tv_block_render_authorized_corrections(doc, dta, spec$arg),
+    "{CONTAINERS_TABLE}" = .tv_block_render_containers(doc, dta, spec$arg),
     doc
   )
 }

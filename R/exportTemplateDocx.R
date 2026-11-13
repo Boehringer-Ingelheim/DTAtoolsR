@@ -52,7 +52,9 @@
 #'     `{SUPPLIER_CONTACTS_TABLE}`, `{RECEIVER_CONTACTS_TABLE}`,
 #'     `{SIGNATURES_TABLE}`, `{VERSION_HISTORY_TABLE}`, `{STUDY_TABLE}`,
 #'     `{AGREEMENT_SECTIONS}`,
-#'     `{AUTHORIZED_CORRECTIONS_LIST}`. Unlike the placeholders above, a block
+#'     `{AUTHORIZED_CORRECTIONS_LIST}`, `{CONTAINERS_TABLE}` (the delivery
+#'     containers: an intro sentence and a table; omitted when the document
+#'     has none). Unlike the placeholders above, a block
 #'     placeholder is replaced by rendered Word content -- a table, a heading, a
 #'     list -- so it must be the only text in its paragraph, and only in the
 #'     document body (not a header, footer or table cell). A `variables` entry

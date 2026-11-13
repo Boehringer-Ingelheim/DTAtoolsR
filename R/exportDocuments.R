@@ -354,6 +354,16 @@ write_dta <- function(
     doc <- .add_authorized_for_corrections_section(doc, meta@authorized_for_corrections, level = 2)
   }
 
+  # Containers follow Process Information, where the free-text Packaging lives.
+  ctx <- .container_ctx(dta)
+  if (nrow(.containers_df(ctx)) > 0) {
+    doc <- .add_heading(doc, "Containers", level = 1)
+    doc <- .add_body_par(doc, .containers_intro(ctx))
+    doc <- .add_spacer(doc)
+    doc <- flextable::body_add_flextable(doc, .build_containers_table(ctx), align = "left")
+    doc <- .add_spacer(doc)
+  }
+
   doc <- .add_agreement_sections(doc, meta@sections, level = 1)
 
   # Datasets: facts, files, column specifications and validation rules.
@@ -371,7 +381,9 @@ write_dta <- function(
       doc <- flextable::body_add_flextable(doc, .kv_table(.dataset_facts(dataset)), align = "left")
       doc <- .add_spacer(doc)
 
-      doc <- .add_file_specifications(doc, dataset@files, title = "Files", heading_level = 3)
+      doc <- .add_file_specifications(doc, dataset@files,
+        title = "Files", heading_level = 3, ctx = ctx, dataset = dataset@id
+      )
       doc <- .add_dataset_specs_section(doc, dataset,
         include_rules = TRUE, heading_level = 3, furniture_meta = meta
       )
@@ -401,7 +413,7 @@ write_dta <- function(
 # The Markdown document of write_dta(): a complete, numbered GitHub-flavoured
 # Markdown file with the chapters of the Word layout in the same order --
 # Approval and Signatures, Document Information (+ Version History), Study,
-# Parties, Process Information, Agreement Sections, Datasets -- a linked
+# Parties, Process Information, Containers, Agreement Sections, Datasets -- a linked
 # "Contents" list, and a footer without any time stamp. Empty chapters are left
 # out and the numbers close up (.md_render()). Every piece of author text goes
 # through .md_escape() / .md_table(), so it cannot change the structure. The
@@ -410,6 +422,7 @@ write_dta <- function(
 #' @keywords internal
 .write_dta_markdown <- function(dta, file, include_signatures = TRUE, signature_list = NULL) {
   meta <- dta@metadata
+  ctx <- .container_ctx(dta)
 
   sections <- .md_children(
     if (isTRUE(include_signatures)) {
@@ -433,8 +446,9 @@ write_dta <- function(
     },
     .md_parties_section(meta),
     .md_process_section(meta),
+    .md_containers_section(ctx),
     .md_agreement_section(meta@sections),
-    .md_datasets_section(dta@datasets)
+    .md_datasets_section(dta@datasets, ctx)
   )
 
   lines <- .md_render(.md_dta_head(meta), sections, .md_dta_footer(meta))
@@ -595,6 +609,16 @@ write_dta <- function(
   .md_section("Process Information", children = children)
 }
 
+# "Containers": the intro sentence and the Container | Description | Files
+# table; no chapter when no container is in effect.
+.md_containers_section <- function(ctx) {
+  df <- .containers_df(ctx)
+  if (nrow(df) == 0) {
+    return(NULL)
+  }
+  .md_section("Containers", .md_compose(.md_escape(.containers_intro(ctx)), .md_table(df)))
+}
+
 # "Agreement Sections": one sub-chapter per clause, its text as paragraphs.
 .md_agreement_section <- function(sections) {
   if (length(sections) == 0) {
@@ -617,7 +641,7 @@ write_dta <- function(
 # Specifications and Validation Rules sub-chapters. The rule reading guide is
 # shown once, before the first list of rules in the document; how to read the
 # file table is explained once, in the first Files chapter.
-.md_datasets_section <- function(datasets) {
+.md_datasets_section <- function(datasets, ctx = NULL) {
   if (length(datasets) == 0) {
     return(NULL)
   }
@@ -626,7 +650,7 @@ write_dta <- function(
   children <- list()
   for (ds_name in names(datasets)) {
     dataset <- datasets[[ds_name]]
-    parts <- .md_dataset_parts(dataset, guide = guide, explain = explain, level = 5L)
+    parts <- .md_dataset_parts(dataset, guide = guide, explain = explain, level = 5L, ctx = ctx)
     guide <- guide && !parts$guide_shown
     explain <- explain && !parts$explained
     children[[length(children) + 1L]] <- .md_section(
@@ -659,7 +683,7 @@ write_dta <- function(
 # headings inside these chapters (one below the chapters' own). Returns
 # list(sections =, guide_shown =, explained =).
 .md_dataset_parts <- function(dataset, include_file_specs = TRUE, include_rules = TRUE, guide = TRUE,
-                              explain = TRUE, level = 5L) {
+                              explain = TRUE, level = 5L, ctx = NULL) {
   tabular <- inherits(dataset, "DTAtools::DTADataSetTabular")
   rules <- if (tabular) dataset@specs@rules %||% list() else list()
   guide_shown <- isTRUE(guide) && isTRUE(include_rules) && tabular && length(rules) > 0
@@ -668,7 +692,7 @@ write_dta <- function(
   columns <- if (tabular) .md_table(.column_specs_df(dataset@specs), drop_empty = TRUE) else character(0)
   sections <- .md_children(
     if (isTRUE(include_file_specs)) {
-      .md_section("Files", .md_files_body(dataset@files, explain = explain, level = level))
+      .md_section("Files", .md_files_body(dataset@files, explain = explain, level = level, ctx = ctx, dataset = dataset@id))
     },
     if (tabular) {
       .md_section(
@@ -686,14 +710,14 @@ write_dta <- function(
 # Body of a "Files" chapter: how many files are expected (with how to read the
 # table when `explain`), the file table and, for tabular files, how each file
 # is to be parsed under an unnumbered "File format" heading of `level`.
-.md_files_body <- function(files, explain = TRUE, level = 5L) {
+.md_files_body <- function(files, explain = TRUE, level = 5L, ctx = NULL, dataset = NULL) {
   if (is.null(files) || length(files) == 0) {
     return("No files specified.")
   }
   format_table <- .md_table(.file_format_df(files))
   .md_compose(
     .md_escape(.file_count_sentence(files, explain = explain)),
-    .md_table(.md_file_specs_df(files), drop_empty = TRUE),
+    .md_table(.md_file_specs_df(files, ctx = ctx, dataset = dataset), drop_empty = TRUE),
     if (length(format_table) > 0) paste(strrep("#", level), "File format"),
     format_table
   )
@@ -702,8 +726,8 @@ write_dta <- function(
 # .file_specs_df() for Markdown: the Description cell lists the pattern
 # description and then every `info` entry on a line of its own ("Data:
 # smrnaseq"), instead of the nested bullet text the Word table shows.
-.md_file_specs_df <- function(files) {
-  df <- .file_specs_df(files)
+.md_file_specs_df <- function(files, ctx = NULL, dataset = NULL) {
+  df <- .file_specs_df(files, ctx = ctx, dataset = dataset)
   df$Description <- vapply(files, function(f) {
     desc <- f@pattern_description
     desc <- if (length(desc) == 0 || is.na(desc[[1]])) "" else as.character(desc[[1]])

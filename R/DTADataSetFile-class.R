@@ -233,7 +233,7 @@ dta_file_id_to_names <- function(all_names, tables = NULL) {
 # not delivered": count failures, and a pattern that matched nothing, whose
 # regex is not a file name.
 #' @keywords internal
-dta_file_dataset_targets <- function(x) {
+dta_file_dataset_targets <- function(x, container_globs = NULL) {
   paths <- x@file_paths
   delivered <- stats::setNames(paths, dta_file_target_keys(paths))
 
@@ -274,9 +274,16 @@ dta_file_dataset_targets <- function(x) {
   # A declared name that is missing, and whose handler says which container it
   # arrives inside, names that container in the report (name = declared file
   # name, value = container).
-  container_of <- unlist(lapply(x@files, function(handler) {
+  # `container_globs` (entry index -> glob, "" for none) is what check(DTA)
+  # resolved; without it the raw reference is named, and "none" names nothing.
+  container_of <- unlist(lapply(seq_along(x@files), function(h_idx) {
+    handler <- x@files[[h_idx]]
     container <- dta_handler_container(handler)
-    if (isTRUE(handler@pattern) || is.null(container)) {
+    if (!is.null(container_globs) && !is.na(container_globs[as.character(h_idx)])) {
+      container <- container_globs[[as.character(h_idx)]]
+    }
+    if (isTRUE(handler@pattern) || is.null(container) || !nzchar(container) ||
+      identical(container, "none")) {
       return(NULL)
     }
     stats::setNames(rep(container, length(handler@filename)), handler@filename)
@@ -601,6 +608,9 @@ method(load_file, DTADataSetFile) <- function(
   stream = getOption("DTAtools.stream", "auto"),
   ...
 ) {
+  # An object restored from an older version lacks properties its class now has.
+  if (dta_is_stale(x)) x <- dta_upgrade(x)
+
   handler_index <- dta_resolve_file_handler_index(handler_index, x@files)
 
   file <- dta_assert_single_file_path(file, "load_file")
@@ -625,6 +635,7 @@ method(load_file, DTADataSetFile) <- function(
       "The provided file '{file}' does not match the filename or pattern in the DTAFile object."
     )
   }
+  dta_assert_not_container(x, handler, file)
 
   # Replace in place when this file is already bound, append otherwise -- the
   # same contract as the tabular method's `x@tables[[name]] <- ...`. The PATH
@@ -648,6 +659,7 @@ method(load_file, DTADataSetFile) <- function(
     x@file_paths <- c(x@file_paths, file)
     x@file_handlers <- c(x@file_handlers, as.integer(handler_index))
   } else {
+    old_path <- x@file_paths[[slot]]
     x@file_paths[[slot]] <- file
     x@file_handlers[[slot]] <- as.integer(handler_index)
     # The previous file's verdict describes a file that is no longer there.
@@ -660,9 +672,14 @@ method(load_file, DTADataSetFile) <- function(
     replaced_key <- dta_file_target_keys(x@file_paths)[[slot]]
     x@validation_index[[replaced_key]] <- NULL
     x@validation_store[[replaced_key]] <- NULL
+    # ... and so does its record of how it arrived, keyed by the old path.
+    x <- dta_set_provenance(x, old_path, NULL)
   }
 
-  x
+  dta_set_provenance(
+    x, file,
+    list(file = basename(file), container = character(), via = "file")
+  )
 }
 
 
@@ -757,8 +774,15 @@ S7::method(check, DTADataSetFile) <- function(
   max_errors = NULL,
   fail_fast = FALSE,
   on_missing_column = c("scan", "stop"),
-  use_threads = TRUE
+  use_threads = TRUE,
+  # Named character, entry index -> the glob the entry's file must arrive
+  # inside ("" for none): how check(DTA) tells a file dataset, which holds no
+  # containers of its own, where a missing file belonged. Without it the raw
+  # reference is named.
+  .container_globs = NULL
 ) {
+  if (dta_is_stale(x)) x <- dta_upgrade(x)
+
   if (is.null(validation_run)) {
     validation_run <- dta_new_validation_run_id()
   }
@@ -766,7 +790,7 @@ S7::method(check, DTADataSetFile) <- function(
   # target_files is now a NAMED vector (key -> path, NA for an undelivered
   # target); its own names ARE the keys, and re-deriving them with
   # dta_file_target_keys() would try to treat every NA entry as a path.
-  target_files <- dta_file_dataset_targets(x)
+  target_files <- dta_file_dataset_targets(x, .container_globs)
   target_keys <- names(target_files)
   target_messages <- attr(target_files, "messages")
   selected_keys <- dta_file_id_to_names(target_keys, tables)

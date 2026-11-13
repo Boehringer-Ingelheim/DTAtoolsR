@@ -307,7 +307,8 @@ redact data. Unspecified test-upload/blinding flags remain unspecified.
 
 Default Word/Markdown exports include study information and ordered sections.
 For a custom Word layout, use inline `{STUDY_ID}` and `{PROTOCOL_ID}` or
-standalone `{STUDY_TABLE}` and `{AGREEMENT_SECTIONS}` block paragraphs.
+standalone `{STUDY_TABLE}`, `{AGREEMENT_SECTIONS}` and `{CONTAINERS_TABLE}` block paragraphs (the last renders the delivery containers
+of the document, and is omitted when it has none).
 The library does not alter user-supplied Word templates automatically.
 
 The machine-owned fields `template` and `import_issues` cannot be set by a template. The validator reports a template attempting to target either
@@ -611,8 +612,13 @@ files:
 ```
 
 A file entry may also say which `.zip` archive or SAS transport library (`.xpt`) its file arrives inside, with `container:`. It is optional: leave it
-out and the file is accepted loose or inside any container. `*` matches any run of characters and `?` one character (`sdtm_*.zip`), and letter case
-must match. Quote a value that starts with `*` or contains ` #`. Only `load_delivery()` consults it.
+out and the file is accepted loose or inside any container. In a template, name the container by its **file name** (`sdtm.zip`): a template has no
+`containers:` section, so an id would not resolve, and the file name declares the container for the documents created from it. `*` matches any run of
+characters and `?` one character (`sdtm_*.zip`), and letter case must match. Quote a value that starts with `*` or contains ` #`. `container: none` exempts
+an entry. A file that arrives outside its container is still loaded and validated, and `check()` reports the packaging separately.
+
+Pattern entries of different datasets must not be able to take the same file name (`^lb.*[.]csv$` next to `^lb_supp.*[.]csv$`): `validate_template()`
+fails a template whose datasets overlap that way (`file_name_conflict`), and the `lint_dta()` of a document created from it warns.
 
 ```yaml
 files:

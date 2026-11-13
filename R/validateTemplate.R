@@ -873,7 +873,10 @@
           lint <- tryCatch(lint_dta(build_res$value), error = function(e) NULL)
           for (i in seq_len(if (is.null(lint)) 0L else nrow(lint))) {
             add(
-              lint$severity[[i]], lint$code[[i]],
+              # A template library must not ship overlapping file names: the
+              # linter's warning is an error here (D16).
+              if (identical(lint$code[[i]], "file_name_conflict")) "error" else lint$severity[[i]],
+              lint$code[[i]],
               .dta_template_lint_message(prefix, lint[i, , drop = FALSE])
             )
           }

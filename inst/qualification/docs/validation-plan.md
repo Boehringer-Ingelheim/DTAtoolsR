@@ -68,7 +68,21 @@ and oversized content before extracting anything, extracts each needed file
 on its own, and splits a transport library into single-dataset files that
 haven then reads. Area CONT checks the refusals against hostile fixtures, the
 split byte for byte, truncated libraries, and that a file inside a container
-is validated exactly as the same file delivered loose. Decompression itself
+is validated exactly as the same file delivered loose. A data transfer
+agreement may also define containers at document level, name one as the
+default for every file entry that has none of its own, and exempt a file with
+`none`. A file that does not arrive inside the container its entry requires is
+still loaded and its content validated; whether it arrived inside is a
+separate verdict, reported by `container_findings()` and carried into the
+overall verdict of `check()`: a file delivered loose or inside another container
+fails the run, a file checked on its own or a table with no record of how it
+arrived leaves the run incomplete, and no run is reported as passed while such a
+finding exists. A file that two datasets could take by pattern is ambiguous
+and is not loaded until the caller chooses with `route`. Area CONT checks the
+ranking of entries, the three findings and their effect on the verdict and the
+report, and the Containers section of the exported agreement. Whether two file
+names in an agreement can overlap is detected from generated example names
+only, so some overlaps are found at delivery instead (LIM-022). Decompression itself
 is the `zip` package's job and out of scope, as decoding is for haven. What
 the package makes of a transport file's decoded values is in scope: its text
 is read as UTF-8 only, and a version 5 file with rows under 80 bytes cannot

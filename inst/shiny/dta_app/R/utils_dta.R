@@ -616,11 +616,11 @@ dta_check <- function(dta, dataset = NULL) {
   # returns is already complete; merging the prior rows in here as well would
   # count them twice and keep rows a fix has made stale.
   out <- dta_try({
-    # check() warns (class `dta_file_count_mismatch`) when a dataset's file
-    # count is outside its declared bounds. Muffling that one class is safe:
-    # the same finding rides on the returned object's
-    # `last_file_count_findings` attribute, which the status map and the
-    # report read. Every other warning still propagates.
+    # check() warns (class `dta_validation_finding`) for a finding that rides
+    # on the returned object instead: a file count outside its declared bounds
+    # (`last_file_count_findings`) or a file not verified inside its container
+    # (`last_container_findings`); the status map and the report read those.
+    # Muffling that one class is safe. Every other warning still propagates.
     withCallingHandlers(
       if (is.null(dataset)) {
         DTAtools::check(dta, quiet = TRUE, persist = FALSE)
@@ -628,7 +628,7 @@ dta_check <- function(dta, dataset = NULL) {
         DTAtools::check(dta, datasets = dataset, quiet = TRUE, persist = FALSE)
       },
       warning = function(w) {
-        if (inherits(w, "dta_file_count_mismatch")) invokeRestart("muffleWarning")
+        if (inherits(w, "dta_validation_finding")) invokeRestart("muffleWarning")
       }
     )
   })
@@ -656,6 +656,32 @@ dta_file_count_findings <- function(dta) {
 # `datasets` restricts them to the datasets of the current run.
 dta_file_count_messages <- function(dta, datasets = NULL) {
   f <- dta_file_count_findings(dta)
+  if (is.null(f)) {
+    return(character(0))
+  }
+  if (!is.null(datasets)) f <- f[f$dataset %in% datasets, , drop = FALSE]
+  as.character(f$message)
+}
+
+# Container findings recorded by the last check(), or NULL when there are none.
+# Never throws: the attribute may be absent or malformed.
+dta_container_findings <- function(dta) {
+  f <- tryCatch(
+    attr(dta, "last_container_findings", exact = TRUE),
+    error = function(e) NULL
+  )
+  if (!is.data.frame(f) || nrow(f) == 0 || !all(c("dataset", "status", "message") %in% names(f))) {
+    return(NULL)
+  }
+  live <- tryCatch(dta_dataset_names(dta), error = function(e) NULL)
+  if (!is.null(live)) f <- f[f$dataset %in% live, , drop = FALSE]
+  if (nrow(f) == 0) NULL else f
+}
+
+# The human-readable reasons behind those findings (character(0) when none).
+# `datasets` restricts them to the datasets of the current run.
+dta_container_messages <- function(dta, datasets = NULL) {
+  f <- dta_container_findings(dta)
   if (is.null(f)) {
     return(character(0))
   }
@@ -1212,6 +1238,14 @@ dta_has_import_issues <- function(ds) {
   isTRUE("import_issues" %in% tryCatch(S7::prop_names(ds), error = function(e) character(0)))
 }
 
+# `ds` without the provenance records of `keys` (an object that predates the
+# property is returned as it is).
+dta_drop_provenance <- function(ds, keys) {
+  prov <- tryCatch(ds@provenance, error = function(e) NULL)
+  if (length(prov) > 0) try(ds@provenance <- prov[setdiff(names(prov), keys)], silent = TRUE)
+  ds
+}
+
 # Remove ONE bound file/table (and its validation state) from a dataset.
 # ORDER MATTERS: the table's per-table state (validation_index, validation_store
 # AND import_issues) is cleared BEFORE the table/file itself is dropped. The
@@ -1248,10 +1282,13 @@ dta_unload_table <- function(dta, dataset, table) {
       # The recorded handler of each file moves with it; a record that is not in
       # step with the paths is dropped (the package then matches by name).
       ds@file_handlers <- if (length(fh) == length(fp)) fh[keep] else integer(0)
+      # Provenance of a file dataset is keyed by the bound path.
+      ds <- dta_drop_provenance(ds, fp[!keep])
     } else {
       tabs <- tryCatch(ds@tables, error = function(e) list()) %||% list()
       tabs[[table]] <- NULL
       ds@tables <- tabs
+      ds <- dta_drop_provenance(ds, table)
     }
     dta@datasets[[dataset]] <- ds
     dta
@@ -1276,6 +1313,7 @@ dta_unload_all <- function(dta, dataset) {
     } else {
       ds@tables <- list()
     }
+    try(ds@provenance <- list(), silent = TRUE)
     dta@datasets[[dataset]] <- ds
     dta
   })
@@ -2087,8 +2125,14 @@ dta_export_pdf <- function(dta, file, signature_list = NULL, doc_args = list()) 
 # Distinct from DTAtools::write_validation_report(), which the Validation
 # messages dock offers as "Report": that one lists the individual validation
 # messages, this one certifies the overall per-dataset outcome.
+#
+# `findings` are the container findings (DTAtools::container_findings() rows);
+# NULL computes them from `dta`. A file outside its required container fails the
+# banner, a file whose packaging is unverified (checked on its own, or no record
+# of how it arrived) leaves it incomplete.
 dta_build_validation_report <- function(dta, status = NULL, document_name = NULL,
-                                        organisation = NULL, organisation_unit = NULL) {
+                                        organisation = NULL, organisation_unit = NULL,
+                                        findings = NULL) {
   esc <- function(x) htmltools::htmlEscape(as.character(x %||% ""))
   ts <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
 
@@ -2176,9 +2220,19 @@ dta_build_validation_report <- function(dta, status = NULL, document_name = NULL
   count_msgs <- dta_file_count_messages(dta)
   count_failed <- isFALSE(attr(dta, "last_validation_ok", exact = TRUE)) &&
     !is.null(dta_file_count_findings(dta))
-  banner_cls <- if (n_fail > 0 || count_failed) {
+  if (is.null(findings)) {
+    findings <- tryCatch(DTAtools::container_findings(dta), error = function(e) NULL)
+  }
+  findings <- if (is.data.frame(findings) && all(c("status", "message") %in% names(findings))) {
+    findings
+  } else {
+    data.frame(status = character(0), message = character(0), stringsAsFactors = FALSE)
+  }
+  n_outside <- sum(findings$status == "outside")
+  n_unverified <- sum(findings$status %in% c("unverified", "unrecorded"))
+  banner_cls <- if (n_fail > 0 || count_failed || n_outside > 0) {
     "warn"
-  } else if (n_pass > 0 && n_unvalidated == 0) {
+  } else if (n_pass > 0 && n_unvalidated == 0 && n_unverified == 0) {
     "pass"
   } else {
     "incomplete"
@@ -2192,26 +2246,62 @@ dta_build_validation_report <- function(dta, status = NULL, document_name = NULL
     n_pass, " passed, ", n_fail, " failed, ",
     n_nodata, " without data",
     if (n_pending > 0) paste0(", ", n_pending, " not validated") else "",
+    if (nrow(findings) > 0) {
+      paste0(", ", nrow(findings), if (nrow(findings) == 1) " packaging finding" else " packaging findings")
+    } else {
+      ""
+    },
     "."
   )
   # The caveat points at the table below it, so it is only worth printing when
   # that table actually has rows to point at.
-  caveat <- if (identical(banner_cls, "incomplete") && length(st) > 0) {
-    paste0(
-      "<div class='caveat'>Not every dataset was validated, so this DTA ",
-      "cannot be reported as passed. Load the missing data and re-check the ",
-      "datasets listed below as &ldquo;No data&rdquo; or &ldquo;Not ",
-      "validated&rdquo;.</div>"
-    )
-  } else {
-    ""
-  }
+  caveat <- paste0(
+    if (identical(banner_cls, "warn") && n_outside > 0) {
+      paste0(
+        "<div class='caveat'>Files arrived outside the container the agreement ",
+        "requires, so this DTA fails. See &ldquo;Delivery&rdquo; below.</div>"
+      )
+    } else {
+      ""
+    },
+    if (identical(banner_cls, "incomplete") && n_unvalidated > 0) {
+      paste0(
+        "<div class='caveat'>Not every dataset was validated, so this DTA ",
+        "cannot be reported as passed. Load the missing data and re-check the ",
+        "datasets listed below as &ldquo;No data&rdquo; or &ldquo;Not ",
+        "validated&rdquo;.</div>"
+      )
+    } else {
+      ""
+    },
+    if (identical(banner_cls, "incomplete") && n_unverified > 0) {
+      paste0(
+        "<div class='caveat'>Some files were not verified inside their ",
+        "container, so this DTA cannot be reported as passed. See ",
+        "&ldquo;Delivery&rdquo; below.</div>"
+      )
+    } else {
+      ""
+    }
+  )
   # Why a dataset failed on file count: the per-target table below cannot show
   # it because every table may be individually valid. Messages are escaped.
   count_html <- if (length(count_msgs) > 0) {
     paste0(
       "<h2>File count</h2><ul>",
       paste0("<li>", vapply(count_msgs, esc, character(1)), "</li>", collapse = ""),
+      "</ul>"
+    )
+  } else {
+    ""
+  }
+  # Packaging, judged on the document as a whole: the same findings that set the
+  # banner, so nothing says passed while one is listed. Messages are escaped.
+  delivery_html <- if (nrow(findings) > 0) {
+    lead <- ifelse(findings$status == "outside", "Not inside its container: ", "Not verified: ")
+    paste0(
+      "<h2>Delivery</h2><ul>",
+      paste0("<li>", vapply(paste0(lead, findings$message), esc, character(1)), "</li>", collapse = ""),
       "</ul>"
     )
   } else {
@@ -2254,7 +2344,7 @@ dta_build_validation_report <- function(dta, status = NULL, document_name = NULL
     "<div class='banner ", banner_cls, "'>", banner_txt, "</div>",
     "<div class='summary'>", esc(summary_line), "</div>", caveat,
     "<h2>Datasets</h2><table><thead><tr><th>Dataset</th><th>Name</th><th>Status</th></tr>",
-    "</thead><tbody>", ds_rows, "</tbody></table>", count_html, detail_html,
+    "</thead><tbody>", ds_rows, "</tbody></table>", count_html, delivery_html, detail_html,
     "</body></html>"
   )
 }
@@ -2625,7 +2715,8 @@ dta_handler_type <- function(h) {
 }
 
 # One file handler -> plain list (mirrors the `files:` block of the examples).
-dta_handler_to_list <- function(h) {
+# `container` is the reference written ("" = none); by default the one stored.
+dta_handler_to_list <- function(h, container = handler_container(h)) {
   out <- list()
   fn <- tryCatch(h@filename, error = function(e) NULL)
   if (!is.null(fn) && length(fn) > 0) {
@@ -2645,8 +2736,7 @@ dta_handler_to_list <- function(h) {
   if (!is.null(pd) && length(pd) > 0 && any(nzchar(pd))) out$pattern_description <- pd
   info <- tryCatch(h@info, error = function(e) NULL)
   if (!is.null(info) && length(info) > 0) out$info <- info
-  ct <- handler_container(h)
-  if (nzchar(ct)) out$container <- ct
+  if (nzchar(container)) out$container <- container
   ext <- tryCatch(h@extensions, error = function(e) NULL)
   if (!is.null(ext) && length(ext) > 0) {
     out$extensions <- if (length(ext) == 1) ext else as.list(ext)
@@ -2735,8 +2825,33 @@ dta_rule_type_label <- function(type) {
   )
 }
 
-# One DTADataSet -> plain list (standalone-dataset shape).
-dta_dataset_to_list <- function(ds) {
+# The reference an entry is written with when the dataset leaves its document:
+# its own container reference with an id replaced by the container's file name
+# (`none` stays `none`), else -- `apply_default` -- the default container's file
+# name, so the standalone file keeps the requirement. "" = none written.
+.dta_handler_ref_outside <- function(h, containers, apply_default = TRUE) {
+  own <- handler_container(h)
+  if (nzchar(own)) {
+    if (identical(own, "none") || grepl(".", own, fixed = TRUE)) {
+      return(own)
+    }
+    hit <- containers[[own]]
+    return(if (is.null(hit)) own else hit@filename)
+  }
+  if (apply_default) {
+    for (ct in containers) {
+      if (isTRUE(ct@default)) {
+        return(ct@filename)
+      }
+    }
+  }
+  ""
+}
+
+# One DTADataSet -> plain list (standalone-dataset shape). Without `dta` the
+# entries keep their references as stored (the shape inside a document); with
+# it they are written for use outside it (see .dta_handler_ref_outside()).
+dta_dataset_to_list <- function(ds, dta = NULL, apply_default = TRUE) {
   if (is.null(ds)) {
     return(list())
   }
@@ -2754,10 +2869,17 @@ dta_dataset_to_list <- function(ds) {
   td <- tryCatch(ds@template_date, error = function(e) NULL)
   if (!is.null(td) && length(td) > 0) out$template_date <- .dta_stringify_dates(td)
   handlers <- dta_handlers(ds)
+  entry <- function(h) {
+    if (is.null(dta)) {
+      dta_handler_to_list(h)
+    } else {
+      dta_handler_to_list(h, container = .dta_handler_ref_outside(h, .ctr_list(dta), apply_default))
+    }
+  }
   if (length(handlers) == 1) {
-    out$files <- dta_handler_to_list(handlers[[1]])
+    out$files <- entry(handlers[[1]])
   } else if (length(handlers) > 1) {
-    out$files <- unname(lapply(handlers, dta_handler_to_list))
+    out$files <- unname(lapply(handlers, entry))
   }
   cols <- tryCatch(ds@specs@columns, error = function(e) NULL)
   if (!is.null(cols) && length(cols) > 0) {
@@ -2770,7 +2892,7 @@ dta_dataset_to_list <- function(ds) {
   out
 }
 
-# Whole DTA -> plain list (metadata + datasets array).
+# Whole DTA -> plain list (metadata, containers, datasets array).
 dta_to_list <- function(dta) {
   out <- list()
   md <- tryCatch(DTAtools::metadata(dta), error = function(e) NULL)
@@ -2778,6 +2900,16 @@ dta_to_list <- function(dta) {
     ml <- tryCatch(as.list(md), error = function(e) NULL)
     ml <- .dta_compact(.dta_stringify_dates(ml))
     if (!is.null(ml) && length(ml) > 0) out$metadata <- ml
+  }
+  # Explicit containers only (an implied one is just a file name in an entry).
+  cs <- .ctr_list(dta)
+  if (length(cs) > 0) {
+    out$containers <- unname(lapply(cs, function(ct) {
+      el <- list(id = ct@id, filename = ct@filename)
+      if (!is.null(ct@description)) el$description <- ct@description
+      if (isTRUE(ct@default)) el$default <- TRUE
+      el
+    }))
   }
   names_ds <- dta_dataset_names(dta)
   if (length(names_ds) > 0) {
@@ -2820,7 +2952,7 @@ dta_dataset_to_yaml_text <- function(dta, dataset) {
   dta_try({
     ds <- dta_get_dataset(dta, dataset)
     if (is.null(ds)) stop(sprintf("Dataset '%s' not found.", dataset))
-    lst <- .dta_compact(dta_dataset_to_list(ds))
+    lst <- .dta_compact(dta_dataset_to_list(ds, dta))
     # max_depth 1, not 3: this document is a `datasets:` entry hoisted to the
     # root, so the same keys sit two levels shallower than in the full document.
     dta_yaml_blank_lines(
@@ -3418,11 +3550,15 @@ dta_handlers_overview <- function(dta, dataset) {
   if (length(hs) == 0) {
     return(data.frame())
   }
-  do.call(rbind, lapply(hs, function(h) {
+  ca <- tryCatch(DTAtools::container_assignments(dta), error = function(e) NULL)
+  do.call(rbind, lapply(seq_along(hs), function(i) {
+    h <- hs[[i]]
     data.frame(
       filename = handler_expected(h),
       type = dta_handler_type(h),
-      container = handler_container(h),
+      # Where the file must arrive: the effective file name (an id or the
+      # default container resolved), not the stored reference.
+      container = dta_effective_glob(dta, dataset, i, ca),
       pattern = if (handler_is_pattern(h)) "yes" else "no",
       files = handler_count_label(h),
       endings = handler_endings(h),
@@ -3909,6 +4045,11 @@ dta_transfer_bound_data <- function(dta, dataset, old_ds, keep_validation = TRUE
     } else {
       new_ds@tables <- tryCatch(old_ds@tables, error = function(e) list()) %||% list()
     }
+    # How each bound item arrived (delivered file, container chain) travels with
+    # it; an object that predates the property has nothing to carry.
+    prov <- tryCatch(old_ds@provenance, error = function(e) list()) %||% list()
+    bound <- if (identical(ty, "file")) new_ds@file_paths else names(new_ds@tables)
+    try(new_ds@provenance <- prov[intersect(names(prov), bound)], silent = TRUE)
     if (isTRUE(keep_validation)) {
       new_ds@validation_index <- tryCatch(old_ds@validation_index, error = function(e) list()) %||% list()
       new_ds@validation_store <- tryCatch(old_ds@validation_store, error = function(e) list()) %||% list()
@@ -4209,7 +4350,10 @@ dta_export_stem <- function(dta, when = Sys.time()) {
 # call only: they are never set for the R session, so a run_dta_app() inside a
 # user's session leaves its options alone. `bytes_left` is the session's room
 # for extracted files, `held` the bytes of extracted files it already holds.
-dta_load_delivery <- function(dta, paths, exdir, bytes_left, held = 0) {
+# `route` (named list: file name -> dataset id, or character(0) for "do not load")
+# answers the files that match several datasets; `datasets` limits the delivery to
+# those datasets. Both are passed on to load_delivery() as they are.
+dta_load_delivery <- function(dta, paths, exdir, bytes_left, held = 0, route = NULL, datasets = NULL) {
   # TRUE when the session's remaining room, not the app's cap, is the byte
   # limit of this call AND the session holds extracted files it could free:
   # dta_app_reason() then names the remedy the user has. With nothing held (a
@@ -4222,14 +4366,22 @@ dta_load_delivery <- function(dta, paths, exdir, bytes_left, held = 0) {
   )
   on.exit(options(op), add = TRUE)
   missing <- character(0)
+  # A delivery that binds nothing aborts with its routing table attached; a
+  # table with `ambiguous` rows is a question for the user, not a failure.
+  failed_plan <- NULL
   res <- dta_try(withCallingHandlers(
-    DTAtools::load_delivery(dta, files = paths, exdir = exdir, on_error = "skip"),
+    DTAtools::load_delivery(dta,
+      files = paths, exdir = exdir, on_error = "skip",
+      route = route, datasets = datasets
+    ),
     warning = function(w) if (inherits(w, "dta_delivery_refused")) invokeRestart("muffleWarning"),
     message = function(m) {
       if (inherits(m, "dta_delivery_summary")) missing <<- m$missing %||% character(0)
       if (inherits(m, c("dta_delivery_summary", "dta_sas7bdat_in_memory"))) invokeRestart("muffleMessage")
-    }
+    },
+    dta_delivery_nothing_loaded = function(e) failed_plan <<- e$plan
   ))
+  res$plan <- failed_plan
   res$missing <- missing
   res$budget_limited <- budget_limited
   res
@@ -4339,6 +4491,9 @@ dta_delivery_note <- function(plan, n_replaced = 0L, missing = character(0), bud
   why <- function(rows) {
     paste0(rows$name, " (", vapply(rows$reason, dta_app_reason, character(1), budget_limited = budget_limited, USE.NAMES = FALSE), ")")
   }
+  # A plan from before the routing columns (or a hand-made one) lacks them: the
+  # rows are then read as having none of what they describe.
+  if (!"conformant" %in% names(plan)) plan$conformant <- rep(NA, nrow(plan))
   loaded <- plan[plan$status == "loaded", , drop = FALSE]
   text <- sprintf(
     "%s: loaded %d file(s) into %d dataset(s)",
@@ -4348,12 +4503,30 @@ dta_delivery_note <- function(plan, n_replaced = 0L, missing = character(0), bud
   text <- paste0(text, ".")
   if (length(missing) > 0) text <- paste0(text, " Not in the delivery: ", cap(missing), ".")
   unused <- plan[plan$status == "unused", , drop = FALSE]
+  # A file the route sent to no dataset was left out because the user chose so:
+  # it is listed with the files not loaded, not as "Not used".
+  unrouted <- !is.na(unused$reason) & unused$reason == "route sends it to no dataset"
+  chosen_none <- unused$name[unrouted]
+  unused <- unused[!unrouted, , drop = FALSE]
   if (nrow(unused) > 0) {
     shown <- ifelse(
       is.na(unused$reason) | unused$reason == "matches no file entry of the specification",
       unused$name, paste0(unused$name, " (", unused$reason, ")")
     )
     text <- paste0(text, " Not used: ", cap(shown), ".")
+  }
+  # Matches several datasets and the user chose none of them (or the call
+  # carried no answer): the file was not loaded.
+  ambiguous <- plan[plan$status == "ambiguous", , drop = FALSE]
+  not_chosen <- unique(c(ambiguous$name, chosen_none))
+  if (length(not_chosen) > 0) {
+    text <- paste0(text, " Not loaded (no dataset chosen): ", cap(not_chosen), ".")
+  }
+  # Loaded, but not inside the container its entry requires; the finding is on
+  # the document (check() reports it).
+  misfit <- loaded[!is.na(loaded$conformant) & !loaded$conformant, , drop = FALSE]
+  if (nrow(misfit) > 0) {
+    text <- paste0(text, " Not inside its required container: ", cap(unique(misfit$name)), ".")
   }
   refused <- plan[plan$status == "refused", , drop = FALSE]
   if (nrow(refused) > 0) text <- paste0(text, " Refused: ", cap(why(refused), "; "), ".")
@@ -4370,7 +4543,10 @@ dta_delivery_note <- function(plan, n_replaced = 0L, missing = character(0), bud
   }
   if (length(over) > 0) text <- paste0(text, " More files than a slot accepts: ", cap(over), ".")
   text <- paste0(text, " Run Check to validate.")
-  list(type = if (nrow(refused) + nrow(failed) + length(over) > 0) "warning" else "message", text = text)
+  list(
+    type = if (nrow(refused) + nrow(failed) + nrow(ambiguous) + nrow(misfit) + length(over) > 0) "warning" else "message",
+    text = text
+  )
 }
 
 # The one place a package message that names an R option is turned into app

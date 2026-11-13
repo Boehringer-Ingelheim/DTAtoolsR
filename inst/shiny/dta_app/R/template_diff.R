@@ -175,7 +175,11 @@ dta_dataset_leaves <- function(dta) {
   out <- list()
   for (nm in dta_dataset_names(dta)) {
     ds <- dta_get_dataset(dta, nm)
-    lst <- dta_dataset_to_list(ds)
+    # An entry's OWN container reference, resolved to its file name (`none` as
+    # `none`), the default container NOT applied: ticking the default would
+    # otherwise mark every dataset changed, and an implied container made
+    # explicit (file name -> id) is no change at all.
+    lst <- dta_dataset_to_list(ds, dta, apply_default = FALSE)
 
     cols <- lst$columns
     lst$columns <- NULL
@@ -189,6 +193,20 @@ dta_dataset_leaves <- function(dta) {
       col$id <- NULL
       out <- c(out, .dta_leaf_flatten(col, paste(nm, "columns", cid, sep = ".")))
     }
+  }
+  out
+}
+
+# The document's explicit containers as leaves keyed by id:
+# "<id>.filename", "<id>.description" and "<id>.default" (each when set).
+dta_container_leaves <- function(dta) {
+  out <- stats::setNames(list(), character(0))
+  for (ct in .ctr_list(dta)) {
+    out[[paste0(ct@id, ".filename")]] <- ct@filename
+    if (!is.null(ct@description)) out[[paste0(ct@id, ".description")]] <- ct@description
+    # Only when set: an unset flag is the default, and a leaf for it would make
+    # every new container two changes.
+    if (isTRUE(ct@default)) out[[paste0(ct@id, ".default")]] <- TRUE
   }
   out
 }
@@ -285,14 +303,25 @@ dta_diff_two_way <- function(a_leaves, b_leaves) {
   out
 }
 
-# The full diff between two DTAs: metadata leaves and dataset leaves,
-# compared independently (a document can differ in either, or both).
+# The full diff between two DTAs: metadata, container and dataset leaves,
+# compared independently (a document can differ in any of them).
 dta_diff <- function(a, b) {
+  containers <- dta_diff_two_way(dta_container_leaves(a), dta_container_leaves(b))
+  # Leaves are compared by container id (a rename keeps its identity), but a
+  # change is named by the file name the user sees: the new one, else the old.
+  fns <- function(dta) vapply(.ctr_list(dta), function(ct) ct@filename, character(1))
+  fa <- fns(a)
+  fb <- fns(b)
+  fa[names(fb)] <- fb
+  id <- sub("[.](filename|description|default)$", "", containers$key)
+  prop <- substring(containers$key, nchar(id) + 2L)
+  if (nrow(containers) > 0) containers$key <- paste0(ifelse(id %in% names(fa), fa[id], id), ".", prop)
   list(
     metadata = dta_diff_two_way(
       dta_metadata_leaves(DTAtools::metadata(a)),
       dta_metadata_leaves(DTAtools::metadata(b))
     ),
+    containers = containers,
     datasets = dta_diff_two_way(
       dta_dataset_leaves(a),
       dta_dataset_leaves(b)

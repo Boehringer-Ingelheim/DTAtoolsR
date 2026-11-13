@@ -1255,49 +1255,241 @@ attr(xpt_dta, "last_delivery")[, c("name", "member", "dataset", "status")]
 
 Nothing has to be declared for a container: a specification that declares
 `clinical_data.csv` already takes that file from inside any zip passed to
-`load_delivery()`. A file entry may nevertheless say where its file must come
-from, with `container`; the entry then takes only files that came out of a
-container with a matching name (`*` and `?` are wildcards, and letter case must
-match). A file delivered loose is not used by such an entry, and is listed as
-unused with the container it expects.
+`load_delivery()`, or loose. A file entry may nevertheless say where its file
+must arrive, with `container`. Such a file that arrives elsewhere is **still
+loaded and its content validated**, so that a supplier can check a file while
+the rest is still being produced. What the agreement says about the packaging
+is a verdict of its own, reported by `container_findings()` and by `check()`
+(see below). The reference is one of three things:
 
-A `.zip` or `.xpt` that a `type: any` entry takes as a deliverable, by its name
-or because its `extensions` list `zip` or `xpt`, stays one file and is not
-opened, unless an entry declares it as its `container`; the load summary says
-"kept as one file" for it.
+- a **file name** (it contains a dot): `sdtm.zip`. `*` and `?` are wildcards
+  (`sdtm_*.zip`) and letter case must match;
+- a container **id** (no dot): `sdtm`, naming a container the document defines;
+- `none`: this entry needs no container, whatever the document's default says.
 
 ```{r delivery-container}
 strict <- DTA(datasets = list(DTADataSetTabular(
   id = "clinical_data", specs = DTAColumnSpecCollection(columns = list()),
   files = list(DTAFileCSV("clinical_data.csv", container = "delivery.zip"))
 )))
-plan <- tryCatch(load_delivery(strict, csv), dta_delivery_nothing_loaded = function(e) e$plan)
-plan[, c("name", "status", "reason")]
-strict <- load_delivery(strict, zipfile)
-names(tables(datasets(strict, "clinical_data")))
-unlink(zipfile)
+# Loose, the file still loads; the delivery says it did not conform.
+loose <- load_delivery(strict, csv)
+attr(loose, "last_delivery")[, c("name", "dataset", "status", "conformant")]
+container_findings(loose)[, c("dataset", "arrived", "status")]
+# Inside the zip, there is nothing to report.
+inzip <- load_delivery(strict, zipfile)
+nrow(container_findings(inzip))
 ```
 
-In a specification the same declaration is one more line on the file entry
-(columns omitted); quote a value that starts with `*` or contains ` #`, as in
-`container: "*_SDTM.zip"`:
+A `.zip` or `.xpt` that a `type: any` entry takes as a deliverable, by its name
+or because its `extensions` list `zip` or `xpt`, stays one file and is not
+opened, unless an entry declares it as its `container`; the load summary says
+"kept as one file" for it.
+
+### Containers as a section of the specification
+
+Writing the file name into every entry gets tedious, and renaming the archive
+means editing every entry. A specification therefore defines its containers once,
+in a `containers` section, and the entries refer to them by `id`:
 
 ```yaml
+containers:
+  - id: sdtm
+    filename: "STUDY_SDTM_*.zip"
+    description: All SDTM domains as SAS transport files.
+    default: true
+  - id: adam
+    filename: adam.zip
 datasets:
   - id: ae
     type: tabular
-    name: Adverse events
     files:
-      filename: ae.csv
-      type: csv
-      container: sdtm.zip
-  - id: dm
+      filename: ae.xpt
+      type: xpt            # no container of its own: the default one, sdtm
+  - id: adsl
     type: tabular
-    name: Demographics
     files:
-      filename: dm.csv
-      type: csv
-      container: sdtm.zip
+      filename: adsl.xpt
+      type: xpt
+      container: adam      # an id; "adam.zip" also works but breaks on a rename
+  - id: define
+    type: file
+    files:
+      filename: define.pdf
+      type: any
+      container: none      # sent separately: exempt from the default container
+```
+
+A container has an `id` (a letter, then letters, digits, `_` or `-`; `none` is
+reserved), a `filename`, an optional `description`, which exported agreements
+show in their Containers section, and `default`. In R the same section is a list
+of `DTAContainer` objects:
+
+```{r containers-section}
+sdtm <- DTAContainer("sdtm", "sdtm_*.zip", description = "AE and DM as transport files.")
+by_id <- DTA(
+  datasets = list(
+    DTADataSetTabular(id = "ae", specs = empty, files = list(DTAFileXPT("ae.xpt", container = "sdtm"))),
+    DTADataSetTabular(id = "dm", specs = empty, files = list(DTAFileXPT("dm.xpt", container = "sdtm"))),
+    DTADataSetTabular(id = "vs", specs = empty, files = list(DTAFileXPT("vs.xpt")))
+  ),
+  containers = list(sdtm)
+)
+container_assignments(by_id)[, c("dataset", "expected", "reference", "container", "filename")]
+```
+
+`container_assignments()` shows where every file entry must arrive: `vs` has
+no container, so it may come loose or in any container. The fixture below is a
+zip named `sdtm_xpt.zip` holding `ae.xpt` and `dm.xpt`, which the container's
+`sdtm_*.zip` matches:
+
+```{r containers-load}
+sdtm_zip <- system.file("qualification", "fx", "container", "sdtm_xpt.zip", package = "DTAtools")
+by_id <- load_delivery(by_id, sdtm_zip)
+attr(by_id, "last_delivery")[, c("name", "dataset", "status", "conformant")]
+nrow(container_findings(by_id))
+```
+
+### A default container: everything arrives inside it
+
+`default: true` on one container makes every entry without a container of its
+own belong to it, including datasets added later; that is how an agreement says
+"everything arrives in the zip". `container: none` exempts an entry. At most one
+container is the default. The next example writes the bundled specification
+with such a container in front of it:
+
+```{r containers-default}
+yaml_file <- file.path(tempdir(), "clinical_in_zip.yaml")
+writeLines(c(
+  "containers:",
+  "  - id: delivery",
+  "    filename: delivery.zip",
+  "    description: The whole delivery in one zip.",
+  "    default: true",
+  readLines(spec)
+), yaml_file)
+packed <- read_dta_from_yaml(yaml_file)
+container_assignments(packed)[, c("dataset", "expected", "container", "default")]
+```
+
+### Content and packaging are separate verdicts
+
+A file delivered loose is loaded and its content validated; its
+packaging fails the run. `container_findings()` lists every file that is not
+known to be inside its container, with one of three statuses:
+
+| Status | When | `check()` says |
+| --- | --- | --- |
+| `outside` | delivered with `load_delivery()` loose, or inside another container | Validation FAILED |
+| `unverified` | loaded on its own with `load_file()` | Validation INCOMPLETE |
+| `unrecorded` | bound without a record of how it arrived (a table assigned to `@tables`) | Validation INCOMPLETE |
+
+```{r containers-findings}
+# The receiver got the file loose: content passes, packaging fails.
+loose <- load_delivery(packed, csv)
+container_findings(loose)[, c("dataset", "arrived", "status")]
+checked <- check(loose, quiet = TRUE, persist = FALSE)
+attr(checked, "last_validation_ok")
+validation_status(datasets(checked, "clinical_data"))$ok
+
+# Inside the zip: nothing to report.
+inzip <- load_delivery(packed, zipfile)
+nrow(container_findings(inzip))
+checked <- check(inzip, quiet = TRUE, persist = FALSE)
+attr(checked, "last_validation_ok")
+```
+
+### Checking one file on its own
+
+`load_file()` binds the one file it is given to the dataset it is told to,
+whatever its container. This is the individual check of a file that is still
+being produced: its content is validated, and its packaging is `unverified`,
+which leaves the run incomplete rather than failed or passed. `load_file()`
+refuses a `.zip` (or an `.xpt` the dataset's entry does not read) and points to
+`load_delivery(datasets = )`.
+
+```{r containers-on-its-own}
+alone <- load_file(packed, dataset = "clinical_data", file = csv)
+container_findings(alone)[, c("dataset", "arrived", "status")]
+checked <- check(alone, quiet = TRUE, persist = FALSE)
+attr(checked, "last_validation_ok")
+```
+
+### Loading only some datasets
+
+With `datasets`, `load_delivery()` takes only the files of those datasets; a
+file meant for another dataset is `unused`, and only the chosen datasets' files
+are extracted from an archive. The library below holds `AE`, `DM` and `VS`:
+
+```{r containers-datasets}
+only_ae <- load_delivery(xpt_dta, library_file, datasets = "ae")
+attr(only_ae, "last_delivery")[, c("name", "member", "dataset", "status")]
+```
+
+### Ambiguous files and `route`
+
+Patterns of different datasets may match the same file name. When a file fits
+several datasets equally well, `load_delivery()` does not guess: the file is
+not loaded, its row in `last_delivery` has the status `ambiguous` and lists the
+`candidates`, and `route` chooses. (A literal name that two datasets both
+declare is not ambiguous: both get the file.)
+
+```{r containers-ambiguous}
+lab <- function(id, pattern) {
+  DTADataSetTabular(
+    id = id, specs = empty,
+    files = list(DTAFileCSV(pattern, pattern = TRUE, pattern_description = paste(id, "files")))
+  )
+}
+labs <- DTA(datasets = list(lab("lb", "^lb.*[.]csv$"), lab("lb_supp", "^lb_supp.*[.]csv$")))
+lab_dir <- file.path(tempdir(), "labs")
+dir.create(lab_dir)
+lab_files <- file.path(lab_dir, c("lb.csv", "lb_supp.csv"))
+for (f in lab_files) writeLines(c("a", "1"), f)
+
+asked <- load_delivery(labs, lab_files)
+attr(asked, "last_delivery")[, c("name", "dataset", "status", "candidates")]
+
+routed <- load_delivery(labs, lab_files, route = list("lb_supp.csv" = "lb_supp"))
+attr(routed, "last_delivery")[, c("name", "dataset", "status")]
+```
+
+In the app, the same question is a table with one row per file, with a choice
+to load nothing; in R, `route = list("lb_supp.csv" = character(0))` does that.
+
+### File names must not overlap across datasets
+
+An agreement in which one file name could belong to two datasets is itself
+ambiguous, so the overlap should be removed where the agreement is written
+rather than answered at every delivery. `file_name_conflicts()` finds pairs of
+pattern entries of different datasets that take the same file, with a file name
+both take; `lint_dta()` reports them as the warning `file_name_conflict`, and
+`validate_template()` refuses a template that contains one:
+
+```{r containers-conflicts}
+file_name_conflicts(labs)[, c("dataset_a", "dataset_b", "example")]
+```
+
+Fix it with distinct prefixes (`^lb_main.*` and `^lb_supp.*`), or make one
+pattern exclude the other with a character class:
+
+```{r containers-conflicts-fixed}
+fixed <- DTA(datasets = list(
+  lab("lb", "^lb([^_].*)?[.]csv$"), lab("lb_supp", "^lb_supp.*[.]csv$")
+))
+nrow(file_name_conflicts(fixed))
+```
+
+A look-ahead such as `^lb(?!_supp).*[.]csv$` also routes correctly, but the
+conflict check does not analyse look-arounds, back-references or inline flags:
+it reports a conflict only with a real file name that both patterns take, so it
+never invents one, but it can miss some. Two literal entries with the same name
+are no conflict, and neither is a literal name against a pattern: the literal
+wins. Datasets with overlapping patterns still reach the ambiguity question at
+delivery, as a safety net.
+
+```{r containers-cleanup, include = FALSE}
+unlink(c(zipfile, yaml_file, lab_dir), recursive = TRUE)
 ```
 
 An archive is refused, before anything is extracted, when an entry name is

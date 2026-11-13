@@ -35,7 +35,7 @@ areas:
     min_tests: 54
   - area: CONT
     title: Container deliveries (zip archives, SAS transport libraries)
-    min_tests: 32
+    min_tests: 62
   - area: STREAM
     title: Streaming validation and engine parity
     min_tests: 32

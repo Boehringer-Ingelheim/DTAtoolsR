@@ -226,6 +226,98 @@
 
 
 #' @keywords internal
+#' @title Container Findings of a Checked DTA
+#' @description
+#' The rows of the `"last_container_findings"` attribute `check()` leaves on a
+#' DTA (see `container_findings()`). Like the file count, a file outside its
+#' container affects the verdict without appearing in `results()` or
+#' `messages()`, so the report folds it in itself.
+#' @param x The object being reported on.
+#' @return A data frame with at least one row, or `NULL` when there is nothing
+#'   to report (also for an unchecked DTA, which has no attribute).
+.report_container_findings <- function(x) {
+  f <- attr(x, "last_container_findings", exact = TRUE)
+  if (is.data.frame(f) && nrow(f) > 0 && all(c("dataset", "status", "message") %in% names(f))) f else NULL
+}
+
+# The file a finding is about, so findings of one dataset stay distinguishable.
+.report_container_target <- function(f) {
+  nm <- ifelse(is.na(f$file), basename(as.character(f$item)), as.character(f$file))
+  paste0("container: ", nm)
+}
+
+#' @keywords internal
+#' @title Add the Container Axis to the Overview Rows
+#' @description
+#' One row per file not known to be inside its container: `failed` for a file
+#' that is `outside` (`ok` FALSE), pending for `unverified` and `unrecorded`
+#' (`ok` NA).
+#' @param x The object being reported on.
+#' @param res The frame returned by `results(x)`.
+#' @return `res` with the rows appended.
+.report_with_container_rows <- function(x, res) {
+  f <- .report_container_findings(x)
+  if (is.null(f)) {
+    return(res)
+  }
+  n <- nrow(f)
+  rows <- if (is.data.frame(res) && ncol(res) > 0) {
+    res[rep(NA_integer_, n), , drop = FALSE]
+  } else {
+    data.frame(
+      dataset = rep(NA_character_, n), target = NA_character_,
+      target_type = NA_character_, status = NA_character_,
+      n_columnspec_errors = NA_integer_, n_rule_errors = NA_integer_,
+      n_import_errors = NA_integer_, stringsAsFactors = FALSE
+    )
+  }
+  rownames(rows) <- NULL
+  rows$dataset <- as.character(f$dataset)
+  rows$target <- .report_container_target(f)
+  if ("target_type" %in% names(rows)) {
+    rows$target_type <- "container"
+  }
+  rows$status <- ifelse(f$status == "outside", "failed", "not_validated")
+  rows$n_columnspec_errors <- 0L
+  rows$n_rule_errors <- 0L
+  rows$n_import_errors <- 0L
+
+  if (!is.data.frame(res) || nrow(res) == 0) {
+    return(rows)
+  }
+  rbind(res, rows)
+}
+
+#' @keywords internal
+#' @title Add the Container Findings to the Messages Table
+#' @description
+#' One message row per finding, appended after the ids `messages()` assigned:
+#' severity `error` for `outside`, `warning` for the others. Called after the
+#' inspect panels are built: a finding has no inspect detail.
+#' @param x The object being reported on.
+#' @param msgs The frame returned by `messages(x, as_tibble = FALSE)`.
+#' @return `msgs` with the rows appended.
+.report_with_container_messages <- function(x, msgs) {
+  f <- .report_container_findings(x)
+  if (is.null(f) || !is.data.frame(msgs)) {
+    return(msgs)
+  }
+  n <- nrow(f)
+  rows <- msgs[rep(NA_integer_, n), , drop = FALSE]
+  rownames(rows) <- NULL
+  rows$id <- as.integer(max(c(0L, msgs$id), na.rm = TRUE) + seq_len(n))
+  rows$dataset <- as.character(f$dataset)
+  rows$target <- .report_container_target(f)
+  rows$severity <- ifelse(f$status == "outside", "error", "warning")
+  rows$source <- "container"
+  rows$message <- as.character(f$message)
+  if (nrow(msgs) == 0) {
+    return(rows)
+  }
+  rbind(msgs, rows)
+}
+
+#' @keywords internal
 #' @title Build Validation Summary HTML Section
 #' @description
 #' Renders the top-level summary section with pass/fail/pending counts and
@@ -324,10 +416,15 @@
 #' and the report must not re-read it.
 #' @param x A DTA object.
 #' @return A data frame with columns `Dataset`, `Table`, `Kind`, `Source file`,
-#'   `Size (bytes)`, `Modified (UTC)` and `Content hash`; zero rows when no
-#'   dataset has data attached.
+#'   `Size (bytes)`, `Modified (UTC)`, `Content hash` and `Container` (the
+#'   container chain the file arrived through, joined with " > "; "loose" when
+#'   delivered with `load_delivery()` outside any container, "on its own" when
+#'   read with `load_file()`, "not recorded" without a record; empty only for
+#'   a dataset with no container entry); zero rows when no dataset has data
+#'   attached.
 .report_inputs_df <- function(x) {
-  input_row <- function(dataset, table, kind, path = NA_character_, hash = NA_character_) {
+  input_row <- function(dataset, table, kind, path = NA_character_, hash = NA_character_,
+                        container = "") {
     size <- NA_character_
     modified <- NA_character_
     if (!is.na(path)) {
@@ -342,6 +439,7 @@
     data.frame(
       Dataset = dataset, Table = table, Kind = kind, `Source file` = path,
       `Size (bytes)` = size, `Modified (UTC)` = modified, `Content hash` = hash,
+      Container = container,
       check.names = FALSE, stringsAsFactors = FALSE
     )
   }
@@ -349,9 +447,30 @@
   rows <- list()
   for (ds in x@datasets) {
     id <- ds@id
+    prov <- dta_provenance(ds)
+    # "" for a dataset none of whose entries needs a container.
+    has_container <- length(ds@files) > 0L && any(vapply(
+      ds@files, function(h) !is.null(dta_effective_container(x, h)$filename), logical(1)
+    ))
+    chain_of <- function(key) {
+      rec <- prov[[key]]
+      if (is.null(rec)) {
+        return(if (has_container) "not recorded" else "")
+      }
+      chain <- as.character(rec$container)
+      if (length(chain)) {
+        paste(chain, collapse = " > ")
+      } else if (!has_container) {
+        ""
+      } else if (identical(rec$via, "file")) {
+        "on its own"
+      } else {
+        "loose"
+      }
+    }
     if (inherits(ds, "DTAtools::DTADataSetFile")) {
       for (path in ds@file_paths) {
-        rows[[length(rows) + 1L]] <- input_row(id, NA_character_, "file", path)
+        rows[[length(rows) + 1L]] <- input_row(id, NA_character_, "file", path, container = chain_of(path))
       }
       next
     }
@@ -365,12 +484,13 @@
         files <- dta_dataset_source_files(tbl)
         if (length(files) == 0) files <- NA_character_
         for (path in files) {
-          rows[[length(rows) + 1L]] <- input_row(id, nm, "streamed", path)
+          rows[[length(rows) + 1L]] <- input_row(id, nm, "streamed", path, container = chain_of(nm))
         }
       } else {
         rows[[length(rows) + 1L]] <- input_row(
           id, nm, "in memory",
-          hash = dta_table_hash_stamp(tbl) %||% NA_character_
+          hash = dta_table_hash_stamp(tbl) %||% NA_character_,
+          container = chain_of(nm)
         )
       }
     }

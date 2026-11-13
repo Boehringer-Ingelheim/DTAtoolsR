@@ -391,16 +391,103 @@ match it, exactly as if the files had been delivered loose:
 ```r
 dta <- load_delivery(dta, "sdtm.zip")
 dta <- load_delivery(dta, "sdtm.xpt")
-attr(dta, "last_delivery") # what was loaded, opened, unused, ignored or refused
+attr(dta, "last_delivery") # what was loaded, opened, unused, ignored, refused or ambiguous
 ```
 
 A library is split into one file per member, named after the member in lower
 case: member `AE` is offered as `ae.xpt`, which an entry `filename: ae.xpt`
-with `type: xpt` takes. A file entry may say where its file must come from,
-in one line: `container: sdtm.zip` (`*` and `?` are wildcards; letter case
-must match). A `.zip` or `.xpt` that a `type: any` entry takes as a deliverable,
-by its name or because its `extensions` list `zip` or `xpt`, stays one file and
-is not opened, unless an entry declares it as its `container`.
+with `type: xpt` takes. A `.zip` or `.xpt` that a `type: any` entry takes as a
+deliverable, by its name or because its `extensions` list `zip` or `xpt`, stays
+one file and is not opened, unless an entry declares it as its container.
+
+**The `containers:` section.** An agreement names its containers once, at
+document level, and file entries refer to them:
+
+```yaml
+containers:
+  - id: sdtm
+    filename: "STUDY_SDTM_*.zip"   # * and ? are wildcards; letter case must match
+    description: All SDTM domains as SAS transport files.   # shown in exported agreements
+    default: true                  # every entry without a container of its own belongs here
+  - id: adam
+    filename: adam.zip
+datasets:
+  - id: adsl
+    files:
+      filename: adsl.xpt
+      type: xpt
+      container: adam              # a container id
+  - id: define
+    files:
+      filename: define.pdf
+      type: any
+      container: none              # needs no container: exempt from the default
+```
+
+In R the section is `DTA(containers = list(DTAContainer("sdtm", "STUDY_SDTM_*.zip")))`.
+`container_assignments(dta)` lists where every file entry must arrive.
+
+- **Ids and file names.** A reference without a dot is a container id and must
+  name a container of the document. A reference with a dot is a file name
+  (`container: sdtm.zip`, as in 0.27.0): it resolves to the container with that
+  file name, otherwise it declares one, so a specification without a
+  `containers:` section works unchanged. Prefer the id: renaming the archive is
+  then one edit, in the container.
+- **The default container.** `default: true` (at most one container) makes every
+  entry without its own reference belong to that container, datasets added
+  later included: "everything arrives in the zip". `container: none` exempts
+  an entry, e.g. a `define.pdf` sent separately.
+- An entry belongs to at most one container.
+
+**Individual checks.** Every dataset and every file can be checked on its own,
+while the supplier is still producing the rest. A file that is not inside its
+container is still loaded and its content validated. Packaging is a verdict of
+its own: `container_findings(dta)` lists every file that is not known to be
+inside the container its entry requires, and `check()` shows it beside the
+content verdict:
+
+| Finding | When | Verdict |
+| --- | --- | --- |
+| `outside` | delivered with `load_delivery()` loose, or inside another container | Validation FAILED |
+| `unverified` | loaded on its own with `load_file()` (the individual check) | Validation INCOMPLETE |
+| `unrecorded` | no record of how it arrived (a table assigned to `@tables`) | Validation INCOMPLETE |
+
+So `ae.xpt` checked alone reports "content passed, packaging not verified",
+while loose files delivered where the agreement requires a zip fail. Nothing
+says PASSED while a finding exists. `check()` can therefore fail or be
+incomplete on packaging alone; `validation_status()` of a dataset still judges
+content only. `load_file()` refuses a `.zip` (or an `.xpt` the dataset's entry
+does not read) and points to `load_delivery(x, files, datasets = "<id>")`.
+
+**Ambiguity and `route`.** Containers rank an entry instead of excluding it: a
+file that fits an entry's container wins over one that does not, and a misfit
+is taken only when nothing ranks higher. When the same-rank candidates are
+pattern entries of several datasets, the file is not guessed: it is not loaded,
+`last_delivery` has the status `ambiguous` with the `candidates`, and you
+choose with `route`, a named list from file name to dataset id
+(`character(0)` loads it nowhere). The app asks with a table instead. Two
+datasets that name the same file literally both get it.
+
+```r
+dta <- load_delivery(dta, files, route = list("lb_supp.csv" = "lb_supp"))
+```
+
+**`datasets`.** `load_delivery(dta, "sdtm.zip", datasets = c("ae", "dm"))` loads
+only those datasets' files from the delivery (the rest are `unused`, and only
+the chosen files are extracted). This is what dropping an archive on one
+dataset's upload zone in the app does.
+
+**File names must not overlap across datasets.** An agreement in which one file
+name could belong to two datasets is ambiguous. `file_name_conflicts(dta)` lists
+pattern entries of different datasets that take the same file, with an example
+file name; `lint_dta()` reports `file_name_conflict` as a warning,
+`validate_template()` fails a template that has one, and the app refuses an
+edit that introduces one. For `^lb.*[.]csv$` and `^lb_supp.*[.]csv$` use distinct
+prefixes (`^lb_main.*`, `^lb_supp.*`) or exclude the other
+(`^lb([^_].*)?[.]csv$`).
+
+Objects saved by an older version are upgraded when they are used;
+`upgrade_dta()` does it explicitly.
 
 An archive is inspected before anything is extracted, and refused as a whole
 when an entry name would escape its folder (absolute, `..`, a drive letter),
@@ -418,7 +505,15 @@ default `tempdir()`), also when its table is then streamed.
 
 Validation results name the dataset and the table. For a table read into
 memory the validation report does not name the zip or library it came from;
-the summary `load_delivery()` prints and its `last_delivery` table do.
+the summary `load_delivery()` prints and its `last_delivery` table do, and the
+report's inputs table has a Container column. The exported agreement gets a
+Containers section (container, description, files) after Process Information.
+
+**In the app**, a Delivery zone in the sidebar takes containers and loose
+files for the whole document and opens a Delivery view; ambiguous files are
+asked in a dialog. A container manager (Metadata tab, or the sidebar) edits
+containers and assigns files, and the file editor's "Delivered inside" is a
+select. A dataset's own upload zone takes only that dataset's files.
 
 ### Validating a file too large to load
 
@@ -746,6 +841,7 @@ by the same renderers the built-in layout uses:
 | `{AUTHORIZED_CORRECTIONS_LIST}` | the authorized-for-corrections names |
 | `{STUDY_TABLE}` | structured study and protocol identifiers |
 | `{AGREEMENT_SECTIONS}` | titled narrative sections in their stored order |
+| `{CONTAINERS_TABLE}` | the delivery containers: an intro sentence and a table of container, description and files; omitted when there are none |
 
 The first four take an optional dataset id — `{COLUMN_SPECS:ADSL}` renders
 one dataset, the bare form renders every applicable one under its own heading.

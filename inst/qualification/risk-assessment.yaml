@@ -100,7 +100,18 @@ assessment:
     depth: >
       One case per refusal rule with a hostile fixture; byte-level comparison of
       split members against the library; truncation at every kind of boundary;
-      parity of verdict and counts between a zipped and a loose file.
+      parity of verdict and counts between a zipped and a loose file. Routing is
+      covered tier by tier (five tiers, the entry of the best tier winning
+      within and across datasets) with the ambiguity a pattern tie leaves and
+      the route and datasets arguments that resolve and scope it, and the
+      duplicate rules for copies that fit and copies that do not. Packaging is a
+      separate verdict from content: a file outside its container still loads,
+      and cases pin each of the three findings (outside, unverified,
+      unrecorded), their effect on the overall verdict of check() (failed,
+      incomplete, never passed) and their place in the validation report. The
+      container model, its YAML and lint rules, the exported Containers section
+      and the detection of overlapping file names have their own cases, with the
+      limits of that detection pinned (LIM-019 to LIM-022).
 
   - area: PERF
     title: End-to-end workflows and behaviour at scale

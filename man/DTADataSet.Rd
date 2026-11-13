@@ -44,6 +44,18 @@ An object of class DTADataSet.
 \description{
 Class to handle data from files
 }
+\section{Provenance}{
+
+The property \code{provenance} records, for every bound item (a table of a
+tabular dataset, a path of a file dataset), the delivered file name, the
+chain of containers it arrived in (outermost first; empty when it arrived
+loose) and \code{via}: \code{"file"} when \code{load_file()} bound it,
+\code{"delivery"} when \code{load_delivery()} did. It travels with the
+dataset. It is maintained by \code{load_file()} and \code{load_delivery()}
+only: a table assigned to \code{@tables} directly has no record, or, if it
+replaced a recorded one, keeps that record.
+}
+
 \examples{
 ds <- DTADataSet(
   id = "example_dataset",

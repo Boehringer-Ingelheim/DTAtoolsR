@@ -18,32 +18,50 @@ requirements:
       each a loose file, a .zip archive or a SAS transport file (.xpt or
       .xpt.gz), shall bind every file it routes with load_file(), and shall
       return the object with a last_delivery attribute holding one row per file
-      considered, with the columns delivered, container, member, name, dataset,
-      handler, item, status, reason and path, status being one of loaded,
-      opened, unused, ignored and refused.
+      considered, with the twelve columns delivered, container, member, name,
+      dataset, handler, item, status, reason, conformant, candidates and path,
+      in that order, status being one of loaded, opened, unused, ignored,
+      refused and ambiguous. conformant shall be TRUE for a loaded file whose
+      entry has an effective container and which arrived inside a container
+      that fits it, FALSE for one that did not, and NA for every other row;
+      candidates shall be a list column holding, for an ambiguous row, the ids
+      of the datasets the file is ambiguous between, and an empty character
+      vector for every other row.
     risk: high
     category: interface
     covers: [load_delivery, load_file]
-    source: R/loadDelivery.R
+    source: R/loadDelivery.R; plan PLAN-container-manager.md section 4.6 (last_delivery columns)
   - id: REQ-CONT-002
     text: >
       A file inside a .zip archive shall be routed by its base name exactly as a
       loose file of that name would be, whether the archive separates folders
-      with slashes or backslashes; within a dataset to the first matching
-      literal file entry, else the first matching pattern entry; to every
-      dataset that matches it, except that a file some literal entry matches is
-      not routed to pattern entries of other datasets, and that holds when
-      the literal entry declares a container the file did not come from (the
-      file is then taken only by a pattern entry that declares a container the
-      file did come from, and otherwise by no dataset); a pattern entry, as for
-      a loose file, shall also match the name without its compression
-      suffix. It shall reach the same
-      validation verdict and the same error counts as the same bytes delivered
-      loose.
+      with slashes or backslashes. Every entry that could take a file shall be
+      ranked, lower tier first: tier 1, a literal file entry that the file fits
+      or that needs no container; tier 2, a pattern entry that the file fits;
+      tier 3, a literal entry whose container the file did not come from; tier
+      4, a pattern entry that needs no container; tier 5, a pattern entry whose
+      container the file did not come from. A file fits an entry when the
+      entry's effective container, its own reference or else the default
+      container, matches the file's own name as a deliverable or a container
+      the file came from. Within a dataset the entry of the lowest tier wins, a
+      fitting entry before a free one of the same tier, then the first in
+      order; across datasets only the datasets whose best entry is in the
+      lowest tier keep the file, and when that tier is a literal one every kept
+      dataset receives the file. A pattern entry, as for a loose file, shall
+      also match the name without its compression suffix. A file shall reach
+      the same validation verdict and the same error counts as the same bytes
+      delivered loose.
     risk: high
     category: functional
     covers: [load_delivery, check]
-    source: R/loadDelivery.R (dta_delivery_claims); R/containerFiles.R
+    source: R/loadDelivery.R (dta_delivery_claims, dta_delivery_best_slot); R/containerFiles.R; plan PLAN-container-manager.md D6 and D13 (S3 and Q1 of the red team)
+    notes: >
+      Rewritten for the container manager. Until 0.27.0 an entry that declared
+      a container excluded every file that did not come from it, and a literal
+      entry blocked the pattern entries of other datasets. Containers now rank
+      an entry instead of excluding it (a misfit is taken only when nothing
+      ranks higher), and a pattern entry that fits outranks a free one of the
+      same literalness, within a dataset and across datasets.
   - id: REQ-CONT-003
     text: >
       Each member of a SAS transport library holding several datasets shall be
@@ -91,20 +109,31 @@ requirements:
     notes: The memory consequence is the one recorded for .sas7bdat files (LIM-010).
   - id: REQ-CONT-006
     text: >
-      load_delivery() shall route a file to a file entry that declares a
-      container only when the file came out of a container whose name matches
-      the declaration, * matching any text and ? one character, and shall list
-      any other file that entry would take as unused with a reason naming the
-      container. An entry without a container shall accept the file loose or
-      from inside any container. A file that was delivered and then refused
-      (it could not be loaded, it duplicates another, or it exceeds a size
-      limit) was delivered: it shall not be reported as not in the delivery,
-      and its row of last_delivery shall keep the dataset and the entry it was
-      meant for.
+      A file entry shall refer to its container by a container id, by a dotted
+      file name (a glob in which * matches any text and ? one character, and
+      the whole name must match, letter case included), by the reserved word
+      none, or by nothing, in which case the document's default container, if
+      it has one, applies. none exempts the entry from the default container.
+      load_delivery() shall load a file that an entry takes even when the file
+      did not arrive inside the container of that entry: the row of
+      last_delivery has conformant FALSE and a reason that says where the file
+      arrived and which container the agreement requires, and a container
+      finding is reported for it (REQ-CONT-025). A file that fits is loaded
+      with conformant TRUE; an entry without an effective container accepts
+      the file loose or from inside any container, with conformant NA. A file
+      that was delivered and then refused (it could not be loaded, it
+      duplicates another, or it exceeds a size limit) was delivered: it shall
+      not be reported as not in the delivery, and its row of last_delivery
+      shall keep the dataset and the entry it was meant for.
     risk: high
     category: functional
     covers: [DTAFile, DTAFileFactory, load_delivery]
-    source: R/DTAFile-class.R (dta_container_regex, dta_matches_container); R/loadDelivery.R
+    source: R/DTAFile-class.R (dta_container_regex, dta_resolve_container, dta_effective_container); R/loadDelivery.R; plan PLAN-container-manager.md D2, D3 and D4
+    notes: >
+      Rewritten for the container manager. Until 0.27.0 a file outside the
+      declared container was listed as unused and not loaded; it is now loaded
+      with a finding, so that content is validated even when packaging is not
+      right (D4).
   - id: REQ-CONT-007
     text: >
       An archive holding an entry whose name is empty, not valid text,
@@ -117,8 +146,8 @@ requirements:
       one of < > " | ? *, has a path segment that ends in a dot or a space,
       names a reserved Windows device, is longer than 255 bytes or has a name
       of 511 bytes or more (which the zip library returns cut, so it cannot be
-      read in full) shall never be extracted: when a file entry claims it, or an entry declares it as a
-      container, the archive shall be refused with the same class and a
+      read in full) shall never be extracted: when a file entry claims it, or an entry's effective container
+      names it, the archive shall be refused with the same class and a
       message saying that some file systems cannot write the name; otherwise
       it shall be listed as unused, with the problem in its reason; a name of
       511 bytes or more shall not count as a duplicate of another, and its
@@ -146,14 +175,14 @@ requirements:
       DTAtools.container_max_ratio times its size on disk, or the call would
       write more than DTAtools.container_max_bytes; and when a file it would
       extract from an archive (a transport library inside it included,
-      whether it is only probed for members or declared as a container) or
+      whether it is only probed for members or named by an effective container) or
       split out of a library, streamed or not, or a gzip file it would read
       into memory, is larger than
       DTAtools.container_max_member_bytes, the gzip file judged by what it
       inflates to. A gzip-compressed transport
       file that decompresses to more than DTAtools.container_max_bytes shall be
-      refused the same way when it is declared as a container or read by a type
-      xpt entry; one that no entry declares or claims is listed as unused with
+      refused the same way when an entry's effective container names it or a
+      type xpt entry reads it; one that no entry names or claims is listed as unused with
       that reason. An archive is refused before anything is extracted from it;
       a library inside an archive is extracted before its members are counted.
     risk: high
@@ -169,11 +198,21 @@ requirements:
       of one delivery that would be loaded as the same table or file of the
       same dataset shall be refused with a condition of class
       dta_delivery_duplicate_name, or with on_error = "skip" both listed as
-      refused while the rest is loaded.
+      refused while the rest is loaded. When one of such copies fits its
+      entry's effective container and the others do not, the copy that fits
+      shall be kept and the others listed as unused, naming where the kept
+      copy came from, instead of being refused; when every copy arrived
+      outside the container, none shall be loaded, all shall be listed as
+      unused and the delivery shall neither abort nor refuse them; and when
+      the copy that fits fails to load, the best copy that does not fit shall
+      be loaded instead (REQ-CONT-023).
     risk: high
     category: integrity
     covers: [load_delivery]
-    source: R/containerFiles.R (dta_zip_inspect, dta_zip_extract); R/loadDelivery.R (dta_delivery_resolve_duplicates)
+    source: R/containerFiles.R (dta_zip_inspect, dta_zip_extract); R/loadDelivery.R (dta_delivery_resolve_duplicates); plan PLAN-container-manager.md section 4.6 (Duplicates)
+    notes: >
+      Rewritten for the container manager: a copy outside the container used to
+      be unused before duplicates were judged, so it could never clash.
   - id: REQ-CONT-010
     text: >
       A member whose extracted size differs from the size its archive declares
@@ -184,9 +223,10 @@ requirements:
       record or inside a member's header records shall be refused with a
       condition of class dta_container_corrupt and no member of it shall be
       read, and a .xpt that is not a SAS transport file with a condition of
-      class dta_xpt_not_transport, when the file is declared as a container or
-      read by a type xpt entry; a .xpt that no entry declares or claims, and
-      whose scan fails, shall be listed as unused with that reason.
+      class dta_xpt_not_transport, when an effective container names the file
+      or a type xpt entry reads it; a .xpt that no entry's effective container
+      names or claims, and whose scan fails, shall be listed as unused with
+      that reason.
     risk: high
     category: integrity
     covers: [load_delivery, DTAFileXPT, read_file]
@@ -203,14 +243,15 @@ requirements:
       return) shall never be bound and shall be listed as ignored; directory entries
       shall produce no row; a .zip inside a .zip shall not be opened, and is
       listed as unused unless an entry takes it as a file; a .xpt inside a .zip
-      may be opened, when an entry declares it as a container or when the
+      may be opened, when an entry's effective container names it or when the
       archive holds no .xpt an entry names and some type xpt entry matches no
       file of the archive; a .xpt not opened for that reason shall be listed
       as unused with a reason that says so and names the declaration that
       would open it. A .zip or .xpt that a type any entry takes as a file in
       its own right (the entry names it, or lists its ending in extensions)
       shall be bound as one file and shall not be opened, scanned or split,
-      unless an entry declares it as its container; its loaded row and the
+      unless an entry's own reference names it as the container of other
+      entries (the default container alone does not open it); its loaded row and the
       summary shall say that it was kept as one file and how to have its
       contents checked.
     risk: medium
@@ -244,50 +285,93 @@ requirements:
     text: >
       The exported specification shall show a file entry's container in a
       "Delivered In" column of the Files table when at least one entry of the
-      table declares one, and shall keep the five-column table otherwise.
+      table has a value, and shall keep the five-column table otherwise. When
+      the whole document is exported (write_dta), the cell shall name the
+      effective container of the entry resolved to its file name, never its
+      id, the default container included, and Not required for an entry whose
+      reference is none; the document shall also carry a Containers section
+      (REQ-CONT-027). When a dataset is exported on its own
+      (write_dataset_metadata), the cell shall keep the reference of the entry
+      as written.
     risk: medium
     category: documentation
     covers: [write_dataset_metadata, write_dta]
-    source: R/documentData.R (.file_specs_df)
+    source: R/documentData.R (.file_specs_df, .container_ctx); plan PLAN-container-manager.md D12 and section 4.10
+    notes: >
+      A dataset on its own does not carry its document's containers, so it
+      cannot resolve an id or a default; it prints the raw reference.
   - id: REQ-CONT-015
     text: >
-      lint_dta() shall report, as findings of severity error, a container that
-      is not a single .zip or .xpt file name (code file_container_invalid), a
-      file entry key its type does not take (code file_field_unknown) and a
-      container given on a dataset instead of a file entry (code
-      file_container_misplaced), and read_dta_from_yaml() shall refuse such a
-      document with a condition of class dta_lint_error.
+      lint_dta() shall report, as findings of severity error, a container
+      reference that is neither a single .zip or .xpt file name nor the word
+      none nor a container id, that is a value with a dot that is not a file
+      name of that kind, or a value without a dot that does not start with a
+      letter or holds a character other than letters, digits, underscore and
+      hyphen (code file_container_invalid), a file entry key its type does not
+      take (code file_field_unknown) and a container given on a dataset
+      instead of a file entry (code file_container_misplaced), and
+      read_dta_from_yaml() shall refuse such a document with a condition of
+      class dta_lint_error.
     risk: medium
     category: interface
     covers: [lint_dta, read_dta_from_yaml]
-    source: R/lintDTA.R (dta_lint_files_list); R/DTAFile-class.R (dta_container_value_problem)
+    source: R/lintDTA.R (dta_lint_files_list); R/DTAFile-class.R (dta_container_ref_problem, dta_container_value_problem)
+    notes: >
+      The dotted rule is unchanged from 0.27.0; the id rule is new. Whether an
+      id names a container of the document is REQ-CONT-026.
   - id: REQ-CONT-016
     text: >
-      In the interactive application, a drop holding a .zip or .xpt on any
-      upload slot shall bind every file of the drop that matches a file entry
-      of the document, in every dataset, shall record the container with each
-      loaded file, shall ask before replacing a table that is already loaded,
-      and shall refuse, before asking about any replacement, a loose file
-      dropped on a slot whose entry declares a container. It shall delete
-      every extracted file no loaded file record names before each delivery,
-      after a file is removed or a dataset's files are discarded and after a
-      delivery is committed, the whole extraction of a cancelled or failed
-      delivery, and at session end every extracted file no file dataset uses,
-      so that a session's delivery budget is never exhausted by files it no
-      longer holds, whichever datasets one delivery filled.
+      In the interactive application, the upload zone of a dataset shall take
+      only that dataset's files. A loose file dropped on it shall be bound to
+      the entry it matches, also when that entry declares or inherits a
+      container, as a file loaded for an individual check, and the notice shall
+      say that the agreement requires it inside the container. A drop holding a
+      .zip or .xpt that the dataset's own entry does not read as a file shall be
+      one delivery restricted to that dataset: the container is opened, only
+      that dataset's files are bound, a loose file of the same drop travels with
+      the delivery and is judged as delivered, the other files are not loaded,
+      and the notice says which were bound and how many were left, or that the
+      archive holds no file for the dataset. A .zip or .xpt that the dataset's
+      own entry names as a file shall be bound as that file. The Delivery zone
+      in the sidebar shall load the whole delivery into every dataset it feeds.
+      Every container drop shall record the container with each loaded file,
+      shall ask before replacing a table that is already loaded, and shall
+      delete every extracted file no loaded file record names before each
+      delivery, after a file is removed or a dataset's files are discarded and
+      after a delivery is committed, the whole extraction of a cancelled or
+      failed delivery, and at session end every extracted file no file dataset
+      uses, so that a session's delivery budget is never exhausted by files it
+      no longer holds, whichever datasets one delivery filled.
     risk: medium
     category: functional
     covers: [run_dta_app]
-    source: inst/shiny/dta_app/app.R (handle_upload, handle_delivery, commit_delivery, do_remove_file, onSessionEnded)
+    source: inst/shiny/dta_app/app.R (handle_upload, handle_delivery, commit_delivery, do_remove_file, onSessionEnded); plan PLAN-container-manager.md D7 and section 5.4
+    notes: >
+      Rewritten for the container manager. Until 0.27.0 a drop on any slot
+      filled every dataset, and a loose file for an entry that declared a
+      container was refused (gate G3b); the first is now the job of the
+      Delivery zone and the second is the individual check (REQ-CONT-025).
   - id: REQ-CONT-017
     text: >
       The application's file editor shall offer the type xpt for a tabular
-      dataset and an optional "Delivered inside" value that is saved as the
-      entry's container and written to the exported YAML.
+      dataset and shall offer "Delivered inside" as a select of the document's
+      containers: the choice that leaves the entry without a reference of its
+      own, each defined container, each container implied by the file name of
+      an entry, and none when the document has a default container. A value an
+      entry already stores shall be offered and shall be kept when the field
+      reports nothing, so that saving the entry never loses a reference. A
+      defined container's file name typed into the select shall be saved as the
+      id of that container; any other archive name typed into it shall create a
+      container on save and reference it, and a name that cannot be a container
+      shall be refused with a message and change nothing. The reference shall
+      be written to the exported YAML.
     risk: low
     category: functional
     covers: [run_dta_app]
-    source: inst/shiny/dta_app/R/utils_dta.R (dta_set_handler, dta_handler_to_list)
+    source: inst/shiny/dta_app/app.R (file_save); inst/shiny/dta_app/R/containers.R (dta_container_choices); plan PLAN-container-manager.md D10 and section 5.7
+    notes: >
+      Rewritten for the container manager. Until 0.27.0 "Delivered inside" was
+      a free-text field whose value was stored as typed.
   - id: REQ-CONT-018
     text: >
       A SAS transport file read as a table shall be decoded as UTF-8: a variable
@@ -314,3 +398,310 @@ requirements:
       many rows it holds, and a transport file records no encoding (LIM-017,
       LIM-018). Expected values are the data frames the test files are written
       from.
+
+  # ---- the container manager (document-level containers, packaging verdict) ----
+
+  - id: REQ-CONT-019
+    text: >
+      A DTAContainer shall hold an id, a file name glob, an optional
+      description and a default flag, and shall refuse with a condition of
+      class dta_container_invalid an id that does not start with a letter or
+      holds a character other than letters, digits, underscore and hyphen, an
+      id that is none in any letter case, a file name that is not a single
+      .zip or .xpt file name, and a default that is not TRUE or FALSE, at
+      construction and when a property is assigned. A DTA shall hold its
+      containers keyed by id, shall refuse duplicate ids, duplicate file
+      names and more than one default container with the same condition
+      class, and shall refuse a file entry whose reference without a dot names
+      no container of the document with a condition of class
+      dta_container_unknown, while a dotted reference and none are never
+      unknown. A file name reference equal to the file name of a defined
+      container shall be stored as that container's id. container_assignments()
+      shall return one row per file entry with the columns dataset, handler,
+      expected, reference, container, filename, default and implied, naming
+      the container the entry must arrive inside (the id of a defined
+      container, the file name of an implied one, NA for none), and marking
+      an assignment that comes from the default container. A containers
+      section of a YAML document shall be read as written, and print() of a
+      DTA shall name the containers in effect.
+    risk: high
+    category: interface
+    covers: [DTAContainer, DTA, read_dta_from_yaml, container_assignments, print]
+    source: R/DTAContainer-class.R; R/DTA-class.R; R/containerAssignments.R; plan PLAN-container-manager.md D1, D2, D3, sections 4.1 to 4.5
+    notes: >
+      An id can never be mistaken for a file name because only a file name
+      contains a dot. A container that no entry names is implied by the file
+      name of the entries that do, so a document written for 0.27.0 reads as
+      before. A dataset on its own does not carry its document's containers
+      (LIM-020).
+
+  - id: REQ-CONT-020
+    text: >
+      When the best entry of every kept dataset for a file is a pattern entry
+      (tier 2, 4 or 5 of REQ-CONT-002) and more than one dataset is kept, the
+      file shall be ambiguous: it shall not be loaded, its row of
+      last_delivery shall have the status ambiguous, the ids of the datasets
+      it matches in candidates and no path, and the summary shall name it
+      among the files that match several datasets. A literal tie in one tier
+      shall not be ambiguous: every kept dataset receives the file. Ambiguity
+      shall never abort a delivery that loads another file; a delivery in
+      which only ambiguous files exist shall be refused with a condition of
+      class dta_delivery_nothing_loaded whose plan field holds them.
+    risk: high
+    category: functional
+    covers: [load_delivery]
+    source: R/loadDelivery.R (dta_delivery_claims, dta_delivery_best_slot, dta_delivery_summary); plan PLAN-container-manager.md D6 and section 4.6
+    notes: >
+      Until 0.27.0 a pattern tie bound the file to every dataset it matched.
+
+  - id: REQ-CONT-021
+    text: >
+      load_delivery() shall take a route, a named list or named character vector
+      from a file name to the ids of the datasets that file is to go to, and
+      shall refuse before reading anything, with a condition of class
+      dta_delivery_bad_input, a route with unnamed or duplicate names or with
+      an id that is no dataset of the document. A route shall apply only to
+      files that are ambiguous: it shall send such a file to the datasets it
+      names, and a route that names a dataset the file is not ambiguous
+      between shall refuse the whole file, with a refused row that names the
+      dataset (and a dta_delivery_bad_input abort in abort mode). A route to
+      no dataset shall list the file as unused with the reason that the route
+      sends it to no dataset. A route that names a file that was not ambiguous
+      shall change nothing, and the summary shall list its name.
+    risk: high
+    category: interface
+    covers: [load_delivery]
+    source: R/loadDelivery.R (dta_delivery_check_route); plan PLAN-container-manager.md section 4.6 (route)
+
+  - id: REQ-CONT-022
+    text: >
+      load_delivery() shall take datasets, ids of the document, and shall
+      refuse an unknown id or an empty vector before reading anything with a
+      condition of class dta_delivery_bad_input. It shall bind only files for
+      those datasets and extract only the files they need; a file that only
+      other datasets take shall be listed as unused with the reason that it is
+      for a dataset this call does not load; files for the other datasets
+      shall not be reported as not in the delivery; and an ambiguous file
+      that only one dataset of datasets takes shall be bound to it.
+    risk: medium
+    category: interface
+    covers: [load_delivery]
+    source: R/loadDelivery.R; plan PLAN-container-manager.md section 4.6 (datasets)
+
+  - id: REQ-CONT-023
+    text: >
+      Of several copies of a file that would be loaded as the same item of the
+      same dataset, a copy that fits the container of its entry shall be kept
+      and each copy that does not fit shall be listed as unused with the
+      reason "another copy was loaded from" followed by where the kept copy
+      came from, the container chain and the file name joined by " > ". When
+      two or more copies exist and every one arrived outside the container,
+      none shall be loaded and each shall be listed as unused with the reason
+      "several copies arrived outside" the container glob "; none was
+      loaded", and the delivery shall not be refused. When the kept copy fails
+      to load in skip mode, the best copy that does not fit shall be loaded
+      instead, and no reason shall claim another copy was loaded from the
+      container whose copy failed.
+    risk: high
+    category: integrity
+    covers: [load_delivery]
+    source: R/loadDelivery.R (dta_delivery_resolve_duplicates); plan PLAN-container-manager.md section 4.6 (Duplicates) and the WP3 review rules
+
+  - id: REQ-CONT-024
+    text: >
+      Every item bound by load_file() or load_delivery() shall leave a
+      provenance record on its dataset (the provenance property): the base
+      name of the file as delivered, the chain of containers it came through,
+      outermost first and empty for a loose file, and how it was bound, file
+      for load_file() and delivery for load_delivery(). The record of a table
+      shall be keyed by the table name and that of a file dataset by the bound
+      path; a later load shall overwrite it, and it shall travel with the
+      dataset.
+    risk: medium
+    category: integrity
+    covers: [load_file, load_delivery]
+    source: R/DTADataSet-class.R; R/DTADataSetTabular-class.R; R/DTADataSetFile-class.R; R/loadDelivery.R (dta_set_provenance); plan PLAN-container-manager.md D5 and section 4.7
+    notes: >
+      A table assigned to the tables property directly has no record, or keeps
+      the record of the table it replaced (LIM-019).
+
+  - id: REQ-CONT-025
+    text: >
+      container_findings() shall judge packaging apart from content. For a DTA
+      it shall return a data frame with the character columns dataset, item,
+      file, container, arrived, status and message, one row per bound item
+      whose entry requires a container and which is not known to be inside it:
+      outside for a file delivered with load_delivery() loose or inside
+      another container (arrived is loose or the container chain),
+      unverified for a file read on its own with load_file() (arrived is on
+      its own), and unrecorded for a table with no provenance record whose
+      dataset has an entry with an effective container; a file inside its
+      container gives no row. check() on a DTA shall judge the same findings:
+      one or more outside files shall make the verdict Validation FAILED, one
+      or more unverified or unrecorded files and no outside file shall make it
+      Validation INCOMPLETE, no verdict shall read passed while a finding
+      exists, the findings shall be left in the attribute
+      last_container_findings and signalled as one warning of class
+      dta_container_mismatch, and validation_status() of the datasets shall
+      not change. write_validation_report() shall show each finding as a
+      row and a message, and its inputs table shall name the container each
+      file arrived through.
+    risk: high
+    category: functional
+    covers: [container_findings, check, write_validation_report]
+    source: R/containerFindings.R; R/DTA-class.R (check); R/reportRendering.R (.report_with_container_rows, .report_with_container_messages, .report_inputs_df); plan PLAN-container-manager.md D4 and section 4.8
+    notes: >
+      Content and packaging are separate verdicts: a file outside its
+      container is still loaded and its content validated, so a supplier who
+      checks one file alone sees content that passed and packaging that is not
+      verified rather than a failure.
+
+  - id: REQ-CONT-026
+    text: >
+      lint_dta() shall report container_invalid and container_duplicate as
+      errors on a document whose containers section is malformed (an element
+      without an id or a filename, of the wrong type, with an unknown field or
+      a value the container refuses; a duplicate id or file name; more than one
+      default), file_container_unknown as an error for a reference without a
+      dot that names no container of the document, container_unused as a
+      warning for a defined, non-default container no entry refers to,
+      document_field_unknown as a warning for a top-level key other than
+      metadata, containers and datasets, and container_reference_by_filename as
+      a warning for an entry that refers by file name to a container that has
+      an id. The rows about a container itself shall have an empty dataset. A
+      dataset linted on its own shall not report file_container_unknown.
+      read_dta_from_yaml() shall refuse a document with an error finding with
+      a condition of class dta_lint_error.
+    risk: medium
+    category: interface
+    covers: [lint_dta, read_dta_from_yaml]
+    source: R/lintDTA.R; plan PLAN-container-manager.md section 4.13 and Appendix D
+
+  - id: REQ-CONT-027
+    text: >
+      write_dta() shall add a Containers section right after Process
+      Information, in Word and in Markdown: a sentence and a table with the
+      columns Container, Description and Files, listing the defined
+      containers in definition order and then the implied ones in order of
+      first use, the files of each as the expected name with the dataset in
+      brackets joined by semicolons, All other files for the default
+      container (followed by except: and the entries whose reference is none),
+      and No file assigned for a container no entry uses. The sentence shall
+      be the one for a default container, the one for every entry having a
+      container, or the one for some entries having one, in that order of
+      precedence. A document without a container in effect shall have no such
+      section. The template block {CONTAINERS_TABLE} shall render the same
+      sentence and table, nothing when there is no container, and
+      dta_template_placeholders() shall list it.
+    risk: medium
+    category: documentation
+    covers: [write_dta, write_dataset_metadata, export_with_template, dta_template_placeholders]
+    source: R/documentData.R (.containers_df, .containers_intro); R/exportDocuments.R; R/exportTemplateBlocks.R; plan PLAN-container-manager.md D12 and section 4.10
+
+  - id: REQ-CONT-028
+    text: >
+      load_file() on a dataset shall refuse with a condition of class
+      dta_load_file_container, before reading, a .zip file for an entry that is
+      not of type any and a .xpt file for an entry that is neither of type xpt
+      nor of type any, with a message that names the file by its base name and
+      points to load_delivery().
+    risk: medium
+    category: interface
+    covers: [load_file]
+    source: R/DTAFile-class.R (dta_load_file_container); plan PLAN-container-manager.md section 4.9
+
+  - id: REQ-CONT-029
+    text: >
+      upgrade_dta() shall re-create every DTAtools object inside a DTA or a
+      dataset saved by an older version with the current class definition,
+      giving a property the old object lacks its default and keeping every
+      other value, shall return a current object with identical property
+      values, and shall refuse anything else. The functions that read or write
+      such an object shall do the same by themselves.
+    risk: medium
+    category: integrity
+    covers: [upgrade_dta]
+    source: R/containerAssignments.R (dta_upgrade, dta_is_stale, upgrade_dta); plan PLAN-container-manager.md D15 and section 4.12
+
+  - id: REQ-CONT-030
+    text: >
+      In the interactive application, a document with two or more datasets or
+      with a container in effect shall offer a Delivery zone in the sidebar.
+      A drop on it shall be one delivery of the whole document: it shall bind
+      every file to the dataset its expected name matches, record the delivery
+      and open a Delivery view that shows the container status, the members of
+      each container and one row per file considered, with the dataset, the
+      entry that matched and the result, and that names the files the document
+      expects and the delivery did not hold. A file that matches several
+      datasets shall be asked about in a dialog with one row per file name and,
+      per row, the candidate datasets with the expected name that matched and
+      Don't load as explicit choices, none preselected; the dialog shall refuse
+      to go on until every row is answered, shall bind a file only to the
+      dataset it was sent to, shall load nothing and delete the staged copies
+      on Cancel, and shall, when the answers open a container that holds
+      further ambiguous files, ask again for those files only and keep the
+      earlier answers. The verdict surfaces shall agree with the packaging
+      findings: the validation report shall read VALIDATION FAILED when a file
+      is outside its container and VALIDATION INCOMPLETE when files are only
+      unverified or unrecorded and none is outside, the validation summary
+      button shall not be offered as a pass while a finding exists, and the
+      report shall read VALIDATION PASSED only for a delivery that conforms.
+    risk: high
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R (handle_delivery, commit_delivery, output$delivery_panel, the ambiguity dialog, validation_report_html); inst/shiny/dta_app/R/utils_dta.R (dta_build_validation_report); plan PLAN-container-manager.md D8, D9, D11 and sections 5.2, 5.3, 5.5, 5.8
+    notes: >
+      The packaging verdict is the one of REQ-CONT-025, read live from the
+      document the user holds rather than from the last check.
+
+  - id: REQ-CONT-031
+    text: >
+      In the interactive application, the container manager shall list the
+      containers of the document (file name, description and what it takes)
+      and shall, in edit mode only, add, edit and remove them and assign the
+      file entries of every dataset to them. In view mode it shall show the
+      same lists as text, with no control that changes the document. Saving a
+      container under another file name shall keep every entry that referred to
+      it on that container; ticking its default option shall take the default
+      from the container that had it and say so; removing a container shall ask
+      first and shall clear every reference to it; and an invalid file name
+      shall be refused inline with nothing saved. A reference that an
+      assignment select did not report shall be kept. The Metadata tab shall
+      have a Containers section that lists the containers and offers the
+      manager only in edit mode.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R (the container manager, output$metadata_containers); inst/shiny/dta_app/R/containers.R (dta_container_save, dta_container_assign, dta_container_remove); plan PLAN-container-manager.md D10 and sections 5.1 and 5.6
+
+  - id: REQ-CONT-032
+    text: >
+      file_name_conflicts() shall return, for a DTA, a data frame with the
+      columns dataset_a, entry_a, expected_a, dataset_b, entry_b, expected_b and
+      example, one row per pair of pattern entries of different datasets that
+      could both take one correctly packaged file, with the shortest file name
+      both take as example, and no row when there is none. Two entries
+      conflict only when both need no container, or both containers can name
+      the same archive; literal entries, entries of one dataset and
+      entries whose containers cannot name the same archive shall not
+      conflict. lint_dta() shall report each pair as a warning of code
+      file_name_conflict, and validate_template() shall report a creation
+      template whose datasets conflict as an error. The interactive
+      application shall refuse an edit that introduces a conflict, with
+      nothing saved and a message that names both datasets and the example file
+      name: a save in the file editor, a save of the assignments, a container's
+      file name or default option, and the removal of a container. Whether an
+      edit introduces a conflict shall be decided by comparing what the
+      entries expect, not their positions, so that an unrelated edit of a
+      document that already has a conflict is accepted. A document that is
+      opened (a bulk source, as are raw YAML and a dataset added from a
+      template) shall be accepted with a warning that names the overlapping
+      dataset and the example file name.
+    risk: medium
+    category: functional
+    covers: [file_name_conflicts, lint_dta, validate_template, run_dta_app]
+    source: R/fileNameConflicts.R; R/lintDTA.R; R/validateTemplate.R; inst/shiny/dta_app/R/containers.R (dta_new_conflicts); plan PLAN-container-manager.md D16 and sections 4.14 and 5.9
+    notes: >
+      Detection is sound, not complete: a conflict is reported only when a
+      generated example file name shows it, so an undetected overlap is
+      asked about at delivery (REQ-CONT-020) instead (LIM-022).

@@ -4,6 +4,107 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Containers are a section of the specification.** A top-level `containers:`
+  list names the delivery archives once (`id`, `filename`, `description`,
+  `default`); file entries refer to a container by its id in `container:`, so
+  renaming an archive is one edit. In R, `DTAContainer()` builds one and
+  `DTA(containers = )` takes them. A reference with a dot is still a file name
+  (`container: sdtm.zip`, as in 0.27.0) and works without a `containers:`
+  section; `container: none` exempts an entry.
+- **A default container.** `default: true` on one container makes every file
+  entry without a container of its own belong to it, datasets added later
+  included: "everything arrives in the zip". `container_assignments()` lists
+  where every file entry must arrive.
+- **Individual checks.** A file that is not inside its container is still
+  loaded and its content validated, so a supplier can check a file while the
+  rest is still being produced. Packaging is a verdict of its own:
+  `container_findings()` lists every file that is `outside` its container
+  (delivered loose or in another container: "Validation FAILED"), `unverified`
+  (loaded on its own with `load_file()`) or `unrecorded` (no record of how it
+  arrived; both "Validation INCOMPLETE"). `check()` prints them under
+  "Containers", signals a warning of class `dta_container_mismatch`, and
+  returns them in the new `last_container_findings` attribute. A dataset's
+  `validation_status()` still judges content only. Every loaded file now carries
+  a provenance record (`DTADataSet@provenance`) of the file name and containers
+  it arrived in.
+- `load_delivery()` gains `route` and `datasets`. A file that fits the file
+  entries of several datasets equally well is no longer guessed: its row in
+  `last_delivery` has the status `ambiguous` and lists the `candidates`, and
+  `route = list("lb_supp.csv" = "lb_supp")` chooses (`character(0)` loads it
+  nowhere). `datasets` loads only those datasets' files from a delivery; files
+  meant for the others are `unused`, and only the chosen files are extracted.
+  `last_delivery` gains the columns `conformant` and `candidates`.
+- The validation report names the container of every input (a Container column
+  in the inputs table) and lists files outside their container in its rows and
+  messages.
+- Exported agreements (Word and Markdown) get a Containers section after
+  Process Information, with each container's file name, description and files;
+  the "Delivered In" column shows the container's file name, default included
+  (`Not required` for `none`). A new block marker `{CONTAINERS_TABLE}` renders
+  the same intro and table in a custom Word template.
+- `file_name_conflicts()` finds file entries of different datasets that could
+  take the same file name, with an example name both take. `lint_dta()` reports
+  such a pair as the warning `file_name_conflict`, `validate_template()` as an
+  error, and the app refuses an edit that introduces one (documents that are
+  opened or applied as raw YAML are accepted and show the conflict as a warning). The check
+  is sound but not complete: it reports only conflicts it can show with a real
+  file name, and does not analyse look-arounds or back-references.
+- New lint codes: `container_invalid`, `container_duplicate`,
+  `file_container_unknown` (errors), `container_unused`,
+  `container_reference_by_filename` and `document_field_unknown` (warnings).
+- `upgrade_dta()` re-stamps a `DTA` or dataset saved by an older version with
+  the current classes. It is also done automatically when such an object is
+  used, and when the app restores a session.
+- The app has a **Delivery** zone in the sidebar that takes containers and
+  loose files for the whole document, routes the unambiguous files and opens a
+  **Delivery view** (containers, members, the routing table, "Check all"). Files
+  that match several datasets are asked in a dialog, one row per file with the
+  candidate datasets and "Don't load". A **container manager** (a Containers
+  section on the Metadata tab, or "Containers..." in the sidebar) edits
+  containers and assigns files to them, and the file editor's "Delivered inside"
+  is now a select of the document's containers. Findings appear wherever a
+  verdict is shown: the summary banner, the validation summary, the sidebar, the
+  Delivery view and the loaded-file chips.
+
+### Changed
+
+- **Breaking:** a file that arrives outside the container its entry names is
+  now loaded (it was listed as unused), and `check()` reports it: a file `outside` its
+  container fails the run ("Validation FAILED") and an `unverified` or
+  `unrecorded` file leaves it incomplete, so a `DTA` can fail or be incomplete on
+  packaging alone. `last_validation_ok` is `FALSE` for either.
+- **Breaking:** pattern entries of different datasets that match the same file
+  no longer both take it: the file is `ambiguous` and is not loaded until
+  `route` (or the app) chooses. Containers now rank an entry instead of
+  excluding it, and an entry whose container fits the file outranks one of the
+  same kind with no container, within a dataset and across datasets.
+- **Breaking:** `load_file()` refuses a `.zip` (and an `.xpt` the dataset's entry
+  does not read) with class `dta_load_file_container`, pointing to
+  `load_delivery(datasets = )`.
+- **Breaking:** `validate_template()` fails a template whose datasets' patterns
+  overlap (`file_name_conflict`), so a template library that passed before can
+  fail.
+- **Breaking:** a dataset's own drop zone in the app takes only that dataset's
+  files; a dropped `.zip` or `.xpt` is opened for that dataset alone
+  (`load_delivery(datasets = )`) and no longer routes across all datasets. Use
+  the sidebar Delivery zone for a whole delivery.
+- `last_delivery` has 12 columns instead of 10 (`conformant` and `candidates`
+  added; the `status` `ambiguous` is new).
+- Exported agreements get a Containers section for implied containers too (a
+  `container: sdtm.zip` without a `containers:` section).
+- `DTAFile` accepts a container id as `container`, as well as a file name or
+  `none`.
+- Objects saved by an older version (autosaved sessions, `.rds` files) are
+  upgraded when used (see `upgrade_dta()`), which also fixes the failure of
+  restored objects that lacked newer properties such as `file_handlers`.
+- A dataset-only YAML no longer flags an undotted `container:` value at lint
+  time: it is a container id, which only the document can resolve, and it fails
+  at `load_delivery()` instead.
+
 ## [0.27.0] - 2026-11-12
 
 ### Added

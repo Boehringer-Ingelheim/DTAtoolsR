@@ -2164,3 +2164,36 @@ test_that("an id that merely contains 'cycle detected' is still classified by co
   expect_code_row(result, "mixin_conflict", "error")
   expect_no_code_row(result, "extends_cycle")
 })
+
+# ---- file_name_conflict (D16) ---------------------------------------------------
+
+test_that("a creation template whose datasets conflict on a file name is an error", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: conflicting",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Conflicting",
+      "datasets:",
+      "  - id: ae",
+      "    type: tabular",
+      "    files: {filename: '^a.*[.]csv$', type: csv, pattern: true}",
+      "    columns:",
+      "      - {id: COL1, type: SAS Char}",
+      "  - id: dm",
+      "    type: tabular",
+      "    files: {filename: '^.*e[.]csv$', type: csv, pattern: true}",
+      "    columns:",
+      "      - {id: COL1, type: SAS Char}"
+    ),
+    lib_file(dir, "conflicting.dta-template.yaml")
+  )
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "file_name_conflict", "error")
+  expect_equal(nrow(rows), 1)
+  expect_match(rows$message, "'ae'", fixed = TRUE)
+  expect_match(rows$message, "'dm'", fixed = TRUE)
+})

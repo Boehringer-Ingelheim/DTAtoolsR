@@ -510,6 +510,569 @@ ui_page <- function(cfg) {
 ui <- function(req) ui_page(dta_app_config())
 
 # ---------------------------------------------------------------------------
+# Delivery: the sidebar block, the Delivery view and the ambiguity dialog
+#
+# Pure builders: the document, the container findings and the last delivery go
+# in, tags come out. They hold no reactive state, so the server stays the one
+# place that decides when they run. All text goes in through tags$*, which
+# escapes it: file names are user-supplied.
+# ---------------------------------------------------------------------------
+
+dv_empty_findings <- function() {
+  data.frame(
+    dataset = character(0), item = character(0), file = character(0),
+    container = character(0), arrived = character(0), status = character(0),
+    message = character(0), stringsAsFactors = FALSE
+  )
+}
+
+# The packaging findings of the live document; never throws.
+dv_findings <- function(dta) {
+  if (is.null(dta)) {
+    return(dv_empty_findings())
+  }
+  f <- tryCatch(DTAtools::container_findings(dta), error = function(e) NULL)
+  if (is.data.frame(f)) f else dv_empty_findings()
+}
+
+dv_provenance <- function(ds) {
+  p <- tryCatch(ds@provenance, error = function(e) NULL)
+  if (is.list(p)) p else list()
+}
+
+# The items (tables, or file paths of a file dataset) bound in a dataset: the
+# keys of its provenance records.
+dv_bound_items <- function(ds) {
+  if (inherits(ds, "DTAtools::DTADataSetFile")) {
+    as.character(tryCatch(ds@file_paths, error = function(e) character(0)))
+  } else {
+    as.character(names(tryCatch(ds@tables, error = function(e) NULL)))
+  }
+}
+
+dv_ds_label <- function(dta, id) .ctr_ds_label(id, dta)
+
+# TRUE when something is bound in at least one dataset.
+dv_anything_bound <- function(dta) {
+  any(vapply(
+    dta_dataset_names(dta),
+    function(nm) isTRUE(dta_dataset_readiness(dta, nm)$has_data),
+    logical(1)
+  ))
+}
+
+# One entry per container in effect: its row (dta_container_rows()), the datasets
+# whose entries it holds, the findings against it and the archive names (the
+# first element of the chain) its files arrived inside.
+dv_container_states <- function(dta, findings) {
+  rows <- dta_container_rows(dta)
+  if (length(rows) == 0) {
+    return(list())
+  }
+  ca <- tryCatch(DTAtools::container_assignments(dta), error = function(e) NULL)
+  lapply(rows, function(r) {
+    mine <- if (is.null(ca)) NULL else ca[!is.na(ca$container) & ca$container == r$key, , drop = FALSE]
+    ds_ids <- unique(as.character(mine$dataset))
+    # A finding with no single container (unrecorded, several globs) belongs to
+    # every container its dataset has entries in.
+    f <- findings[
+      (!is.na(findings$container) & findings$container == r$filename) |
+        (is.na(findings$container) & findings$dataset %in% ds_ids), ,
+      drop = FALSE
+    ]
+    inside <- character(0)
+    for (id in ds_ids) {
+      prov <- dv_provenance(dta_get_dataset(dta, id))
+      for (it in setdiff(names(prov), f$item[f$dataset == id])) {
+        chain <- as.character(prov[[it]]$container)
+        if (length(chain) && dv_glob_hits(r$filename, chain[[1]])) inside <- c(inside, chain[[1]])
+      }
+    }
+    list(
+      row = r, datasets = ds_ids, findings = f, inside = inside,
+      n_outside = sum(f$status == "outside"),
+      n_unverified = sum(f$status == "unverified"),
+      n_unrecorded = sum(f$status == "unrecorded")
+    )
+  })
+}
+
+# The sidebar line of one container: first match wins, worst first.
+dv_container_line <- function(st) {
+  fn <- st$row$filename
+  files <- function(n) .ctr_count(n, "file", "files")
+  if (st$n_outside > 0) {
+    list(glyph = "\u26A0", cls = "dp-bad", text = paste0(fn, ": ", files(st$n_outside), " not inside it"))
+  } else if (st$n_unverified > 0) {
+    n <- st$n_unverified
+    list(
+      glyph = "\u25D0", cls = "dp-warn",
+      text = paste0(fn, ": ", files(n), if (n == 1) " checked on its own" else " checked on their own")
+    )
+  } else if (st$n_unrecorded > 0) {
+    list(
+      glyph = "?", cls = "dp-warn",
+      text = paste0(fn, ": ", files(st$n_unrecorded), ", origin not recorded")
+    )
+  } else if (length(st$inside) > 0) {
+    list(
+      glyph = "\u2713", cls = "dp-ok",
+      text = paste0(paste(unique(st$inside), collapse = ", "), ": ", files(length(st$inside)))
+    )
+  } else if (isTRUE(st$row$n_files == 0)) {
+    list(glyph = "\u25CB", cls = "dp-none", text = paste0(fn, ": no files assigned"))
+  } else {
+    list(glyph = "\u25CB", cls = "dp-none", text = paste0(fn, ": not delivered yet"))
+  }
+}
+
+# The packaging verdict of dataset `id` in the live findings: "outside" (a file
+# is not inside the container the agreement requires), "unverified" (checked
+# on its own, or its origin is not recorded) or "none".
+dv_ds_packaging <- function(findings, id) {
+  s <- findings$status[findings$dataset == id]
+  if (any(s == "outside")) "outside" else if (length(s) > 0) "unverified" else "none"
+}
+
+# "1 file not inside its container, 2 files whose packaging is not verified".
+dv_packaging_phrase <- function(findings) {
+  n_out <- sum(findings$status == "outside")
+  n_unv <- sum(findings$status != "outside")
+  paste(c(
+    if (n_out > 0) paste(.ctr_count(n_out, "file", "files"), "not inside", if (n_out == 1) "its container" else "their container"),
+    if (n_unv > 0) paste(.ctr_count(n_unv, "file", "files"), "whose packaging is not verified")
+  ), collapse = ", ")
+}
+
+# Rows of the last delivery that nothing was bound for (the "unmatched" count).
+dv_n_unmatched <- function(plan) sum(plan$status %in% c("unused", "refused", "ambiguous"))
+
+# The sidebar's per-container lines, the last-delivery line and the manager link.
+dv_panel_ui <- function(dta, findings, last, editing = FALSE) {
+  states <- dv_container_states(dta, findings)
+  lines <- lapply(states, function(st) {
+    l <- dv_container_line(st)
+    div(
+      class = paste("dp-line", l$cls), title = l$text,
+      span(class = "dp-glyph", `aria-hidden` = "true", l$glyph),
+      span(class = "dp-text", l$text)
+    )
+  })
+  last_line <- if (!is.null(last) && is.data.frame(last$plan)) {
+    plan <- last$plan
+    div(
+      class = "dp-last",
+      sprintf(
+        "Last delivery, %s: %s loaded, %d unmatched",
+        format(last$at %||% Sys.time(), "%H:%M"),
+        .ctr_count(sum(plan$status == "loaded"), "file", "files"), dv_n_unmatched(plan)
+      ),
+      " \u00B7 ", actionLink("delivery_details", "Details")
+    )
+  }
+  link <- if (length(states) > 0 || isTRUE(editing)) {
+    div(class = "dp-links", actionLink("open_containers", "Containers\u2026"))
+  }
+  div(class = "delivery-panel", lines, last_line, link)
+}
+
+# How the file(s) of an item reached the document, in the Delivery view's words.
+dv_arrival <- function(rec) {
+  if (is.null(rec)) {
+    return("origin not recorded")
+  }
+  chain <- as.character(rec$container)
+  if (length(chain)) {
+    paste("inside", paste(chain, collapse = " > "))
+  } else if (identical(rec$via, "file")) {
+    "on its own"
+  } else {
+    "loose"
+  }
+}
+
+# A routing reason in the words of an app user: the R-only phrases are rewritten.
+dv_reason <- function(reason, budget_limited = FALSE) {
+  if (is.null(reason) || length(reason) != 1 || is.na(reason)) {
+    return("")
+  }
+  x <- dta_app_reason(reason, budget_limited)
+  x <- gsub("; pass route = list\\(\"[^\"]*\" = \"<dataset>\"\\) to choose", "; choose the dataset when asked", x)
+  x <- gsub(
+    "kept as one file: a type: any entry takes it as a deliverable; to have its files checked, name it as the container of their entries",
+    "kept as one file because a file entry takes the archive itself; to have its files checked, assign them to a container",
+    x,
+    fixed = TRUE
+  )
+  x
+}
+
+dv_result_word <- function(status, reason) {
+  switch(status,
+    loaded = "loaded",
+    refused = "refused",
+    ambiguous = "several datasets match",
+    opened = if (is.na(reason)) "opened" else "could not be opened",
+    ignored = "ignored",
+    unused = if (is.na(reason) || identical(reason, "matches no file entry of the specification")) {
+      "no matching entry"
+    } else {
+      "not loaded"
+    },
+    status
+  )
+}
+
+# The table of the last delivery: problem rows first, an opened archive as a
+# group header over the files it held.
+dv_last_table <- function(plan, ca, dta = NULL) {
+  for (cn in c("container", "reason", "dataset", "conformant")) {
+    if (!cn %in% names(plan)) plan[[cn]] <- NA
+  }
+  if (!"handler" %in% names(plan)) plan$handler <- NA_integer_
+  keep <- plan$status != "opened" | !is.na(plan$reason)
+  plan <- plan[keep, , drop = FALSE]
+  if (nrow(plan) == 0) {
+    return(div(class = "msg-hint", "Nothing in the last delivery was listed."))
+  }
+  problem <- plan$status %in% c("refused", "ambiguous") |
+    (plan$status == "opened" & !is.na(plan$reason)) |
+    (plan$status == "loaded" & !is.na(plan$conformant) & !plan$conformant %in% TRUE)
+  matched <- vapply(seq_len(nrow(plan)), function(i) {
+    if (!identical(plan$status[[i]], "loaded") || is.null(ca) || is.na(plan$dataset[[i]])) {
+      return("\u2014")
+    }
+    e <- ca$expected[ca$dataset == plan$dataset[[i]] & ca$handler == plan$handler[[i]]]
+    if (length(e)) e[[1]] else "\u2014"
+  }, character(1))
+  dataset_txt <- vapply(seq_len(nrow(plan)), function(i) {
+    cand <- if ("candidates" %in% names(plan)) as.character(plan$candidates[[i]]) else character(0)
+    if (identical(plan$status[[i]], "ambiguous") && length(cand)) {
+      paste(vapply(cand, .ctr_ds_label, character(1), dta = dta), collapse = ", ")
+    } else if (is.na(plan$dataset[[i]])) {
+      "\u2014"
+    } else {
+      .ctr_ds_label(plan$dataset[[i]], dta)
+    }
+  }, character(1))
+  row_ui <- function(i) {
+    tags$tr(
+      class = if (problem[[i]]) "dv-problem",
+      tags$td(plan$name[[i]]),
+      tags$td(if (is.na(plan$container[[i]])) "\u2014" else plan$container[[i]]),
+      tags$td(dataset_txt[[i]]),
+      tags$td(matched[[i]]),
+      tags$td(dv_result_word(plan$status[[i]], plan$reason[[i]])),
+      # "loaded" already says the file was loaded: the note starts at the "but".
+      tags$td(sub("^loaded, but ", "", dv_reason(plan$reason[[i]])))
+    )
+  }
+  body <- list()
+  for (p in c(TRUE, FALSE)) {
+    idx <- which(problem == p)
+    for (grp in unique(plan$container[idx])) {
+      in_grp <- idx[if (is.na(grp)) is.na(plan$container[idx]) else (!is.na(plan$container[idx]) & plan$container[idx] == grp)]
+      if (!is.na(grp)) {
+        body[[length(body) + 1L]] <- tags$tr(class = "dv-group", tags$td(colspan = 6, paste("Inside", grp)))
+      }
+      body <- c(body, lapply(in_grp, row_ui))
+    }
+  }
+  tags$table(
+    class = "table table-sm dv-table",
+    tags$thead(tags$tr(lapply(c("File", "Inside", "Dataset", "Matched", "Result", "Note"), tags$th))),
+    tags$tbody(body)
+  )
+}
+
+# The members of one container: what each dataset that must arrive inside it
+# received, and how.
+dv_members_table <- function(dta, st, ca) {
+  mine <- ca[!is.na(ca$container) & ca$container == st$row$key, , drop = FALSE]
+  rows <- lapply(unique(as.character(mine$dataset)), function(id) {
+    ds <- dta_get_dataset(dta, id)
+    prov <- dv_provenance(ds)
+    items <- dv_bound_items(ds)
+    arrived <- if (length(items) == 0) "\u2014" else paste(unique(vapply(items, function(it) dv_arrival(prov[[it]]), character(1))), collapse = ", ")
+    f <- st$findings[st$findings$dataset == id, , drop = FALSE]
+    status <- if (any(f$status == "outside")) {
+      "not inside it"
+    } else if (any(f$status == "unverified")) {
+      "checked on its own"
+    } else if (any(f$status == "unrecorded")) {
+      "origin not recorded"
+    } else if (length(items) > 0) {
+      "inside"
+    } else {
+      "not delivered yet"
+    }
+    tags$tr(
+      tags$td(dv_ds_label(dta, id)),
+      tags$td(paste(unique(mine$expected[mine$dataset == id]), collapse = ", ")),
+      tags$td(arrived),
+      tags$td(status)
+    )
+  })
+  tags$table(
+    class = "table table-sm dv-table",
+    tags$thead(tags$tr(lapply(c("Dataset", "Expected file", "Arrived as", "Status"), tags$th))),
+    tags$tbody(rows)
+  )
+}
+
+# The Delivery view (main area): the packaging verdict, every container with its
+# members, and the routing table of the last delivery.
+dv_view_ui <- function(dta, last, findings, active = NULL) {
+  ca <- tryCatch(DTAtools::container_assignments(dta), error = function(e) NULL)
+  states <- dv_container_states(dta, findings)
+  chip <- if (any(findings$status == "outside")) {
+    list("status-fail", "Not conforming")
+  } else if (any(findings$status %in% c("unverified", "unrecorded"))) {
+    list("status-nodata", "Packaging not verified")
+  } else if (length(states) == 0) {
+    list("status-pending", "No packaging rules")
+  } else if (!dv_anything_bound(dta)) {
+    list("status-pending", "Nothing delivered yet")
+  } else {
+    list("status-pass", "Packaging conforms")
+  }
+  containers <- lapply(states, function(st) {
+    r <- st$row
+    div(
+      class = "dv-container",
+      tags$h5(r$filename),
+      if (!is.null(r$description) && nzchar(r$description)) tags$p(class = "msg-hint", r$description),
+      tags$p(class = "msg-hint", r$summary),
+      if (!is.null(ca) && length(st$datasets) > 0) dv_members_table(dta, st, ca)
+    )
+  })
+  plan <- if (!is.null(last) && is.data.frame(last$plan)) last$plan else NULL
+  div(
+    class = "delivery-view",
+    if (!is.null(active) && nzchar(active)) {
+      div(class = "dv-back", actionLink("delivery_back", paste0("\u2190 Back to ", dv_ds_label(dta, active))))
+    },
+    div(
+      class = "dv-head",
+      tags$h4("Delivery"),
+      tags$span(class = paste("status-chip", chip[[1]]), tags$span(class = "status-dot"), chip[[2]])
+    ),
+    if (length(containers) == 0) {
+      tags$p(class = "msg-hint", "The agreement names no containers: every file is judged on its content alone.")
+    },
+    containers,
+    tags$h5("Last delivery"),
+    if (is.null(plan)) {
+      tags$p(class = "msg-hint", "No delivery has been loaded in this session yet.")
+    } else {
+      tagList(
+        tags$p(
+          class = "msg-hint",
+          sprintf(
+            "Last delivery, %s: %s \u2014 %s loaded, %d unmatched.",
+            format(last$at %||% Sys.time(), "%H:%M"), paste(unique(plan$delivered), collapse = ", "),
+            .ctr_count(sum(plan$status == "loaded"), "file", "files"), dv_n_unmatched(plan)
+          )
+        ),
+        dv_last_table(plan, ca, dta),
+        if (length(last$missing) > 0) {
+          tags$p(class = "msg-hint", paste0("Not in the delivery: ", paste(last$missing, collapse = ", "), "."))
+        }
+      )
+    },
+    actionButton("check_all_delivery", "Check all", class = "btn btn-primary")
+  )
+}
+
+# How an entry's expected name reads in prose: a pattern is described by its
+# `pattern_description` when it has one (else `fallback`), never by its regex.
+dv_prose_name <- function(h, fallback = handler_expected(h)) {
+  if (!handler_is_pattern(h)) {
+    return(handler_expected(h))
+  }
+  pd <- tryCatch(h@pattern_description, error = function(e) NULL)
+  if (length(pd) == 1 && !is.na(pd) && nzchar(pd)) pd else fallback
+}
+
+# The expected name of dataset `id` that the file `name` matches.
+dv_expected_for <- function(dta, id, name) {
+  for (h in tryCatch(dta_handlers(dta_get_dataset(dta, id)), error = function(e) list())) {
+    if (isTRUE(handler_matches(h, name))) {
+      return(dv_prose_name(h))
+    }
+  }
+  ""
+}
+
+# The ambiguous rows of a plan, one per distinct file name.
+dv_ambiguous_rows <- function(plan) {
+  amb <- plan[plan$status == "ambiguous", , drop = FALSE]
+  lapply(unique(amb$name), function(nm) {
+    r <- amb[amb$name == nm, , drop = FALSE]
+    list(
+      name = nm,
+      candidates = unique(unlist(lapply(seq_len(nrow(r)), function(i) as.character(r$candidates[[i]])))),
+      inside = unique(ifelse(is.na(r$container), NA_character_, r$container)),
+      copies = nrow(r)
+    )
+  })
+}
+
+# The dialog that asks which dataset each ambiguous file is for. Radio ids carry
+# the nonce, so a second dialog never inherits the client's cached answers.
+dv_ambiguity_modal <- function(dta, rows, nonce, editing = FALSE) {
+  n <- length(rows)
+  table_rows <- lapply(seq_len(n), function(i) {
+    r <- rows[[i]]
+    labels <- unname(c(
+      vapply(r$candidates, function(cd) {
+        ex <- dv_expected_for(dta, cd, r$name)
+        if (nzchar(ex)) paste0(dv_ds_label(dta, cd), " \u2014 expects ", ex) else dv_ds_label(dta, cd)
+      }, character(1)),
+      "Don't load"
+    ))
+    where <- r$inside[!is.na(r$inside)]
+    tags$tr(
+      tags$td(
+        tags$code(r$name),
+        if (r$copies > 1) div(class = "msg-hint", "one answer applies to all copies")
+      ),
+      tags$td(if (length(where) > 0) paste("in", paste(where, collapse = ", ")) else "\u2014"),
+      tags$td(tagAppendAttributes(
+        radioButtons(
+          sprintf("amb_%s_%d", nonce, i),
+          label = NULL, choiceNames = as.list(labels), choiceValues = as.list(c(r$candidates, "")),
+          selected = character(0), inline = TRUE
+        ),
+        role = "radiogroup", `aria-label` = paste("Send", r$name, "to")
+      ))
+    )
+  })
+  set_all <- if (n >= 5) {
+    cands <- unique(unlist(lapply(rows, function(r) r$candidates)))
+    div(
+      class = "amb-set-all",
+      selectInput(
+        "amb_set_all", "Set all to\u2026",
+        choices = c(stats::setNames(cands, vapply(cands, function(cd) dv_ds_label(dta, cd), character(1))), "Don't load" = ""),
+        selectize = FALSE, width = "auto"
+      ),
+      actionButton("amb_apply", "Apply", class = "btn btn-outline-secondary")
+    )
+  }
+  modalDialog(
+    title = if (n == 1) "Which dataset is this file for?" else "Which dataset are these files for?",
+    size = "l",
+    if (n == 1) {
+      tags$p("This file matches more than one dataset. Choose one, or Don't load.")
+    } else {
+      tags$p("These files match more than one dataset. Choose one for each, or Don't load.")
+    },
+    if (isTRUE(editing)) {
+      tags$p(class = "msg-hint", "To stop being asked, make the expected names distinct in each dataset's Edit \u25B8 Files.")
+    },
+    set_all,
+    div(
+      class = "amb-body",
+      tags$table(
+        class = "table table-sm dv-table",
+        tags$thead(tags$tr(lapply(c("File", "Inside", "Send to"), tags$th))),
+        tags$tbody(table_rows)
+      )
+    ),
+    uiOutput("amb_error"),
+    footer = div(
+      class = "amb-footer",
+      actionButton("amb_cancel", "Cancel delivery (nothing is loaded)", class = "btn btn-outline-secondary"),
+      actionButton("amb_load", "Load delivery", class = "btn btn-primary")
+    ),
+    easyClose = FALSE
+  )
+}
+
+# ---------------------------------------------------------------------------
+# Containers: the manager's pure UI pieces and the file-name conflict warnings
+# ---------------------------------------------------------------------------
+
+# One sentence per other dataset whose file names overlap with `ds` (the rows of
+# DTAtools::file_name_conflicts()); the edit-mode pointer only while editing.
+dv_conflict_sentences <- function(conf, ds, editing = FALSE, dta = NULL, in_files_editor = FALSE) {
+  if (is.null(conf) || nrow(conf) == 0) {
+    return(character(0))
+  }
+  mine <- conf[conf$dataset_a == ds | conf$dataset_b == ds, , drop = FALSE]
+  if (nrow(mine) == 0) {
+    return(character(0))
+  }
+  other <- ifelse(mine$dataset_a == ds, mine$dataset_b, mine$dataset_a)
+  first <- !duplicated(other)
+  paste0(
+    "File names overlap with dataset '", vapply(other[first], .ctr_ds_label, character(1), dta = dta), "' (e.g. '", mine$example[first],
+    "'). A delivered file matching both is asked about.",
+    if (isTRUE(in_files_editor)) {
+      " Make the expected names distinct."
+    } else if (isTRUE(editing)) {
+      " Edit \u25B8 Files to make them distinct."
+    }
+  )
+}
+
+# The persistent warning for `ds`, or NULL.
+dv_conflict_ui <- function(conf, ds, editing = FALSE, dta = NULL, in_files_editor = FALSE) {
+  s <- dv_conflict_sentences(conf, ds, editing, dta, in_files_editor)
+  if (length(s) == 0) {
+    return(NULL)
+  }
+  div(
+    class = "alert alert-warning py-2 dv-conflict", role = "alert",
+    lapply(s, function(x) div(x))
+  )
+}
+
+# The live line under the container's file name: which archives of the last
+# delivery it would take. NULL when there is nothing to say yet.
+dv_container_match_line <- function(filename, last_delivery) {
+  filename <- trimws(as.character(filename %||% "")[1])
+  plan <- last_delivery$plan
+  if (is.na(filename) || !nzchar(filename) || !is.data.frame(plan) || nrow(plan) == 0) {
+    return(NULL)
+  }
+  archives <- unique(as.character(plan$delivered))
+  archives <- archives[!is.na(archives) & dta_is_container_name(archives)]
+  hit <- archives[dv_glob_hits(filename, archives)]
+  if (length(hit) > 0) {
+    div(class = "msg-hint ctr-match", paste0("\u2713 Matches ", paste(hit, collapse = ", "), " from the last delivery."))
+  } else if (length(archives) > 0) {
+    div(class = "msg-hint ctr-match", paste0("\u2717 Matches none of the last delivery's archives (", paste(archives, collapse = ", "), ")."))
+  } else {
+    div(class = "msg-hint ctr-match", "The last delivery held no archive to match.")
+  }
+}
+
+# The read-only list of the document's containers (Metadata tab and manager).
+dv_container_list_ui <- function(rows, actions = NULL) {
+  if (length(rows) == 0) {
+    return(div(class = "msg-hint", "No containers. A container is a .zip archive or .xpt SAS transport file that files must arrive inside."))
+  }
+  tags$table(
+    class = "table table-sm ctr-table",
+    tags$thead(tags$tr(
+      tags$th("File name"), tags$th("Description"), tags$th("Files"),
+      if (!is.null(actions)) tags$th("")
+    )),
+    tags$tbody(lapply(seq_along(rows), function(i) {
+      r <- rows[[i]]
+      tags$tr(
+        tags$td(tags$code(r$filename), if (isTRUE(r$implied)) div(class = "msg-hint", "defined by file entries (no container record yet)")),
+        tags$td(r$description %||% ""),
+        tags$td(r$summary),
+        if (!is.null(actions)) tags$td(class = "text-nowrap", HTML(actions[[i]]))
+      )
+    }))
+  )
+}
+
+# ---------------------------------------------------------------------------
 # Server
 # ---------------------------------------------------------------------------
 server <- function(input, output, session) {
@@ -587,7 +1150,22 @@ server <- function(input, output, session) {
     version_note = "", # the optional note typed in the new-version modal
     new_version_msg = NULL, # inline new-version-modal result: NULL | list(ok, error)
     editing = FALSE, # TRUE while the author is in edit mode -- see the WHY on editing() below
-    new_document_msg = NULL # inline new-document-modal result: NULL | list(ok, error)
+    new_document_msg = NULL, # inline new-document-modal result: NULL | list(ok, error)
+    last_delivery = NULL, # list(plan, missing, at) of the last committed delivery
+    pending_delivery = NULL, # a delivery waiting for the ambiguity dialog's answers
+    amb_msg = NULL, # inline error of the ambiguity dialog
+    ctr_open = FALSE, # the container manager is on screen (its body renders NULL otherwise)
+    ctr_token = 0, # bump to re-render the manager's body
+    ctr_nonce = NULL, # data-dta-modal-id of the open manager
+    ctr_tab = "containers", # manager tab: "containers" | "assign"
+    ctr_view = "list", # containers tab: "list" | "form"
+    ctr_rows = list(), # dta_container_rows() as last rendered (row buttons carry an index)
+    ctr_edit_key = NULL, # key of the container being edited (NULL = adding)
+    ctr_form = list(), # prefill of the container form
+    ctr_confirm = NULL, # key awaiting the inline remove confirmation
+    ctr_msg = NULL, # inline error of the manager
+    ctr_assign = NULL, # list(rows, nonce, base) of the Assign tab as rendered
+    main_view = "dataset" # the main area: "dataset" (the slots) | "delivery" (the Delivery view)
   )
 
   # The single gate for every editing surface. Off by default: rv$editing is
@@ -998,6 +1576,10 @@ server <- function(input, output, session) {
     # (its extraction is under a delivery directory no record names).
     pending <- isolate(rv$pending_upload)$delivery
     if (!is.null(pending)) unlink(dirname(pending$copies), recursive = TRUE)
+    # ... and one waiting for the ambiguity dialog (its extraction was removed
+    # before it asked; only the staged copies are left).
+    asking <- isolate(rv$pending_delivery)
+    if (!is.null(asking)) unlink(dirname(asking$copies), recursive = TRUE)
     if (exists(session$token, envir = .dta_live_session_paths, inherits = FALSE)) {
       rm(list = session$token, envir = .dta_live_session_paths)
     }
@@ -1036,17 +1618,30 @@ server <- function(input, output, session) {
     if (length(names_ds) == 0) {
       return(list())
     }
+    # Where an entry must arrive is its effective container (its own reference,
+    # else the default container), not the raw reference the handler stores.
+    ca <- tryCatch(DTAtools::container_assignments(dta), error = function(e) NULL)
+    crows <- dta_container_rows(dta)
+    descriptions <- stats::setNames(
+      lapply(crows, function(r) r$description %||% ""),
+      vapply(crows, function(r) r$filename, character(1))
+    )
     stats::setNames(lapply(seq_along(names_ds), function(i) {
       ds <- dta_get_dataset(dta, names_ds[i])
-      handlers <- lapply(dta_handlers(ds), function(h) {
+      handlers <- lapply(seq_along(dta_handlers(ds)), function(hi) {
+        h <- dta_handlers(ds)[[hi]]
+        glob <- dta_effective_glob(dta, names_ds[i], hi, ca)
         list(
-          expected  = handler_expected(h),
-          hint      = handler_hint(h),
-          count     = handler_count_label(h),
-          min       = handler_min(h),
-          max       = handler_max(h),
-          pattern   = handler_is_pattern(h),
-          container = handler_container(h)
+          expected = handler_expected(h),
+          hint = handler_hint(h),
+          count = handler_count_label(h),
+          min = handler_min(h),
+          max = handler_max(h),
+          pattern = handler_is_pattern(h),
+          # What a slot's prose calls the file: a pattern is described, not printed.
+          prose = dv_prose_name(h, "a matching file"),
+          container = glob,
+          container_description = if (nzchar(glob)) descriptions[[glob]] %||% "" else ""
         )
       })
       list(
@@ -1077,6 +1672,7 @@ server <- function(input, output, session) {
         structure = isolate(rv$structure),
         active = isolate(rv$active),
         uploads = isolate(rv$uploads),
+        last_delivery = isolate(rv$last_delivery),
         status = isolate(rv$status),
         dataset_only = isolate(rv$dataset_only),
         is_example = isolate(rv$is_example),
@@ -1127,6 +1723,9 @@ server <- function(input, output, session) {
     rv$yaml_text <- yaml_text
     rv$structure <- build_structure(dta)
     rv$uploads <- list()
+    # A delivery belongs to the document it was loaded into.
+    rv$last_delivery <- NULL
+    rv$main_view <- "dataset"
     rv$status <- stats::setNames(rep("pending", length(names_ds)), names_ds)
     rv$active <- if (length(names_ds) > 0) names_ds[1] else NULL
     rv$dataset_only <- isTRUE(dataset_only)
@@ -2150,8 +2749,10 @@ server <- function(input, output, session) {
   output$dataset_nav_ui <- renderUI({
     req(rv$structure)
     names_ds <- names(rv$structure)
-    active <- rv$active
+    # No dataset is highlighted while the Delivery view stands in for them.
+    active <- if (identical(rv$main_view, "delivery")) NULL else rv$active
     st_map <- rv$status
+    fnd <- findings_now()
     div(
       class = "dataset-nav",
       div(class = "section-label", "Datasets"),
@@ -2163,32 +2764,39 @@ server <- function(input, output, session) {
           # has none; the id is the right fallback, as everywhere else.
           label <- rv$structure[[i]]$label %||% nm
           st <- dta_lookup(st_map, nm, "pending")
+          # A content pass with a packaging finding is no pass: the row goes
+          # amber (not verified) or red (outside its container), in words too.
+          pk <- dv_ds_packaging(fnd, nm)
           # Row background + icon encode status: passed (green), failed (red),
           # missing/no-data (orange), not-checked-yet (neutral grey).
-          st2 <- switch(st,
+          st2 <- switch(status_display(st, pk),
             pass = "pass",
             fail = "fail",
             nodata = "nodata",
             "pending"
           )
-          ic_ch <- switch(st,
-            pass = "\u2714",
-            fail = "\u2716",
-            nodata = "\u2716",
-            "\u2013"
-          )
-          ic_cls <- switch(st,
-            pass = "nav-ic-pass",
-            fail = "nav-ic-fail",
-            nodata = "nav-ic-nodata",
-            "nav-ic-pending"
-          )
-          ic_ttl <- switch(st,
-            pass = "Passed all checks",
-            fail = "Validation failed",
-            nodata = "No data loaded (missing data)",
-            "Not validated yet"
-          )
+          pk_pass <- identical(st, "pass") && !identical(pk, "none")
+          ic_ch <- if (pk_pass) {
+            if (identical(pk, "outside")) "\u26a0" else "\u25d0"
+          } else {
+            switch(st,
+              pass = "\u2714",
+              fail = "\u2716",
+              nodata = "\u2716",
+              "\u2013"
+            )
+          }
+          ic_cls <- paste0("nav-ic-", if (st2 == "pending") "pending" else st2)
+          ic_ttl <- if (pk_pass) {
+            if (identical(pk, "outside")) "Content passed, but a file is not inside its container" else "Content passed; packaging not verified"
+          } else {
+            switch(st,
+              pass = "Passed all checks",
+              fail = "Validation failed",
+              nodata = "No data loaded (missing data)",
+              "Not validated yet"
+            )
+          }
           row_cls <- paste0(
             "dataset-nav-row nav-st-", st2,
             if (identical(nm, active)) " active" else ""
@@ -2199,7 +2807,7 @@ server <- function(input, output, session) {
               paste0("selds_", i),
               class = "nav-select",
               label = tagList(
-                span(class = paste("nav-ic", ic_cls), title = ic_ttl, ic_ch),
+                span(class = paste("nav-ic", ic_cls), title = ic_ttl, role = "img", `aria-label` = ic_ttl, ic_ch),
                 span(
                   class = "nav-text",
                   span(class = "nav-name", label),
@@ -2234,6 +2842,9 @@ server <- function(input, output, session) {
           IDX <- i
           observeEvent(input[[paste0("selds_", IDX)]],
             {
+              # Any click on the list leaves the Delivery view, also on the
+              # dataset that is already active (rv$active does not change then).
+              rv$main_view <- "dataset"
               nms <- names(rv$structure)
               if (IDX <= length(nms)) rv$active <- nms[IDX]
             },
@@ -2446,6 +3057,17 @@ server <- function(input, output, session) {
   })
 
   # --- upload observers (registered once per handler) ---------------------
+  # Does the entry `h` take the container-named file `name` AS a file? Its name
+  # must match the entry, and the entry's type must read that kind of file: a
+  # .zip only a `type: any` entry, an .xpt a `type: xpt` or `type: any` one.
+  takes_as_file <- function(h, name) {
+    if (!isTRUE(handler_matches(h, name))) {
+      return(FALSE)
+    }
+    type <- dta_handler_type(h)
+    if (grepl("\\.zip$", name, ignore.case = TRUE)) identical(type, "any") else type %in% c("xpt", "any")
+  }
+
   handle_upload <- function(ds_idx, hi, fileinfo, overwrite = FALSE) {
     if (is.null(fileinfo)) {
       return()
@@ -2463,22 +3085,16 @@ server <- function(input, output, session) {
     h <- handlers[[hi]]
     key <- paste0(dsname, "||", hi)
 
-    # A drop holding a .zip / .xpt is a delivery: ALL of its files are routed
-    # across the whole document by load_delivery(), which also binds an archive
-    # an entry names and opens one an entry declares as a container.
-    if (any(dta_is_container_name(fileinfo$name))) {
-      handle_delivery(fileinfo)
-      session$sendCustomMessage("dta_reset_fileinput", sprintf("up_%d_%d", ds_idx, hi))
-      return()
-    }
-    # G3b -- an entry that declares a container takes no loose file (every file
-    # left here is loose).
-    ct <- handler_container(h)
-    if (nzchar(ct)) {
-      showNotification(sprintf(
-        "No files added to '%s'. Rejected %d: %s", dsname, nrow(fileinfo),
-        paste(sprintf("'%s' (expected inside %s; drop the archive)", fileinfo$name, ct), collapse = "; ")
-      ), type = "warning", duration = 10)
+    # A slot takes THIS dataset's files only. A .zip / .xpt its entry reads as a
+    # file is a file; any other one in the drop is a delivery, and then the
+    # WHOLE drop goes through load_delivery() for this dataset alone: the
+    # archive is opened and only this dataset's files are taken from it.
+    is_container <- dta_is_container_name(fileinfo$name)
+    if (any(is_container) && !all(vapply(
+      as.character(fileinfo$name)[is_container],
+      function(nm) takes_as_file(h, nm), logical(1)
+    ))) {
+      handle_delivery(fileinfo, datasets = dsname, origin = "slot")
       session$sendCustomMessage("dta_reset_fileinput", sprintf("up_%d_%d", ds_idx, hi))
       return()
     }
@@ -2628,7 +3244,21 @@ server <- function(input, output, session) {
     } else {
       ""
     }
-    if (length(loaded) > 0 && length(rejected) == 0) {
+    # A loose file bound into an entry that must arrive inside a container was
+    # loaded to be checked on its own; saying so is the one place that tells
+    # the user this is not yet a conforming delivery.
+    glob <- if (length(loaded) > 0) dta_effective_glob(rv$dta, dsname, hi) else ""
+    if (length(loaded) > 0 && length(rejected) == 0 && nzchar(glob)) {
+      one <- length(loaded) == 1
+      showNotification(
+        sprintf(
+          "Loaded %s %s for checking. The agreement requires %s inside %s, so this is not yet a conforming delivery.",
+          paste(loaded, collapse = ", "), if (one) "on its own" else "on their own",
+          if (one) "it" else "them", glob
+        ),
+        type = "warning", duration = 10
+      )
+    } else if (length(loaded) > 0 && length(rejected) == 0) {
       showNotification(
         sprintf(
           "Loaded %d file(s) into '%s'%s. Run Check to validate.",
@@ -2661,56 +3291,101 @@ server <- function(input, output, session) {
   }
 
   # A drop that holds a .zip / .xpt: load it whole into a COPY of the document
-  # (load_delivery() routes every file across all datasets), then either commit
-  # it or, when it would replace tables already loaded, ask once first. The
-  # copy waits in rv$pending_upload$delivery until Replace commits it or Cancel
-  # deletes its extraction directory.
-  handle_delivery <- function(fileinfo) {
-    sz <- suppressWarnings(as.numeric(fileinfo$size))
-    ok <- !is.na(sz) & sz > 0
-    if (!any(ok)) {
-      showNotification("The delivery is empty or was not transferred completely.", type = "error")
-      return(invisible())
+  # (load_delivery() routes every file across the datasets in scope), then either
+  # commit it or ask first: which dataset a file is for when it matches several
+  # (the ambiguity dialog), and once more when it would replace tables already
+  # loaded. A copy waiting for Replace sits in rv$pending_upload$delivery until
+  # Replace commits it or Cancel deletes its extraction directory.
+  #
+  # `datasets` limits the delivery to those datasets (a slot's drop); `route` is
+  # the answers collected so far (file name -> dataset id, character(0) = do not
+  # load); `staged` the already staged copies when this call continues a drop the
+  # ambiguity dialog asked about; `origin` is "sidebar" or "slot".
+  handle_delivery <- function(fileinfo, datasets = NULL, route = NULL, staged = NULL, origin = "sidebar") {
+    if (is.null(staged)) {
+      sz <- suppressWarnings(as.numeric(fileinfo$size))
+      ok <- !is.na(sz) & sz > 0
+      if (!any(ok)) {
+        showNotification("The delivery is empty or was not transferred completely.", type = "error")
+        return(invisible())
+      }
+      if (any(!ok)) {
+        showNotification(sprintf(
+          "Not loaded (empty or not transferred completely): %s",
+          paste(fileinfo$name[!ok], collapse = ", ")
+        ), type = "warning", duration = 10)
+      }
+      fileinfo <- fileinfo[ok, , drop = FALSE]
     }
-    if (any(!ok)) {
-      showNotification(sprintf(
-        "Not loaded (empty or not transferred completely): %s",
-        paste(fileinfo$name[!ok], collapse = ", ")
-      ), type = "warning", duration = 10)
-    }
-    fileinfo <- fileinfo[ok, , drop = FALSE]
     # Extracted files no record names any more go first, so the budget below
     # counts only what is in use, and "remove or discard, then drop again" works.
     dta_delivery_cleanup(owned$upload, rv$uploads, session$token)
     held <- dta_session_delivery_bytes(owned$upload)
     left <- dta_session_delivery_budget() - held
     if (left <= 0) {
+      if (!is.null(staged)) unlink(dirname(staged[staged != fileinfo$datapath]), recursive = TRUE)
       showNotification(
         "This session already holds the maximum of extracted deliveries; remove or discard files loaded from a delivery and drop again, or use Start over.",
         type = "error", duration = 10
       )
       return(invisible())
     }
-    staged <- vapply(seq_len(nrow(fileinfo)), function(r) {
-      s <- dta_stage_upload(fileinfo$datapath[r], fileinfo$name[r])
-      if (!identical(s, fileinfo$datapath[r])) own("upload", dirname(s))
-      s
-    }, character(1))
+    if (is.null(staged)) {
+      staged <- vapply(seq_len(nrow(fileinfo)), function(r) {
+        s <- dta_stage_upload(fileinfo$datapath[r], fileinfo$name[r])
+        if (!identical(s, fileinfo$datapath[r])) own("upload", dirname(s))
+        s
+      }, character(1))
+    }
     copies <- staged[staged != fileinfo$datapath] # our own staged copies, never Shiny's upload file
     exdir <- tempfile("dta_upload_delivery_")
     own("upload", exdir)
     res <- withProgress(
       message = "Opening the delivery\u2026", value = 0.3,
-      dta_load_delivery(rv$dta, staged, exdir, left, held)
+      dta_load_delivery(rv$dta, staged, exdir, left, held, route = route, datasets = datasets)
     )
+
+    # Files that match several datasets are a question, not a failure: a delivery
+    # that binds nothing but ambiguous files aborts, and its table says so.
+    plan <- if (isTRUE(res$ok)) attr(res$value, "last_delivery") else res$plan
+    asked <- if (is.data.frame(plan)) plan[plan$status == "ambiguous" & !plan$name %in% names(route), , drop = FALSE] else NULL
+    if (!is.null(asked) && nrow(asked) > 0) {
+      # Nothing of this pass is kept: the staged copies wait, the answers decide
+      # what is extracted. Each round adds at least one name to `route`.
+      unlink(exdir, recursive = TRUE)
+      nonce <- paste(sample(c(letters, 0:9), 8, replace = TRUE), collapse = "")
+      rows <- dv_ambiguous_rows(asked)
+      rv$amb_msg <- NULL
+      rv$pending_delivery <- list(
+        fileinfo = fileinfo, staged = staged, copies = copies, datasets = datasets,
+        route = route, rows = rows, nonce = nonce, origin = origin
+      )
+      showModal(dv_ambiguity_modal(rv$dta, rows, nonce, editing = editing()))
+      return(invisible())
+    }
+
     if (!isTRUE(res$ok)) {
       unlink(c(exdir, dirname(copies)), recursive = TRUE)
-      showNotification(paste("Delivery not loaded:", dta_app_reason(res$error, isTRUE(res$budget_limited))), type = "error", duration = 10)
+      zero <- identical(origin, "slot") && is.data.frame(plan) && !any(plan$status %in% c("refused", "ambiguous")) &&
+        !any(plan$status == "opened" & !is.na(plan$reason))
+      if (zero) {
+        archives <- unique(plan$delivered[dta_is_container_name(plan$delivered)])
+        ds_id <- datasets[[1]]
+        expected <- vapply(dta_handlers(dta_get_dataset(rv$dta, ds_id)), handler_expected, character(1))
+        showNotification(sprintf(
+          "%s holds no file for %s (expected %s). Nothing was loaded.",
+          paste(archives, collapse = ", "), ds_title(ds_id), paste(expected, collapse = ", ")
+        ), type = "warning", duration = 10)
+      } else {
+        showNotification(paste("Delivery not loaded:", dta_app_reason(res$error, isTRUE(res$budget_limited))), type = "error", duration = 10)
+      }
       return(invisible())
     }
     d <- list(
       value = res$value, plan = attr(res$value, "last_delivery"), exdir = exdir,
-      missing = res$missing, copies = copies, budget_limited = isTRUE(res$budget_limited)
+      missing = res$missing, copies = copies, budget_limited = isTRUE(res$budget_limited),
+      origin = origin, datasets = datasets,
+      loose_names = as.character(fileinfo$name[!dta_is_container_name(fileinfo$name)])
     )
     replaced <- dta_delivery_replaced(rv$dta, d$plan)
     d$n_replaced <- nrow(replaced)
@@ -2732,6 +3407,43 @@ server <- function(input, output, session) {
       return(invisible())
     }
     commit_delivery(d)
+  }
+
+  # The one notification a delivery dropped on a dataset's own slot shows.
+  slot_delivery_note <- function(d, over = character(0)) {
+    plan <- d$plan
+    if (!"conformant" %in% names(plan)) plan$conformant <- NA
+    loaded <- plan[plan$status == "loaded", , drop = FALSE]
+    ds_id <- d$datasets[[1]]
+    archives <- unique(loaded$delivered[dta_is_container_name(loaded$delivered)])
+    n_other <- sum(plan$status == "unused")
+    text <- sprintf(
+      "Loaded only %s's files from %s (%s).",
+      ds_title(ds_id), paste(archives, collapse = ", "), paste(loaded$name, collapse = ", ")
+    )
+    if (n_other > 0) {
+      text <- paste0(
+        text, " Its other ", .ctr_count(n_other, "file", "files"), " ",
+        if (n_other == 1) "was" else "were", " not loaded."
+      )
+    }
+    misfit <- unique(loaded$name[!is.na(loaded$conformant) & !loaded$conformant])
+    if (length(misfit) > 0) {
+      text <- paste0(text, " Not inside its required container: ", paste(misfit, collapse = ", "), ".")
+    }
+    refused <- plan[plan$status == "refused", , drop = FALSE]
+    if (nrow(refused) > 0) {
+      why <- vapply(refused$reason, dv_reason, character(1), USE.NAMES = FALSE)
+      text <- paste0(text, " Refused: ", paste0(refused$name, " (", why, ")", collapse = "; "), ".")
+    }
+    # D7: loose files that travel with the archive are judged as delivered.
+    if (length(d$loose_names) > 0) {
+      text <- paste0(text, " The loose files in this drop were judged as delivered; drop them alone to check them on their own.")
+    }
+    if (length(over) > 0) {
+      text <- paste0(text, " More files than a slot accepts: ", paste(over, collapse = ", "), ".")
+    }
+    list(text = text, type = if (length(misfit) + nrow(refused) + length(over) > 0) "warning" else "message")
   }
 
   # Make a loaded delivery the document: assign it, record which file filled
@@ -2766,10 +3478,21 @@ server <- function(input, output, session) {
     # replaced, and whatever an earlier removal could not delete.
     unlink(dirname(setdiff(d$copies, loaded$path)), recursive = TRUE)
     dta_delivery_cleanup(owned$upload, up, session$token)
+    # What the Delivery view and the sidebar's last-delivery line show.
+    rv$last_delivery <- list(plan = d$plan, missing = d$missing, at = Sys.time())
+    if (identical(d$origin %||% "sidebar", "sidebar")) {
+      rv$main_view <- "delivery"
+      # The Delivery view lives on the Datasets tab; the Metadata tab may be open.
+      bslib::nav_select("main_tabs", "Datasets", session = session)
+    }
     autosave()
-    note <- dta_delivery_note(d$plan, d$n_replaced, d$missing, d$budget_limited,
-      over = dta_slots_over_max(rv$dta, up)
-    )
+    note <- if (identical(d$origin, "slot")) {
+      slot_delivery_note(d, over = dta_slots_over_max(rv$dta, up))
+    } else {
+      dta_delivery_note(d$plan, d$n_replaced, d$missing, d$budget_limited,
+        over = dta_slots_over_max(rv$dta, up)
+      )
+    }
     showNotification(note$text, type = note$type, duration = if (identical(note$type, "message")) 5 else 10)
   }
 
@@ -2878,6 +3601,569 @@ server <- function(input, output, session) {
     rv$pending_upload <- NULL
     removeModal()
     if (!is.null(pu$delivery)) unlink(c(pu$delivery$exdir, dirname(pu$delivery$copies)), recursive = TRUE)
+  })
+
+  # --- delivery: the sidebar's drop zone and the ambiguity dialog ----------
+  observeEvent(input$delivery_files,
+    {
+      req(rv$dta)
+      handle_delivery(input$delivery_files)
+      session$sendCustomMessage("dta_reset_fileinput", "delivery_files")
+    },
+    ignoreInit = TRUE
+  )
+
+  # The dialog's inline error. It renders NULL while no delivery is asking, and
+  # is never suspended: a modal's output keeps the client's last HTML, so a
+  # stale message would otherwise greet the next dialog.
+  output$amb_error <- renderUI({
+    pd <- rv$pending_delivery
+    if (is.null(pd) || is.null(rv$amb_msg)) {
+      return(NULL)
+    }
+    div(class = "text-danger", role = "alert", rv$amb_msg)
+  })
+  outputOptions(output, "amb_error", suspendWhenHidden = FALSE)
+
+  observeEvent(input$amb_load, {
+    pd <- rv$pending_delivery
+    req(pd)
+    answers <- vapply(seq_along(pd$rows), function(i) {
+      a <- input[[sprintf("amb_%s_%d", pd$nonce, i)]]
+      if (is.null(a) || length(a) != 1 || is.na(a)) NA_character_ else as.character(a)
+    }, character(1))
+    if (anyNA(answers)) {
+      rv$amb_msg <- "Choose a dataset or Don't load for every file."
+      return()
+    }
+    names_asked <- vapply(pd$rows, function(r) r$name, character(1))
+    # A LIST: a character vector cannot hold character(0), the answer "no dataset".
+    route <- c(
+      pd$route %||% list(),
+      stats::setNames(lapply(answers, function(a) if (nzchar(a)) a else character(0)), names_asked)
+    )
+    removeModal()
+    rv$pending_delivery <- NULL
+    rv$amb_msg <- NULL
+    handle_delivery(pd$fileinfo, pd$datasets, route, pd$staged, pd$origin)
+  })
+
+  observeEvent(input$amb_cancel, {
+    pd <- rv$pending_delivery
+    rv$pending_delivery <- NULL
+    rv$amb_msg <- NULL
+    removeModal()
+    if (!is.null(pd)) unlink(dirname(pd$copies), recursive = TRUE)
+  })
+
+  # "Set all to ...": answers every row the chosen dataset is a candidate of (every
+  # row for Don't load) and leaves the others for the user.
+  observeEvent(input$amb_apply, {
+    pd <- rv$pending_delivery
+    req(pd, !is.null(input$amb_set_all))
+    v <- input$amb_set_all
+    for (i in seq_along(pd$rows)) {
+      if (identical(v, "") || v %in% pd$rows[[i]]$candidates) {
+        updateRadioButtons(session, sprintf("amb_%s_%d", pd$nonce, i), selected = v)
+      }
+    }
+  })
+
+  # The sidebar's last-delivery line reopens the Delivery view.
+  observeEvent(input$delivery_details, {
+    rv$main_view <- "delivery"
+    bslib::nav_select("main_tabs", "Datasets", session = session)
+  })
+  observeEvent(input$check_all_delivery, run_check(NULL))
+  observeEvent(input$delivery_back, rv$main_view <- "dataset", ignoreInit = TRUE)
+
+  # --- the container manager (D10) -----------------------------------------
+  # One modal, two tabs (containers / assign files). Its body is a uiOutput keyed
+  # on rv$ctr_token: it renders NULL while the manager is closed and is never
+  # suspended, because a modal's output keeps the client's last HTML and a
+  # reopened dialog would otherwise show it (and report its stale inputs) before
+  # the server answers. The browser's close is reported by dta_modal_state.
+  # Every mutation requires editing(); in view mode the manager only shows.
+  ctr_modal_seq <- 0L
+
+  open_container_manager <- function(tab = "containers") {
+    req(rv$dta)
+    ctr_modal_seq <<- ctr_modal_seq + 1L
+    rv$ctr_nonce <- paste0("containers-", ctr_modal_seq)
+    rv$ctr_open <- TRUE
+    rv$ctr_view <- "list"
+    rv$ctr_edit_key <- NULL
+    rv$ctr_form <- list()
+    rv$ctr_confirm <- NULL
+    rv$ctr_msg <- NULL
+    if (identical(tab, "assign")) ctr_enter_assign() else rv$ctr_tab <- "containers"
+    rv$ctr_token <- rv$ctr_token + 1
+    showModal(tagAppendAttributes(
+      modalDialog(
+        title = "Delivery containers", size = "xl", easyClose = FALSE,
+        uiOutput("ctr_modal_body"),
+        footer = uiOutput("ctr_modal_footer")
+      ),
+      `data-dta-modal` = "containers",
+      `data-dta-modal-id` = rv$ctr_nonce
+    ))
+  }
+
+  ctr_close <- function() {
+    rv$ctr_open <- FALSE
+    rv$ctr_token <- rv$ctr_token + 1
+    removeModal()
+  }
+
+  # The Assign tab's rows (one per file entry) and the choices every select
+  # shares, computed once for the render.
+  ctr_enter_assign <- function() {
+    dta <- isolate(rv$dta)
+    ca <- DTAtools::container_assignments(dta)
+    rv$ctr_assign <- list(
+      rows = ca[, c("dataset", "handler", "expected", "reference"), drop = FALSE],
+      nonce = paste(sample(c(letters, 0:9), 8, replace = TRUE), collapse = ""),
+      base = dta_container_choices_base(dta, ca)
+    )
+    rv$ctr_tab <- "assign"
+    rv$ctr_view <- "list"
+    rv$ctr_confirm <- NULL
+    rv$ctr_msg <- NULL
+  }
+
+  # A save's common end: refuse a result that has an error or introduces a
+  # file-name conflict (the document stays as it was), else commit it.
+  ctr_commit <- function(r, done) {
+    if (!isTRUE(r$ok)) {
+      rv$ctr_msg <- r$error
+      return(FALSE)
+    }
+    fresh <- dta_new_conflicts(isolate(rv$dta), r$value)
+    if (nrow(fresh) > 0) {
+      rv$ctr_msg <- dta_conflict_refusal(fresh, isolate(rv$dta))
+      return(FALSE)
+    }
+    rv$dta <- r$value
+    rv$structure <- build_structure(rv$dta)
+    sync_yaml_text()
+    rv$ctr_msg <- NULL
+    rv$ctr_confirm <- NULL
+    rv$ctr_edit_key <- NULL
+    rv$ctr_form <- list()
+    rv$ctr_view <- "list"
+    showNotification(paste(c(done, r$note), collapse = " "), type = "message")
+    TRUE
+  }
+
+  # The row a row button's integer index names, among the rows rendered last.
+  ctr_row_at <- function(i) {
+    i <- suppressWarnings(as.integer(i))
+    rows <- isolate(rv$ctr_rows)
+    if (length(i) != 1 || is.na(i) || i < 1 || i > length(rows)) NULL else rows[[i]]
+  }
+
+  observeEvent(input$open_containers, open_container_manager("containers"), ignoreInit = TRUE)
+  observeEvent(input$metadata_manage_containers, open_container_manager("containers"), ignoreInit = TRUE)
+
+  output$ctr_modal_body <- renderUI({
+    rv$ctr_token
+    if (!isTRUE(isolate(rv$ctr_open)) || is.null(isolate(rv$dta))) {
+      return(NULL)
+    }
+    dta <- isolate(rv$dta)
+    ro <- !isolate(editing())
+    tab <- isolate(rv$ctr_tab)
+    tabs <- tags$ul(
+      class = "nav nav-tabs mb-3", role = "tablist",
+      tags$li(
+        class = "nav-item", role = "presentation",
+        actionLink("ctr_tab_containers", "Containers",
+          class = paste("nav-link", if (identical(tab, "containers")) "active"),
+          role = "tab", `aria-selected` = tolower(identical(tab, "containers"))
+        )
+      ),
+      tags$li(
+        class = "nav-item", role = "presentation",
+        actionLink("ctr_tab_assign", "Assign files",
+          class = paste("nav-link", if (identical(tab, "assign")) "active"),
+          role = "tab", `aria-selected` = tolower(identical(tab, "assign"))
+        )
+      )
+    )
+    body <- if (identical(tab, "assign")) {
+      st <- isolate(rv$ctr_assign)
+      rows <- st$rows
+      if (nrow(rows) == 0) {
+        div(class = "msg-hint", "No files are declared yet. Add the expected files under Edit \u25B8 Files first.")
+      } else {
+        sel <- lapply(seq_len(nrow(rows)), function(i) {
+          ref <- rows$reference[[i]]
+          if (is.na(ref)) ref <- ""
+          list(
+            choices = dta_container_choices(dta, current = ref, base = st$base),
+            selected = dta_container_normalise_ref(dta, ref)
+          )
+        })
+        # A dataset's title is on every one of its rows: the filter hides rows, and
+        # a row left without its dataset's name would be a bare file name. Only the
+        # first row of a dataset says it loudly.
+        # Filtering and "Set the shown rows to" are the browser's: the rows of a
+        # filtered-out dataset are hidden (not removed), and Apply reports which
+        # ones are still shown, so no select loses an unsaved choice.
+        shown_js <- paste0(
+          "var m=this.closest('.modal-body');var v=[];",
+          "m.querySelectorAll('tr[data-ctr-row]').forEach(function(r){if(!r.hidden)v.push(r.getAttribute('data-ctr-row'));});",
+          "Shiny.setInputValue('ctr_shown',v.join(','));"
+        )
+        filter_js <- paste0(
+          "var q=this.value.toLowerCase();",
+          "this.closest('.modal-body').querySelectorAll('tr[data-ctr-row]').forEach(function(r){",
+          "r.hidden=q!==''&&r.getAttribute('data-ctr-text').indexOf(q)<0;});"
+        )
+        tagList(
+          if (!ro) {
+            div(
+              class = "ctr-assign-tools",
+              tags$input(
+                type = "search", class = "form-control form-control-sm ctr-filter", id = "ctr_filter",
+                placeholder = "Filter by dataset or file", `aria-label` = "Filter the rows by dataset or expected file",
+                oninput = filter_js
+              ),
+              div(
+                class = "d-flex gap-2 align-items-end",
+                selectInput("ctr_set_all", "Set the shown rows to", choices = st$base, selectize = FALSE, width = "auto"),
+                tagAppendAttributes(
+                  actionButton("ctr_apply", "Apply", class = "btn btn-outline-secondary mb-3"),
+                  onclick = shown_js
+                )
+              )
+            )
+          },
+          div(
+            class = "ctr-assign-scroll",
+            tags$table(
+              class = "table table-sm ctr-table",
+              tags$thead(tags$tr(lapply(c("Dataset", "Expected file", "Delivered inside"), tags$th))),
+              tags$tbody(lapply(seq_len(nrow(rows)), function(i) {
+                first <- i == 1L || rows$dataset[[i]] != rows$dataset[[i - 1L]]
+                s <- sel[[i]]
+                title <- ds_title(rows$dataset[[i]])
+                tags$tr(
+                  `data-ctr-row` = i,
+                  `data-ctr-text` = tolower(paste(title, rows$dataset[[i]], rows$expected[[i]])),
+                  tags$td(if (first) tags$strong(title) else tags$span(class = "ctr-repeat", title)),
+                  tags$td(tags$code(rows$expected[[i]])),
+                  tags$td(if (ro) {
+                    names(s$choices)[match(s$selected, s$choices)]
+                  } else {
+                    htmltools::tagQuery(selectInput(sprintf("ctr_a_%s_%d", st$nonce, i),
+                      label = NULL, choices = s$choices, selected = s$selected,
+                      selectize = FALSE, width = "100%"
+                    ))$find("select")$addClass("form-select-sm")$addAttrs(
+                      `aria-label` = paste("Delivered inside for", title, rows$expected[[i]])
+                    )$allTags()
+                  })
+                )
+              }))
+            )
+          ),
+          uiOutput("ctr_msg")
+        )
+      }
+    } else if (identical(isolate(rv$ctr_view), "form")) {
+      pf <- isolate(rv$ctr_form) %||% list()
+      tagList(
+        textInput("ctr_filename", "File name",
+          value = pf$filename %||% "", width = "100%", placeholder = "STUDY_SDTM_*.zip"
+        ),
+        div(
+          class = "msg-hint", style = "margin:-8px 0 10px;",
+          "A .zip archive or a .xpt SAS transport file. * stands for any text, e.g. STUDY_SDTM_*.zip (letter case must match)."
+        ),
+        uiOutput("ctr_match"),
+        textAreaInput("ctr_description", "Description",
+          value = pf$description %||% "", width = "100%", rows = 3
+        ),
+        div(class = "msg-hint", style = "margin:-8px 0 10px;", "Shown in the exported agreement."),
+        checkboxInput("ctr_default", "All other files must arrive inside it too", value = isTRUE(pf$default)),
+        div(class = "msg-hint", style = "margin:-8px 0 10px;", "Files added later are included automatically."),
+        uiOutput("ctr_default_warning"),
+        uiOutput("ctr_msg"),
+        div(
+          class = "d-flex justify-content-between mt-2",
+          actionButton("ctr_cancel", "Cancel", class = "btn btn-outline-secondary"),
+          actionButton("ctr_save", "Save", class = "btn btn-primary")
+        )
+      )
+    } else {
+      rows <- dta_container_rows(dta)
+      rv$ctr_rows <- rows
+      pending <- isolate(rv$ctr_confirm)
+      pend_row <- Filter(function(r) identical(r$key, pending), rows)
+      tagList(
+        if (!ro) {
+          div(
+            class = "mb-2",
+            actionButton("ctr_add", "+ Add container", class = "btn btn-sm btn-outline-primary")
+          )
+        },
+        dv_container_list_ui(
+          rows,
+          actions = if (!ro && length(rows) > 0) {
+            as.list(row_action_buttons("ctr_edit", "ctr_remove", length(rows),
+              labels = vapply(rows, function(r) r$filename, character(1))
+            ))
+          }
+        ),
+        if (!ro && length(pend_row) > 0) {
+          r <- pend_row[[1]]
+          div(
+            class = "alert alert-warning py-2",
+            role = "alert",
+            paste0(
+              "Remove ", r$filename, "? Its ", .ctr_count(r$n_files, "file", "files"),
+              " will no longer have to arrive inside it."
+            ),
+            div(
+              class = "mt-2",
+              actionButton("ctr_remove_confirm", "Remove", class = "btn btn-sm btn-danger"),
+              actionButton("ctr_remove_keep", "Keep", class = "btn btn-sm btn-outline-secondary")
+            )
+          )
+        },
+        uiOutput("ctr_msg")
+      )
+    }
+    tagList(
+      tabs,
+      if (ro) div(class = "msg-hint mb-2", "View only \u2014 switch on Edit mode to change containers."),
+      body
+    )
+  })
+  outputOptions(output, "ctr_modal_body", suspendWhenHidden = FALSE)
+
+  # The dialog's footer follows the view: no Close while the container form is
+  # open (its own Cancel and Save are the way out), Cancel and Save of the Assign
+  # tab here (the body scrolls, the buttons do not), else Close.
+  output$ctr_modal_footer <- renderUI({
+    rv$ctr_token
+    if (!isTRUE(isolate(rv$ctr_open)) || is.null(isolate(rv$dta))) {
+      return(NULL)
+    }
+    tab <- isolate(rv$ctr_tab)
+    if (identical(tab, "containers") && identical(isolate(rv$ctr_view), "form")) {
+      return(NULL)
+    }
+    if (identical(tab, "assign") && isolate(editing()) && nrow(isolate(rv$ctr_assign)$rows) > 0) {
+      return(tagList(
+        actionButton("ctr_assign_cancel", "Cancel", class = "btn btn-outline-secondary"),
+        actionButton("ctr_assign_save", "Save", class = "btn btn-primary")
+      ))
+    }
+    modalButton("Close")
+  })
+  outputOptions(output, "ctr_modal_footer", suspendWhenHidden = FALSE)
+
+  output$ctr_msg <- renderUI({
+    if (!isTRUE(rv$ctr_open) || is.null(rv$ctr_msg)) {
+      return(NULL)
+    }
+    div(class = "text-danger", role = "alert", rv$ctr_msg)
+  })
+  outputOptions(output, "ctr_msg", suspendWhenHidden = FALSE)
+
+  # The form's live lines (never rendered outside the form).
+  ctr_in_form <- function() isTRUE(rv$ctr_open) && identical(rv$ctr_tab, "containers") && identical(rv$ctr_view, "form")
+  output$ctr_match <- renderUI({
+    if (!ctr_in_form()) {
+      return(NULL)
+    }
+    dv_container_match_line(input$ctr_filename %||% isolate(rv$ctr_form)$filename, isolate(rv$last_delivery))
+  })
+  outputOptions(output, "ctr_match", suspendWhenHidden = FALSE)
+
+  output$ctr_default_warning <- renderUI({
+    if (!ctr_in_form()) {
+      return(NULL)
+    }
+    on <- input$ctr_default %||% isTRUE(isolate(rv$ctr_form)$default)
+    if (!isTRUE(on)) {
+      return(NULL)
+    }
+    key <- isolate(rv$ctr_edit_key)
+    other <- Filter(function(r) isTRUE(r$default) && !identical(r$key, key), dta_container_rows(isolate(rv$dta)))
+    if (length(other) == 0) {
+      return(NULL)
+    }
+    new <- trimws(as.character(input$ctr_filename %||% isolate(rv$ctr_form)$filename %||% "")[1])
+    div(
+      class = "alert alert-warning py-2", role = "alert",
+      paste0(
+        "'", other[[1]]$filename, "' currently collects all other files. Saving moves them to '",
+        if (is.na(new) || !nzchar(new)) "this container" else new,
+        "'; '", other[[1]]$filename, "' will then hold no files."
+      )
+    )
+  })
+  outputOptions(output, "ctr_default_warning", suspendWhenHidden = FALSE)
+
+  observeEvent(input$dta_modal_state, {
+    st <- input$dta_modal_state
+    closed <- identical(st$event, "hidden") && !is.null(rv$ctr_nonce) &&
+      identical(as.character(st$id %||% ""), rv$ctr_nonce)
+    replaced <- identical(st$event, "shown") && !identical(st$kind, "containers")
+    if (isTRUE(rv$ctr_open) && (closed || replaced)) {
+      rv$ctr_open <- FALSE
+      rv$ctr_nonce <- NULL
+      rv$ctr_token <- rv$ctr_token + 1
+    }
+  })
+
+  observeEvent(input$ctr_tab_containers, {
+    req(rv$ctr_open)
+    rv$ctr_tab <- "containers"
+    rv$ctr_view <- "list"
+    rv$ctr_confirm <- NULL
+    rv$ctr_msg <- NULL
+    rv$ctr_token <- rv$ctr_token + 1
+  })
+  observeEvent(input$ctr_tab_assign, {
+    req(rv$ctr_open, rv$dta)
+    ctr_enter_assign()
+    rv$ctr_token <- rv$ctr_token + 1
+  })
+
+  # -- the containers tab --
+  observeEvent(input$ctr_add, {
+    req(editing(), rv$ctr_open)
+    rv$ctr_edit_key <- NULL
+    rv$ctr_form <- list()
+    rv$ctr_confirm <- NULL
+    rv$ctr_msg <- NULL
+    rv$ctr_view <- "form"
+    rv$ctr_token <- rv$ctr_token + 1
+  })
+  observeEvent(input$ctr_edit, {
+    req(editing(), rv$ctr_open)
+    r <- ctr_row_at(input$ctr_edit)
+    req(r)
+    rv$ctr_edit_key <- r$key
+    rv$ctr_form <- list(filename = r$filename, description = r$description %||% "", default = isTRUE(r$default))
+    rv$ctr_confirm <- NULL
+    rv$ctr_msg <- NULL
+    rv$ctr_view <- "form"
+    rv$ctr_token <- rv$ctr_token + 1
+  })
+  observeEvent(input$ctr_cancel, {
+    req(rv$ctr_open)
+    rv$ctr_view <- "list"
+    rv$ctr_msg <- NULL
+    rv$ctr_token <- rv$ctr_token + 1
+  })
+  observeEvent(input$ctr_save, {
+    req(editing(), rv$ctr_open, identical(rv$ctr_view, "form"))
+    pf <- rv$ctr_form
+    r <- dta_container_save(
+      rv$dta, rv$ctr_edit_key,
+      input$ctr_filename %||% pf$filename,
+      input$ctr_description %||% pf$description,
+      input$ctr_default %||% isTRUE(pf$default)
+    )
+    if (ctr_commit(r, "Container saved.")) rv$ctr_token <- rv$ctr_token + 1
+  })
+  observeEvent(input$ctr_remove, {
+    req(editing(), rv$ctr_open)
+    r <- ctr_row_at(input$ctr_remove)
+    req(r)
+    rv$ctr_confirm <- r$key
+    rv$ctr_msg <- NULL
+    rv$ctr_token <- rv$ctr_token + 1
+  })
+  observeEvent(input$ctr_remove_keep, {
+    req(rv$ctr_open)
+    rv$ctr_confirm <- NULL
+    rv$ctr_token <- rv$ctr_token + 1
+  })
+  observeEvent(input$ctr_remove_confirm, {
+    req(editing(), rv$ctr_open, rv$ctr_confirm)
+    key <- rv$ctr_confirm
+    if (!ctr_commit(dta_container_remove(rv$dta, key), "Container removed.")) {
+      rv$ctr_confirm <- NULL
+    }
+    rv$ctr_token <- rv$ctr_token + 1
+  })
+
+  # -- the assign tab --
+  observeEvent(input$ctr_apply, {
+    req(editing(), rv$ctr_open)
+    st <- rv$ctr_assign
+    v <- input$ctr_set_all
+    req(st, !is.null(v))
+    # The browser reports which rows the filter still shows ("1,2,5"; "" = none);
+    # without a report every row is meant.
+    shown <- input$ctr_shown
+    rows_to_set <- if (is.null(shown)) {
+      seq_len(nrow(st$rows))
+    } else {
+      intersect(seq_len(nrow(st$rows)), suppressWarnings(as.integer(strsplit(as.character(shown), ",", fixed = TRUE)[[1]])))
+    }
+    for (i in rows_to_set) {
+      updateSelectInput(session, sprintf("ctr_a_%s_%d", st$nonce, i), selected = v)
+    }
+  })
+  # Cancel leaves the Assign tab for the Containers list; the dialog stays.
+  observeEvent(input$ctr_assign_cancel, {
+    req(rv$ctr_open)
+    rv$ctr_tab <- "containers"
+    rv$ctr_view <- "list"
+    rv$ctr_confirm <- NULL
+    rv$ctr_msg <- NULL
+    rv$ctr_token <- rv$ctr_token + 1
+  })
+  observeEvent(input$ctr_assign_save, {
+    req(editing(), rv$ctr_open, identical(rv$ctr_tab, "assign"))
+    st <- rv$ctr_assign
+    req(st)
+    rows <- st$rows
+    # A select that did not report keeps the stored reference (NA), and so does
+    # one still showing what is stored: only a real choice rewrites an entry.
+    vals <- vapply(seq_len(nrow(rows)), function(i) {
+      v <- input[[sprintf("ctr_a_%s_%d", st$nonce, i)]]
+      if (is.null(v) || length(v) != 1 || is.na(v)) {
+        return(NA_character_)
+      }
+      ref <- rows$reference[[i]]
+      if (is.na(ref)) ref <- ""
+      if (identical(as.character(v), dta_container_normalise_ref(rv$dta, ref))) NA_character_ else as.character(v)
+    }, character(1))
+    r <- dta_container_assign(
+      rv$dta,
+      data.frame(dataset = rows$dataset, handler = rows$handler, value = vals, stringsAsFactors = FALSE)
+    )
+    if (ctr_commit(r, "Container assignments saved.")) ctr_close()
+  })
+
+  # File-name conflicts of the live document, shared by the dataset panel and the
+  # Files editor (a bulk source -- opening a document, raw YAML, a template --
+  # may bring some in; an edit that would add one is refused where it is made).
+  conflicts_now <- reactive({
+    req(rv$dta)
+    tryCatch(DTAtools::file_name_conflicts(rv$dta), error = function(e) NULL)
+  })
+  output$dataset_conflict_warning <- renderUI({
+    req(rv$active)
+    dv_conflict_ui(conflicts_now(), rv$active, editing(), rv$dta)
+  })
+  output$file_conflict_warning <- renderUI({
+    rv$file_token
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    dv_conflict_ui(conflicts_now(), ed, editing(), rv$dta, in_files_editor = TRUE)
+  })
+
+  output$metadata_containers <- renderUI({
+    req(rv$dta)
+    dv_container_list_ui(dta_container_rows(rv$dta))
   })
 
   # Confirm the example-file modal: load the chosen file into the target slot.
@@ -3064,10 +4350,23 @@ server <- function(input, output, session) {
     if (length(nodata) > 0) parts <- c(parts, sprintf("%d skipped (no data)", length(nodata)))
     if (length(parts) == 0) parts <- "nothing to validate"
     summary_txt <- sprintf("Validation complete \u2014 %s.", paste(parts, collapse = ", "))
+    # Content and packaging are two verdicts: with a finding against a checked
+    # dataset the toast says both, and the content count never stands alone.
+    fnd <- isolate(findings_now())
+    fnd <- fnd[fnd$dataset %in% ready, , drop = FALSE]
+    if (nrow(fnd) > 0) {
+      summary_txt <- sprintf(
+        "Content: %s; packaging: %s.",
+        paste(parts, collapse = ", "), dv_packaging_phrase(fnd)
+      )
+    }
     # A file-count violation is not visible in the pass/fail tally, so list the
     # reasons. They go in as plain-text children (htmltools escapes them);
     # newlines would not render in a toast.
-    count_msgs <- dta_file_count_messages(rv$dta, datasets = ready)
+    count_msgs <- c(
+      dta_file_count_messages(rv$dta, datasets = ready),
+      dta_container_messages(rv$dta, datasets = ready)
+    )
     if (length(count_msgs) > 0) {
       showNotification(
         ui = tagList(summary_txt, tags$ul(lapply(count_msgs, tags$li))),
@@ -3357,8 +4656,14 @@ server <- function(input, output, session) {
   # every other column and disables escaping for this one column alone
   # (escape = -ncol(ov)), because everything else in the frame is document
   # text and only this generated column is meant to be raw HTML.
+  #
+  # `labels` (one per row) name the row in the Edit and Remove buttons' accessible
+  # names: a screen reader hears "Edit sdtm_*.zip", not a row of identical pencils.
   row_action_buttons <- function(edit_input, del_input, n,
-                                 up_input = NULL, down_input = NULL) {
+                                 up_input = NULL, down_input = NULL, labels = NULL) {
+    aria <- function(verb, i) {
+      if (is.null(labels)) "" else sprintf(" aria-label=\"%s %s\"", verb, htmltools::htmlEscape(labels[[i]], attribute = TRUE))
+    }
     vapply(seq_len(n), function(i) {
       up_btn <- if (is.null(up_input)) {
         ""
@@ -3383,12 +4688,12 @@ server <- function(input, output, session) {
       paste0(
         up_btn, down_btn,
         sprintf(
-          "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn\" title=\"Edit\" onclick=\"Shiny.setInputValue('%s', %d, {priority:'event'})\">&#x270E;</button> ",
-          edit_input, i
+          "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn\" title=\"Edit\"%s onclick=\"Shiny.setInputValue('%s', %d, {priority:'event'})\">&#x270E;</button> ",
+          aria("Edit", i), edit_input, i
         ),
         sprintf(
-          "<button class=\"btn btn-sm btn-outline-danger dta-row-btn\" title=\"Remove\" onclick=\"Shiny.setInputValue('%s', %d, {priority:'event'})\">&#x1F5D1;</button>",
-          del_input, i
+          "<button class=\"btn btn-sm btn-outline-danger dta-row-btn\" title=\"Remove\"%s onclick=\"Shiny.setInputValue('%s', %d, {priority:'event'})\">&#x1F5D1;</button>",
+          aria("Remove", i), del_input, i
         )
       )
     }, character(1))
@@ -3481,6 +4786,7 @@ server <- function(input, output, session) {
             )
           )
         ),
+        uiOutput("file_conflict_warning"),
         DT::dataTableOutput("file_tbl"),
         if (n_handlers == 0) {
           div(
@@ -3514,6 +4820,10 @@ server <- function(input, output, session) {
         error = function(e) "tabular"
       )
       type_choices <- dta_handler_types(ds_type)
+      # The "Delivered inside" select: the document's containers, plus the stored
+      # reference whatever it is (a select must never fall back to "" and erase it).
+      ct_choices <- dta_container_choices(isolate(rv$dta), current = g("container"))
+      ct_selected <- dta_container_normalise_ref(isolate(rv$dta), g("container"))
       # Labelled only where the bare token would not explain itself.
       type_labels <- c(
         any = "Any file (not parsed)",
@@ -3564,12 +4874,15 @@ server <- function(input, output, session) {
               )
             )
           },
-          textInput("file_container", "Delivered inside (optional)",
-            value = g("container"), width = "100%", placeholder = "sdtm.zip"
+          selectizeInput("file_container", "Delivered inside",
+            choices = ct_choices, selected = ct_selected, width = "100%",
+            # A typed delimiter creates the item at once, so the default ","
+            # would cut "a,b.zip" short; no file name holds this one.
+            options = list(create = TRUE, allowEmptyOption = TRUE, delimiter = "\u0001")
           ),
           div(class = "msg-hint", style = "margin:-8px 0 10px;", paste(
-            "The .zip or .xpt this file arrives in, e.g. sdtm.zip or sdtm_*.zip",
-            "(* = any text; letter case must match). Leave blank if it may arrive loose or in any .zip/.xpt."
+            "Pick a container, or type a new archive name (e.g. sdtm_*.zip; * = any text, letter case must match) to add one.",
+            "Containers are listed under Metadata \u25B8 Containers."
           )),
           conditionalPanel(
             condition = "input.file_type == 'any'",
@@ -3692,7 +5005,7 @@ server <- function(input, output, session) {
     rv$file_token
     ed <- isolate(rv$editor_dataset)
     req(ed)
-    ov <- dta_handlers_overview(isolate(rv$dta), ed)
+    ov <- dv_files_overview(isolate(rv$dta), ed)
     if (is.null(ov) || nrow(ov) == 0) {
       ov <- data.frame(
         filename = character(0), type = character(0), container = character(0),
@@ -3704,7 +5017,8 @@ server <- function(input, output, session) {
     ov$Actions <- if (nrow(ov) > 0) {
       row_action_buttons(
         "file_edit_click", "file_del_click", nrow(ov),
-        "file_up_click", "file_down_click"
+        "file_up_click", "file_down_click",
+        labels = ov$filename
       )
     } else {
       character(0)
@@ -3846,10 +5160,36 @@ server <- function(input, output, session) {
     }
     encoding <- trimws(as.character(input$file_encoding %||% "")[1])
     if (nzchar(encoding)) reader$encoding <- encoding
+    # "Delivered inside": an empty value means none; a value among the select's
+    # choices is stored as it is; the file name of an explicit container is its
+    # id; anything else was typed -- a new archive name, which becomes an
+    # explicit container (its id is derived, never asked for).
+    # A control that never rendered reads as NULL, and taking that as blank
+    # would clear a container the form never showed; an explicitly emptied
+    # field ("") does clear it.
+    dta0 <- isolate(rv$dta)
+    dta1 <- dta0
+    ct <- input$file_container %||% (isolate(rv$file_prefill)$container %||% "")
+    ct <- trimws(as.character(ct)[1])
+    if (is.na(ct)) ct <- ""
+    if (nzchar(ct) && !ct %in% dta_container_choices(dta0, current = isolate(rv$file_prefill)$container)) {
+      by_name <- dta_container_normalise_ref(dta0, ct)
+      if (!identical(by_name, ct)) {
+        ct <- by_name
+      } else {
+        made <- dta_container_save(dta0, NULL, ct, NULL, FALSE)
+        if (!isTRUE(made$ok)) {
+          rv$file_msg <- list(ok = FALSE, error = made$error)
+          return()
+        }
+        dta1 <- made$value
+        ct <- made$key
+      }
+    }
     # The count controls only exist while `pattern` is ticked; without it the
     # class contract fixes the count at exactly 1.
     r <- dta_set_handler(
-      isolate(rv$dta), ed,
+      dta1, ed,
       index = isolate(rv$file_edit_index),
       filename = input$file_filename,
       type = input$file_type,
@@ -3862,10 +5202,7 @@ server <- function(input, output, session) {
       info = input$file_info,
       extensions = input$file_extensions,
       reader_settings = reader,
-      # A control that never rendered reads as NULL, and taking that as blank
-      # would clear a container the form never showed; an explicitly emptied
-      # field ("") does clear it.
-      container = input$file_container %||% (isolate(rv$file_prefill)$container %||% ""),
+      container = ct,
       # The dataset decides which types are on offer, so it has to decide which
       # ones validate too -- otherwise the form could offer `any` and the save
       # would reject it.
@@ -3876,6 +5213,13 @@ server <- function(input, output, session) {
     )
     if (!isTRUE(r$ok)) {
       rv$file_msg <- list(ok = FALSE, error = r$error)
+      return()
+    }
+    # An edit that would let two datasets take the same file name is refused
+    # where it is made; conflicts the document already had do not block it.
+    fresh <- dta_new_conflicts(isolate(conflicts_now()) %||% dta0, r$value)
+    if (nrow(fresh) > 0) {
+      rv$file_msg <- list(ok = FALSE, error = dta_conflict_refusal(fresh, dta0))
       return()
     }
     adding <- is.null(isolate(rv$file_edit_index))
@@ -6643,6 +7987,10 @@ server <- function(input, output, session) {
         f_area("tr_packaging", "Packaging", trf("packaging"), width = "100%", rows = 2),
         f_area("tr_security", "Security", trf("security"), width = "100%", rows = 2)
       ),
+      div(
+        class = "msg-hint", style = "margin:-8px 0 10px;",
+        "File names and contents of the delivery archives are defined under Containers below."
+      ),
       f_text("tr_checksum", "Checksum requirements", trf("checksum"), width = "100%"),
       layout_columns(
         col_widths = c(6, 6),
@@ -6655,6 +8003,13 @@ server <- function(input, output, session) {
           width = "100%", rows = 3
         )
       ),
+      tags$hr(),
+      div(
+        class = "md-section-title d-flex justify-content-between align-items-center",
+        tags$span("Containers"),
+        if (!ro) actionButton("metadata_manage_containers", "Manage containers\u2026", class = "btn btn-sm btn-outline-primary")
+      ),
+      uiOutput("metadata_containers"),
       tags$hr(),
       div(
         class = "md-section-title d-flex justify-content-between align-items-center",
@@ -8095,14 +9450,45 @@ server <- function(input, output, session) {
     if (!isTRUE(ok) || !cfg$exports$validation_summary) {
       return(NULL)
     }
-    complete <- length(validated) == length(st)
+    # The same predicate as the report's banner: a packaging finding means this
+    # is not a pass, however well the content validated.
+    fnd <- findings_now()
+    outside <- any(fnd$status == "outside")
+    complete <- length(validated) == length(st) && nrow(fnd) == 0
     # No divider of its own: this button belongs to the sidebar's Export
     # group, whose label sits above the two export buttons it follows.
     tagList(
-      downloadButton("dl_validation_summary", "Validation summary",
-        class = if (complete) "btn btn-success w-100" else "btn btn-warning w-100",
-        title = if (complete) {
+      downloadButton(
+        "dl_validation_summary",
+        # The state is in the words, not only the colour.
+        if (outside) {
+          "Validation summary (FAILED: packaging)"
+        } else if (nrow(fnd) > 0) {
+          "Validation summary (INCOMPLETE: packaging)"
+        } else {
+          "Validation summary"
+        },
+        class = if (outside) {
+          "btn btn-outline-danger w-100"
+        } else if (complete) {
+          "btn btn-success w-100"
+        } else {
+          "btn btn-warning w-100"
+        },
+        title = if (outside) {
+          paste(
+            "Download a summary of this validation.",
+            "Files arrived outside the container the agreement requires, so it",
+            "will report the validation as failed."
+          )
+        } else if (complete) {
           "Download a summary certifying this successful validation"
+        } else if (nrow(fnd) > 0) {
+          paste(
+            "Download a summary of this validation.",
+            "The packaging of some files is not verified, so it will report the",
+            "validation as incomplete rather than passed."
+          )
         } else {
           paste(
             "Download a summary of this validation.",
@@ -8114,19 +9500,25 @@ server <- function(input, output, session) {
     )
   })
 
+  # The summary's HTML, with the packaging findings of the live document: an
+  # outside finding fails the banner, an unverified one leaves it incomplete.
+  validation_report_html <- function() {
+    args <- dta_app_export_args(cfg)
+    dta_build_validation_report(
+      rv$dta, rv$status,
+      document_name = args$document_name, organisation = args$organisation,
+      organisation_unit = args$organisation_unit,
+      findings = findings_now()
+    )
+  }
+
   output$dl_validation_summary <- downloadHandler(
     filename = function() {
       paste0("validation_summary_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".html")
     },
     content = function(file) {
       req(rv$dta, cfg$exports$validation_summary)
-      args <- dta_app_export_args(cfg)
-      html <- dta_build_validation_report(
-        rv$dta, rv$status,
-        document_name = args$document_name, organisation = args$organisation,
-        organisation_unit = args$organisation_unit
-      )
-      writeLines(html, file, useBytes = TRUE)
+      writeLines(validation_report_html(), file, useBytes = TRUE)
     }
   )
 
@@ -8149,6 +9541,9 @@ server <- function(input, output, session) {
     rv$active <- NULL
     rv$uploads <- list()
     rv$status <- list()
+    rv$last_delivery <- NULL
+    rv$pending_delivery <- NULL
+    rv$main_view <- "dataset"
     rv$is_example <- FALSE
     rv$example_target <- NULL
     rv$doc_token <- rv$doc_token + 1
@@ -8178,6 +9573,9 @@ server <- function(input, output, session) {
   output$dataset_status_line <- renderUI({
     req(rv$active)
     st <- dta_lookup(rv$status, rv$active, "pending")
+    # The chip reads the CONTENT status unless a file of this dataset has a
+    # packaging finding: then it says so, and never plain Passed.
+    pk <- dv_ds_packaging(findings_now(), rv$active)
     s <- rv$structure[[rv$active]]
     type_txt <- if (!is.null(s) && !is.na(s$type)) s$type else ""
     ds <- dta_get_dataset(rv$dta, rv$active)
@@ -8185,7 +9583,7 @@ server <- function(input, output, session) {
     heading <- dta_dataset_label(ds)
     if (!nzchar(heading)) heading <- rv$active
     div(
-      class = paste0("ds-head-block ds-st-", st),
+      class = paste0("ds-head-block ds-st-", status_display(st, pk)),
       div(
         class = "ds-head",
         tags$h4(class = "ds-desc", heading)
@@ -8197,7 +9595,7 @@ server <- function(input, output, session) {
         # also when the heading above is its name.
         tags$span(class = "dta-name-chip", title = "Dataset ID", rv$active),
         if (nzchar(type_txt)) tags$span(class = "status-chip status-pending", type_txt),
-        status_chip(st)
+        status_chip(st, pk)
       ),
       if (nzchar(desc)) tags$p(class = "ds-long-desc", desc)
     )
@@ -8210,6 +9608,28 @@ server <- function(input, output, session) {
     dsname <- rv$active
     s <- rv$structure[[dsname]]
     tstatus <- dta_table_status_map(rv$dta, dsname)
+    # Packaging findings of this dataset (the live state, not the last check's).
+    fnd <- findings_now()
+    fnd <- fnd[fnd$dataset == dsname, , drop = FALSE]
+    # The chip a file carries when its packaging is not what the agreement asks.
+    finding_chip <- function(table) {
+      f <- fnd[fnd$item == table | basename(fnd$item) == table, , drop = FALSE]
+      if (nrow(f) == 0) {
+        return(NULL)
+      }
+      f <- f[1, , drop = FALSE]
+      need <- if (is.na(f$container)) "" else paste0("; required inside ", f$container)
+      txt <- switch(f$status,
+        outside = if (identical(f$arrived, "loose")) {
+          paste0("\u26A0 delivered loose", need)
+        } else {
+          paste0("\u26A0 came in ", f$arrived, need)
+        },
+        unverified = paste0("\u25D0 checked on its own", need),
+        paste0("? origin not recorded", need)
+      )
+      tags$span(class = paste("file-finding", paste0("ff-", f$status)), title = f$message, txt)
+    }
     any_files <- FALSE
     blocks <- lapply(seq_along(s$handlers), function(hi) {
       h <- s$handlers[[hi]]
@@ -8251,6 +9671,7 @@ server <- function(input, output, session) {
           tags$span(class = paste("file-status", icls), title = ttl, icon_ch),
           tags$span(class = "file-name", rec$file),
           if (!is.null(rec$container)) tags$span(class = "file-table", paste0("from ", rec$container)),
+          finding_chip(rec$table),
           if (!identical(s$type, "file")) {
             tags$span(
               class = "file-table", title = "Table name",
@@ -8317,6 +9738,14 @@ server <- function(input, output, session) {
     # Datasets with data bound but never checked, plus datasets with no
     # status at all: everything the three counts above do not cover.
     npend <- max(n - np - nf - nd, 0L)
+    # A content pass whose files have a packaging finding is no pass: it moves
+    # out of the passed count into the packaging segment (red when a file is
+    # outside its container, amber when it is only unverified).
+    fnd <- findings_now()
+    pk <- vapply(names(st)[st == "pass"], function(id) dv_ds_packaging(fnd, id), character(1))
+    npk <- sum(pk != "none")
+    np <- np - npk
+    pk_cls <- if (any(pk == "outside")) "fail" else "nodata"
     # One bar segment per non-zero state, sized by its share of the datasets.
     seg <- function(k, cls) {
       if (k > 0) span(class = paste("status-seg", cls), style = sprintf("flex: %d 1 0;", k))
@@ -8334,10 +9763,10 @@ server <- function(input, output, session) {
       div(
         class = "status-bar", role = "img",
         `aria-label` = sprintf(
-          "%d passed, %d failed, %d without data, %d not checked",
-          np, nf, nd, npend
+          "%d passed, %d with a packaging issue, %d failed, %d without data, %d not checked",
+          np, npk, nf, nd, npend
         ),
-        seg(np, "seg-pass"), seg(nf, "seg-fail"),
+        seg(np, "seg-pass"), seg(npk, paste0("seg-", pk_cls)), seg(nf, "seg-fail"),
         seg(nd, "seg-nodata"), seg(npend, "seg-pending")
       ),
       div(
@@ -8347,11 +9776,59 @@ server <- function(input, output, session) {
           span(class = "status-n", n), if (n == 1) " dataset" else " datasets"
         ),
         item(np, "st-pass", " passed"),
+        # Datasets, like every other count here and the bar segment beside it.
+        item(npk, paste0("st-", pk_cls), if (npk == 1) " packaging issue" else " packaging issues"),
         item(nf, "st-fail", " failed"),
         item(nd, "st-nodata", " no data"),
         item(npend, "st-pending", " not checked")
       )
     )
+  })
+
+  # --- the Delivery block of the sidebar -----------------------------------
+  # The packaging findings of the LIVE document, computed once for every reader
+  # (the sidebar lines, the loaded-file chips, the Delivery view, the report
+  # banner, the summary button). Not check()'s attribute: that one only exists
+  # after a run and goes stale with the next edit.
+  findings_now <- reactive(dv_findings(rv$dta))
+
+  # The block shows for a document with two or more datasets or any container in
+  # effect (explicit, implied or default). A flag the conditionalPanel reads, not
+  # a uiOutput: re-rendering the block would rebuild its fileInput and lose the
+  # binding. It is never suspended -- the panel is hidden when it is FALSE, and a
+  # suspended output would never tell the client it became TRUE.
+  delivery_zone_on <- reactive({
+    !is.null(rv$dta) &&
+      (length(dta_dataset_names(rv$dta)) >= 2 || length(dta_container_rows(rv$dta)) > 0)
+  })
+  # A render function proper (not `output$x <- reactive()`): a test session reads
+  # an output through its two-argument call, which a bare reactive does not take.
+  output$delivery_zone <- shiny::markRenderFunction(
+    uiFunc = function(...) NULL,
+    renderFunc = function(shinysession, name, ...) delivery_zone_on()
+  )
+  outputOptions(output, "delivery_zone", suspendWhenHidden = FALSE)
+
+  output$delivery_hint <- renderUI({
+    req(rv$dta)
+    base <- "Each file goes to the dataset whose expected name it matches."
+    div(
+      class = "msg-hint",
+      if (length(dta_container_rows(rv$dta)) > 0) {
+        paste(
+          base,
+          "Files here are judged as delivered.",
+          "To check single files before packing them, drop them on a dataset's own zone."
+        )
+      } else {
+        base
+      }
+    )
+  })
+
+  output$delivery_panel <- renderUI({
+    req(rv$dta)
+    dv_panel_ui(rv$dta, findings_now(), rv$last_delivery, editing = editing())
   })
 
   # The sidebar's dynamic outputs must never be suspended as "hidden".
@@ -8379,7 +9856,8 @@ server <- function(input, output, session) {
   # for the same belt-and-braces reason as the sidebar outputs above.
   for (sidebar_output in c(
     "workspace_header", "summary_metrics", "dataset_nav_ui",
-    "add_dataset_ui", "validation_report_ui", "edit_gate"
+    "add_dataset_ui", "validation_report_ui", "edit_gate",
+    "delivery_hint", "delivery_panel"
   )) {
     outputOptions(output, sidebar_output, suspendWhenHidden = FALSE)
   }
@@ -8401,6 +9879,14 @@ server <- function(input, output, session) {
         "This specification has no datasets yet. Use + Add dataset in the sidebar to create the first one, and fill in the rest of the document on the Metadata tab."
       ))
     }
+    # The Delivery view stands in for the dataset's slots after a sidebar drop. It
+    # reads the document, so this render depends on rv$dta only while it is
+    # shown; the slots below must not (a re-render would rebuild their file
+    # inputs).
+    if (identical(rv$main_view, "delivery")) {
+      req(rv$dta)
+      return(dv_view_ui(rv$dta, rv$last_delivery, findings_now(), isolate(rv$active)))
+    }
     req(rv$active)
     s <- rv$structure[[rv$active]]
     req(!is.null(s))
@@ -8415,18 +9901,13 @@ server <- function(input, output, session) {
         upid <- sprintf("up_%d_%d", ds_idx, hi)
         exid <- sprintf("expick_%d_%d", ds_idx, hi)
         multiple <- isTRUE(!is.na(h$max) && h$max > 1)
-        # An entry that declares a container takes the archive, not a loose file.
+        # h$container is the EFFECTIVE container: the entry's own, else the default.
+        # The zone takes this dataset's files; a loose file is checked on its own.
         in_container <- nzchar(h$container %||% "")
         up_ctrl <- div(
           class = "dropzone",
           fileInput(upid,
-            label = if (in_container) {
-              "Drop the .zip / .xpt it arrives in, or browse"
-            } else if (multiple) {
-              "Drop or choose file(s)"
-            } else {
-              "Drop or choose a file"
-            },
+            label = if (multiple) "Drop or choose file(s)" else "Drop or choose a file",
             multiple = multiple
           )
         )
@@ -8442,6 +9923,18 @@ server <- function(input, output, session) {
           ),
           card_body(
             if (nzchar(h$hint)) div(class = "slot-meta", style = "margin-bottom:8px;", h$hint),
+            if (in_container) {
+              div(
+                class = "slot-meta", style = "margin-bottom:8px;",
+                paste0(
+                  "Must arrive inside ", h$container, ". Drop that archive on Delivery (sidebar) to load every dataset, or drop ",
+                  h$prose, " here to check it on its own."
+                ),
+                if (nzchar(h$container_description %||% "")) {
+                  tags$div(class = "msg-hint", h$container_description)
+                }
+              )
+            },
             if (length(example_files) > 0) {
               div(
                 class = "slot-example",
@@ -8468,6 +9961,7 @@ server <- function(input, output, session) {
 
     tagList(
       uiOutput("dataset_status_line"),
+      uiOutput("dataset_conflict_warning"),
       div(
         class = "ds-actions",
         style = "margin-bottom:12px;",
@@ -8499,7 +9993,7 @@ server <- function(input, output, session) {
       # tags$h5("Expected files"),
       div(
         class = "msg-hint", style = "margin:-4px 0 10px;",
-        "Drop each required file below, or a whole .zip / .xpt delivery: its files are matched to every dataset by name. Loaded files appear underneath, with the archive each came from; for a table read into memory, validation results name the dataset and table, not the archive."
+        "Drop this dataset's files below. To load a whole delivery for every dataset, drop it on Delivery in the sidebar."
       ),
       slots,
       card(
@@ -8599,6 +10093,24 @@ server <- function(input, output, session) {
           width = 320,
           uiOutput("workspace_header"),
           uiOutput("summary_metrics"),
+          # Shown for two or more datasets or any container in effect. The drop
+          # zone is static: only the flag behind the panel changes.
+          conditionalPanel(
+            "output.delivery_zone",
+            div(
+              class = "delivery-block",
+              div(class = "section-label", "Delivery"),
+              div(
+                class = "dropzone delivery-drop",
+                fileInput("delivery_files",
+                  label = "Drop the whole delivery (.zip, .xpt or loose files)",
+                  multiple = TRUE, width = "100%"
+                )
+              ),
+              uiOutput("delivery_hint"),
+              uiOutput("delivery_panel")
+            )
+          ),
           uiOutput("dataset_nav_ui"),
           uiOutput("add_dataset_ui"),
           actionButton("check_all", "Check all datasets", class = "btn btn-primary w-100"),
@@ -8672,13 +10184,38 @@ server <- function(input, output, session) {
               )
             }
           )
-          do.call(navset_card_tab, Filter(Negate(is.null), panels))
+          # The id lets the server switch tabs: a sidebar drop opens the Delivery
+          # view on Datasets even while Metadata is showing.
+          do.call(navset_card_tab, c(list(id = "main_tabs"), Filter(Negate(is.null), panels)))
         }
       )
     }
   })
 
   # --- restore previous session ------------------------------------------
+  # The fallback of a restore whose document cannot be upgraded: the document
+  # read again from its YAML text, with the data bound in `old` carried over
+  # (and its validation, where the dataset's specification is unchanged). NULL
+  # when there is no usable text.
+  rebuild_from_yaml <- function(old, yaml_text) {
+    if (!is.character(yaml_text) || length(yaml_text) != 1 || !nzchar(yaml_text)) {
+      return(NULL)
+    }
+    r <- dta_read_yaml_text(yaml_text)
+    if (!isTRUE(r$ok)) {
+      return(NULL)
+    }
+    new <- r$value
+    for (nm in dta_dataset_names(new)) {
+      old_ds <- tryCatch(old@datasets[[nm]], error = function(e) NULL)
+      if (is.null(old_ds)) next
+      same_specs <- identical(dta_specs_signature(old_ds), dta_specs_signature(dta_get_dataset(new, nm)))
+      moved <- dta_transfer_bound_data(new, nm, old_ds, keep_validation = same_specs)
+      if (isTRUE(moved$ok)) new <- moved$value
+    }
+    new
+  }
+
   observeEvent(input$restore_session, {
     sf <- session_file()
     if (is.null(sf) || !file.exists(sf)) {
@@ -8710,6 +10247,19 @@ server <- function(input, output, session) {
       showNotification("Could not restore the previous session.", type = "error")
       return()
     }
+    # A document saved by an older version has the classes it was saved with:
+    # re-stamp them with the current ones. When that fails, rebuild the document
+    # from its YAML text and carry the bound data over.
+    upgraded <- tryCatch(DTAtools::upgrade_dta(restored), error = function(e) NULL)
+    from_yaml <- is.null(upgraded)
+    if (from_yaml) {
+      upgraded <- rebuild_from_yaml(restored, saved$yaml_text)
+      if (is.null(upgraded)) {
+        showNotification("Could not restore the previous session.", type = "error")
+        return()
+      }
+    }
+    restored <- upgraded
     if (!is.null(saved$dump)) {
       store <- session_tables()
       store$adopt(restored, saved$dump)
@@ -8717,7 +10267,12 @@ server <- function(input, output, session) {
     }
     rv$dta <- restored
     rv$yaml_text <- saved$yaml_text
-    rv$structure <- saved$structure %||% build_structure(restored)
+    # Rebuilt, not read back: what a slot shows (the effective container) follows
+    # the restored document, which an older save may not have described.
+    rv$structure <- build_structure(restored)
+    rv$last_delivery <- saved$last_delivery
+    rv$pending_delivery <- NULL
+    rv$main_view <- "dataset"
     ups <- saved$uploads %||% list()
     rv$uploads <- lapply(ups, function(recs) {
       if (length(recs) == 0) {
@@ -8804,7 +10359,14 @@ server <- function(input, output, session) {
     rv$md_token <- rv$md_token + 1
     rv$contacts_token <- rv$contacts_token + 1
     rv$doc_token <- rv$doc_token + 1
-    showNotification("Previous session restored.", type = "message")
+    showNotification(
+      if (from_yaml) {
+        "Previous session restored from its YAML text: it was saved by an older version of the app. Run Check again to refresh the results."
+      } else {
+        "Previous session restored."
+      },
+      type = if (from_yaml) "warning" else "message", duration = if (from_yaml) 10 else 5
+    )
     # A restored RDS object skips every constructor, so it is checked here
     # rather than trusted; the findings stay listed in the Spec check panel.
     notify_spec_check(restored, "Restored session")

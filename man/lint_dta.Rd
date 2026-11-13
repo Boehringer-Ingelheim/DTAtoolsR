@@ -39,12 +39,23 @@ Errors: \code{yaml_unreadable}, \code{metadata_invalid}, \code{dataset_invalid},
 \code{rule_condition_operator_invalid}, \code{rule_condition_numeric_on_text},
 \code{rule_condition_value_unfit}, \code{rule_condition_value_outside_values},
 \code{group_constraint_unknown_condition}, \code{file_container_invalid},
-\code{file_field_unknown}, \code{file_container_misplaced}, \code{file_count_bound_invalid}.
+\code{file_field_unknown}, \code{file_container_misplaced}, \code{file_count_bound_invalid},
+\code{container_invalid} (the \code{containers} section is malformed, an element lacks
+an \code{id} or \code{filename}, has an unknown field or a value a container cannot
+hold), \code{container_duplicate} (an id or file name used twice, or more than one
+\code{default: true}) and \code{file_container_unknown} (a file entry's \code{container}
+names an id the document's \code{containers} do not define).
 
 Warnings: \code{rules_without_columns}, \code{rule_not_checkable},
 \code{format_narrower_than_length}, \code{metadata_import_issue}, \code{version_unquoted}
 (an unquoted numeric \code{metadata.version} in a YAML file, which YAML reads
-as a number: \code{1.10} becomes \code{1.1}).
+as a number: \code{1.10} becomes \code{1.1}), \code{container_unused} (an explicit,
+non-default container no file entry refers to), \code{document_field_unknown} (a
+top-level key other than \code{metadata}, \code{containers} and \code{datasets}),
+\code{container_reference_by_filename} (a file entry names a container by its
+file name although the container has an id; refer to it by the id, which
+survives renaming the file) and \code{file_name_conflict} (file entries of two
+datasets could take the same file; see \code{\link[=file_name_conflicts]{file_name_conflicts()}}).
 }
 
 \examples{

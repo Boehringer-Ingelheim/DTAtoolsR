@@ -888,6 +888,9 @@ method(load_file, DTADataSetTabular) <- function(
   name = tools::file_path_sans_ext(dta_strip_compression_extension(basename(file))),
   stream = getOption("DTAtools.stream", "auto")
 ) {
+  # An object restored from an older version lacks properties its class now has.
+  if (dta_is_stale(x)) x <- dta_upgrade(x)
+
   # Shared with the file dataset's method rather than restated. The guard this
   # replaces was `handler_index < 1 || handler_index > length(x@files)`, run on
   # a value that could be NULL, NA, length > 1 or character -- so `"1"` reached
@@ -907,6 +910,10 @@ method(load_file, DTADataSetTabular) <- function(
       "{.fn load_file} requires {.arg name} to be a single non-missing, non-empty string."
     )
   }
+  dta_assert_not_container(x, handler, file)
+
+  # How it arrived: on its own. load_delivery() overwrites this with its chain.
+  rec <- list(file = basename(file), container = character(), via = "file")
 
   # Whatever is bound under this name now is about to be replaced, so any
   # verdict recorded against it describes data that is no longer here. Left
@@ -963,7 +970,7 @@ method(load_file, DTADataSetTabular) <- function(
     x@tables[[name]] <- open_file(handler, file, specs = x@specs)
     x@import_issues[[name]] <- NULL
 
-    return(x)
+    return(dta_set_provenance(x, name, rec))
   }
 
   coerced <- dta_coerce_table_to_specs(
@@ -982,7 +989,7 @@ method(load_file, DTADataSetTabular) <- function(
     x@import_issues[[name]] <- NULL
   }
 
-  x
+  dta_set_provenance(x, name, rec)
 }
 
 # The files a lazily held table plans to scan that are no longer there.
@@ -1416,8 +1423,14 @@ S7::method(check, DTADataSetTabular) <- function(
   max_errors = getOption("DTAtools.max_errors", 10000L),
   fail_fast = FALSE,
   on_missing_column = c("scan", "stop"),
-  use_threads = TRUE
+  use_threads = TRUE,
+  # Accepted and ignored: check(DTA) hands both dataset methods the effective
+  # container glob of each file entry (entry index -> glob), and only a file
+  # dataset has a missing target to name it in.
+  .container_globs = NULL
 ) {
+  if (dta_is_stale(x)) x <- dta_upgrade(x)
+
   # Matched here rather than only downstream so a typo is reported once, before
   # any table is touched, instead of after the first one has been scanned.
   on_missing_column <- match.arg(on_missing_column, c("scan", "stop"))
