@@ -84,8 +84,10 @@ dta_container_choices_base <- function(dta, ca = NULL) {
 # this value.
 dta_container_normalise_ref <- function(dta, ref) {
   ref <- as.character(ref %||% "")[1]
-  for (ct in .ctr_list(dta)) if (identical(ct@filename, ref)) {
-    return(ct@id)
+  for (ct in .ctr_list(dta)) {
+    if (identical(ct@filename, ref)) {
+      return(ct@id)
+    }
   }
   ref
 }
