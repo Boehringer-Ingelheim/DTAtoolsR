@@ -245,3 +245,51 @@ test_that("dta_diff() has a containers section named by file name", {
   expect_identical(d$containers$change[d$containers$key == "adam.zip.description"], "added")
   expect_identical(nrow(app_fn("dta_diff")(a, a)$containers), 0L)
 })
+
+# ---- Two sides with no leaves at all -----------------------------------------
+
+# An empty leaf map has NULL names, so the union of two is NULL and
+# sort(NULL, method = "radix") used to abort with "not a vector". Expected
+# frames are spelled out here rather than read back from the app's own
+# empty-frame helpers.
+test_that("a diff of two empty leaf maps is the empty change frame, not an error", {
+  expect_identical(
+    app_fn("dta_diff_two_way")(list(), list()),
+    data.frame(
+      key = character(0), change = character(0),
+      from = character(0), to = character(0),
+      stringsAsFactors = FALSE
+    )
+  )
+})
+
+test_that("dta_diff() of two documents with no metadata fields and no datasets reports nothing", {
+  empty <- function() DTAtools::DTA(datasets = list(), metadata = DTAtools::DTAMetaData())
+  d <- app_fn("dta_diff")(empty(), empty())
+  expect_named(d, c("metadata", "containers", "datasets"))
+  for (section in d) {
+    expect_identical(names(section), c("key", "change", "from", "to"))
+    expect_identical(nrow(section), 0L)
+  }
+})
+
+test_that("rebase classification of three empty leaf maps yields empty change and conflict frames", {
+  conflicts <- data.frame(
+    key = character(0), ancestor = character(0),
+    current = character(0), target = character(0),
+    stringsAsFactors = FALSE
+  )
+  changes <- data.frame(
+    key = character(0), resolution = character(0),
+    ancestor = character(0), current = character(0), target = character(0),
+    stringsAsFactors = FALSE
+  )
+  expect_identical(
+    app_fn(".rebase_classify_three_way")(list(), list(), list()),
+    list(changes = changes, conflicts = conflicts)
+  )
+  expect_identical(
+    app_fn(".rebase_classify_two_way")(list(), list()),
+    list(changes = changes, conflicts = conflicts)
+  )
+})

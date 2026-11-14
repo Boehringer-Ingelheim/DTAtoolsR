@@ -141,6 +141,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `r-lib/actions` v2.14.0. With v2.12.1 it failed on Ubuntu 26.04 runners
   (now `ubuntu-latest`) before installing anything, because `sudo-rs` ignores
   `sudo -E`.
+- The app's template comparison no longer aborts with "argument 1 is not a
+  vector" when both sides have nothing to compare, for example two documents
+  with no datasets and no metadata fields. It now reports no differences.
 
 ## [0.27.0] - 2026-11-12
 
