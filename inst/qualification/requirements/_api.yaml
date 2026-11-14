@@ -16,6 +16,8 @@ exports:
   - column_preview
   - columns
   - columns_specs_from_word
+  - container_assignments
+  - container_findings
   - create_example_DTA
   - create_example_DTAColumnSpec
   - create_example_DTAColumnSpecCollection
@@ -39,6 +41,7 @@ exports:
   - DTAColumnSpecStructure
   - DTAColumnSpecStructureFactory
   - DTAColumnSpecStructureSAS
+  - DTAContainer
   - DTADataSet
   - DTADataSetFactory
   - DTADataSetFile
@@ -63,6 +66,7 @@ exports:
   - export_column_value_table
   - export_specs_table
   - export_with_template
+  - file_name_conflicts
   - files
   - get_arrow_type
   - get_authorized_for_corrections
@@ -108,6 +112,7 @@ exports:
   - specs
   - specs_from_list
   - tables
+  - upgrade_dta
   - validate_file_stream
   - validate_rules
   - validate_table

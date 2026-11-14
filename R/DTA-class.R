@@ -11,6 +11,11 @@
 #'   up by id, so a repeated id would validate one entry twice and the other
 #'   never.
 #' @param metadata A DTAMetaData object.
+#' @param containers A list of \code{\link{DTAContainer}} objects, the delivery
+#'   archives the agreement names. An unnamed list is keyed automatically by
+#'   the containers' ids. A file entry's \code{container} refers to one by id;
+#'   a reference that equals a container's file name is rewritten to its id.
+#'   At most one container may be the default.
 #' @param ... If metadata is not set, additional arguments are passed to
 #'   DTAMetaData(...).
 #' @return An object of class DTA.
@@ -41,6 +46,7 @@ DTA <- S7::new_class(
   constructor = function(
     datasets = NULL,
     metadata = NULL,
+    containers = NULL,
     ...
   ) {
     if (is.null(datasets)) {
@@ -57,17 +63,39 @@ DTA <- S7::new_class(
     if (is.null(metadata)) {
       metadata <- DTAMetaData(...)
     }
+
+    if (is.null(containers)) {
+      containers <- list()
+    }
+    if (inherits(containers, "DTAtools::DTAContainer")) {
+      containers <- list(containers)
+    }
+    if (is.list(containers) && is.null(names(containers)) && length(containers) > 0L &&
+      all(vapply(containers, inherits, logical(1), "DTAtools::DTAContainer"))) {
+      names(containers) <- vapply(containers, function(cn) cn@id, character(1))
+    }
+    datasets <- dta_normalise_container_refs(datasets, containers)
+
     new_object(
       S7_object(),
       datasets = datasets,
-      metadata = metadata
+      metadata = metadata,
+      containers = containers
     )
   },
   properties = list(
     datasets = class_list,
-    metadata = class_DTAMetaData
+    metadata = class_DTAMetaData,
+    containers = S7::new_property(class_list, default = list())
   ),
   validator = function(self) {
+    # The container rules come BEFORE the early return below: a DTA with no
+    # datasets can still carry (and must still get right) its containers.
+    problem <- dta_containers_problem(self@containers)
+    if (!is.null(problem)) {
+      cli_abort("{problem}", class = "dta_container_invalid")
+    }
+
     ds <- self@datasets
     # An empty or NULL @datasets is a legitimate DTA with nothing bound yet
     # (see dta_from_list() and the Shiny app's "remove last dataset" flow) --
@@ -122,8 +150,101 @@ DTA <- S7::new_class(
         x = "{cli::qty(sum(mismatch))}Key{?s} {.val {nms[mismatch]}} hold{?s/} dataset{?s} with id{?s} {.val {ids[mismatch]}}."
       ))
     }
+
+    # Every reference resolves: "none" and a file name always do (an unknown
+    # file name is an implied container), an id must name a defined container.
+    msg <- dta_unresolved_container_message(ds, self@containers)
+    if (!is.null(msg)) {
+      cli_abort("{msg}", class = "dta_container_unknown")
+    }
   }
 )
+
+# NULL when `containers` (the @containers list) is well formed, else one
+# sentence: every element a DTAContainer, named by its id, ids and file names
+# unique, at most one default.
+dta_containers_problem <- function(containers) {
+  if (length(containers) == 0L) {
+    return(NULL)
+  }
+  is_cn <- vapply(containers, inherits, logical(1), "DTAtools::DTAContainer")
+  if (!all(is_cn)) {
+    return("Every entry in @containers must be a DTAContainer.")
+  }
+  ids <- vapply(containers, function(cn) cn@id, character(1))
+  nms <- names(containers)
+  if (is.null(nms) || any(is.na(nms) | !nzchar(nms)) || !identical(unname(nms), unname(ids))) {
+    return("Every entry in @containers must be named by its container's id.")
+  }
+  quoted <- function(v) paste0("'", unique(v[duplicated(v)]), "'", collapse = ", ")
+  if (anyDuplicated(ids)) {
+    return(sprintf("@containers has duplicate id(s): %s.", quoted(ids)))
+  }
+  fn <- vapply(containers, function(cn) cn@filename, character(1))
+  if (anyDuplicated(fn)) {
+    return(sprintf("@containers has duplicate file name(s): %s.", quoted(fn)))
+  }
+  if (sum(vapply(containers, function(cn) isTRUE(cn@default), logical(1))) > 1L) {
+    return("At most one container may be the default.")
+  }
+  NULL
+}
+
+# The sentence for the first file entry that refers to a container id nobody
+# defines, else NULL. "none" and dotted references (a file name: an explicit
+# container's or an implied one) always resolve, so only a plain id is looked
+# up. This runs on every `@<-` of a DTA: raw attr() reads, no resolving.
+dta_unresolved_container_message <- function(datasets, containers) {
+  for (d in datasets) {
+    fl <- attr(d, "files", exact = TRUE)
+    for (i in seq_along(fl)) {
+      ref <- attr(fl[[i]], "container", exact = TRUE)
+      if (is.null(ref) || identical(ref, "none") || grepl(".", ref, fixed = TRUE) ||
+        !is.null(containers[[ref]])) {
+        next
+      }
+      return(sprintf(
+        "File entry %d of dataset '%s' refers to container '%s', which this document does not define. (A dataset on its own does not carry its document's containers: pass the DTA.)",
+        i, d@id, ref
+      ))
+    }
+  }
+  NULL
+}
+
+# A reference that equals an explicit container's file name becomes its id, so
+# renaming that container's file later cannot silently split the entries off.
+# Entries and datasets are rebuilt only when something changes.
+dta_normalise_container_refs <- function(datasets, containers) {
+  if (length(containers) == 0L || !is.list(datasets)) {
+    return(datasets)
+  }
+  by_file <- list()
+  for (cn in containers) {
+    if (inherits(cn, "DTAtools::DTAContainer")) by_file[[cn@filename]] <- cn@id
+  }
+  if (length(by_file) == 0L) {
+    return(datasets)
+  }
+  for (k in seq_along(datasets)) {
+    d <- datasets[[k]]
+    if (!inherits(d, "DTAtools::DTADataSet")) next
+    fl <- d@files
+    changed <- FALSE
+    for (i in seq_along(fl)) {
+      ref <- dta_handler_container(fl[[i]])
+      if (!is.null(ref) && !is.null(by_file[[ref]])) {
+        fl[[i]]@container <- by_file[[ref]]
+        changed <- TRUE
+      }
+    }
+    if (changed) {
+      d@files <- fl
+      datasets[[k]] <- d
+    }
+  }
+  datasets
+}
 
 
 #' @title Get Metadata
@@ -395,6 +516,7 @@ method(load_file, DTA) <- function(
   stream = getOption("DTAtools.stream", "auto"),
   ...
 ) {
+  if (dta_is_stale(x)) x <- dta_upgrade(x)
   dataset_object <- datasets(x, dataset)
 
   args <- list(
@@ -553,6 +675,11 @@ dta_dataset_summary_message <- function(n_targets,
 #'   was not checked" says nothing about which target, and there is none.
 #' @param total_count_errors Integer. Datasets whose supplied file count lies
 #'   outside the bounds their handlers declare. Fails the run on its own.
+#' @param total_container_errors Integer. Files that arrived loose or inside
+#'   another container than the one their entry requires. Fails the run.
+#' @param total_container_unverified Integer. Files whose packaging was never
+#'   seen (loaded on their own, or without a record). Leaves the run
+#'   incomplete.
 #' @return A list of `severity` (`"danger"`, `"warning"` or `"success"`) and
 #'   `text`.
 #' @keywords internal
@@ -560,7 +687,9 @@ dta_overall_summary_message <- function(total_invalid,
                                         total_import_errors,
                                         total_unchecked,
                                         total_undelivered = 0,
-                                        total_count_errors = 0L) {
+                                        total_count_errors = 0L,
+                                        total_container_errors = 0L,
+                                        total_container_unverified = 0L) {
   unchecked_tail <- if (total_unchecked > 0) {
     paste0("; ", dta_count_noun(total_unchecked, "target", "targets"), " not checked")
   } else {
@@ -572,6 +701,21 @@ dta_overall_summary_message <- function(total_invalid,
   )
   # Named alongside the other failures, not dropped behind them.
   count_tail <- if (total_count_errors > 0) paste0("; ", count_phrase) else ""
+  container_phrase <- paste0(
+    dta_count_noun(total_container_errors, "file", "files"),
+    " not inside the required container"
+  )
+  container_tail <- if (total_container_errors > 0) paste0("; ", container_phrase) else ""
+  # A failed run still says what packaging was never seen.
+  container_unv_tail <- if (total_container_unverified > 0) {
+    paste0(
+      "; ", dta_count_noun(total_container_unverified, "file", "files"),
+      " whose packaging is not verified"
+    )
+  } else {
+    ""
+  }
+  container_tail <- paste0(container_tail, container_unv_tail)
 
   if (total_invalid > 0) {
     return(list(
@@ -579,7 +723,7 @@ dta_overall_summary_message <- function(total_invalid,
       text = paste0(
         "Validation FAILED: ",
         dta_count_noun(total_invalid, "table", "tables"),
-        " with validation errors", count_tail, unchecked_tail
+        " with validation errors", count_tail, container_tail, unchecked_tail
       )
     ))
   }
@@ -590,7 +734,7 @@ dta_overall_summary_message <- function(total_invalid,
       text = paste0(
         "Validation FAILED: ",
         dta_count_noun(total_import_errors, "value", "values"),
-        " could not be imported in the declared type", count_tail, unchecked_tail
+        " could not be imported in the declared type", count_tail, container_tail, unchecked_tail
       )
     ))
   }
@@ -598,11 +742,18 @@ dta_overall_summary_message <- function(total_invalid,
   if (total_count_errors > 0) {
     return(list(
       severity = "danger",
-      text = paste0("Validation FAILED: ", count_phrase, unchecked_tail)
+      text = paste0("Validation FAILED: ", count_phrase, container_tail, unchecked_tail)
     ))
   }
 
-  if (total_unchecked > 0) {
+  if (total_container_errors > 0) {
+    return(list(
+      severity = "danger",
+      text = paste0("Validation FAILED: ", container_phrase, container_unv_tail, unchecked_tail)
+    ))
+  }
+
+  if (total_unchecked > 0 || total_container_unverified > 0) {
     undelivered_tail <- if (total_undelivered > 0) {
       paste0(
         " (", dta_count_noun(total_undelivered, "dataset", "datasets"),
@@ -612,14 +763,24 @@ dta_overall_summary_message <- function(total_invalid,
       ""
     }
 
+    parts <- c(
+      if (total_unchecked > 0) {
+        paste0(
+          dta_count_noun(total_unchecked, "target", "targets"), " ",
+          if (total_unchecked == 1) "was" else "were", " not checked",
+          undelivered_tail
+        )
+      },
+      if (total_container_unverified > 0) {
+        paste0(
+          dta_count_noun(total_container_unverified, "file", "files"),
+          " whose packaging is not verified"
+        )
+      }
+    )
     return(list(
       severity = "warning",
-      text = paste0(
-        "Validation INCOMPLETE: ",
-        dta_count_noun(total_unchecked, "target", "targets"), " ",
-        if (total_unchecked == 1) "was" else "were", " not checked",
-        undelivered_tail
-      )
+      text = paste0("Validation INCOMPLETE: ", paste(parts, collapse = "; "))
     ))
   }
 
@@ -778,6 +939,11 @@ dta_emit_summary_message <- function(summary_message) {
 #'       datasets replaces the rows of the datasets it checked; a row of another
 #'       dataset is kept while that dataset still exists and still holds a file
 #'       count outside its bounds (it is judged again, not copied).}
+#'     \item{\code{"last_container_findings"}}{data.frame from
+#'       \code{\link{container_findings}()}, covering ALL datasets also when
+#'       only some were checked: one row per file not known to be inside its
+#'       container (\code{outside}, \code{unverified} or \code{unrecorded}),
+#'       zero rows when none.}
 #'     \item{\code{"last_metadata_summary"}}{one-row data.frame for the metadata
 #'       axis, with columns scope, status, import_valid, n_import_errors, fields,
 #'       ok. Metadata belongs to the \code{DTA} itself rather than to any
@@ -788,7 +954,9 @@ dta_emit_summary_message <- function(summary_message) {
 #'       imported cleanly, no target -- e.g. a table checked against zero
 #'       column specs -- was left unchecked, every dataset had something to
 #'       check in the first place, and no tabular dataset holds a number of
-#'       files outside the bounds its handlers declare.}
+#'       files outside the bounds its handlers declare, no file is
+#'       \code{outside} its container and none is \code{unverified} or
+#'       \code{unrecorded} (see \code{\link{container_findings}()}).}
 #'     \item{\code{"benchmark"}}{Present only when \code{benchmark = TRUE}. A
 #'       one-row data.frame of runtime/memory metrics; see
 #'       \code{\link{validation_benchmark}}. \code{rows} is \code{NA} at this
@@ -819,6 +987,15 @@ dta_emit_summary_message <- function(summary_message) {
 #' \code{FALSE}) and is listed in the \code{"last_file_count_findings"}
 #' attribute. This applies only to a DTA-level check, not to a dataset checked
 #' alone, and a dataset with no handlers or no tables is not judged.
+#'
+#' Packaging is a verdict of its own, apart from content. A file that arrived
+#' loose or inside another container than its entry requires
+#' (\code{outside}) fails the run ("Validation FAILED") and signals a warning
+#' of class \code{dta_container_mismatch}; a file that was loaded on its own
+#' or without a record of how it arrived (\code{unverified},
+#' \code{unrecorded}) leaves it incomplete ("Validation INCOMPLETE"), and the
+#' warning is signalled for it too. The content of each file is validated
+#' either way, so \code{validation_status()} of the dataset is unaffected.
 #' @examples
 #' dta <- create_example_DTA()
 #' # Check all datasets
@@ -852,6 +1029,9 @@ method(check, DTA) <- function(
   # Matched once, here, so a typo is reported before any dataset is touched
   # rather than after the first one has been scanned.
   on_missing_column <- match.arg(on_missing_column, c("scan", "stop"))
+
+  # An object restored from an older version lacks properties its class now has.
+  if (dta_is_stale(x)) x <- dta_upgrade(x)
 
   if (is.null(x@datasets) || length(x@datasets) == 0) {
     cli_abort("DTA object has no datasets to check.")
@@ -932,9 +1112,17 @@ method(check, DTA) <- function(
     # be captured and written back into `x@datasets` - otherwise the
     # validation state (and any failures) are silently discarded and the
     # subsequent summary is computed from the stale, unvalidated object.
+    # Where each entry must arrive (entry index -> glob, "" for none), resolved
+    # here because only the DTA knows its containers.
+    container_globs <- vapply(ds@files, function(h) {
+      g <- dta_effective_container(x, h)$filename
+      if (is.null(g)) "" else g
+    }, character(1))
+    names(container_globs) <- as.character(seq_along(container_globs))
     ds <- check(
       ds,
       tables = NULL,
+      .container_globs = container_globs,
       force = force,
       persist = persist,
       artifact_dir = artifact_dir,
@@ -1022,6 +1210,29 @@ method(check, DTA) <- function(
   summary_df <- do.call(rbind, summary_rows)
   rownames(summary_df) <- NULL
 
+  # Packaging is judged for ALL datasets, also on a subset check: a finding of
+  # a dataset this run did not check is still true of the document.
+  cf <- container_findings(x)
+  attr(x, "last_container_findings") <- cf
+  n_out <- sum(cf$status == "outside")
+  n_unv <- sum(cf$status %in% c("unverified", "unrecorded"))
+  if (nrow(cf) > 0) {
+    if (!isTRUE(quiet)) {
+      cli::cli_h1("Containers")
+      for (i in seq_len(nrow(cf))) {
+        msg <- cf$message[[i]]
+        if (cf$status[[i]] == "outside") cli::cli_alert_danger("{msg}") else cli::cli_alert_warning("{msg}")
+      }
+    }
+    cli::cli_warn(
+      c(
+        "Files are not verified inside their container.",
+        stats::setNames(.cli_escape(cf$message), rep("x", nrow(cf)))
+      ),
+      class = c("dta_container_mismatch", "dta_validation_finding")
+    )
+  }
+
   # Metadata axis. The DTA has exactly two parts, `datasets` and `metadata`, and
   # only the first was ever checked, so a corrupted transfer date could sit in an
   # agreement while the run reported PASSED. Metadata is reported as a DTA-level
@@ -1108,7 +1319,7 @@ method(check, DTA) <- function(
   total_count_errors <- sum(summary_df$n_file_count_errors, na.rm = TRUE) +
     if (is.null(kept_findings)) 0L else nrow(kept_findings)
   overall_ok <- total_invalid == 0 && total_import_errors == 0 &&
-    total_unchecked == 0 && total_count_errors == 0
+    total_unchecked == 0 && total_count_errors == 0 && n_out == 0 && n_unv == 0
 
   if (!isTRUE(quiet)) {
     cli::cli_rule("Validation Summary")
@@ -1117,7 +1328,9 @@ method(check, DTA) <- function(
       total_import_errors = total_import_errors,
       total_unchecked = total_unchecked,
       total_undelivered = total_undelivered,
-      total_count_errors = total_count_errors
+      total_count_errors = total_count_errors,
+      total_container_errors = n_out,
+      total_container_unverified = n_unv
     ))
     if (total_invalid > 0 || total_import_errors > 0) {
       cli::cli_alert_info("Run {.fn explain_messages} on the checked object to see what failed and why.")
@@ -1234,6 +1447,22 @@ method(print, DTA) <- function(x, ...) {
     cli_alert_info("Datasets ({n_ds}): {.field {shown}}")
   } else {
     cli_alert_info("Datasets: {.emph none}")
+  }
+
+  # The containers in effect (an entry must arrive inside them): defined ones
+  # in the order the document lists them, then implied ones.
+  ca <- container_assignments(x)
+  ca <- ca[!is.na(ca$container), , drop = FALSE]
+  if (nrow(ca) > 0L) {
+    keys <- unique(ca$container)
+    defined <- names(dta_containers(x))
+    keys <- c(defined[defined %in% keys], keys[!keys %in% defined])
+    labels <- vapply(keys, function(k) {
+      rows <- ca[ca$container == k, , drop = FALSE]
+      paste0(rows$filename[[1L]], if (any(rows$default)) " (all other files)" else "")
+    }, character(1))
+    shown_cn <- cli::cli_vec(unname(labels), list("vec-sep" = ", ", "vec-sep2" = ", ", "vec-last" = ", "))
+    cli_alert_info("Containers: {.field {shown_cn}}")
   }
 
   invisible(x)
@@ -1363,9 +1592,49 @@ dta_from_list_build <- function(x) {
     dta_dataset_from_list(x$datasets)
   }
 
-  # Create and return DTA object
   DTA(
     datasets = datasets_list,
-    metadata = metadata
+    metadata = metadata,
+    containers = dta_containers_from_list(x$containers)
   )
+}
+
+# The `containers:` section of a document as a list of DTAContainer. Field names
+# are checked before do.call() (an unknown one would print its whole value in
+# R's "unused argument" error); every value reaches DTAContainer() as data.
+dta_containers_from_list <- function(x) {
+  if (is.null(x) || length(x) == 0L) {
+    return(list())
+  }
+  if (!is.list(x) || !is.null(names(x))) {
+    cli_abort(
+      "The 'containers' section must be a list of mappings.",
+      class = "dta_container_invalid"
+    )
+  }
+  allowed <- c("id", "filename", "description", "default")
+  lapply(seq_along(x), function(i) {
+    el <- x[[i]]
+    if (!is.list(el) || is.null(names(el))) {
+      cli_abort("Container {i} must be a mapping.", class = "dta_container_invalid")
+    }
+    unknown <- setdiff(names(el), allowed)
+    if (length(unknown) > 0L) {
+      msg <- sprintf(
+        "Unknown field(s) in container %d: %s.", i,
+        paste0("'", unknown, "'", collapse = ", ")
+      )
+      cli_abort("{msg}", class = "dta_container_invalid")
+    }
+    given <- names(el)[!vapply(el, is.null, logical(1))]
+    absent <- setdiff(c("id", "filename"), given)
+    if (length(absent) > 0L) {
+      msg <- sprintf(
+        "Container %d needs %s.", i,
+        paste0("'", absent, "'", collapse = " and ")
+      )
+      cli_abort("{msg}", class = "dta_container_invalid")
+    }
+    do.call(DTAContainer, el)
+  })
 }

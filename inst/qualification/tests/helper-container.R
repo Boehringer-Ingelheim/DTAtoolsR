@@ -178,6 +178,19 @@ cont_filedata <- function(id, ...) DTAtools::DTADataSetFile(id = id, files = lis
 # A DTA of the given datasets.
 cont_of <- function(...) DTAtools::DTA(datasets = list(...))
 
+# A DTA of the given datasets and document-level containers (a list of
+# DTAContainer objects).
+cont_doc <- function(..., containers = list()) {
+  DTAtools::DTA(datasets = list(...), containers = containers)
+}
+
+# A tabular dataset `id` with one CSV file entry "<id>.csv" that refers to
+# `container` (an id, a file name, "none" or NULL); specs are those of its
+# domain unless others are given.
+cont_csv_ds <- function(id, container = NULL, specs = cont_specs(id)) {
+  cont_tab(id, list(DTAtools::DTAFileCSV(paste0(id, ".csv"), container = container)), specs)
+}
+
 # A copy of the zip `base` with extra EMPTY stored entries called `names` added
 # to it, written to a temp file called `name`. Entry names of 511 bytes or more
 # cannot be created on Windows and zip::zip() would not write them, so the

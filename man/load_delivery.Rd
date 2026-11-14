@@ -9,7 +9,9 @@ load_delivery(
   files,
   stream = getOption("DTAtools.stream", "auto"),
   on_error = c("abort", "skip"),
-  exdir = NULL
+  exdir = NULL,
+  route = NULL,
+  datasets = NULL
 )
 }
 \arguments{
@@ -31,38 +33,79 @@ lists the rest as \code{refused} and warns once.}
 
 \item{exdir}{Directory below which a call extracts. \code{NULL} means
 \code{file.path(tempdir(), "DTAtools_delivery")}.}
+
+\item{route}{Chooses the dataset for files that are \code{ambiguous}: a named
+list (or named character vector) from a file name, as in the \code{name} column
+of \code{last_delivery}, to dataset ids; \code{character(0)} sends the file to no
+dataset. It only applies to files that are ambiguous. A route to a dataset
+the file is not ambiguous between refuses the file as a whole
+(\code{on_error = "abort"}: an error of class \code{dta_delivery_bad_input}). Names
+that match no ambiguous file are listed in the summary message.}
+
+\item{datasets}{\code{NULL} (all datasets) or the ids of the datasets this call
+loads. Files meant for other datasets are \code{unused}, and only the files of
+the chosen datasets are extracted from archives.}
 }
 \value{
 \code{x} (the same class as given) with every routed file bound, and the
 attribute \code{"last_delivery"}: a data frame with one row per file
 considered and the columns \code{delivered}, \code{container}, \code{member}, \code{name},
 \code{dataset}, \code{handler}, \code{item}, \code{status} (\code{"loaded"}, \code{"opened"},
-\code{"unused"}, \code{"ignored"} or \code{"refused"}), \code{reason} and \code{path}. The table
-describes this call only and is carried along unchanged by later calls.
+\code{"unused"}, \code{"ignored"}, \code{"refused"} or \code{"ambiguous"}), \code{reason},
+\code{conformant}, \code{candidates} and \code{path}, in that order. \code{conformant} is
+\code{TRUE} or \code{FALSE} for a loaded file whose entry has a container
+requirement (did it arrive inside it?) and \code{NA} otherwise. \code{candidates} is
+a list column: the dataset ids an \code{ambiguous} file matches, \code{character(0)}
+for every other row. The table describes this call only and is carried
+along unchanged by later calls.
 }
 \description{
 Routes every file in \code{files} to the dataset(s) whose file entry matches its
 name and binds it with \code{\link[=load_file]{load_file()}}. A \code{.zip} is opened and its files are
 routed the same way. A SAS transport library (\code{.xpt}) holding several
-datasets is split, and member AE is offered as \code{ae.xpt}. A file entry with
-a \code{container} only takes files from inside a matching container.
+datasets is split, and member AE is offered as \code{ae.xpt}. A file entry with a
+\code{container} expects its file inside a matching container; a file that
+arrives elsewhere is still loaded, and the call says it did not conform.
 }
 \section{Routing}{
 
-A literal file entry (\code{pattern: false}) is tried before a pattern entry, and
-the first literal entry that matches a file claims it, else the first
-pattern entry. A file that a literal entry of any dataset claims is not also
-claimed by the pattern entries of other datasets. A \code{.zip} is opened (only
-when it is one of \code{files}) when an entry declares it as its \code{container}, or
-when no literal entry claims it, and a \code{.xpt} is split when an entry
-declares it as its \code{container}, or when no literal \code{type: xpt} entry claims
-it and it holds more than one dataset. A \code{.zip} or \code{.xpt} that a \code{type: any}
-entry takes as a deliverable, by naming it or by listing its ending in
-\code{extensions}, stays one file and is neither opened nor scanned unless an
-entry declares it as its \code{container}. A single-dataset \code{.xpt} is a file: the
-entry that names it reads it whole. Only the files an entry claims are
-extracted from a zip, and only the members an entry claims are split out of
-a library.
+A file entry is tried against a file in five tiers, best first: (1) a
+literal entry (\code{pattern: false}) that has no container requirement or whose
+container the file arrived in; (2) a pattern entry whose container the file
+arrived in; (3) a literal entry whose container the file did not arrive in;
+(4) a pattern entry without a container requirement; (5) a pattern entry
+whose container the file did not arrive in. Within one dataset the best
+entry wins (a fitting entry before a free one of the same tier, then the
+first entry). Across datasets only the datasets at the best tier take the
+file. When that tier is a literal one, all of them take it: two datasets
+that name the same file both get it. When it is a pattern tier and several
+datasets are there, the file is \code{ambiguous}: it is not loaded, its row lists
+the candidate datasets, and \code{route} chooses. A file that arrived outside the
+container of its entry is loaded all the same and reported as not
+conforming (\code{conformant} is \code{FALSE}): validating the data and judging the
+packaging are separate questions. When the same item arrives twice for a
+dataset, a copy that conforms beats copies that do not; several copies that
+all arrived outside the container are not loaded at all.
+
+A \code{.zip} is opened (only when it is one of \code{files}) when an entry declares
+it as its container, or when no literal entry takes it, and a \code{.xpt} is
+split when an entry declares it as its container, or when no literal
+\code{type: xpt} entry takes it and it holds more than one dataset. A \code{.zip} or
+\code{.xpt} that a \code{type: any} entry takes as a deliverable, by naming it or by
+listing its ending in \code{extensions}, stays one file and is neither opened nor
+scanned unless an entry declares it as its container; it may be taken even
+when it arrived outside that entry's container (reported as not conforming)
+as long as no entry's container matches the archive's own name. Only an
+entry's own \code{container} reference, not the document's default container,
+declares an archive that a literal \code{type: any} entry names and that is not a
+fit there (\code{container: none}, or another container). A single-dataset
+\code{.xpt} is a file: the entry that names it reads it whole. Only the files an
+entry takes are extracted from a zip, and only the members an entry takes
+are split out of a library.
+
+With \code{datasets}, only those datasets take files: a file meant for another
+dataset is \code{unused}, and a file that is ambiguous between a chosen dataset
+and others goes to the chosen one when it is the only one left.
 }
 
 \section{Limits}{
@@ -107,9 +150,13 @@ streamed or not (a 60 GB member streamed from a zip needs 60 GB there).
 
 \section{Reports}{
 
-Validation results name the dataset and the table. The validation report
-names no zip or library for a table that was read into memory; the
-\code{last_delivery} table and the summary message do.
+Validation results name the dataset and the table. The validation report's
+inputs table names the container a file came from (its \code{Container} column,
+the chain of archives joined with " > ", empty for a loose file), also for a
+table that was read into memory, as do the \code{last_delivery} table and the
+summary message. A file that did not arrive inside the container its entry
+requires is listed by \code{\link[=container_findings]{container_findings()}} and shown in the report's rows
+and messages.
 }
 
 \examples{

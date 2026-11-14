@@ -414,12 +414,23 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
 #' `rule_condition_operator_invalid`, `rule_condition_numeric_on_text`,
 #' `rule_condition_value_unfit`, `rule_condition_value_outside_values`,
 #' `group_constraint_unknown_condition`, `file_container_invalid`,
-#' `file_field_unknown`, `file_container_misplaced`, `file_count_bound_invalid`.
+#' `file_field_unknown`, `file_container_misplaced`, `file_count_bound_invalid`,
+#' `container_invalid` (the `containers` section is malformed, an element lacks
+#' an `id` or `filename`, has an unknown field or a value a container cannot
+#' hold), `container_duplicate` (an id or file name used twice, or more than one
+#' `default: true`) and `file_container_unknown` (a file entry's `container`
+#' names an id the document's `containers` do not define).
 #'
 #' Warnings: `rules_without_columns`, `rule_not_checkable`,
 #' `format_narrower_than_length`, `metadata_import_issue`, `version_unquoted`
 #' (an unquoted numeric `metadata.version` in a YAML file, which YAML reads
-#' as a number: `1.10` becomes `1.1`).
+#' as a number: `1.10` becomes `1.1`), `container_unused` (an explicit,
+#' non-default container no file entry refers to), `document_field_unknown` (a
+#' top-level key other than `metadata`, `containers` and `datasets`),
+#' `container_reference_by_filename` (a file entry names a container by its
+#' file name although the container has an id; refer to it by the id, which
+#' survives renaming the file) and `file_name_conflict` (file entries of two
+#' datasets could take the same file; see [file_name_conflicts()]).
 #'
 #' @param x One of: a path to a DTA YAML file; a parsed list (a DTA document,
 #'   one dataset, or a list with `columns` and/or `rules`); a `DTA`,
@@ -550,6 +561,20 @@ dta_lint_list <- function(x) {
 dta_lint_document <- function(x) {
   out <- dta_lint_empty()
 
+  # The containers pass runs first: its id set is needed by the file entries,
+  # and its findings must not depend on the early returns below.
+  cont <- dta_lint_containers_list(x[["containers"]], x[["datasets"]])
+  out <- rbind(out, cont$rows)
+  for (key in setdiff(names(x), c("metadata", "containers", "datasets"))) {
+    out <- rbind(out, dta_lint_row(
+      "", "document", key, "warning", "document_field_unknown",
+      sprintf(
+        "Unknown top-level key '%s'; a document has 'metadata', 'containers' and 'datasets'.",
+        key
+      )
+    ))
+  }
+
   md <- x[["metadata"]]
   if (!is.null(md)) {
     out <- rbind(out, dta_lint_metadata_list(md))
@@ -580,9 +605,190 @@ dta_lint_document <- function(x) {
   }
   for (i in seq_along(datasets)) {
     label <- if (is.na(ids[[i]])) paste0("#", i) else ids[[i]]
-    out <- rbind(out, dta_lint_dataset_list(datasets[[i]], label))
+    out <- rbind(out, dta_lint_dataset_list(datasets[[i]], label, container_ids = cont$ids))
+  }
+
+  # File-name conflicts need a files-only skeleton, so they are looked for only
+  # when nothing above is an error (a skeleton of a broken document is moot).
+  if (!any(out$severity == "error")) {
+    slots <- dta_lint_skeleton_slots(datasets, ids, x[["containers"]])
+    if (!is.null(slots)) {
+      out <- rbind(out, dta_lint_file_name_conflicts(slots))
+    }
   }
   out
+}
+
+# The slot list of dta_file_name_conflicts_slots() for a raw document: handlers
+# built per dataset (no columns, no rules) and the containers resolved the way a
+# DTA would. NULL when anything fails to build.
+dta_lint_skeleton_slots <- function(datasets, ids, containers) {
+  tryCatch(
+    {
+      cs <- dta_containers_from_list(containers)
+      names(cs) <- vapply(cs, function(cn) cn@id, character(1))
+      slots <- list()
+      for (i in seq_along(datasets)) {
+        handlers <- dta_file_handlers_from_list(datasets[[i]][["files"]])
+        for (k in seq_along(handlers)) {
+          h <- handlers[[k]]
+          info <- dta_effective_container(cs, h)
+          slots[[length(slots) + 1L]] <- list(
+            dataset = ids[[i]], handler = k, h = h, literal = !isTRUE(h@pattern),
+            glob = if (is.null(info)) NULL else info$filename
+          )
+        }
+      }
+      slots
+    },
+    error = function(e) NULL
+  )
+}
+
+# The file entries of a `files` value: a fully named list is one entry, as
+# dta_file_handlers_from_list() reads it.
+dta_lint_file_entries <- function(files) {
+  if (is.null(files) || length(files) == 0L || !is.list(files)) {
+    return(list())
+  }
+  nms <- names(files)
+  if (!is.null(nms) && all(nzchar(nms))) {
+    files <- list(files)
+  }
+  files
+}
+
+# The label a file entry has in findings (its file name, else its position).
+dta_lint_entry_label <- function(entry, i) {
+  if (is.null(entry[["filename"]])) {
+    paste0("#", i)
+  } else {
+    paste(unlist(entry[["filename"]]), collapse = ", ")
+  }
+}
+
+# The containers pass over a raw document. Returns the findings and `ids`, the
+# named character vector (names = container ids, values = file names) of the
+# containers that are well formed, or NULL when the section is not a list at
+# all (no reference can then be judged).
+dta_lint_containers_list <- function(containers, datasets) {
+  refs <- list()
+  if (!is.null(datasets) && is.list(datasets)) {
+    if (dta_lint_entry_is_dataset(datasets)) datasets <- list(datasets)
+    for (d in datasets) {
+      if (!is.list(d)) next
+      label <- if (is.null(d[["id"]]) || length(d[["id"]]) != 1L) "" else as.character(d[["id"]])
+      entries <- dta_lint_file_entries(d[["files"]])
+      for (i in seq_along(entries)) {
+        e <- entries[[i]]
+        if (!is.list(e)) next
+        refs[[length(refs) + 1L]] <- list(
+          dataset = label, id = dta_lint_entry_label(e, i), ref = e[["container"]]
+        )
+      }
+    }
+  }
+  dta_lint_containers_core(containers, refs)
+}
+
+# `containers`: the raw section (a list of mappings); `refs`: one
+# list(dataset, id, ref) per file entry. Shared by the list and object forms.
+dta_lint_containers_core <- function(containers, refs) {
+  rows <- dta_lint_empty()
+  bad <- function(id, msg) {
+    dta_lint_row("", "container", id, "error", "container_invalid", msg)
+  }
+  if (is.null(containers) || length(containers) == 0L) {
+    return(list(rows = rows, ids = character(0)))
+  }
+  if (!is.list(containers) || !is.null(names(containers))) {
+    return(list(
+      rows = bad(NA_character_, "The 'containers' section must be a list of mappings."),
+      ids = NULL
+    ))
+  }
+  allowed <- c("id", "filename", "description", "default")
+  defined <- character(0)
+  defaults <- character(0)
+  seen <- character(0) # every id written in the section, even of a malformed element
+  for (i in seq_along(containers)) {
+    el <- containers[[i]]
+    pos <- as.character(i)
+    if (is.list(el) && is.character(el[["id"]]) && length(el[["id"]]) == 1L && !is.na(el[["id"]])) seen <- c(seen, el[["id"]])
+    if (!is.list(el) || is.null(names(el))) {
+      rows <- rbind(rows, bad(pos, sprintf("Container %d must be a mapping.", i)))
+      next
+    }
+    id <- el[["id"]]
+    shown <- if (is.character(id) && length(id) == 1L && !is.na(id) && nzchar(id)) id else pos
+    unknown <- setdiff(names(el), allowed)
+    if (length(unknown) > 0L) {
+      rows <- rbind(rows, bad(shown, sprintf(
+        "Unknown field(s) in container %d: %s.", i, paste0("'", unknown, "'", collapse = ", ")
+      )))
+      next
+    }
+    if (is.null(id) || is.null(el[["filename"]])) {
+      rows <- rbind(rows, bad(shown, sprintf("Container %d needs an 'id' and a 'filename'.", i)))
+      next
+    }
+    problem <- dta_container_def_problem(
+      id, el[["filename"]], el[["description"]],
+      if (is.null(el[["default"]])) FALSE else el[["default"]]
+    )
+    if (!is.null(problem)) {
+      rows <- rbind(rows, bad(shown, problem))
+      next
+    }
+    defined <- c(defined, stats::setNames(el[["filename"]], id))
+    if (isTRUE(el[["default"]])) defaults <- c(defaults, id)
+  }
+
+  dup_row <- function(id, msg) {
+    dta_lint_row("", "container", id, "error", "container_duplicate", msg)
+  }
+  for (dup in unique(names(defined)[duplicated(names(defined))])) {
+    rows <- rbind(rows, dup_row(dup, sprintf("Container id '%s' is used by more than one container.", dup)))
+  }
+  for (dup in unique(unname(defined)[duplicated(unname(defined))])) {
+    rows <- rbind(rows, dup_row(
+      names(defined)[match(dup, defined)],
+      sprintf("Container file name '%s' is used by more than one container.", dup)
+    ))
+  }
+  if (length(defaults) > 1L) {
+    rows <- rbind(rows, dup_row(
+      defaults[[1]],
+      sprintf("At most one container may be the default; %s are.", paste0("'", defaults, "'", collapse = ", "))
+    ))
+  }
+
+  # Unused: an explicit, non-default container no entry names by id or file name.
+  used <- unlist(lapply(refs, function(r) if (is.character(r$ref)) r$ref))
+  for (k in seq_along(defined)) {
+    id <- names(defined)[[k]]
+    if (!(id %in% defaults) && !(id %in% used) && !(defined[[k]] %in% used)) {
+      rows <- rbind(rows, dta_lint_row(
+        "", "container", id, "warning", "container_unused",
+        sprintf("Container '%s' is not used: no file entry refers to it.", id)
+      ))
+    }
+  }
+  for (r in refs) {
+    if (is.character(r$ref) && length(r$ref) == 1L && r$ref %in% defined) {
+      rows <- rbind(rows, dta_lint_row(
+        r$dataset, "file", r$id, "warning", "container_reference_by_filename",
+        sprintf(
+          "Entry refers to container '%2$s' by its file name '%1$s'; it works, but refer to it as '%2$s' so renaming the file keeps it.",
+          r$ref, names(defined)[match(r$ref, defined)]
+        )
+      ))
+    }
+  }
+  # An id written in the section is never "unknown" in a file entry; only a
+  # malformed container itself is flagged.
+  extra <- setdiff(seen, names(defined))
+  list(rows = rows, ids = c(defined, stats::setNames(rep(NA_character_, length(extra)), extra)))
 }
 
 dta_lint_metadata_list <- function(md) {
@@ -641,7 +847,7 @@ dta_lint_metadata_object <- function(md) {
   out
 }
 
-dta_lint_dataset_list <- function(d, label) {
+dta_lint_dataset_list <- function(d, label, container_ids = NULL) {
   out <- dta_lint_empty()
   id <- d[["id"]]
   if (is.null(id) || length(id) != 1L || !nzchar(as.character(id))) {
@@ -670,7 +876,7 @@ dta_lint_dataset_list <- function(d, label) {
         "'container' belongs to a file entry: write it under 'files:'."
       ))
     }
-    out <- rbind(out, dta_lint_files_list(d[["files"]], label))
+    out <- rbind(out, dta_lint_files_list(d[["files"]], label, container_ids))
     if (!identical(type, "tabular")) {
       return(out)
     }
@@ -681,8 +887,11 @@ dta_lint_dataset_list <- function(d, label) {
 # The file entries of a dataset, judged without building them: a key the
 # entry's constructor does not take, and a `container` that is not a single
 # .zip/.xpt file name. `files` is normalised as dta_file_handlers_from_list()
-# does (fully named = one entry, otherwise a list of entries).
-dta_lint_files_list <- function(files, dataset) {
+# does (fully named = one entry, otherwise a list of entries). `container_ids`:
+# the containers the document defines (names = ids, values = file names; a plain
+# character vector is read as ids); NULL = unknown, which skips
+# file_container_unknown (a dataset linted on its own).
+dta_lint_files_list <- function(files, dataset, container_ids = NULL) {
   out <- dta_lint_empty()
   if (is.null(files) || length(files) == 0L || !is.list(files)) {
     return(out)
@@ -716,11 +925,24 @@ dta_lint_files_list <- function(files, dataset) {
       }
     }
     if (!is.null(entry[["container"]])) {
-      problem <- dta_container_value_problem(entry[["container"]])
+      ref <- entry[["container"]]
+      problem <- dta_container_ref_problem(ref)
       if (!is.null(problem)) {
         out <- rbind(out, dta_lint_row(
           dataset, "file", id, "error", "file_container_invalid", problem
         ))
+      } else if (!is.null(container_ids) && !identical(ref, "none") &&
+        !grepl(".", ref, fixed = TRUE)) {
+        known <- if (is.null(names(container_ids))) container_ids else names(container_ids)
+        if (!(ref %in% known)) {
+          out <- rbind(out, dta_lint_row(
+            dataset, "file", id, "error", "file_container_unknown",
+            sprintf(
+              "The container '%s' is not defined: add it to the document's 'containers' section.",
+              ref
+            )
+          ))
+        }
       }
     }
     # The bounds the entry would be refused for when built (the DTAFile
@@ -810,6 +1032,7 @@ dta_lint_specs_lists <- function(columns, rules, dataset) {
 
 dta_lint_object <- function(x) {
   if (inherits(x, "DTAtools::DTA")) {
+    if (dta_is_stale(x)) x <- dta_upgrade(x)
     out <- dta_lint_empty()
     if (!is.null(x@metadata)) {
       out <- rbind(out, dta_lint_metadata_object(x@metadata))
@@ -825,7 +1048,21 @@ dta_lint_object <- function(x) {
     for (d in datasets) {
       out <- rbind(out, dta_lint_object(d))
     }
-    return(out)
+    containers <- lapply(unname(dta_containers(x)), function(cn) {
+      list(id = cn@id, filename = cn@filename, description = cn@description, default = cn@default)
+    })
+    refs <- list()
+    for (d in datasets) {
+      for (i in seq_along(d@files)) {
+        h <- d@files[[i]]
+        refs[[length(refs) + 1L]] <- list(
+          dataset = as.character(d@id)[1], id = paste(h@filename, collapse = ", "),
+          ref = dta_handler_container(h)
+        )
+      }
+    }
+    out <- rbind(out, dta_lint_containers_core(containers, refs)$rows)
+    return(rbind(out, dta_lint_file_name_conflicts(dta_conflict_slots(x))))
   }
   if (inherits(x, "DTAtools::DTADataSetTabular")) {
     return(dta_lint_with_dataset(

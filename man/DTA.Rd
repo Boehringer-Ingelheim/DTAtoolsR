@@ -4,7 +4,7 @@
 \alias{DTA}
 \title{DTA Class}
 \usage{
-DTA(datasets = NULL, metadata = NULL, ...)
+DTA(datasets = NULL, metadata = NULL, containers = NULL, ...)
 }
 \arguments{
 \item{datasets}{A list of DTADataSet objects, keyed by their \code{id}. An
@@ -14,6 +14,12 @@ up by id, so a repeated id would validate one entry twice and the other
 never.}
 
 \item{metadata}{A DTAMetaData object.}
+
+\item{containers}{A list of \code{\link{DTAContainer}} objects, the delivery
+archives the agreement names. An unnamed list is keyed automatically by
+the containers' ids. A file entry's \code{container} refers to one by id;
+a reference that equals a container's file name is rewritten to its id.
+At most one container may be the default.}
 
 \item{...}{If metadata is not set, additional arguments are passed to
 DTAMetaData(...).}

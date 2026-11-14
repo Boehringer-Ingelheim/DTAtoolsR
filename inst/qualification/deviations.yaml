@@ -695,3 +695,67 @@ limitations:
       column and the first row; it is never read with guessed characters. The
       sender should deliver the dataset as .sas7bdat, which records its
       encoding, or write the transport file from a UTF-8 session.
+
+  - id: LIM-019
+    title: A table bound by assigning tables is unrecorded, and a direct replacement keeps the old record
+    affects: [REQ-CONT-024, REQ-CONT-025]
+    reference: R/DTADataSetTabular-class.R (provenance); R/containerFindings.R; tests/test-OQ-CONT-model.R (OQ-CONT-045), tests/test-OQ-CONT-findings.R (OQ-CONT-050)
+    consequence: >
+      Where a file arrived is recorded by load_file() and load_delivery(), per
+      bound item. A table that is bound by assigning the tables property, or by
+      the constructor's tables argument, has no record: when its dataset has an
+      entry with an effective container, container_findings() reports it as
+      unrecorded and check() leaves the run incomplete until the file is loaded
+      with load_file() or load_delivery(). A table that replaces a recorded
+      table of the same name by assignment keeps the record of the table it
+      replaced, so it is judged by how the old table arrived, not the new one;
+      a content signal to detect the replacement was rejected as costly and
+      unstable for tables restored from disk. A caller who assigns tables
+      should load the files instead if the packaging verdict is to be about
+      them.
+
+  - id: LIM-020
+    title: A dataset outside its DTA resolves only file-name references and no default container
+    affects: [REQ-CONT-019, REQ-CONT-014]
+    reference: R/DTAFile-class.R (dta_resolve_container); tests/test-OQ-CONT-model.R (OQ-CONT-041), tests/test-OQ-CONT-documents.R (OQ-CONT-054)
+    consequence: >
+      Containers are defined by the document, so a dataset on its own does not
+      carry them. Used alone, its entries can resolve only a dotted file name
+      and none; a reference by container id cannot be resolved, and the default
+      container does not apply, so load_delivery() and check() on a dataset
+      judge only the file names its entries state. A dataset exported on its own
+      prints the reference as written, an id included. The id is resolved when
+      the dataset is in its DTA; load_delivery() on a dataset whose entry refers
+      to an id aborts with dta_container_unknown, and the message says to pass
+      the DTA.
+
+  - id: LIM-021
+    title: Templates have no containers section
+    affects: [REQ-CONT-019]
+    reference: R/validateTemplate.R; thoughts/shared/plans/PLAN-container-manager.md (D14)
+    consequence: >
+      A creation template can state where a dataset's files must arrive only by
+      the file name in its entries, which makes an implied container; it cannot
+      define a container with an id, a description or a default, and
+      validate_template() reports nothing about a containers section written in
+      one. The only packaging rule a template library is held to is that its
+      datasets' file names must not overlap (REQ-CONT-032). A document created
+      from a template can be given containers afterwards.
+
+  - id: LIM-022
+    title: File-name conflicts are found only when a generated example name shows them
+    affects: [REQ-CONT-032]
+    reference: R/fileNameConflicts.R; tests/test-OQ-CONT-model.R (OQ-CONT-048)
+    consequence: >
+      file_name_conflicts(), and the lint warning and template error built on
+      it, generate example file names from each pattern and report a pair only
+      when a real example is taken by both entries, so every reported conflict
+      is genuine and comes with a file name. An overlap that no generated
+      example shows is not reported: look-arounds, back-references and inline
+      flags are not analysed, containers nested in containers are not
+      analysed, and a prefix glob and a suffix glob for containers
+      (STUDY_*.zip and *_SDTM.zip) are never seen to name one archive although
+      STUDY_SDTM.zip is taken by both. Such an overlap is found only when a
+      delivery arrives and a file matches several datasets, which
+      load_delivery() reports as ambiguous (REQ-CONT-020) and the caller
+      resolves with route.

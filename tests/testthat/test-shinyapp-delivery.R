@@ -308,14 +308,14 @@ test_that("the session budget reads its variable", {
 
 # ---- server tests -------------------------------------------------------------
 
-test_that("a zip dropped on one slot loads every dataset it feeds", {
+test_that("a zip dropped on the Delivery zone loads every dataset it feeds", {
   clean_session_file()
   spec <- dv_spec()
   zip1 <- cont_fx("sdtm_csv.zip")
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(zip1, "sdtm_csv.zip"))
+    session$setInputs(delivery_files = fi(zip1, "sdtm_csv.zip"))
 
     expect_identical(sort(names(rv$uploads)), c("ae||1", "dm||1"))
     rec <- rv$uploads[["dm||1"]][[1]]
@@ -346,8 +346,8 @@ test_that("a second delivery asks before replacing, and Cancel keeps the old dat
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(zip1, "sdtm_csv.zip"))
-    session$setInputs(up_1_1 = fi(zip2, "sdtm_csv.zip"))
+    session$setInputs(delivery_files = fi(zip1, "sdtm_csv.zip"))
+    session$setInputs(delivery_files = fi(zip2, "sdtm_csv.zip"))
 
     # The dialog: both replaced tables with their dataset, the two buttons, and
     # no way to dismiss it other than them.
@@ -383,12 +383,12 @@ test_that("Replace commits the delivery and deletes the superseded extraction", 
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(zip1, "sdtm_csv.zip"))
+    session$setInputs(delivery_files = fi(zip1, "sdtm_csv.zip"))
     first <- delivery_dirs(session)
     old <- rv$uploads[["ae||1"]][[1]]$path
     expect_true(file.exists(old))
 
-    session$setInputs(up_1_1 = fi(zip2, "sdtm_csv.zip"))
+    session$setInputs(delivery_files = fi(zip2, "sdtm_csv.zip"))
     session$setInputs(confirm_overwrite = 1)
 
     expect_length(rv$uploads[["ae||1"]], 1)
@@ -419,43 +419,59 @@ test_that("a hostile archive binds nothing", {
   })
 })
 
-test_that("a loose file for an entry that declares a container is rejected, before any overwrite question", {
+test_that("a loose file for an entry that declares a container loads on its own, and a second one asks before it replaces", {
   clean_session_file()
   spec <- dv_spec_container()
   ae1 <- cont_write("ae.csv", CONT_AE_CSV)
   ae2 <- cont_write("ae.csv", CONT_AE_CSV)
-  zip1 <- cont_fx("sdtm_csv.zip")
   mock_notifications()
+  mock_modals()
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
     session$setInputs(up_1_1 = fi(ae1, "ae.csv"))
 
-    expect_length(rv$uploads, 0)
-    expect_true(grepl("'ae.csv' (expected inside sdtm_csv.zip; drop the archive)", utils::tail(shown, 1), fixed = TRUE))
-
-    session$setInputs(up_1_1 = fi(zip1, "sdtm_csv.zip"))
+    # The old gate G3b refused this; the file is the individual check.
     expect_length(rv$uploads[["ae||1"]], 1)
+    expect_true(grepl(
+      "Loaded ae.csv on its own for checking. The agreement requires it inside sdtm_csv.zip, so this is not yet a conforming delivery.",
+      utils::tail(shown, 1),
+      fixed = TRUE
+    ))
 
+    # Back to the ordinary per-slot overwrite question.
     session$setInputs(up_1_1 = fi(ae2, "ae.csv"))
-    expect_null(rv$pending_upload)
-    expect_true(grepl("expected inside sdtm_csv.zip", utils::tail(shown, 1), fixed = TRUE))
+    expect_false(is.null(rv$pending_upload))
+    expect_true(grepl("Overwrite existing file(s)?", utils::tail(modals, 1), fixed = TRUE))
   })
 })
 
-test_that("the slot card and the loaded-files list name the container", {
+test_that("the slot card, the dataset hint and the loaded-files list name the container", {
   clean_session_file()
   spec <- dv_spec_container()
   zip1 <- cont_fx("sdtm_csv.zip")
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(zip1, "sdtm_csv.zip"))
+    session$setInputs(delivery_files = fi(zip1, "sdtm_csv.zip"))
+    # The Delivery view stands in for the slots until a dataset is clicked.
+    expect_identical(rv$main_view, "delivery")
+    do.call(session$setInputs, stats::setNames(list(1), paste0("selds_", rv$structure[["ae"]]$index)))
+    expect_identical(rv$main_view, "dataset")
 
     detail <- ui_text(output$dataset_detail)
     expect_true(grepl("in sdtm_csv.zip", detail, fixed = TRUE))
-    expect_true(grepl("Drop the .zip / .xpt it arrives in, or browse", detail, fixed = TRUE))
-    expect_true(grepl("or a whole .zip / .xpt delivery", detail, fixed = TRUE))
+    expect_true(grepl(
+      "Must arrive inside sdtm_csv.zip. Drop that archive on Delivery (sidebar) to load every dataset, or drop ae.csv here to check it on its own.",
+      detail,
+      fixed = TRUE
+    ))
+    expect_true(grepl("Drop or choose a file", detail, fixed = TRUE))
+    expect_true(grepl(
+      "Drop this dataset's files below. To load a whole delivery for every dataset, drop it on Delivery in the sidebar.",
+      detail,
+      fixed = TRUE
+    ))
     expect_true(grepl("from sdtm_csv.zip", ui_text(output$loaded_files), fixed = TRUE))
   })
 })
@@ -475,14 +491,14 @@ test_that("an archive named by one entry and declared by another fills both", {
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(archive, "sdtm.zip"))
+    session$setInputs(delivery_files = fi(archive, "sdtm.zip"))
 
     expect_length(rv$uploads[["archive||1"]], 1)
     expect_length(rv$uploads[["define||1"]], 1)
   })
 })
 
-test_that("a mixed drop goes through the delivery path in one step", {
+test_that("a mixed drop on a slot goes through one delivery for that dataset", {
   clean_session_file()
   spec <- dv_spec()
   zip1 <- cont_fx("sdtm_csv.zip")
@@ -495,8 +511,19 @@ test_that("a mixed drop goes through the delivery path in one step", {
     session$setInputs(up_1_1 = fi(c(zip1, dm, lb), c("sdtm_csv.zip", "dm.csv", "lb.csv")))
 
     expect_null(rv$pending_upload)
+    # Only ae: dm's files, inside the archive and loose, are for another dataset.
     expect_identical(names(rv$uploads), "ae||1")
     expect_true(any(grepl("Not loaded (empty or not transferred completely): lb.csv", shown, fixed = TRUE)))
+    # One delivery, so one record of it; the loose file travelled with it.
+    expect_identical(unique(rv$last_delivery$plan$delivered), c("sdtm_csv.zip", "dm.csv"))
+    expect_true(grepl(
+      "Loaded only ae's files from sdtm_csv.zip (ae.csv).",
+      utils::tail(shown, 1),
+      fixed = TRUE
+    ))
+    expect_true(grepl("judged as delivered", utils::tail(shown, 1), fixed = TRUE))
+    # A slot drop does not take over the main area.
+    expect_identical(rv$main_view, "dataset")
   })
 })
 
@@ -512,6 +539,7 @@ test_that("the editor form offers xpt and the container field after the type hin
 
     html <- ui_text(output$file_modal_body)
     expect_match(html, 'id="file_container"', fixed = TRUE)
+    expect_match(html, "Loose or in any container", fixed = TRUE)
     expect_match(html, 'value="xpt"', fixed = TRUE)
     expect_match(html, "SAS transport (.xpt)", fixed = TRUE)
     expect_match(html, "file_type != .{1,6}xpt")
@@ -544,7 +572,8 @@ test_that("the editor shows a stored container and keeps it when the field did n
     unlock_editing(session)
     session$setInputs(edit_files = 1)
     session$setInputs(file_edit_click = 1)
-    expect_true(grepl('value="sdtm.zip"', ui_text(output$file_modal_body), fixed = TRUE))
+    # A select now: the stored file name is an implied container, offered and selected.
+    expect_true(grepl('<option value="sdtm.zip" selected>sdtm.zip</option>', ui_text(output$file_modal_body), fixed = TRUE))
 
     # Every input the form renders except the container field.
     session$setInputs(
@@ -677,14 +706,14 @@ test_that("discarding one dataset a shared delivery filled frees exactly its fil
     session$setInputs(up_1_1 = fi(a1, "a.zip"))
     # up_2_1 is dm's slot; in a browser it exists only while dm is the active
     # dataset, testServer() accepts it regardless.
-    session$setInputs(up_2_1 = fi(b1, "b.zip"))
+    session$setInputs(delivery_files = fi(b1, "b.zip"))
     # 83 bytes against the 47 left.
     expect_identical(names(rv$uploads), "ae||1")
     expect_true(grepl("remove or discard", utils::tail(shown, 1), fixed = TRUE))
 
     session$setInputs(discard_all = 1)
     session$setInputs(confirm_discard_all = 1)
-    session$setInputs(up_2_1 = fi(b2, "b.zip"))
+    session$setInputs(delivery_files = fi(b2, "b.zip"))
     expect_identical(sort(names(rv$uploads)), c("ae||1", "dm||1"))
     ae_file <- rv$uploads[["ae||1"]][[1]]$path
     dm_file <- rv$uploads[["dm||1"]][[1]]$path
@@ -716,7 +745,7 @@ test_that("session end keeps only the files a file dataset uses", {
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(zipf, "d.zip"))
+    session$setInputs(delivery_files = fi(zipf, "d.zip"))
     ae_path <<- rv$uploads[["ae||1"]][[1]]$path
     define_path <<- rv$uploads[["define||1"]][[1]]$path
     expect_true(file.exists(ae_path))
@@ -794,12 +823,12 @@ test_that("a delivery over validated datasets marks every dataset it fed not val
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(zip1, "sdtm_csv.zip"))
+    session$setInputs(delivery_files = fi(zip1, "sdtm_csv.zip"))
     session$setInputs(check_all = 1)
     expect_identical(rv$status[["ae"]], "pass")
     expect_identical(rv$status[["dm"]], "pass")
 
-    session$setInputs(up_1_1 = fi(zip2, "sdtm_csv.zip"))
+    session$setInputs(delivery_files = fi(zip2, "sdtm_csv.zip"))
     session$setInputs(confirm_overwrite = 1)
     expect_identical(rv$status[["ae"]], "pending")
     expect_identical(rv$status[["dm"]], "pending")
@@ -899,7 +928,7 @@ test_that("a drop refused by a small budget in an empty session names the admini
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(zip1, "sdtm_csv.zip"))
+    session$setInputs(delivery_files = fi(zip1, "sdtm_csv.zip"))
 
     expect_length(rv$uploads, 0)
     last <- utils::tail(shown, 1)
@@ -965,7 +994,7 @@ test_that("a restored session owns the extracted files it re-reads", {
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_client_id = id)
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(zipf, "d.zip"))
+    session$setInputs(delivery_files = fi(zipf, "d.zip"))
     define_path <<- rv$uploads[["define||1"]][[1]]$path
     session$close()
   })
@@ -1002,7 +1031,7 @@ test_that("a bound archive's staged copy survives the commit", {
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(archive, "sdtm.zip"))
+    session$setInputs(delivery_files = fi(archive, "sdtm.zip"))
 
     bound <- DTAtools::datasets(rv$dta, "archive")@file_paths
     expect_length(bound, 1)
@@ -1021,7 +1050,7 @@ test_that("a file bound into two datasets survives discarding one of them", {
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(a, "a.zip"))
+    session$setInputs(delivery_files = fi(a, "a.zip"))
     shared <- rv$uploads[["ae2||1"]][[1]]$path
     expect_identical(rv$uploads[["ae||1"]][[1]]$path, shared)
     expect_true(file.exists(shared))
@@ -1075,7 +1104,7 @@ test_that("a committed delivery is in the autosave", {
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_client_id = strrep("9", 32))
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(zip1, "sdtm_csv.zip"))
+    session$setInputs(delivery_files = fi(zip1, "sdtm_csv.zip"))
 
     f <- list.files(tempdir(), pattern = "^dtatools_app_session.*[.]rds$", full.names = TRUE)
     expect_length(f, 1)
@@ -1093,7 +1122,7 @@ test_that("a loose file loaded beside an archive has no container", {
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(c(a, dm), c("a.zip", "dm.csv")))
+    session$setInputs(delivery_files = fi(c(a, dm), c("a.zip", "dm.csv")))
 
     expect_setequal(names(rv$uploads), c("ae||1", "dm||1"))
     expect_identical(rv$uploads[["ae||1"]][[1]]$container, "a.zip")
@@ -1136,10 +1165,15 @@ test_that("the container check reads the slot's own entry, not the first one", {
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
     session$setInputs(up_1_1 = fi(ae, "ae.csv"))
     expect_length(rv$uploads[["ae||1"]], 1)
+    # Entry 1 declares no container: the plain toast.
+    expect_true(grepl("Loaded 1 file(s) into 'ae'", utils::tail(shown, 1), fixed = TRUE))
 
+    # Entry 2 does: the loose file is its individual check, and the toast names
+    # entry 2's container, not entry 1's (it has none).
     session$setInputs(up_1_2 = fi(ae2, "ae2.csv"))
-    expect_length(rv$uploads[["ae||2"]], 0)
-    expect_true(grepl("'ae2.csv' (expected inside a.zip; drop the archive)", utils::tail(shown, 1), fixed = TRUE))
+    expect_length(rv$uploads[["ae||2"]], 1)
+    expect_true(grepl("Loaded ae2.csv on its own for checking", utils::tail(shown, 1), fixed = TRUE))
+    expect_true(grepl("requires it inside a.zip", utils::tail(shown, 1), fixed = TRUE))
   })
 })
 
@@ -1153,7 +1187,7 @@ test_that("the note names what a declared container did not hold", {
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(a, "a.zip"))
+    session$setInputs(delivery_files = fi(a, "a.zip"))
 
     expect_identical(names(rv$uploads), "ae||1")
     expect_true(grepl("Not in the delivery: dm.csv", utils::tail(shown, 1), fixed = TRUE))
@@ -1246,7 +1280,7 @@ test_that("a second tab that restores the session does not lose the first tab's 
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_client_id = id)
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(zipf, "sdtm.zip"))
+    session$setInputs(delivery_files = fi(zipf, "sdtm.zip"))
     ae_path <- rv$uploads[["ae||1"]][[1]]$path
     root <<- delivery_root(ae_path)
     expect_true(file.exists(ae_path))
@@ -1278,7 +1312,7 @@ test_that("a second tab that restores the session does not lose the first tab's 
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_client_id = id)
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(zipf, "sdtm.zip"))
+    session$setInputs(delivery_files = fi(zipf, "sdtm.zip"))
     def_path <- rv$uploads[["define||1"]][[1]]$path
     root <<- delivery_root(def_path)
 
@@ -1307,7 +1341,7 @@ test_that("without a second tab, removing the delivery's last file still deletes
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_client_id = strrep("c", 32))
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(zipf, "sdtm.zip"))
+    session$setInputs(delivery_files = fi(zipf, "sdtm.zip"))
     def_path <- rv$uploads[["define||1"]][[1]]$path
     fid <- get_file_id("define", 1L, "define.xml")
     do.call(session$setInputs, stats::setNames(list(1), paste0("rmfile_", fid)))
@@ -1391,7 +1425,7 @@ test_that("a streamed delivery table comes back after the session ends and is re
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_client_id = id)
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(zipf, "sdtm.zip"))
+    session$setInputs(delivery_files = fi(zipf, "sdtm.zip"))
     session$setInputs(check_all = 1) # an autosave follows the delivery
     session$close()
   })
@@ -1524,7 +1558,7 @@ test_that("Start over in a second tab does not delete the files the first tab st
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_client_id = id)
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(zipf, "sdtm.zip"))
+    session$setInputs(delivery_files = fi(zipf, "sdtm.zip"))
     ae_path <- rv$uploads[["ae||1"]][[1]]$path
     root <<- delivery_root(ae_path)
 
@@ -1547,7 +1581,7 @@ test_that("without a second tab, Start over still deletes the delivery", {
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_client_id = strrep("f", 32))
     session$setInputs(dta_file = fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = fi(zipf, "sdtm.zip"))
+    session$setInputs(delivery_files = fi(zipf, "sdtm.zip"))
     root <- delivery_root(rv$uploads[["ae||1"]][[1]]$path)
     expect_true(dir.exists(root))
     session$setInputs(confirm_reset = 1)

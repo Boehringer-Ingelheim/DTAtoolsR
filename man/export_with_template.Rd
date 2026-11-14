@@ -91,7 +91,9 @@ fills them from its \code{document_name}, \code{document_abbreviation},
 \code{{SUPPLIER_CONTACTS_TABLE}}, \code{{RECEIVER_CONTACTS_TABLE}},
 \code{{SIGNATURES_TABLE}}, \code{{VERSION_HISTORY_TABLE}}, \code{{STUDY_TABLE}},
 \code{{AGREEMENT_SECTIONS}},
-\code{{AUTHORIZED_CORRECTIONS_LIST}}. Unlike the placeholders above, a block
+\code{{AUTHORIZED_CORRECTIONS_LIST}}, \code{{CONTAINERS_TABLE}} (the delivery
+containers: an intro sentence and a table; omitted when the document
+has none). Unlike the placeholders above, a block
 placeholder is replaced by rendered Word content -- a table, a heading, a
 list -- so it must be the only text in its paragraph, and only in the
 document body (not a header, footer or table cell). A \code{variables} entry

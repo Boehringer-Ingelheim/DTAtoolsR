@@ -208,3 +208,40 @@ test_that("failure after a section write still leaves the original document unch
   expect_null(failed$value)
   expect_identical(current, before)
 })
+
+# ---- Containers in the dataset leaves ---------------------------------------------
+
+diff_ctr_dta <- function(ref = NULL, containers = list()) {
+  DTAtools::DTA(
+    datasets = list(DTAtools::DTADataSetTabular(
+      id = "ae", specs = DTAtools::create_example_DTAColumnSpecCollection(1),
+      files = list(DTAtools::DTAFileFactory(type = "csv", filename = "ae.csv", container = ref))
+    )),
+    metadata = DTAtools::create_example_DTAMetaData(),
+    containers = containers
+  )
+}
+
+test_that("dataset leaves carry the entry's own reference resolved to its file name", {
+  leaves <- app_fn("dta_dataset_leaves")
+  ctr <- list(DTAtools::DTAContainer("adam", "adam.zip", default = TRUE))
+  # An id is written as the file name, so an id and the file name it stands for
+  # are the same leaf (a materialised implied container is no change).
+  expect_identical(leaves(diff_ctr_dta("adam", ctr))[["ae.files.container"]], "adam.zip")
+  expect_identical(leaves(diff_ctr_dta("adam.zip"))[["ae.files.container"]], "adam.zip")
+  expect_identical(leaves(diff_ctr_dta("none", ctr))[["ae.files.container"]], "none")
+  # The default container is NOT applied to an entry without its own reference.
+  expect_null(leaves(diff_ctr_dta(NULL, ctr))[["ae.files.container"]])
+})
+
+test_that("dta_diff() has a containers section named by file name", {
+  a <- diff_ctr_dta(NULL, list(DTAtools::DTAContainer("adam", "adam.zip")))
+  b <- diff_ctr_dta(NULL, list(
+    DTAtools::DTAContainer("adam", "adam.zip", description = "ADaM"),
+    DTAtools::DTAContainer("sdtm", "sdtm.zip")
+  ))
+  d <- app_fn("dta_diff")(a, b)
+  expect_setequal(d$containers$key, c("adam.zip.description", "sdtm.zip.filename"))
+  expect_identical(d$containers$change[d$containers$key == "adam.zip.description"], "added")
+  expect_identical(nrow(app_fn("dta_diff")(a, a)$containers), 0L)
+})

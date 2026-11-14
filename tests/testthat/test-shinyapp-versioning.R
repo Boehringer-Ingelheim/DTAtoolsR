@@ -969,3 +969,78 @@ test_that("editing after 'create new from current' summarises against the restar
     expect_equal(first$changes, app_fn("dta_new_document_seed")(old_title, old_version))
   })
 })
+
+# ---- Containers in the version summary ----------------------------------------
+# (plan 5.8: dta_diff() gains a `containers` section keyed by id; an implied
+# container made explicit is no dataset change.)
+
+ver_ctr_dta <- function(ref = NULL, containers = list(), ds = "ae") {
+  DTAtools::DTA(
+    datasets = list(DTAtools::DTADataSetTabular(
+      id = ds, specs = DTAtools::create_example_DTAColumnSpecCollection(1),
+      files = list(DTAtools::DTAFileFactory(type = "csv", filename = "ae.csv", container = ref))
+    )),
+    metadata = DTAtools::create_example_DTAMetaData(),
+    containers = containers
+  )
+}
+
+test_that("a container's file-name change is listed in the version summary", {
+  a <- ver_ctr_dta("adam", list(DTAtools::DTAContainer("adam", "adam.zip")))
+  b <- ver_ctr_dta("adam", list(DTAtools::DTAContainer("adam", "adam_v2.zip")))
+  diff <- app_fn("dta_diff")(a, b)
+  expect_identical(diff$containers$key, "adam_v2.zip.filename")
+  expect_identical(diff$containers$change, "changed")
+  # The entry still names the container, which resolves to the new file name:
+  # the dataset leaves read the entry's reference as a FILE NAME, so the rename
+  # is a dataset change too -- but the container line is the one that explains it.
+  summary <- app_fn("dta_version_change_summary")(diff)
+  expect_match(summary, "Containers: 1 changed.", fixed = TRUE)
+  expect_match(summary, "changed containers.adam_v2.zip.filename ('adam.zip' -> 'adam_v2.zip')", fixed = TRUE)
+})
+
+test_that("materialising an implied container changes no dataset", {
+  implied <- ver_ctr_dta("sdtm_csv.zip")
+  saved <- app_fn("dta_container_save")(implied, "sdtm_csv.zip", "sdtm_csv.zip", NULL, FALSE)
+  expect_true(saved$ok)
+  # The entry now says "sdtm_csv" (an id) instead of the file name ...
+  expect_identical(saved$value@datasets[["ae"]]@files[[1]]@container, "sdtm_csv")
+  diff <- app_fn("dta_diff")(implied, saved$value)
+  # ... which is no change of the dataset, only a new container.
+  expect_identical(nrow(diff$datasets), 0L)
+  expect_identical(diff$containers$key, "sdtm_csv.zip.filename")
+  expect_true(all(diff$containers$change == "added"))
+  summary <- app_fn("dta_version_change_summary")(diff)
+  expect_no_match(summary, "Datasets:", fixed = TRUE)
+  expect_match(summary, "Containers: 1 added.", fixed = TRUE)
+})
+
+test_that("ticking the default container is not a change of every dataset", {
+  a <- ver_ctr_dta(NULL, list(DTAtools::DTAContainer("adam", "adam.zip")))
+  b <- ver_ctr_dta(NULL, list(DTAtools::DTAContainer("adam", "adam.zip", default = TRUE)))
+  diff <- app_fn("dta_diff")(a, b)
+  expect_identical(nrow(diff$datasets), 0L)
+  expect_identical(diff$containers$key, "adam.zip.default")
+})
+
+test_that("a summary without a containers section is unchanged", {
+  diff <- list(
+    metadata = .empty_change_frame(),
+    datasets = data.frame(key = "ae.name", change = "changed", from = "a", to = "b", stringsAsFactors = FALSE)
+  )
+  expect_identical(
+    app_fn("dta_version_change_summary")(diff),
+    "Datasets: 1 changed. Details: changed ae.name ('a' -> 'b')"
+  )
+})
+
+test_that("creating a new version keeps the document's containers", {
+  dta <- ver_ctr_dta("adam", list(DTAtools::DTAContainer("adam", "adam.zip", default = TRUE)))
+  bumped <- app_fn("dta_append_version_entry")(dta, "9.9")
+  expect_true(bumped$ok)
+  expect_identical(names(bumped$value@containers), "adam")
+  restarted <- app_fn("dta_restart_version_history")(dta, version = "0.1")
+  expect_true(restarted$ok)
+  expect_identical(names(restarted$value@containers), "adam")
+  expect_true(restarted$value@containers[["adam"]]@default)
+})

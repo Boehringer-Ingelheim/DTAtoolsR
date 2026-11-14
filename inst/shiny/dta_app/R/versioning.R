@@ -157,7 +157,7 @@ dta_version_change_line <- function(key, change, from, to) {
   paste0(section_label, ": ", paste(fragments, collapse = ", "), ".")
 }
 
-# Render a dta_diff() result (list(metadata = <frame>, datasets = <frame>))
+# Render a dta_diff() result (list(metadata, containers, datasets), each a frame)
 # as one single-line, non-empty `changes` string for a version_history entry.
 #
 # Non-empty is not a style choice: the DTAMetaData validator rejects an
@@ -166,6 +166,15 @@ dta_version_change_line <- function(key, change, from, to) {
 dta_version_change_summary <- function(diff, note = "", max_items = 50) {
   metadata <- diff$metadata
   datasets <- diff$datasets
+  containers <- diff$containers
+
+  if (is.null(containers)) {
+    containers <- data.frame(
+      key = character(0), change = character(0),
+      from = character(0), to = character(0),
+      stringsAsFactors = FALSE
+    )
+  }
 
   if (is.null(metadata) || nrow(metadata) == 0) {
     metadata <- data.frame(
@@ -191,11 +200,15 @@ dta_version_change_summary <- function(diff, note = "", max_items = 50) {
   # what keeps every detail line self-describing on its own.
   meta_keys <- if (nrow(metadata) > 0) paste0("metadata.", metadata$key) else character(0)
   ds_keys <- if (nrow(datasets) > 0) datasets$key else character(0)
+  # Container leaves are keyed by container id ("sdtm.filename"); the prefix
+  # keeps a detail line self-describing, as "metadata." does.
+  ctr_keys <- if (nrow(containers) > 0) paste0("containers.", containers$key) else character(0)
 
   counts_parts <- Filter(
     function(x) nzchar(x),
     c(
       .dta_version_counts_line("Metadata", metadata$change),
+      .dta_version_counts_line("Containers", containers$change),
       .dta_version_counts_line("Datasets", datasets$change)
     )
   )
@@ -208,15 +221,15 @@ dta_version_change_summary <- function(diff, note = "", max_items = 50) {
   # CI's.
   n_meta <- nrow(metadata)
   n_ds <- nrow(datasets)
-  total_rows <- n_meta + n_ds
+  total_rows <- n_meta + nrow(containers) + n_ds
 
   if (total_rows == 0) {
     body <- "No changes recorded."
   } else {
-    all_keys <- c(meta_keys, ds_keys)
-    all_change <- c(metadata$change, datasets$change)
-    all_from <- c(metadata$from, datasets$from)
-    all_to <- c(metadata$to, datasets$to)
+    all_keys <- c(meta_keys, ctr_keys, ds_keys)
+    all_change <- c(metadata$change, containers$change, datasets$change)
+    all_from <- c(metadata$from, containers$from, datasets$from)
+    all_to <- c(metadata$to, containers$to, datasets$to)
 
     n_shown <- min(total_rows, max_items)
     idx <- seq_len(n_shown)

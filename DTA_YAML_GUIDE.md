@@ -19,13 +19,18 @@ the information you have allows.
 ```yaml
 metadata:   # agreement-level information (document header, parties, transfer)
   ...
+containers: # optional: the .zip / .xpt archives the files arrive in
+  - id: ...
+    ...
 datasets:   # one or more deliverables; each is validated independently
   - id: ...
     ...
 ```
 
-Only these two top-level keys exist. `metadata` is technically optional but if
+Only these three top-level keys exist. `metadata` is technically optional but if
 present `title` and `version` are **required** — always include it.
+`containers` is needed only when files arrive in archives (see "`containers`"
+at the end of section 2).
 
 ---
 
@@ -107,6 +112,36 @@ sections:
 Good sections to write when you have the facts: purpose, scope, data
 protection/pseudonymisation, quality control, change management, archiving.
 
+### `containers` (top level, optional)
+
+Names the delivery archives — a `.zip` or a SAS transport library (`.xpt`) —
+once, so that file entries refer to them (`container:` on a file handler,
+section 3) instead of repeating the file name, and so that renaming an archive
+is one edit. A list of mappings, written between `metadata` and `datasets`:
+
+```yaml
+containers:
+  - id: sdtm
+    filename: "STUDY_SDTM_*.zip"
+    description: >-
+      All SDTM domains as SAS transport files.
+    default: true
+  - id: adam
+    filename: adam.zip
+```
+
+| Key | Notes |
+| --- | --- |
+| `id` | **required**. A letter, then letters, digits, `_` or `-` (`sdtm`, `adam-2`); no dot. Unique. `none` is reserved (in any letter case). File entries refer to the container by it. |
+| `filename` | **required**. The archive's file name, a `.zip` or `.xpt` name, no folder. `*` and `?` are wildcards (`STUDY_SDTM_*.zip`); the name is matched as a whole and letter case must match. Quote a value that starts with `*` or contains ` #`. Unique. |
+| `description` | Free text; printed in the Containers section of the exported agreement. |
+| `default` | `true` on at most one container: every file entry **without** a `container` of its own must then arrive inside it, including datasets added later. Must be `true` or `false`. |
+
+No other keys. An entry's `container: none` opts that one entry out of the
+default container (e.g. a `define.pdf` that is sent separately). A container
+that no entry refers to and that is not the default is reported by the lint as
+`container_unused`.
+
 ---
 
 ## 3. `datasets`
@@ -146,7 +181,7 @@ current shape in new files.
 | `missing_values` | Extra token meaning "missing" besides empty, e.g. `"."` or `"NA"`. |
 | `newlines_in_values` | `true` if quoted cells may contain line breaks. |
 | `extensions` | `any` only: allowed endings, e.g. `[pdf, zip]`. A `.zip` or `.xpt` that such an entry accepts is kept as one file, not opened; to have its contents checked, name it as the `container` of their entries. |
-| `container` | Optional. The `.zip` or `.xpt` the file arrives inside; `*` and `?` are wildcards (`sdtm_*.zip`), and letter case must match (`sdtm.zip` does not match `SDTM.ZIP`). Quote a value that starts with `*` or contains ` #`: `container: "*_SDTM.zip"`. Leave it out when the file may come loose or in any container. |
+| `container` | Optional. Where the file must arrive: the **id** of a container of the top-level `containers` section (`sdtm`, no dot); or a container **file name** (it has a dot): `sdtm.zip`, with `*` and `?` as wildcards (`sdtm_*.zip`) and letter case significant (`sdtm.zip` does not match `SDTM.ZIP`); or `none`, which exempts the entry from the default container. Quote a value that starts with `*` or contains ` #`: `container: "*_SDTM.zip"`. Leave it out when the file may come loose or in any container (or, if a container is the `default`, must arrive inside that one). |
 
 CSV is comma-separated, TSV tab-separated; `.gz` files are read transparently.
 
@@ -171,9 +206,13 @@ loose: `load_delivery()` takes the archive or the library, looks at every file
 inside by name, and gives each one to the dataset whose file entry matches it.
 A delivery is loaded with `load_delivery()` or by dropping it in the app.
 
-One zip of CSV files, two datasets (columns omitted):
+One zip of CSV files, two datasets (columns omitted). Define the container
+once and refer to it by id:
 
 ```yaml
+containers:
+  - id: sdtm
+    filename: sdtm.zip
 datasets:
   - id: ae
     type: tabular
@@ -181,29 +220,58 @@ datasets:
     files:
       filename: ae.csv
       type: csv
-      container: sdtm.zip
+      container: sdtm
   - id: dm
     type: tabular
     name: Demographics
     files:
       filename: dm.csv
       type: csv
-      container: sdtm.zip
+      container: sdtm
+```
+
+Everything arrives in the zip, and every new dataset too: mark it `default`
+instead of repeating the reference. An entry that is the exception says
+`container: none`:
+
+```yaml
+containers:
+  - id: sdtm
+    filename: sdtm.zip
+    description: The whole SDTM delivery.
+    default: true
+datasets:
+  - id: ae
+    type: tabular
+    files:
+      filename: ae.csv        # no container: belongs to the default, sdtm
+      type: csv
+  - id: define
+    type: file
+    files:
+      filename: define.pdf
+      type: any
+      container: none         # sent separately
 ```
 
 One transport library `sdtm.xpt` holding the datasets AE, DM and VS: one entry
 per dataset (repeat it for `dm.xpt` and `vs.xpt`):
 
 ```yaml
+containers:
+  - id: sdtm
+    filename: sdtm.xpt
+datasets:
   - id: ae
     type: tabular
     files:
       filename: ae.xpt        # member AE of sdtm.xpt
       type: xpt
-      container: sdtm.xpt
+      container: sdtm
 ```
 
-Sometimes a zip, sometimes loose files: leave `container` out.
+Sometimes a zip, sometimes loose files: leave `container` out (and define no
+default).
 
 ```yaml
     files:
@@ -214,11 +282,19 @@ Sometimes a zip, sometimes loose files: leave `container` out.
 Dated archives (`STUDY123_SDTM_20251101.zip`, `STUDY123_SDTM_20251201.zip`):
 
 ```yaml
-    files:
-      filename: ae.csv
-      type: csv
-      container: STUDY123_SDTM_*.zip
+containers:
+  - id: sdtm
+    filename: STUDY123_SDTM_*.zip
 ```
+
+**Id or file name.** A reference without a dot is an id and must name a
+container of the document. A reference with a dot is a file name:
+`container: sdtm.zip` works without any `containers` section (the entry then
+declares an implied container of that name), and when it equals the `filename`
+of a defined container it means that container. Prefer the id: a reference by
+file name does not follow the container when its `filename` is edited later, and
+`lint_dta()` suggests the id (`container_reference_by_filename`). Templates keep
+using file names, because a template has no `containers` section.
 
 How a delivery is routed:
 
@@ -226,13 +302,22 @@ How a delivery is routed:
   case: member `AE` is offered as `ae.xpt`, which an entry `filename: ae.xpt`
   with `type: xpt` takes. A `.xpt` that holds a single dataset is a file like
   any other and is matched by its own name.
-- A container never needs declaring; declaring one limits where the file may
-  come from. A specification that declares `ae.csv` already takes `ae.csv` from
-  inside any zip given to `load_delivery()`. With `container: sdtm.zip` the entry takes an `ae.csv` only
-  when it came out of a container whose name matches (or out of a container
-  around that one); a loose `ae.csv` is listed as unused, with the container it
-  expects. The name is matched as a whole and apart from `pattern`, which
-  governs `filename` only.
+- A container never needs declaring; declaring one says where the file must
+  arrive. A specification that declares `ae.csv` already takes `ae.csv` from
+  inside any zip given to `load_delivery()`. With a container the entry ranks
+  an `ae.csv` that came out of a matching container (or out of a container
+  around that one) above one that did not. A loose `ae.csv`, or one from
+  another container, is **still loaded and its content validated** unless a
+  better entry takes it, and is reported as not conforming: it is `outside` in
+  `container_findings()` and `check()` says "Validation FAILED". A file loaded
+  on its own with `load_file()` is `unverified` ("Validation INCOMPLETE"). The
+  name is matched as a whole and apart from `pattern`, which governs `filename`
+  only.
+- Entries of different datasets may match the same file. A literal name that
+  two datasets declare gives the file to both. When pattern entries of several
+  datasets fit a file equally well, `load_delivery()` does not guess: the file
+  is `ambiguous` and is not loaded, until `route = list("lb_supp.csv" =
+  "lb_supp")` (R) or the app's question chooses.
 - A `.zip` or `.xpt` that a `type: any` entry takes as a deliverable (by its
   name, or because `extensions` lists `zip` or `xpt`) stays one file and is not
   opened, unless an entry declares it as its `container`; the load summary and
@@ -254,9 +339,40 @@ How a delivery is routed:
   summary and its `last_delivery` table do, and the app lists the archive under
   Loaded files.
 
-Only `load_delivery()` consults `container`; `load_file()` binds the file it is
-given to the entry it is told to. The limits that bound one call, and the rest
-of the rules, are in `?load_delivery`.
+`load_delivery()` routes by `container`; `load_file()` binds the file it is
+given to the entry it is told to, whatever its container (and refuses a `.zip`
+or an `.xpt` the entry does not read). The limits that bound one call, and the
+rest of the rules, are in `?load_delivery`.
+
+### File names must not overlap across datasets
+
+Write the agreement so that no file name could belong to two datasets. Two
+pattern entries of different datasets conflict when one file name matches both
+(and both are free of a container, or sit in containers that can name the same
+archive):
+
+```yaml
+  - id: lb
+    files:
+      filename: "^lb.*[.]csv$"       # takes lb_supp.csv too
+      type: csv
+      pattern: true
+  - id: lb_supp
+    files:
+      filename: "^lb_supp.*[.]csv$"
+      type: csv
+      pattern: true
+```
+
+`lint_dta()` reports this as the warning `file_name_conflict`, naming a file
+that both take; `validate_template()` makes it an error; the app refuses an
+edit that introduces one. Fix it with distinct prefixes (`^lb_main.*[.]csv$`
+and `^lb_supp.*[.]csv$`) or make one pattern exclude the other with a
+character class (`^lb([^_].*)?[.]csv$`). A look-ahead (`^lb(?!_supp).*[.]csv$`)
+also routes correctly, but the check does not analyse look-arounds,
+back-references or inline flags, so it neither confirms nor reports them.
+Two literal entries with the same name are not a conflict (both datasets get
+the file), nor is a literal name against a pattern (the literal wins).
 
 ---
 
@@ -663,4 +779,5 @@ datasets:
 - [ ] Each tabular dataset has a key `col_unique` rule, ranges for measurements,
       and conditional rules for status/unit/result dependencies — each with a `description`.
 - [ ] Rule and constraint ids unique, no whitespace; rules reference declared columns only.
-- [ ] A `container:` value names a `.zip` or `.xpt` file (no folder), on the file entry.
+- [ ] A `container:` value is the id of a defined container, a `.zip` or `.xpt` file name (no folder) or `none`, on the file entry; container ids and file names are unique, at most one container is `default`.
+- [ ] No two pattern entries of different datasets can take the same file name.

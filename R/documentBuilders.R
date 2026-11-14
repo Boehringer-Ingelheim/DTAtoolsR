@@ -652,12 +652,12 @@ NULL
 #' Build the expected-files table (flextable). Shared by the built-in layout and
 #' by the `{FILE_SPECS}` template block.
 #' @keywords internal
-.build_file_specs_table <- function(files, width = TEXT_WIDTH$portrait) {
+.build_file_specs_table <- function(files, width = TEXT_WIDTH$portrait, ctx = NULL, dataset = NULL) {
   if (is.null(files) || length(files) == 0) {
     return(NULL)
   }
 
-  file_data <- .file_specs_df(files)
+  file_data <- .file_specs_df(files, ctx = ctx, dataset = dataset)
 
   ft <- flextable::flextable(file_data)
   ft <- flextable::width(ft, j = 1, width = 1.8)
@@ -671,9 +671,22 @@ NULL
   ft
 }
 
+#' The Containers table (flextable), or NULL when no container is in effect
+#' @keywords internal
+.build_containers_table <- function(ctx, width = TEXT_WIDTH$portrait) {
+  df <- .containers_df(ctx)
+  if (nrow(df) == 0) {
+    return(NULL)
+  }
+  ft <- flextable::flextable(df)
+  ft <- flextable::width(ft, j = 1:3, width = c(1.8, 2.0, 3.0))
+  .fit_table_width(.style_table(ft), width)
+}
+
 #' Add file specifications section
 #' @keywords internal
-.add_file_specifications <- function(doc, files, title = "File Specifications", heading_level = 2) {
+.add_file_specifications <- function(doc, files, title = "File Specifications", heading_level = 2,
+                                     ctx = NULL, dataset = NULL) {
   doc <- if (is.null(heading_level)) .add_bold_subheading(doc, title) else .add_heading(doc, title, level = heading_level)
 
   if (is.null(files) || length(files) == 0) {
@@ -683,7 +696,7 @@ NULL
   doc <- .add_body_par(doc, .file_count_sentence(files))
   doc <- .add_spacer(doc)
 
-  ft <- .build_file_specs_table(files)
+  ft <- .build_file_specs_table(files, ctx = ctx, dataset = dataset)
   doc <- flextable::body_add_flextable(doc, ft, align = "left")
   doc <- .add_spacer(doc)
 

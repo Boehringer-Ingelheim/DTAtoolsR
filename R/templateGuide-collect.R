@@ -1324,7 +1324,7 @@
     shown <- if (isTRUE(f@pattern)) .tgc_chr(f@pattern_description) else ""
     if (nzchar(shown)) shown else .tgc_chr(f@filename)
   }, character(1))
-  cts <- unique(unlist(lapply(files, dta_handler_container)))
+  cts <- setdiff(unique(unlist(lapply(files, dta_handler_container))), "none")
   kv <- c(
     list(
       .tgc_join(names_),
