@@ -106,13 +106,15 @@ requirements:
 
   - id: REQ-SPEC-010
     text: >
-      The dataset classes DTADataSetTabular and DTADataSetFile shall each carry
-      their id, their optional name and description, their file handlers and
-      their validation state, and
-      DTADataSetFactory() shall build the one its type names.
+      The dataset classes DTADataSetTabular, DTADataSetMatrix and DTADataSetFile
+      shall each carry their id, their optional name and description, their
+      file handlers and their validation state, DTADataSetMatrix being a
+      DTADataSetTabular of type "matrix" whose column specifications are its
+      row-label columns, and DTADataSetFactory() shall build the one its type
+      names, tabular, matrix or file.
     risk: high
     category: interface
-    covers: [DTADataSet, DTADataSetTabular, DTADataSetFile, DTADataSetFactory]
+    covers: [DTADataSet, DTADataSetTabular, DTADataSetMatrix, DTADataSetFile, DTADataSetFactory]
     source: R/DTADataSet-class.R
 
   - id: REQ-SPEC-011
@@ -423,3 +425,24 @@ requirements:
     notes: >
       Without the check, a stray entry fails later and obscurely, in a
       validator or in check(), far from the place it was supplied.
+
+  - id: REQ-SPEC-032
+    text: >
+      lint_dta() shall lint the matrix datasets of a specification in the same
+      pass, as a bare dataset, inside a document or as a DTADataSetMatrix
+      object, and shall report at severity error, one row each, under these
+      codes: matrix_columns_key (columns on a dataset of type matrix),
+      row_labels_key (row_labels on a dataset of another type), matrix_key
+      (matrix on a dataset of another type), matrix_row_labels_missing,
+      matrix_file_type (a file entry that is not a CSV or TSV with a header),
+      matrix_field_missing, matrix_field_unknown, matrix_count_invalid,
+      matrix_corner_invalid (also for a corner list of the wrong length),
+      matrix_row_key_invalid, matrix_key_nullable, matrix_number_text,
+      matrix_rule_id_reserved, cell_range_type, cell_range_invalid and
+      cell_finite_type. A rule naming a data column rather than a row label
+      shall be reported as rule_column_undeclared. A clean matrix dataset shall
+      lint with zero rows.
+    risk: high
+    category: functional
+    covers: [lint_dta]
+    source: R/lintDTA.R; PLAN-matrix-dataset.md 4.6

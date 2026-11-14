@@ -1,0 +1,690 @@
+area: MATRIX
+title: Matrix datasets (type matrix)
+
+# A matrix is a delimited file whose header labels the data columns, whose
+# leading column(s) identify and describe each row, and whose remaining cells
+# hold one homogeneous measurement. The data columns are not listed in the
+# specification: they are described by a rule, so a delivery may carry tens of
+# thousands of them. Two things make this area high risk. The header decides
+# what every later column is called, so a header read wrongly misaligns every
+# cell finding that follows; and a cell is judged by a type, a range and a
+# missing-value rule that must say, for every raw token a supplier may write,
+# whether it is a value, a missing value or an error. A token classified the
+# wrong way is a value never checked.
+#
+# Notation. k is the number of row-label columns, c the number of header fields
+# above them (k, or k - 1 when the first corner entry is null), h the number of
+# header fields and m = h - c the number of data columns. "The reading name" of
+# a data column is its label when the label is non-empty and unique among all
+# column names, and "<column p>" otherwise, p being its 1-based position among
+# the fields of a data row.
+#
+# Expected values in the cases of this area come from the sentences below. The
+# cell tables are written token by token on purpose.
+
+requirements:
+  # ---- the class and what it reads ---------------------------------------------
+
+  - id: REQ-MATRIX-001
+    text: >
+      DTADataSetMatrix shall be a DTADataSetTabular whose type is "matrix",
+      built by DTADataSetFactory() and dta_dataset_from_list() for a dataset of
+      type matrix. Its column specifications are the row-label columns, matched
+      to the file's leading columns by position; load_file() shall bind one
+      table whose columns are the row-label ids followed by the data columns,
+      and check() and validation_status() shall judge it like a tabular
+      dataset, so that a file satisfying the specification is valid with no
+      message on any axis.
+    risk: high
+    category: functional
+    covers: [DTADataSetMatrix, DTADataSetFactory, dta_dataset_from_list, load_file, check, validation_status, messages]
+    source: "PLAN-matrix-dataset.md decisions D1, D2; R/DTADataSetMatrix-class.R"
+
+  - id: REQ-MATRIX-002
+    text: >
+      The header of a matrix file shall be its first non-blank record: blank
+      lines before it, whether LF, CRLF or lone CR, and a UTF-8 byte-order mark
+      shall be skipped, so that the file reads exactly as it would without
+      them.
+    risk: medium
+    category: functional
+    covers: [load_file, check]
+    source: "PLAN-matrix-dataset.md 3.1 rule 1"
+
+  - id: REQ-MATRIX-003
+    text: >
+      Header fields shall be taken as text, verbatim: a label 007 stays 007, a
+      label 1e3 stays 1e3, a label NA stays NA, and a label equal to a token
+      declared in the file handler's missing_values stays that text, because
+      those tokens never apply to the header.
+    risk: high
+    category: integrity
+    covers: [load_file, tables]
+    source: "PLAN-matrix-dataset.md 3.1 rule 2, D6"
+
+  - id: REQ-MATRIX-004
+    text: >
+      Before any data is read, load_file() shall compare the number of fields
+      of the first data row with h + (k - c) and, when they differ, abort with
+      a condition of class dta_matrix_header_gate and bind no table. A file
+      with no non-blank line aborts with class dta_matrix_header_empty, which
+      is also a dta_matrix_header_gate.
+    risk: high
+    category: integrity
+    covers: [load_file]
+    source: "PLAN-matrix-dataset.md 3.1 rule 3"
+
+  - id: REQ-MATRIX-005
+    text: >
+      When the first data row has exactly one field more than h + (k - c), the
+      abort shall have class dta_matrix_header_fewer (the header lacks the
+      field above the row names, as R write.table writes it) and its message
+      shall name the corner setting and the null entry that declares such a
+      header.
+    risk: high
+    category: integrity
+    covers: [load_file]
+    source: "PLAN-matrix-dataset.md 3.1 rule 3"
+
+  - id: REQ-MATRIX-006
+    text: >
+      When the first data row has exactly one field fewer than h + (k - c),
+      the abort shall have class dta_matrix_header_more (the header has a
+      field above the row labels that the corner does not declare) and its
+      message shall name the corner setting.
+    risk: high
+    category: integrity
+    covers: [load_file]
+    source: "PLAN-matrix-dataset.md 3.1 rule 3"
+
+  - id: REQ-MATRIX-007
+    text: >
+      When the first data row differs from h + (k - c) by two fields or more,
+      the abort shall have class dta_matrix_header_ragged.
+    risk: medium
+    category: integrity
+    covers: [load_file]
+    source: "PLAN-matrix-dataset.md 3.1 rule 3"
+
+  - id: REQ-MATRIX-008
+    text: >
+      A matrix file whose first record starts with # (a preamble such as
+      featureCounts or GCT writes) shall abort the load with a condition of
+      class dta_matrix_preamble, because preamble lines are not supported.
+    risk: medium
+    category: integrity
+    covers: [load_file]
+    source: "PLAN-matrix-dataset.md 3.1 rule 3"
+
+  - id: REQ-MATRIX-009
+    text: >
+      When the first record is a single field containing another delimiter,
+      for example a comma-separated file declared as tab-separated, load_file()
+      shall abort with a condition of class dta_matrix_delimiter.
+    risk: medium
+    category: integrity
+    covers: [load_file]
+    source: "PLAN-matrix-dataset.md 3.1 rule 3"
+
+  # ---- corner, labels, names -----------------------------------------------------
+
+  - id: REQ-MATRIX-010
+    text: >
+      The corner shall be declared as named (the header text above the row
+      labels is the row-label ids), blank (every such field is empty) or a list
+      of k header texts, whose first entry may be null to say the header has no
+      field above the first row label. A file whose corner agrees with the
+      declaration shall produce no corner finding, for each of: R write.csv
+      with row names (corner blank, header starting with an empty quoted
+      field); pandas to_csv with an unnamed index (blank); R write.table with
+      row names (list with null, header without that field); write.table with
+      an added description column (null, then the description's header text);
+      pandas with an unnamed index and a description column (empty text, then
+      the description's text); pandas with a named index (the index name);
+      header texts equal to the row-label ids (named); and a header text
+      containing a space.
+    risk: high
+    category: functional
+    covers: [load_file, check, messages]
+    source: "PLAN-matrix-dataset.md 2.1 corner-by-writer table, 3.1 rule 4"
+
+  - id: REQ-MATRIX-011
+    text: >
+      Each of the c corner fields that differs from its declared text shall be
+      reported as one column-specification finding with keyword corner, no
+      row, and the column set to the id of the row label the field belongs to.
+    risk: high
+    category: functional
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 3.1 rule 4, 3.5"
+
+  - id: REQ-MATRIX-012
+    text: >
+      Every non-empty data label shall satisfy the header's pattern, values
+      and length where declared; a label that does not shall be reported as a
+      column-specification finding with keyword propertyNames, no row, and the
+      column set to the label.
+    risk: high
+    category: functional
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 3.1 rule 5, 3.5"
+
+  - id: REQ-MATRIX-013
+    text: >
+      An empty data label shall be reported as a column-specification finding
+      with keyword propertyNames, no row, and the column set to the reading
+      name "<column p>"; the cells of that column shall be validated and
+      reported under the same name.
+    risk: high
+    category: functional
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 3.1 rules 5 and 7"
+
+  - id: REQ-MATRIX-014
+    text: >
+      A data label that occurs more than once among the data labels, or that
+      equals a row-label id, shall be reported as one column-specification
+      finding with keyword uniqueNames per repeated label, no row, naming the
+      positions and reading names of its columns; the cells of those columns
+      shall still be validated, under their reading names "<column p>".
+    risk: high
+    category: functional
+    covers: [check, messages, tables]
+    source: "PLAN-matrix-dataset.md 3.1 rules 5 and 7"
+
+  - id: REQ-MATRIX-015
+    text: >
+      The table's column names shall be the row-label ids followed, for each
+      data column in file order, by its label when that label is non-empty and
+      unique among all the names, and by "<column p>" otherwise; a label that
+      is itself the text of a generated name shall be replaced as well, so that
+      the names are always unique.
+    risk: high
+    category: integrity
+    covers: [load_file, tables]
+    source: "PLAN-matrix-dataset.md 3.1 rule 7"
+
+  - id: REQ-MATRIX-016
+    text: >
+      The number of data columns m shall lie within header.count: a smaller m
+      shall be reported with keyword minProperties and a larger one with
+      keyword maxProperties, each as a column-specification finding with no
+      row and no column. A scalar count shall mean exactly that many data
+      columns.
+    risk: high
+    category: functional
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 3.1 rule 6, 3.3"
+
+  - id: REQ-MATRIX-017
+    text: >
+      When header.values lists N labels and header.count is N, the header shall
+      carry exactly those N labels in any order: a header with fewer labels,
+      one with a label that is not listed and one with a listed label repeated
+      shall each be reported, and the listed labels in another order shall not
+      be.
+    risk: medium
+    category: functional
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 2.2 header.pattern/values/length"
+
+  # ---- rows ------------------------------------------------------------------------
+
+  - id: REQ-MATRIX-018
+    text: >
+      The row-label columns shall receive every check a tabular column
+      receives (type, length, pattern, values, nullability), matched to the
+      file's leading columns by position and reported at the row of the
+      offending cell with the row-label id as the column.
+    risk: high
+    category: functional
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 3.2, D2"
+
+  - id: REQ-MATRIX-019
+    text: >
+      The row key, by default the first row label, shall be unique: a key
+      value that occurs twice shall be reported as one error on the rules axis
+      with rule id .matrix:row_key and the key's column, and explain_messages()
+      shall resolve that rule id.
+    risk: high
+    category: functional
+    covers: [check, messages, validation_status, explain_messages]
+    source: "PLAN-matrix-dataset.md 3.2, D5"
+
+  - id: REQ-MATRIX-020
+    text: >
+      A composite row key, given as several row-label ids, shall be unique as a
+      combination: a row repeating the whole combination shall be reported
+      once, and a row that repeats one of the ids but not the combination
+      shall not be reported.
+    risk: high
+    category: functional
+    covers: [check, validation_status]
+    source: "PLAN-matrix-dataset.md 3.2"
+
+  - id: REQ-MATRIX-021
+    text: >
+      A row key shall not be missing: a key column declared nullable true
+      shall be refused when the dataset is built, with a condition of class
+      dta_matrix_invalid_key_nullable, and a missing key cell in a delivery
+      shall be reported with keyword type at its row and the key's column.
+    risk: high
+    category: functional
+    covers: [dta_dataset_from_list, check, messages]
+    source: "PLAN-matrix-dataset.md 2.2 matrix.rows.key, D10"
+
+  - id: REQ-MATRIX-022
+    text: >
+      The number of data rows r shall lie within rows.count, whose default
+      minimum is 1: a smaller r shall be reported with keyword minItems and a
+      larger one with keyword maxItems, each as a column-specification finding
+      with no row and no column. A file with a header and no data row shall
+      therefore fail by default and shall pass when rows.count.min is written
+      as 0.
+    risk: high
+    category: functional
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 3.2, D10"
+
+  - id: REQ-MATRIX-023
+    text: >
+      When a scan is stopped early (fail_fast), the row-count check shall be
+      reported as failed if the rows already seen exceed rows.count.max, as
+      passed if they already reach rows.count.min, and otherwise as
+      not_checked; a minItems finding shall never be raised from a partial
+      scan.
+    risk: high
+    category: integrity
+    covers: [check, validation_errors, messages]
+    source: "PLAN-matrix-dataset.md 3.2 partial-scan semantics, 3.5 vocabulary"
+
+  # ---- dimensions -----------------------------------------------------------------
+
+  - id: REQ-MATRIX-024
+    text: >
+      A count (header.count, rows.count) written as a scalar shall mean exactly
+      that number; written as a mapping, min alone shall mean at least, max
+      alone at most, with the other bound at its default (1 for data columns
+      and for rows, unbounded above); absent shall mean the default.
+    risk: medium
+    category: functional
+    covers: [dta_dataset_from_list, check, messages]
+    source: "PLAN-matrix-dataset.md 3.3"
+
+  - id: REQ-MATRIX-025
+    text: >
+      A count that is not a whole number, is negative, has min above max, or is
+      below 1 for header.count shall be refused when the dataset is built, with
+      a condition of class dta_matrix_count_invalid.
+    risk: medium
+    category: functional
+    covers: [dta_dataset_from_list]
+    source: "PLAN-matrix-dataset.md 3.3"
+
+  # ---- cells: one requirement per row of the contract table ------------------------
+
+  - id: REQ-MATRIX-026
+    text: >
+      In a SAS Num or SAS Int cell, the raw texts 12, " 12 " (with surrounding
+      blanks), +12, 012 and 1.2e1 shall each be the value 12, and in a SAS Char
+      cell each shall be kept as delivered.
+    risk: high
+    category: integrity
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 3.4 table row 1; LIM-025"
+
+  - id: REQ-MATRIX-027
+    text: >
+      The raw text 1.5 shall be the value 1.5 in a SAS Num cell, shall be
+      reported on the import axis with keyword not_whole in a SAS Int cell, and
+      shall be kept as delivered in a SAS Char cell.
+    risk: high
+    category: integrity
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 3.4 table row 2"
+
+  - id: REQ-MATRIX-028
+    text: >
+      The raw texts 1.0, 1e3, 1e+05 and 123.0 shall be the values 1, 1000,
+      100000 and 123 in a SAS Num cell and the same values in a SAS Int cell,
+      and shall be kept as delivered in a SAS Char cell.
+    risk: high
+    category: integrity
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 3.4 table row 3"
+
+  - id: REQ-MATRIX-029
+    text: >
+      The raw text 0x1F shall be accepted as the value 31 in a SAS Num or SAS
+      Int cell, as it is in a tabular column, and shall be kept as delivered in
+      a SAS Char cell.
+    risk: medium
+    category: integrity
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 3.4 table row 4; LIM-025"
+
+  - id: REQ-MATRIX-030
+    text: >
+      The raw text 2147483648 shall be the value 2147483648 in a SAS Num cell,
+      shall be reported on the import axis with keyword out_of_range in a SAS
+      Int cell, and shall be kept as delivered in a SAS Char cell.
+    risk: high
+    category: integrity
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 3.4 table row 5"
+
+  - id: REQ-MATRIX-031
+    text: >
+      The raw texts Inf, -Inf, inf, Infinity and 1e400 shall be infinite values
+      in a SAS Num cell: with the default infinite false each shall be reported
+      as one column-specification finding with keyword finite and no other
+      finding, a range bound never adding a second finding; with infinite true
+      the range shall apply to them, so that +Inf above a finite maximum is
+      reported with keyword maximum and -Inf below a finite minimum with
+      keyword minimum. In a SAS Int cell each shall be reported on the import
+      axis with keyword not_whole, and in a SAS Char cell kept as delivered.
+    risk: high
+    category: integrity
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 3.4 table row 6, 2.2 range and infinite, D9"
+
+  - id: REQ-MATRIX-032
+    text: >
+      The raw text 1.7976931348623157e308 shall be a finite value in a SAS Num
+      cell, shall be reported on the import axis with keyword out_of_range in a
+      SAS Int cell, and shall be kept as delivered in a SAS Char cell.
+    risk: medium
+    category: integrity
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 3.4 table row 7"
+
+  - id: REQ-MATRIX-033
+    text: >
+      In a SAS Num or SAS Int cell the raw texts NaN, nan and -nan shall be
+      reported on the import axis with keyword not_convertible, never as a
+      value and never as missing; in a SAS Char cell they shall be kept as
+      delivered; and when files.missing_values declares NaN they shall be
+      missing. A cell that fails typing is missing afterwards, so in a SAS Num
+      or SAS Int cell that is not nullable the same NaN shall in addition be
+      reported as one column-specification finding with keyword type for the
+      same cell, never as a pattern, values, range or finite finding on the
+      text NaN, and identically whether the table is held in memory or scanned
+      in batches.
+    risk: high
+    category: integrity
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 3.4 table row 8, 12 decision Q2; LIM-002"
+
+  - id: REQ-MATRIX-034
+    text: >
+      In a SAS Num or SAS Int cell the raw texts N/A, NULL, null, n/a, #N/A and
+      " NA " (with surrounding blanks) shall be reported on the import axis
+      with keyword not_convertible and shall not be missing; in a SAS Char cell
+      they shall be kept as delivered.
+    risk: high
+    category: integrity
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 3.4 table row 9; LIM-024"
+
+  - id: REQ-MATRIX-035
+    text: >
+      In a SAS Num or SAS Int cell the raw texts 1,5 (in a tab-separated file),
+      abc and TRUE shall be reported on the import axis with keyword
+      not_convertible; in a SAS Char cell they shall be kept as delivered.
+    risk: high
+    category: integrity
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 3.4 table row 10"
+
+  - id: REQ-MATRIX-036
+    text: >
+      A cell shall be missing, in every cell type, when it is an empty field,
+      the text NA, a quoted empty string, a quoted NA, or a token declared in
+      files.missing_values, which is case-sensitive; empty and NA are not
+      distinguished. A field of blanks only shall be missing in a SAS Num or
+      SAS Int cell and shall be present text in a SAS Char cell.
+    risk: high
+    category: integrity
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 3.4 table rows 11-12, 12 decision Q1; LIM-023, LIM-026"
+
+  - id: REQ-MATRIX-037
+    text: >
+      A missing cell shall be reported with keyword type at its row and the
+      reading name of its column when the cell specification is not nullable
+      (the default), and shall not be reported when it is declared nullable
+      true.
+    risk: high
+    category: functional
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 3.4, 2.2 matrix.cells.nullable"
+
+  - id: REQ-MATRIX-038
+    text: >
+      A cell that cannot be typed shall be stored as missing and reported on
+      the import axis at its row and the reading name of its column; when the
+      cell specification is not nullable it shall in addition be reported with
+      keyword type, two findings for the cell, and it shall never be reported
+      against the range.
+    risk: high
+    category: functional
+    covers: [check, messages, validation_status]
+    source: "PLAN-matrix-dataset.md 3.4 closing bullets"
+
+  - id: REQ-MATRIX-039
+    text: >
+      A SAS Num or SAS Int cell below range.min shall be reported with keyword
+      minimum and one above range.max with keyword maximum, at its row and the
+      reading name of its column; a cell equal to a bound shall not be
+      reported; and a missing cell shall not be reported against the range.
+    risk: high
+    category: functional
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 2.2 matrix.cells.range"
+
+  - id: REQ-MATRIX-040
+    text: >
+      The cell values, pattern, length and format settings shall be evaluated
+      together with the range, every one of them having to hold: a cell
+      breaking both a value list and a range shall be reported once for each.
+    risk: medium
+    category: functional
+    covers: [check, messages]
+    source: "PLAN-matrix-dataset.md 2.2 matrix.cells.values/pattern/length/format"
+
+  - id: REQ-MATRIX-041
+    text: >
+      A range on a SAS Char cell, an infinite setting on a SAS Int or SAS Char
+      cell, a range whose min is above its max, and a range bound written as
+      text such as 1e3 (which YAML 1.1 does not read as a number) shall be
+      refused when the dataset is built, with conditions of class
+      dta_cell_range_type, dta_cell_finite_type, dta_cell_range_invalid and
+      dta_matrix_number_text respectively.
+    risk: medium
+    category: functional
+    covers: [dta_dataset_from_list]
+    source: "PLAN-matrix-dataset.md 2.2 matrix.cells.range, matrix.cells.infinite"
+
+  # ---- findings ------------------------------------------------------------------
+
+  - id: REQ-MATRIX-042
+    text: >
+      The findings shall sit on these axes: corner, propertyNames, uniqueNames,
+      minProperties, maxProperties, minItems, maxItems, minimum, maximum,
+      finite, type and a values, pattern or length violation on the
+      column-specification axis; not_convertible, not_whole and out_of_range on
+      the import axis; and a repeated row key on the rules axis. The three
+      error counts of validation_status() shall count the findings of their
+      axis, one each.
+    risk: high
+    category: functional
+    covers: [check, messages, validation_status]
+    source: "PLAN-matrix-dataset.md 3.5"
+
+  - id: REQ-MATRIX-043
+    text: >
+      Structural findings shall be retained ahead of cell findings, in the
+      order header findings, row-count finding, cell findings, so that when
+      max_errors keeps fewer findings than exist the retained ones begin with
+      the structural ones; the counts in validation_status() shall be exact
+      whatever max_errors is. The retained findings shall be the same, in the
+      same order, whether the table is held in memory or scanned in batches,
+      at every cap including 0, and a scanned table's complete ordered set of
+      column-specification findings (header, row count, cells) shall be what
+      collect_full_errors() returns, whatever the cap.
+    risk: high
+    category: integrity
+    covers: [check, messages, validation_status]
+    source: "PLAN-matrix-dataset.md D7"
+
+  # ---- stale state -----------------------------------------------------------------
+
+  - id: REQ-MATRIX-044
+    text: >
+      check() on a matrix table with no recorded header (the dataset's heads
+      were cleared, or the table was bound by other means) shall not abort: it
+      shall report that table as not valid, with a message telling the caller
+      to load it again with load_file(), and shall still validate the other
+      datasets of a DTA.
+    risk: high
+    category: integrity
+    covers: [check, messages, validation_status]
+    source: "PLAN-matrix-dataset.md D13"
+
+  - id: REQ-MATRIX-045
+    text: >
+      check() on a matrix table whose recorded header no longer yields the
+      table's column names under the current specification (a row label was
+      renamed since load_file()) shall not abort: it shall report that table
+      as not valid with a message telling the caller to load it again, and
+      shall still validate the other datasets of a DTA.
+    risk: high
+    category: integrity
+    covers: [check, messages, validation_status]
+    source: "PLAN-matrix-dataset.md D13"
+
+  - id: REQ-MATRIX-046
+    text: >
+      check() on a lazily held matrix table whose file was changed after
+      load_file() so that its header differs shall not abort: it shall report
+      that table as not valid, with a message that the file changed since it
+      was loaded and telling the caller to load it again.
+    risk: high
+    category: integrity
+    covers: [check, messages, validation_status]
+    source: "PLAN-matrix-dataset.md D13"
+
+  # ---- the YAML contract -------------------------------------------------------------
+
+  - id: REQ-MATRIX-047
+    text: >
+      The constructor of DTADataSetMatrix shall refuse a non-empty tables
+      argument with a condition of class dta_matrix_tables_refused, because a
+      matrix is bound with load_file(), which records the header its data
+      columns are named from.
+    risk: medium
+    category: integrity
+    covers: [DTADataSetMatrix]
+    source: "PLAN-matrix-dataset.md D13"
+
+  - id: REQ-MATRIX-048
+    text: >
+      A dataset of type matrix shall accept its row-label columns under the key
+      row_labels, with the keys of a tabular column entry, and shall make them
+      the dataset's column specifications in the order written.
+    risk: high
+    category: functional
+    covers: [dta_dataset_from_list, DTADataSetFactory]
+    source: "PLAN-matrix-dataset.md 2.2 row_labels, D2"
+
+  - id: REQ-MATRIX-049
+    text: >
+      The key columns shall be rejected where they do not belong: columns on a
+      dataset of type matrix with a condition of class dta_matrix_columns_key,
+      row_labels on a dataset of another type with class dta_row_labels_key,
+      and matrix on a dataset of another type with class dta_matrix_key.
+    risk: high
+    category: functional
+    covers: [dta_dataset_from_list, DTADataSetFactory]
+    source: "PLAN-matrix-dataset.md 2.2, 4.6"
+
+  - id: REQ-MATRIX-050
+    text: >
+      A key that is not allowed under matrix, matrix.header, matrix.rows,
+      matrix.cells or matrix.cells.range shall be refused with a condition of
+      class dta_matrix_field_unknown, and a missing matrix, matrix.header,
+      matrix.header.corner, matrix.cells or matrix.cells.type shall be refused
+      with class dta_matrix_field_missing.
+    risk: high
+    category: functional
+    covers: [dta_dataset_from_list]
+    source: "PLAN-matrix-dataset.md 2.2 closing paragraph"
+
+  - id: REQ-MATRIX-051
+    text: >
+      The labels in matrix.header.values shall be text: a list holding a number
+      or a logical, which YAML makes of an unquoted 007 or Y, shall be refused
+      with a condition of class dta_matrix_header_values_text.
+    risk: medium
+    category: functional
+    covers: [dta_dataset_from_list]
+    source: "PLAN-matrix-dataset.md 2.2 header.pattern/values/length"
+
+  - id: REQ-MATRIX-052
+    text: >
+      A matrix dataset shall be refused when it has no row-label column
+      (condition class dta_matrix_invalid_row_labels), when matrix.rows.key
+      names an id that is not a row-label id (dta_matrix_invalid_row_key), or
+      when a corner list does not hold one entry per row-label column
+      (dta_matrix_invalid_corner).
+    risk: high
+    category: functional
+    covers: [dta_dataset_from_list]
+    source: "PLAN-matrix-dataset.md 2.2, D10"
+
+  - id: REQ-MATRIX-053
+    text: >
+      A matrix dataset shall be refused when a file handler is not a CSV or TSV
+      handler with a header line (condition class dta_matrix_invalid_file) and
+      when a rule id starts with .matrix:, which is reserved for the generated
+      row-key rule (class dta_matrix_invalid_rule).
+    risk: medium
+    category: functional
+    covers: [dta_dataset_from_list]
+    source: "PLAN-matrix-dataset.md D11, 2.2 rules"
+
+  # ---- engines and deliveries ----------------------------------------------------
+
+  - id: REQ-MATRIX-054
+    text: >
+      A matrix table held in memory and the same file scanned in batches shall
+      report the same findings, each with the same source, row, column and
+      keyword, in the same retained order under max_errors, and the same
+      counts on every axis, whatever the batch size.
+    risk: high
+    category: integrity
+    covers: [check, messages, validation_status]
+    source: "PLAN-matrix-dataset.md 9 (every semantic case on both holdings)"
+
+  - id: REQ-MATRIX-055
+    text: >
+      load_delivery() shall bind a matrix file given as a loose file or found
+      inside a zip archive as a table named after the file, recording its
+      header, and check() shall judge it as it would a file loaded with
+      load_file().
+    risk: medium
+    category: functional
+    covers: [load_delivery, check, validation_status]
+    source: "PLAN-matrix-dataset.md 4.7, D1"
+
+  - id: REQ-MATRIX-056
+    text: >
+      explain_messages() on a matrix finding that has no data row (a header
+      label, the corner, a column count or the row count) shall state in its
+      actual field the offending header text or the observed count, and shall
+      not describe the finding as a missing or absent value.
+    risk: medium
+    category: functional
+    covers: [explain_messages, messages]
+    source: "PLAN-matrix-dataset.md 3.5"

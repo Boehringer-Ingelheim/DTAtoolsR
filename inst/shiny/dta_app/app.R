@@ -7507,8 +7507,8 @@ server <- function(input, output, session) {
         ),
         " character(s)"
       ),
-      maximum = paste0("at most ", .first_nonempty(r[["columnspec_params.limit"]])),
-      minimum = paste0("at least ", .first_nonempty(r[["columnspec_params.limit"]])),
+      maximum = paste0("at most ", .first_nonempty(r[["columnspec_params.limit"]], r[["columnspec_columnspec"]])),
+      minimum = paste0("at least ", .first_nonempty(r[["columnspec_params.limit"]], r[["columnspec_columnspec"]])),
       type = paste0("type: ", .first_nonempty(r[["columnspec_parent.type"]])),
       pattern = paste0("match pattern ", .first_nonempty(
         r[["columnspec_params.pattern"]],
@@ -8878,6 +8878,9 @@ server <- function(input, output, session) {
       if (!(nm %in% old_names)) next # brand-new dataset -> fresh, pending
       old_ds <- dta_get_dataset(old_dta, nm)
       new_ds <- dta_get_dataset(new_dta, nm)
+      # A changed dataset type (tabular <-> matrix) keeps nothing: the tables and
+      # upload records belong to the old reading of the file.
+      if (!identical(tryCatch(old_ds@type, error = function(e) NULL), tryCatch(new_ds@type, error = function(e) NULL))) next
       handlers_same <- identical(
         dta_handlers_signature(old_ds),
         dta_handlers_signature(new_ds)

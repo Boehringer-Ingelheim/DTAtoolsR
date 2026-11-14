@@ -1005,3 +1005,144 @@ requirements:
     category: interface
     covers: [lint_template_repo]
     source: R/lintTemplateRepo.R
+
+  # ---- matrix dataset templates (row_labels) ---------------------------------
+
+  - id: REQ-TMPL-048
+    text: >
+      In a template whose dataset is of type matrix, the dataset's row-label
+      columns are its column specifications and shall be addressed under the
+      key row_labels wherever a patch or a path addresses columns. The patch
+      operations modify_columns, add_columns, remove_columns, set and the
+      columns collection verbs shall act on the row_labels list, locating an
+      entry by its id and creating no columns key; a path of the form
+      dataset.row_labels.<id>.<field> shall set that field of the row label it
+      names; a path rooted at columns on a matrix dataset, one rooted at
+      row_labels on a dataset of another type, and an id that is not a row
+      label shall each be refused with an error, never ignored. A patch naming
+      an id that is not a row label of the target dataset template shall be
+      reported patch_incoherent at severity "warning", and one naming a row
+      label it has shall not be reported.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: >
+      PLAN-matrix-dataset.md 4.6, T27;
+      inst/shiny/dta_app/R/dataset_template.R (apply_dataset_patch,
+      apply_dataset_template_path); R/validateTemplate.R
+    notes: >
+      A site that still read columns would see a matrix as having none, and
+      "nothing to do" is indistinguishable from success.
+
+  - id: REQ-TMPL-049
+    text: >
+      A vocabulary slot's target shall be accepted as
+      datasets.<dataset>.columns.<id>.values or, for a matrix dataset,
+      datasets.<dataset>.row_labels.<id>.values; a target naming any other
+      segment shall be reported vocab_slot_invalid at severity "error". When a
+      selection is applied, a row_labels slot shall set the values of the row
+      label it names and create no columns key, and a slot whose segment is not
+      the key its dataset keeps its column specifications under (columns on a
+      matrix dataset, row_labels on any other) shall be refused with an error,
+      not ignored. An option whose path is dataset.row_labels.<id>.<field>
+      shall write that field of the row label.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: >
+      PLAN-matrix-dataset.md 4.6, T27;
+      inst/shiny/dta_app/R/vocabulary.R (vocabulary_slot_target_parts,
+      apply_vocabulary_slot_overrides)
+
+  - id: REQ-TMPL-050
+    text: >
+      A row label of a matrix dataset template that declares values_from shall
+      count as a vocabulary binding, and expanding the bindings shall set its
+      values to the vocabulary's terms in the vocabulary's order and remove the
+      values_from key, leaving a row label without a binding without values and
+      creating no columns key. validate_template() shall read the binding of a
+      row label as it reads a column's: values_from together with a pattern is
+      values_from_pattern at severity "error", and values_from naming a
+      vocabulary that does not resolve is values_from_unresolved at severity
+      "warning".
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: >
+      PLAN-matrix-dataset.md 4.6, T27;
+      inst/shiny/dta_app/R/vocabulary.R (expand_column_vocabularies,
+      dataset_has_vocabulary_binding)
+
+  - id: REQ-TMPL-051
+    text: >
+      The application's comparison of two documents shall key a matrix
+      dataset's row labels by their id, as <dataset>.row_labels.<id>.<field>,
+      and shall key none under columns for it. A changed field of one row label
+      shall be one changed row; a row label present on one side only shall
+      appear as added or removed rows keyed by its id; a row label that did not
+      change shall not appear. The matrix corner shall be one value keyed
+      <dataset>.matrix.header.corner: a corner whose entries differ in any
+      number shall give exactly one changed row, and identical corners none.
+    risk: medium
+    category: integrity
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-dataset.md 4.6, T27;
+      inst/shiny/dta_app/R/template_diff.R (dta_dataset_leaves, .dta_leaf_flatten)
+
+  - id: REQ-TMPL-052
+    text: >
+      The application's template history shall word a change to a matrix
+      dataset's row label as a row label, naming its id ("row label 'ID'") and
+      not as a column, report a row label that is new or gone as one line, and
+      keep the wording "column" for a tabular dataset's columns.
+    risk: low
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-dataset.md 4.6;
+      inst/shiny/dta_app/R/template_history.R (template_history_label,
+      template_history_compare)
+
+  - id: REQ-TMPL-053
+    text: >
+      validate_template() shall judge a dataset template of type matrix as the
+      dataset it is: a clean one shall give no row; a row label that
+      DTAColumnSpec() refuses shall be column_spec_invalid at severity "error"
+      naming that row label alone; and the matrix block shall be linted with
+      the codes lint_dta() uses, so that a key the block does not allow is
+      matrix_field_unknown, a missing cells block or no matrix block is
+      matrix_field_missing, a corner whose length is not the number of row
+      labels is matrix_corner_invalid, and a rule naming a data column rather
+      than a row label is rule_column_undeclared, each at severity "error".
+    risk: high
+    category: functional
+    covers: [validate_template, lint_dta]
+    source: >
+      PLAN-matrix-dataset.md 4.6, T27, REQ-SPEC-032;
+      R/validateTemplate.R (.dta_template_check_dataset_tpl)
+
+  - id: REQ-TMPL-054
+    text: >
+      validate_template() shall report, for a dataset template of type matrix,
+      a columns key as matrix_columns_key and a file entry that is not a CSV or
+      TSV with a header as matrix_file_type, each at severity "error", the same
+      codes and severity lint_dta() reports for the same dataset; a template
+      with a TSV file and no columns key shall not be reported for either.
+    risk: medium
+    category: functional
+    covers: [validate_template, lint_dta]
+    source: PLAN-matrix-dataset.md 4.6, T27, REQ-SPEC-032
+
+  - id: REQ-TMPL-055
+    text: >
+      For a dataset of type matrix, write_template_guide() shall list the
+      dataset's row labels in the table in which it lists a tabular dataset's
+      columns, one row for each row label and none else, in the order
+      declared, with its id, type, whether a value is required and its
+      allowed values, the terms of a bound vocabulary being those values.
+    risk: medium
+    category: functional
+    covers: [write_template_guide]
+    source: >
+      PLAN-matrix-dataset.md 4.6, T27; R/templateGuide-collect.R

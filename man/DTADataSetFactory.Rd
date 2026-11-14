@@ -4,12 +4,22 @@
 \alias{DTADataSetFactory}
 \title{Create a DTADataSet Object}
 \usage{
-DTADataSetFactory(type, columns = NULL, rules = NULL, files = NULL, ...)
+DTADataSetFactory(
+  type,
+  columns = NULL,
+  rules = NULL,
+  files = NULL,
+  matrix = NULL,
+  row_labels = NULL,
+  ...
+)
 }
 \arguments{
-\item{type}{Character. Dataset type, \code{"tabular"} or \code{"file"}.}
+\item{type}{Character. Dataset type, \code{"tabular"}, \code{"file"} or
+\code{"matrix"}.}
 
-\item{columns}{A list with column specifications (optional)}
+\item{columns}{A list with column specifications (optional). Not allowed for
+a \code{"matrix"}, whose row-label columns are given as \code{row_labels}.}
 
 \item{rules}{A list of rules specifications (optional)}
 
@@ -19,16 +29,25 @@ parses to -- or an unnamed list of such lists, one per handler, the shape a
 YAML \code{files:} sequence parses to. \code{NULL} or an empty list yields a
 dataset with no file handlers.}
 
-\item{...}{Further arguments passed on to the \code{DTADataSetTabular()}
-or \code{DTADataSetFile()} constructor, according to \code{type}.}
+\item{matrix}{A list with the settings of a matrix dataset (the YAML
+\code{matrix:} block), or a \code{DTAMatrixSpec}. Only for
+\code{type = "matrix"}.}
+
+\item{row_labels}{A list with the column specifications of the row-label
+columns of a matrix dataset, matched to the file's leading columns by
+position. Only for \code{type = "matrix"}.}
+
+\item{...}{Further arguments passed on to the \code{DTADataSetTabular()},
+\code{DTADataSetFile()} or \code{DTADataSetMatrix()} constructor,
+according to \code{type}.}
 }
 \value{
 An object derived from class \code{DTADataSet} like \code{DTADataSetTabular},
 depending on \code{type}.
 }
 \description{
-Constructs a DTADataSetTabular or DTADataSetFile object, according to
-\code{type}.
+Constructs a DTADataSetTabular, DTADataSetFile or DTADataSetMatrix object,
+according to \code{type}.
 }
 \examples{
 DTADataSetFactory(
@@ -47,7 +66,20 @@ DTADataSetFactory(
   )
 )
 
+# A matrix dataset: row-label columns, then the settings of the matrix.
+DTADataSetFactory(
+  type = "matrix",
+  id = "counts",
+  files = list(type = "tsv", filename = "counts.tsv"),
+  row_labels = list(list(id = "GENE", type = "SAS Char", nullable = FALSE)),
+  matrix = list(
+    header = list(corner = "blank"),
+    cells = list(type = "SAS Int", range = list(min = 0))
+  )
+)
+
 }
 \seealso{
-\code{\link{DTADataSet}}, \code{\link{DTADataSetTabular}}
+\code{\link{DTADataSet}}, \code{\link{DTADataSetTabular}},
+\code{\link{DTADataSetMatrix}}
 }

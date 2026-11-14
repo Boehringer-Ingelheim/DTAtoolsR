@@ -855,6 +855,16 @@
     const = paste0("Must be exactly: ", spec_text, "."),
     pattern = paste0("Must match the pattern: ", spec_text),
     format = paste0("Must fit the SAS format: ", spec_text, "."),
+    minimum = paste0("The value is below the declared minimum (", spec_text, ")."),
+    maximum = paste0("The value is above the declared maximum (", spec_text, ")."),
+    finite = "The value must be finite (not Inf or -Inf).",
+    corner = "The header text above the row labels differs from the declared corner.",
+    propertyNames = "The column label does not satisfy the declared header specification.",
+    uniqueNames = "The column label is repeated; labels must be unique.",
+    minProperties = paste0("The matrix has fewer data columns than the declared minimum (", spec_text, ")."),
+    maxProperties = paste0("The matrix has more data columns than the declared maximum (", spec_text, ")."),
+    minItems = paste0("The matrix has fewer data rows than the declared minimum (", spec_text, ")."),
+    maxItems = paste0("The matrix has more data rows than the declared maximum (", spec_text, ")."),
     fallback()
   )
 }

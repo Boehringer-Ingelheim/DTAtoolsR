@@ -7,7 +7,10 @@
 dta_columnspec_check_kinds()
 }
 \value{
-A data frame with columns \code{check} and \code{keyword}.
+A data frame with columns \code{check}, \code{keyword} and \code{matrix_only}. The
+matrix-only keywords (header, dimension, range and finiteness findings of a
+matrix dataset) are counted in every tally, but only reported in a summary
+built with \code{matrix = TRUE}.
 }
 \description{
 Every constraint keyword \code{as_json_schema()} can emit, paired with the human

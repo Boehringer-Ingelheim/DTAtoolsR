@@ -158,6 +158,7 @@ DTAFileSAS7BDAT <- S7::new_class(
 #' @usage read_file_execution(x, ...)
 method(read_file_execution, DTAFileSAS7BDAT) <- function(x, ...) {
   args <- dta_reader_args(...)
+  dta_refuse_column_names(args)
   dta_read_sas7bdat(args$file, specs = args$specs)
 }
 

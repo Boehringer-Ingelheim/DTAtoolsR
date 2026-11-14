@@ -89,7 +89,7 @@
   if (is.null(x)) {
     return(out)
   }
-  if (!is.list(x)) {
+  if (!is.list(x) || inherits(x, "dta_verbatim")) {
     if (is.null(prefix) || !nzchar(prefix)) {
       # A bare non-list value with no path to hang it on cannot occur from a
       # real call (every caller here starts from a named top-level list or a
@@ -157,7 +157,8 @@ dta_metadata_leaves <- function(md) {
 #                                             flattened generically.
 #   "<dataset>.columns.<COLUMN_ID>.<field>"  each column, keyed by its OWN
 #                                             `id`, never by its position in
-#                                             the list.
+#                                             the list (`row_labels` instead
+#                                             of `columns` for a matrix).
 #
 # Keying columns by id (not position) is the whole point: dta_column_to_list()
 # always includes `id`, so build the key from THAT rather than from the
@@ -181,8 +182,10 @@ dta_dataset_leaves <- function(dta) {
     # explicit (file name -> id) is no change at all.
     lst <- dta_dataset_to_list(ds, dta, apply_default = FALSE)
 
-    cols <- lst$columns
-    lst$columns <- NULL
+    # A matrix keeps its row labels under `row_labels`; keyed by id the same way.
+    key <- dta_dataset_spec_key(lst)
+    cols <- lst[[key]]
+    lst[[key]] <- NULL
     out <- c(out, .dta_leaf_flatten(lst, nm))
 
     for (col in cols) {
@@ -191,7 +194,7 @@ dta_dataset_leaves <- function(dta) {
         next
       }
       col$id <- NULL
-      out <- c(out, .dta_leaf_flatten(col, paste(nm, "columns", cid, sep = ".")))
+      out <- c(out, .dta_leaf_flatten(col, paste(nm, key, cid, sep = ".")))
     }
   }
   out

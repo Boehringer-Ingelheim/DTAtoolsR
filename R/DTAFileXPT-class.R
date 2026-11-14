@@ -107,6 +107,7 @@ DTAFileXPT <- S7::new_class(
 #' @usage read_file_execution(x, ...)
 method(read_file_execution, DTAFileXPT) <- function(x, ...) {
   args <- dta_reader_args(...)
+  dta_refuse_column_names(args)
   dta_read_xpt(args$file, specs = args$specs)
 }
 

@@ -20,22 +20,25 @@ areas:
     min_tests: 23
   - area: SPEC
     title: Specifications, YAML and factories
-    min_tests: 34
+    min_tests: 36
   - area: TYPE
     title: Declared types and typing at read
     min_tests: 31
   - area: VAL
     title: Validation engine and result accessors
-    min_tests: 46
+    min_tests: 48
   - area: RULE
     title: Cross-column and grouped rules
     min_tests: 43
   - area: FILE
     title: File handlers and readers
-    min_tests: 54
+    min_tests: 55
   - area: CONT
     title: Container deliveries (zip archives, SAS transport libraries)
     min_tests: 62
+  - area: MATRIX
+    title: Matrix datasets (type matrix)
+    min_tests: 54
   - area: STREAM
     title: Streaming validation and engine parity
     min_tests: 32
@@ -44,16 +47,16 @@ areas:
     min_tests: 22
   - area: TMPL
     title: Templates, inheritance and controlled vocabulary
-    min_tests: 114
+    min_tests: 122
   - area: EXPORT
     title: Document and data export
-    min_tests: 73
+    min_tests: 76
   - area: REPORT
     title: The standalone HTML validation report
     min_tests: 18
   - area: APP
     title: The interactive application
-    min_tests: 38
+    min_tests: 46
   - area: ROBUST
     title: Error handling, integrity and isolation
     min_tests: 17

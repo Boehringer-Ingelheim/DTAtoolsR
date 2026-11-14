@@ -1,0 +1,51 @@
+metadata:
+  title: Omics Matrix Delivery
+  version: "1.0"
+  date: 2026-11-13
+
+datasets:
+  # Genes x samples, as merged by nf-core/rnaseq. The header starts with two
+  # named corner fields above the two row-label columns.
+  - id: gene_counts
+    type: matrix
+    files: { filename: "matrix_gene_counts.tsv", type: tsv }
+    row_labels:                       # row-label columns, by position
+      - id: GENE_ID                   # the first one is the default row key
+        type: SAS Char
+        nullable: No
+        pattern: '^ENSG[0-9]{11}(\.[0-9]+)?(_PAR_Y)?$'
+      - id: GENE_NAME                 # a row description
+        type: SAS Char
+        nullable: Yes
+    matrix:
+      header:
+        corner: [gene_id, gene_name]  # exact header text above the row labels
+        label: Sample ID
+        pattern: "^S[0-9]{4}$"
+        count: { min: 1, max: 384 }
+      rows:
+        key: GENE_ID
+        count: { min: 1 }
+      cells:
+        type: SAS Num                 # normalised counts are fractional
+        nullable: No
+        range: { min: 0 }
+        infinite: false
+
+  # Samples x miRNAs, as written by nf-core/smrnaseq (R write.csv: the corner
+  # of the header is blank).
+  - id: mature_counts
+    type: matrix
+    files: { filename: "matrix_mature_counts.csv", type: csv }
+    row_labels:
+      - id: SAMPLE
+        type: SAS Char
+        nullable: No
+    matrix:
+      header:
+        corner: blank
+        pattern: "^hsa-(miR|let)-"
+      cells:
+        type: SAS Int
+        nullable: No
+        range: { min: 0 }

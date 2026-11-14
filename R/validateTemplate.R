@@ -1021,7 +1021,8 @@
     rows[[length(rows) + 1L]] <<- .dta_template_row(path, kind, id, version, severity, code, message)
   }
 
-  columns <- ds_body[["columns"]] %||% list()
+  # A matrix body keeps its column specs under `row_labels`.
+  columns <- ds_body[[dta_dataset_spec_key(ds_body)]] %||% list()
   if (!is.list(columns) || length(columns) == 0) {
     return(rows)
   }
@@ -1173,12 +1174,21 @@
   # do.call(), so the keys the constructor does not take are dropped first.
   plain <- tryCatch(yaml::read_yaml(path), error = function(e) NULL)
   plain_ds <- plain[["dataset"]]
-  cols <- Filter(is.list, plain_ds[["columns"]] %||% list())
+  spec_key <- dta_dataset_spec_key(plain_ds)
+  cols <- Filter(is.list, plain_ds[[spec_key]] %||% list())
   cols <- lapply(cols, function(col) col[intersect(names(col), names(formals(DTAColumnSpec)))])
-  lint <- tryCatch(
-    lint_dta(list(columns = cols, rules = plain_ds[["rules"]] %||% list())),
-    error = function(e) NULL
-  )
+  # A matrix template is linted as the dataset it is, so its `matrix:` block is
+  # judged too; a tabular one stays a bare columns + rules input.
+  lint_input <- if (identical(spec_key, "row_labels")) {
+    list(
+      id = as.character(plain_ds[["id"]] %||% id), type = "matrix", row_labels = cols,
+      columns = plain_ds[["columns"]], files = plain_ds[["files"]],
+      rules = plain_ds[["rules"]] %||% list(), matrix = plain_ds[["matrix"]]
+    )
+  } else {
+    list(columns = cols, rules = plain_ds[["rules"]] %||% list())
+  }
+  lint <- tryCatch(lint_dta(lint_input), error = function(e) NULL)
   for (i in seq_len(if (is.null(lint)) 0L else nrow(lint))) {
     row <- lint[i, , drop = FALSE]
     add(

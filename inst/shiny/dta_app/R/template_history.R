@@ -169,9 +169,10 @@ template_history_entities <- function(b) {
   }
   ds <- dta_dataset_names(b$dta)
   cols <- unlist(lapply(ds, function(nm) {
-    cl <- dta_dataset_to_list(dta_get_dataset(b$dta, nm))$columns
-    ids <- vapply(cl, function(col) as.character(col$id %||% ""), character(1))
-    paste(nm, "columns", ids[nzchar(ids)], sep = ".")
+    lst <- dta_dataset_to_list(dta_get_dataset(b$dta, nm))
+    key <- dta_dataset_spec_key(lst)
+    ids <- vapply(lst[[key]], function(col) as.character(col$id %||% ""), character(1))
+    paste(nm, key, ids[nzchar(ids)], sep = ".")
   }))
   list(
     Template = c(slot_ids("options"), slot_ids("party_slots"), slot_ids("vocabulary_slots")),
@@ -190,8 +191,9 @@ template_history_label <- function(area, key) {
     options = "Option", party_slots = "Party slot", vocabulary_slots = "Vocabulary slot"
   )
   if (area == "Datasets") {
-    if (length(parts) >= 3 && parts[[2]] == "columns") {
-      return(sprintf("Dataset '%s', column '%s'%s", parts[[1]], parts[[3]], rest(4)))
+    if (length(parts) >= 3 && parts[[2]] %in% c("columns", "row_labels")) {
+      what <- if (parts[[2]] == "row_labels") "row label" else "column"
+      return(sprintf("Dataset '%s', %s '%s'%s", parts[[1]], what, parts[[3]], rest(4)))
     }
     return(sprintf("Dataset '%s'%s", parts[[1]], rest(2)))
   }
