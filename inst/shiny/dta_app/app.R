@@ -9792,14 +9792,14 @@ server <- function(input, output, session) {
   # after a run and goes stale with the next edit.
   findings_now <- reactive(dv_findings(rv$dta))
 
-  # The block shows for a document with two or more datasets or any container in
-  # effect (explicit, implied or default). A flag the conditionalPanel reads, not
-  # a uiOutput: re-rendering the block would rebuild its fileInput and lose the
-  # binding. It is never suspended -- the panel is hidden when it is FALSE, and a
-  # suspended output would never tell the client it became TRUE.
+  # The block shows for every document with a dataset: it also holds the
+  # sidebar's way into the container manager, which a one-dataset document needs
+  # as much as any. A flag the conditionalPanel reads, not a uiOutput:
+  # re-rendering the block would rebuild its fileInput and lose the binding. It
+  # is never suspended -- the panel is hidden when it is FALSE, and a suspended
+  # output would never tell the client it became TRUE.
   delivery_zone_on <- reactive({
-    !is.null(rv$dta) &&
-      (length(dta_dataset_names(rv$dta)) >= 2 || length(dta_container_rows(rv$dta)) > 0)
+    !is.null(rv$dta) && length(dta_dataset_names(rv$dta)) > 0
   })
   # A render function proper (not `output$x <- reactive()`): a test session reads
   # an output through its two-argument call, which a bare reactive does not take.
@@ -9808,23 +9808,6 @@ server <- function(input, output, session) {
     renderFunc = function(shinysession, name, ...) delivery_zone_on()
   )
   outputOptions(output, "delivery_zone", suspendWhenHidden = FALSE)
-
-  output$delivery_hint <- renderUI({
-    req(rv$dta)
-    base <- "Each file goes to the dataset whose expected name it matches."
-    div(
-      class = "msg-hint",
-      if (length(dta_container_rows(rv$dta)) > 0) {
-        paste(
-          base,
-          "Files here are judged as delivered.",
-          "To check single files before packing them, drop them on a dataset's own zone."
-        )
-      } else {
-        base
-      }
-    )
-  })
 
   output$delivery_panel <- renderUI({
     req(rv$dta)
@@ -9857,7 +9840,7 @@ server <- function(input, output, session) {
   for (sidebar_output in c(
     "workspace_header", "summary_metrics", "dataset_nav_ui",
     "add_dataset_ui", "validation_report_ui", "edit_gate",
-    "delivery_hint", "delivery_panel"
+    "delivery_panel"
   )) {
     outputOptions(output, sidebar_output, suspendWhenHidden = FALSE)
   }
@@ -10093,8 +10076,12 @@ server <- function(input, output, session) {
           width = 320,
           uiOutput("workspace_header"),
           uiOutput("summary_metrics"),
-          # Shown for two or more datasets or any container in effect. The drop
-          # zone is static: only the flag behind the panel changes.
+          uiOutput("dataset_nav_ui"),
+          uiOutput("add_dataset_ui"),
+          # Under the datasets it feeds, before the check that reads them: the
+          # sidebar reads top to bottom as what is expected, load it, check it.
+          # Shown for every document with a dataset. The drop zone is static:
+          # only the flag behind the panel changes.
           conditionalPanel(
             "output.delivery_zone",
             div(
@@ -10103,16 +10090,13 @@ server <- function(input, output, session) {
               div(
                 class = "dropzone delivery-drop",
                 fileInput("delivery_files",
-                  label = "Drop the whole delivery (.zip, .xpt or loose files)",
+                  label = "Drop or choose the whole delivery",
                   multiple = TRUE, width = "100%"
                 )
               ),
-              uiOutput("delivery_hint"),
               uiOutput("delivery_panel")
             )
           ),
-          uiOutput("dataset_nav_ui"),
-          uiOutput("add_dataset_ui"),
           actionButton("check_all", "Check all datasets", class = "btn btn-primary w-100"),
           tags$hr(),
           div(class = "section-label", "Export"),
