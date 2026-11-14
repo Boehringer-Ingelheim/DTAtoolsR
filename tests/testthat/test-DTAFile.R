@@ -1677,3 +1677,12 @@ test_that("valid file-count bounds are still accepted", {
   expect_null(max_number_of_files(mk(min_number_of_files = 1)))
   expect_equal(min_number_of_files(mk()), 1) # the documented default
 })
+
+test_that("dta_reader_args picks column_names by exact name and defaults it to NULL", {
+  args <- dta_reader_args("a.csv", column_names = c("x", "y"))
+  expect_identical(args$column_names, c("x", "y"))
+  expect_identical(args$file, "a.csv")
+  expect_null(dta_reader_args(file = "a.csv")$column_names)
+  # a partial name must not bind
+  expect_null(dta_reader_args(file = "a.csv", column = c("x"))$column_names)
+})

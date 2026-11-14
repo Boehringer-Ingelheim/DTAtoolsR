@@ -318,6 +318,41 @@ dta_check_column_spec <- function(column_name, col_spec, x) {
     )
   }
 
+  # finite / minimum / maximum --------------------------------------------------
+  # Cell specs of a matrix dataset only (DTAColumnSpecCell). NA and NaN are never
+  # range findings: missing is the type/nullable check's business. An infinite
+  # value under `finite` yields the `finite` finding alone, so the bounds skip it.
+  if (base_type %in% c("integer", "number") &&
+    (isTRUE(col_spec$finite) || !is.null(col_spec$minimum) ||
+      !is.null(col_spec$maximum))) {
+    inf <- if (base_type == "number") is.infinite(x) else rep(FALSE, n)
+    if (isTRUE(col_spec$finite)) {
+      bad <- which(inf)
+      parts[[length(parts) + 1]] <- dta_columnspec_error_rows(
+        bad, column_name, "finite", "must be finite", "finite", as_text(bad)
+      )
+    }
+    for (kw in c("minimum", "maximum")) {
+      bound <- col_spec[[kw]]
+      if (is.null(bound) || length(bound) != 1L || is.na(bound)) {
+        next
+      }
+      outside <- if (kw == "minimum") x < bound else x > bound
+      outside <- !is.na(outside) & outside
+      if (isTRUE(col_spec$finite)) {
+        outside <- outside & !inf
+      }
+      bad <- which(outside)
+      bound_text <- dta_numeric_text(as.numeric(bound))
+      parts[[length(parts) + 1]] <- dta_columnspec_error_rows(
+        bad, column_name, kw,
+        paste0(if (kw == "minimum") "must be >= " else "must be <= ", bound_text),
+        bound_text,
+        as_text(bad)
+      )
+    }
+  }
+
   parts <- Filter(Negate(is.null), parts)
   if (length(parts) == 0) {
     return(NULL)
@@ -768,10 +803,13 @@ dta_summarise_columnspec_errors <- function(full_error) {
 #' @description
 #' Every constraint keyword `as_json_schema()` can emit, paired with the human
 #' label the console report groups it under. The row order is the report order.
-#' @return A data frame with columns `check` and `keyword`.
+#' @return A data frame with columns `check`, `keyword` and `matrix_only`. The
+#'   matrix-only keywords (header, dimension, range and finiteness findings of a
+#'   matrix dataset) are counted in every tally, but only reported in a summary
+#'   built with `matrix = TRUE`.
 #' @keywords internal
 dta_columnspec_check_kinds <- function() {
-  data.frame(
+  legacy <- data.frame(
     check = c(
       "presence", "extra", "format", "format", "length", "values", "values", "pattern"
     ),
@@ -779,8 +817,22 @@ dta_columnspec_check_kinds <- function() {
       "required", "additionalProperties",
       "type", "format", "maxLength", "enum", "const", "pattern"
     ),
+    matrix_only = FALSE,
     stringsAsFactors = FALSE
   )
+  matrix_kinds <- data.frame(
+    check = c(
+      rep("header", 3), rep("dimensions", 4), rep("range", 2), "finite"
+    ),
+    keyword = c(
+      "corner", "propertyNames", "uniqueNames",
+      "minProperties", "maxProperties", "minItems", "maxItems",
+      "minimum", "maximum", "finite"
+    ),
+    matrix_only = TRUE,
+    stringsAsFactors = FALSE
+  )
+  rbind(legacy, matrix_kinds)
 }
 
 #' @title Which Columns Declare Each Constraint
@@ -848,6 +900,11 @@ dta_columnspec_declared_columns <- function(schemas) {
   # somehow carries both, so `const` is only in force where `enum` is absent.
   out$const <- declares(function(s) is.null(s$enum) && !is.null(s$const))
   out$pattern <- declares(function(s) !is.null(s$pattern) && !anyNA(s$pattern))
+  out$minimum <- declares(function(s) !is.null(s$minimum))
+  out$maximum <- declares(function(s) !is.null(s$maximum))
+  out$finite <- declares(function(s) isTRUE(s$finite))
+  # The header and dimension keywords stay character(0): a matrix has no
+  # per-column declaration for them, the caller supplies their denominators.
   out
 }
 
@@ -890,7 +947,10 @@ dta_columnspec_tally_add <- function(tally, full_error) {
   # `column` is NA there. Without the fallback the presence check would report
   # failures in zero columns.
   column <- as.character(full_error$column)
-  fallback <- is.na(column)
+  # Only for `required`: a dimension finding (`minItems` ...) carries its bound
+  # in `columnspec` and has no column, and would otherwise tally the bound as a
+  # failed column.
+  fallback <- is.na(column) & keyword == "required"
   if (any(fallback) && "columnspec" %in% names(full_error)) {
     column[fallback] <- as.character(full_error$columnspec)[fallback]
   }
@@ -955,13 +1015,26 @@ dta_columnspec_error_tally <- function(full_error) {
 #' @keywords internal
 dta_columnspec_check_summary <- function(schemas,
                                          tally = NULL,
-                                         settled = NULL) {
+                                         settled = NULL,
+                                         matrix = FALSE,
+                                         structure_declared = NULL) {
   kinds <- dta_columnspec_check_kinds()
-  keywords <- kinds$keyword
-
   if (is.null(tally)) {
     tally <- dta_empty_columnspec_tally()
   }
+  # A tabular summary is byte-identical to what it was before the matrix
+  # vocabulary existed: the matrix-only rows are dropped, not reported as
+  # not applicable -- unless they hold violations. A DTAColumnSpecCell can sit
+  # in a tabular dataset, and its range/finite findings must not vanish into
+  # "all checks passed".
+  if (!isTRUE(matrix)) {
+    kinds <- kinds[
+      !kinds$matrix_only | tally$n_errors[kinds$keyword] > 0, ,
+      drop = FALSE
+    ]
+  }
+  keywords <- kinds$keyword
+  structure_keywords <- kinds$keyword[kinds$check %in% c("header", "dimensions")]
   if (is.null(settled)) {
     settled <- keywords
   }
@@ -973,8 +1046,16 @@ dta_columnspec_check_summary <- function(schemas,
   # `required` violations name exactly the columns nothing else could examine.
   absent <- tally$columns[["required"]]
 
+  # Header and dimension findings have no per-column declaration: the caller
+  # counts them (columns of the head, bounds of the structure).
+  structure_n <- function(kw) {
+    # `[[` on a named atomic vector throws for an absent name.
+    if (kw %in% names(structure_declared)) as.integer(structure_declared[[kw]]) else 0L
+  }
   columns_declared <- vapply(
-    keywords, function(kw) length(declared[[kw]]), integer(1),
+    keywords,
+    function(kw) if (kw %in% structure_keywords) structure_n(kw) else length(declared[[kw]]),
+    integer(1),
     USE.NAMES = FALSE
   )
   columns_checked <- vapply(
@@ -985,7 +1066,9 @@ dta_columnspec_check_summary <- function(schemas,
       # terms -- whether the table carries a column no spec describes does not
       # depend on which declared columns turned up -- so it is not narrowed by
       # `absent` either.
-      if (kw %in% c("required", "additionalProperties")) {
+      if (kw %in% structure_keywords) {
+        structure_n(kw)
+      } else if (kw %in% c("required", "additionalProperties")) {
         length(declared[[kw]])
       } else {
         length(setdiff(declared[[kw]], absent))
@@ -1007,6 +1090,11 @@ dta_columnspec_check_summary <- function(schemas,
   status <- vapply(seq_along(keywords), function(i) {
     if (n_errors[[i]] > 0) {
       return("failed")
+    }
+    # A matrix takes its columns from the header by position: nothing can be
+    # missing or extra, whatever the specs declare.
+    if (isTRUE(matrix) && keywords[[i]] %in% c("required", "additionalProperties")) {
+      return("not_applicable")
     }
     if (columns_declared[[i]] == 0) {
       return("not_applicable")
@@ -1037,6 +1125,9 @@ dta_columnspec_check_summary <- function(schemas,
     stringsAsFactors = FALSE
   )
   rownames(out) <- NULL
+  if (isTRUE(matrix)) {
+    attr(out, "matrix") <- TRUE
+  }
   out
 }
 
@@ -1048,7 +1139,11 @@ dta_columnspec_check_summary <- function(schemas,
   format = "Format",
   length = "Length",
   values = "Values",
-  pattern = "Pattern"
+  pattern = "Pattern",
+  header = "Header",
+  dimensions = "Dimensions",
+  range = "Range",
+  finite = "Finite values"
 )
 
 `__DTAtools_columnspec_check_absent__` <- c(
@@ -1059,7 +1154,11 @@ dta_columnspec_check_summary <- function(schemas,
   format = "no column spec declares a type or format",
   length = "no column spec declares a length",
   values = "no column spec declares a value list",
-  pattern = "no column spec declares a pattern"
+  pattern = "no column spec declares a pattern",
+  header = "the matrix declares no header constraint",
+  dimensions = "no dimension bound applies",
+  range = "the cell spec declares no range",
+  finite = "infinite values are allowed"
 )
 
 #' @title Print the Per-Check Column Spec Report
@@ -1083,6 +1182,7 @@ dta_report_columnspec_checks <- function(checks,
     return(invisible(NULL))
   }
 
+  is_matrix <- isTRUE(attr(checks, "matrix"))
   labels <- unique(checks$check)
   outcome <- character(length(labels))
 
@@ -1113,7 +1213,14 @@ dta_report_columnspec_checks <- function(checks,
       # Long enough to name the offenders, short enough that a 400-column table
       # does not print a paragraph per check.
       columns <- cli::cli_vec(failed_columns, list("vec-trunc" = 5))
-      if (identical(label, "presence")) {
+      if (is_matrix && label %in% c("header", "dimensions")) {
+        # Findings on the file's structure, not values in columns.
+        n_findings <- dta_format_count(n_errors)
+        n_findings_qty <- if (n_errors == 1) 1L else 2L
+        cli::cli_alert_danger(
+          "{title} check failed: {n_findings}{cli::qty(n_findings_qty)} finding{?s}"
+        )
+      } else if (identical(label, "presence")) {
         cli::cli_alert_danger(
           "{title} check failed: {n_columns} of {n_declared} declared column{?s} missing: {.field {columns}}"
         )
@@ -1147,6 +1254,9 @@ dta_report_columnspec_checks <- function(checks,
     } else if (all(rows$status == "not_applicable")) {
       outcome[[i]] <- "not_applicable"
       reason <- `__DTAtools_columnspec_check_absent__`[[label]]
+      if (is_matrix && label %in% c("presence", "extra")) {
+        reason <- "a matrix takes its columns from the header by position"
+      }
       cli::cli_alert_info("{title} check not applicable: {reason}")
     } else if (any(rows$status == "not_checked")) {
       outcome[[i]] <- "not_checked"
@@ -1167,12 +1277,19 @@ dta_report_columnspec_checks <- function(checks,
       } else {
         unchecked_reason
       }
-      cli::cli_alert_warning(
-        "{title} check not checked: {reason} ({n_unchecked_declared} declaring column{?s})"
-      )
+      if (is_matrix && label %in% c("header", "dimensions")) {
+        # No columns are declared here: the structure is what is unsettled.
+        cli::cli_alert_warning("{title} check not checked: {reason}")
+      } else {
+        cli::cli_alert_warning(
+          "{title} check not checked: {reason} ({n_unchecked_declared} declaring column{?s})"
+        )
+      }
     } else {
       outcome[[i]] <- "passed"
-      if (identical(label, "presence")) {
+      if (is_matrix && label %in% c("header", "dimensions")) {
+        cli::cli_alert_success("{title} check passed")
+      } else if (identical(label, "presence")) {
         cli::cli_alert_success("{title} check passed: all {n_declared} declared column{?s} present")
       } else if (identical(label, "extra")) {
         # Not phrased as a count against `n_declared`: a column a RULE names is

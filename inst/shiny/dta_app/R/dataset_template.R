@@ -196,6 +196,7 @@ dataset_item_index_by_id <- function(items, id, kind, ds_name) {
 #   dataset.<field>                     -- a top-level scalar field
 #   dataset.files.<key>                 -- only when `files` is a single map
 #   dataset.columns.<id>.<field>        -- column located by id, not position
+#                                          (`row_labels` for a matrix dataset)
 #   dataset.rules.<id>.<field>          -- rule located by id, not position
 apply_dataset_template_path <- function(ds, path, value) {
   parts <- dataset_template_path_parts(path)
@@ -223,12 +224,19 @@ apply_dataset_template_path <- function(ds, path, value) {
     return(ds)
   }
 
-  if (identical(root, "columns")) {
-    if (length(parts) < 3) {
-      cli::cli_abort("Column path must be 'dataset.columns.<id>.<field>', got '{path}'.")
+  if (root %in% c("columns", "row_labels")) {
+    key <- dta_dataset_spec_key(ds)
+    if (!identical(root, key)) {
+      cli::cli_abort(c(
+        "Path '{path}' addresses '{root}', but dataset '{ds_name}' keeps its column specs under '{key}'.",
+        i = "Use 'dataset.{key}.<id>.<field>'."
+      ))
     }
-    idx <- dataset_item_index_by_id(ds$columns, parts[[2]], "column", ds_name)
-    ds$columns[[idx]] <- list_set_path(ds$columns[[idx]], parts[-c(1, 2)], value)
+    if (length(parts) < 3) {
+      cli::cli_abort("Column path must be 'dataset.{key}.<id>.<field>', got '{path}'.")
+    }
+    idx <- dataset_item_index_by_id(ds[[key]], parts[[2]], if (identical(key, "row_labels")) "row label" else "column", ds_name)
+    ds[[key]][[idx]] <- list_set_path(ds[[key]][[idx]], parts[-c(1, 2)], value)
     return(ds)
   }
 
@@ -280,6 +288,9 @@ apply_dataset_patch <- function(ds, patch) {
   }
 
   ds_name <- as.character(ds$id %||% "?")
+  # The key the dataset keeps its column specs under ("row_labels" for a matrix).
+  key <- dta_dataset_spec_key(ds)
+  spec_noun <- if (identical(key, "row_labels")) "row label" else "column"
   deviations <- list()
 
   # 0) columns: the same four ops written in the SHARED collection vocabulary
@@ -304,11 +315,11 @@ apply_dataset_patch <- function(ds, patch) {
       ))
     }
     id_of <- function(x) as.character(x$id %||% "")
-    before <- vapply(ds$columns %||% list(), id_of, character(1))
-    ds$columns <- dta_template_apply_collection_verbs(
-      ds$columns %||% list(), parsed$verbs, "columns", dta_template_option_key
+    before <- vapply(ds[[key]] %||% list(), id_of, character(1))
+    ds[[key]] <- dta_template_apply_collection_verbs(
+      ds[[key]] %||% list(), parsed$verbs, "columns", dta_template_option_key
     )
-    after <- vapply(ds$columns %||% list(), id_of, character(1))
+    after <- vapply(ds[[key]] %||% list(), id_of, character(1))
     # Deviations stay in the `*_columns` vocabulary the UI already reads: the
     # verbs are a second spelling of these ops, not a second set of them.
     for (id in setdiff(before, after)) {
@@ -326,17 +337,17 @@ apply_dataset_patch <- function(ds, patch) {
   # a hard abort, never a silent no-op -- a caller relying on a column being
   # gone must be told when it never existed to begin with.
   for (id in (patch$remove_columns %||% character(0))) {
-    idx <- dataset_item_index_by_id(ds$columns, id, "column", ds_name)
-    ds$columns[[idx]] <- NULL
+    idx <- dataset_item_index_by_id(ds[[key]], id, spec_noun, ds_name)
+    ds[[key]][[idx]] <- NULL
     deviations[[length(deviations) + 1L]] <- list(op = "remove_columns", target = id)
   }
 
   # 2) add_columns: a list of column specs, each carrying its own `id`.
-  # Tracked against `existing_ids` (rather than re-deriving it from ds$columns
+  # Tracked against `existing_ids` (rather than re-deriving it from ds[[key]]
   # on every iteration) so two entries in the SAME add_columns list that
   # collide with each other are caught too, not just a collision with a
   # column that already existed before the patch.
-  existing_ids <- vapply(ds$columns %||% list(), function(x) as.character(x$id %||% ""), character(1))
+  existing_ids <- vapply(ds[[key]] %||% list(), function(x) as.character(x$id %||% ""), character(1))
   for (spec in (patch$add_columns %||% list())) {
     new_id <- as.character(spec$id %||% "")
     if (!nzchar(new_id)) {
@@ -345,7 +356,7 @@ apply_dataset_patch <- function(ds, patch) {
     if (new_id %in% existing_ids) {
       cli::cli_abort("Cannot add column '{new_id}' to dataset '{ds_name}': a column with that id already exists.")
     }
-    ds$columns[[length(ds$columns) + 1L]] <- spec
+    ds[[key]][[length(ds[[key]]) + 1L]] <- spec
     existing_ids <- c(existing_ids, new_id)
     deviations[[length(deviations) + 1L]] <- list(op = "add_columns", target = new_id)
   }
@@ -366,8 +377,8 @@ apply_dataset_patch <- function(ds, patch) {
   # that shape, which is exactly why it would have gone unnoticed.
   for (spec in (patch$modify_columns %||% list())) {
     mod_id <- as.character(spec$id %||% "")
-    idx <- dataset_item_index_by_id(ds$columns, mod_id, "column", ds_name)
-    ds$columns[[idx]] <- dta_template_merge_value(ds$columns[[idx]], spec[names(spec) != "id"])
+    idx <- dataset_item_index_by_id(ds[[key]], mod_id, spec_noun, ds_name)
+    ds[[key]][[idx]] <- dta_template_merge_value(ds[[key]][[idx]], spec[names(spec) != "id"])
     deviations[[length(deviations) + 1L]] <- list(op = "modify_columns", target = mod_id)
   }
 

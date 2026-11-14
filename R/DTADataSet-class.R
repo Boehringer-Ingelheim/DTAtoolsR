@@ -6,9 +6,11 @@
 #' @importFrom stringr str_flatten_comma
 #' @param id Character. Identifier of the dataset: its key in a DTA's
 #'   \code{datasets}, in every validation message and in \code{load_file()}.
-#' @param type Character. Dataset type: either \code{"tabular"}, whose files
-#'   are read and validated against column specifications, or \code{"file"},
-#'   whose files are only checked for presence, readability and non-emptiness.
+#' @param type Character. Dataset type: \code{"tabular"}, whose files
+#'   are read and validated against column specifications; \code{"file"},
+#'   whose files are only checked for presence, readability and non-emptiness;
+#'   or \code{"matrix"}, whose files are one homogeneous matrix of measurements
+#'   (see \code{\link{DTADataSetMatrix}}).
 #' @param files a list of DTAFile objects specifying input file information.
 #' @param name Character or NULL. Human-readable name of the dataset, e.g.
 #'   \code{"Demographics"}; shown in place of the \code{id} where one is set.

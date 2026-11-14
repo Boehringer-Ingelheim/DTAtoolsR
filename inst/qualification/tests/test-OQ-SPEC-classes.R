@@ -499,3 +499,53 @@ test_that("OQ-SPEC-056 | a DTA with an entry that is not a DTADataSet is refused
   ok <- tryCatch(DTA(datasets = list(good = ds), metadata = md), error = function(e) e)
   qa_check("a list of DTADataSet entries alone constructs", !inherits(ok, "condition"))
 })
+
+# ---- the matrix dataset class -----------------------------------------------
+
+test_that("OQ-SPEC-057 | the dataset classes include DTADataSetMatrix, a tabular dataset of type matrix, and the factory builds the one its type names | REQ-SPEC-010", {
+  files <- list(type = "tsv", filename = "m.tsv")
+  labels <- list(list(id = "ID", type = "SAS Char", nullable = FALSE))
+  matrix <- list(header = list(corner = "blank"), cells = list(type = "SAS Int", nullable = FALSE))
+
+  built <- list(
+    matrix = DTADataSetFactory(
+      "matrix",
+      id = "m", name = "Counts", description = "A matrix.",
+      files = files, row_labels = labels, matrix = matrix
+    ),
+    tabular = DTADataSetFactory("tabular", id = "t", files = files, columns = labels),
+    file = DTADataSetFactory("file", id = "f", files = list(type = "any", filename = "f.pdf"))
+  )
+  qa_step(
+    "the factory builds the class the type names",
+    c(
+      matrix = "DTAtools::DTADataSetMatrix", tabular = "DTAtools::DTADataSetTabular",
+      file = "DTAtools::DTADataSetFile"
+    ),
+    vapply(built, function(d) class(d)[[1]], character(1))
+  )
+  qa_step(
+    "a matrix is a tabular dataset and a dataset",
+    c(TRUE, TRUE),
+    c(
+      inherits(built$matrix, "DTAtools::DTADataSetTabular"),
+      inherits(built$matrix, "DTAtools::DTADataSet")
+    )
+  )
+  qa_step(
+    "a matrix carries its id, name, description and file handlers, and its type is matrix",
+    list("m", "Counts", "A matrix.", 1L, "matrix"),
+    list(
+      built$matrix@id, built$matrix@name, built$matrix@description,
+      length(built$matrix@files), built$matrix@type
+    )
+  )
+  qa_step(
+    "its column specifications are the row-label columns",
+    "ID", names(built$matrix@specs@columns)
+  )
+  qa_step(
+    "a tabular dataset is not a matrix",
+    FALSE, inherits(built$tabular, "DTAtools::DTADataSetMatrix")
+  )
+})

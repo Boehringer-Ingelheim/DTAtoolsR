@@ -114,6 +114,10 @@ DTA                              ← top-level agreement container
     │   └── tables (named list)  ← actual data as Arrow Tables
     │       └── <table_name>     ← populated via load_file() or constructor
     │
+    ├── DTADataSetMatrix         ← omics matrix (DTADataSetTabular subclass):
+    |                                row_labels + header/rows/cells, no
+    |                                per-column specs
+    │
     └── DTADataSetFile           ← non-tabular: file presence/readability check
         ├── file_paths           ← bound file paths (via load_file() or paths=)
         └── files (list)         ← DTAFileAny descriptors (type: any), which
@@ -1906,6 +1910,129 @@ results(dta_mixed) # one row per dataset
 
 ---
 
+## `DTADataSetMatrix`: Omics Matrices
+
+A count matrix (genes × samples, samples × miRNAs, SNPs × samples) has one
+row-label column or two, followed by hundreds or thousands of data columns that
+all mean the same thing. Describing each of them as a `DTAColumnSpec` is
+neither practical nor useful, because the sample names change from delivery to
+delivery. Use `type: matrix` when the delivery agreement is about the *shape*
+of such a file: what the header looks like, what identifies a row, how large
+the matrix may be and what a cell may contain.
+
+A matrix dataset has two blocks instead of `columns:`:
+
+- `row_labels:` lists the leading columns by position. These are ordinary
+  column specs; the first one is the row key unless `matrix.rows.key` says
+  otherwise, further ones are row descriptions such as a gene name.
+- `matrix:` describes the rest. `header` holds the `corner` (the header text
+  above the row labels), a `pattern` or `values` list every data label must
+  satisfy, and a `count` of data columns. `rows` holds the `key` and a
+  `count`. `cells` holds the `type`, `nullable`, `range`, `values`, `pattern`
+  and `infinite`.
+
+The example specification that ships with the package describes two matrices:
+
+```{r matrix_yaml}
+matrix_yaml <- system.file("extdata", "matrix_dta.yaml", package = "DTAtools")
+cat(readLines(matrix_yaml), sep = "\n")
+```
+
+Loading and checking works like any other dataset:
+
+```{r matrix_check}
+dta_m <- read_dta_from_yaml(matrix_yaml)
+dta_m <- load_file(
+  dta_m,
+  dataset = "gene_counts",
+  file = system.file("extdata", "matrix_gene_counts.tsv", package = "DTAtools")
+)
+dta_m <- load_file(
+  dta_m,
+  dataset = "mature_counts",
+  file = system.file("extdata", "matrix_mature_counts.csv", package = "DTAtools")
+)
+dta_m <- check(dta_m, quiet = TRUE)
+results(dta_m)[, c("dataset", "status", "n_invalid")]
+```
+
+A delivery that breaks the agreement is reported with the same tools as any
+other dataset. Here a sample label is renamed and one count is made negative:
+
+```{r matrix_errors}
+bad <- readLines(system.file("extdata", "matrix_gene_counts.tsv", package = "DTAtools"))
+bad[1] <- sub("S0003", "sample3", bad[1])
+bad[3] <- sub("\t0\t1.5", "\t-4\t1.5", bad[3])
+bad_file <- file.path(tempdir(), "matrix_gene_counts.tsv")
+writeLines(bad, bad_file)
+
+dta_bad <- read_dta_from_yaml(matrix_yaml)
+dta_bad <- load_file(dta_bad, dataset = "gene_counts", file = bad_file)
+dta_bad <- check(dta_bad, quiet = TRUE)
+messages(dta_bad)[, c("dataset", "id", "message")]
+```
+
+### The corner depends on the writer
+
+The first header field is where writers disagree, so `matrix.header.corner` is
+required and has no default. `k` is the number of row labels.
+
+| Writer | Header starts | `corner` |
+|---|---|---|
+| R `write.csv(x)` (row names) | `"",S1,...` | `blank` |
+| R `write.table(x, sep = "\t", quote = FALSE)` (row names) | `S1<TAB>...` (no field) | `[null]` |
+| R `write.table` of `cbind(gene_name = ..., x)` | `gene_name<TAB>S1...` | `[null, gene_name]` |
+| pandas `to_csv(index=True)`, unnamed index | `,S1,...` | `blank` |
+| pandas, index named `protein_id` | `protein_id,S1,...` | `[protein_id]` |
+| pandas, unnamed index plus a `gene_name` column | `,gene_name,S1,...` | `["", gene_name]` |
+| header text equals the `row_labels` ids | `GENE_ID<TAB>S1...` | `named` |
+
+`blank` means every corner field is empty, `named` means the `row_labels` ids,
+and a leading `null` says the header has no field above the first row label.
+When the field count does not fit, the error says which of these you probably
+need.
+
+### What a cell can be
+
+A cell is typed exactly like a tabular column of the same type; the matrix adds
+`range` and `infinite`.
+
+| Raw cell | Result |
+|---|---|
+| empty, `NA`, quoted `""` or `"NA"`, a token in `files.missing_values` | missing: allowed only with `nullable: Yes` |
+| whitespace only | missing for `SAS Num` and `SAS Int`, text for `SAS Char` |
+| `12`, ` 12 `, `+12`, `012`, `1e3`, `0x1F` | a number (hex is accepted package-wide, as in tabular data) |
+| `1.5` in a `SAS Int` matrix | import error (not whole) |
+| `NaN` | never a value: an import error, unless declared in `files.missing_values`, which makes it missing |
+| `Inf`, `-Inf` | rejected (`finite`) unless `infinite: true` |
+| `N/A`, `NULL`, `abc`, `1,5` | import error; not missing unless declared in `files.missing_values` |
+
+For example, `files: { missing_values: "./." }` lets a genotype matrix carry
+`./.` for a call that was not made.
+
+### Large files
+
+Matrices are validated in memory and streamed, in containers and through
+`load_delivery()`, and the specification can be exported to a document like any
+other. A matrix with tens of thousands of columns is expensive to read, so on a
+very large file try `check(dta, fail_fast = TRUE)` first: it stops at the first
+batch that shows a problem, which is usually a wrong corner or header and not
+a million bad cells.
+
+### What is not supported
+
+- preamble lines before the header (featureCounts, GCT)
+- semicolon-separated files and decimal commas
+- trailing annotation columns after the data columns
+- matrices without a header row or without row labels
+- sparse and single-cell formats, symmetric matrices
+- references between datasets, checks across files, limits on missingness and
+  column order
+- SAS and XPT matrices, `Delim` handlers, and in-memory `tables =`
+- the template guide and the app's dataset editor
+
+---
+
 ## The Full DTA Object
 
 ### `DTAMetaData`
@@ -2235,7 +2362,8 @@ Seven placeholders resolve inside a repetition to that one dataset's own
 values: `{DATASET_ID}`, `{DATASET_NAME}` (the id when the dataset has no
 name), `{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`, `{DATASET_FILE_COUNT}`,
 `{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}` (the last two are `0`
-for a non-tabular dataset). A dataset block marker
+for a non-tabular dataset; a matrix dataset counts its row-label columns, not
+its data columns). A dataset block marker
 written bare inside the region, as `{COLUMN_SPECS}` is above, binds to the
 current dataset and contributes only its table, without the heading it would
 generate outside a region — the region's own paragraphs are what supply the
@@ -2665,6 +2793,7 @@ datasets:
 | `DTAMetaData`             | Agreement metadata (title, version, contacts, transmission) |
 | `DTADataSet`              | Abstract base class for all dataset types                   |
 | `DTADataSetTabular`       | Dataset with column specs, rules, and data tables           |
+| `DTADataSetMatrix`        | Omics matrix: row labels + header, row and cell checks      |
 | `DTADataSetFile`          | Dataset that checks file presence and readability only      |
 | `DTAColumnSpecCollection` | Named list of column specs + optional list of rules          |
 | `DTAColumnSpec`           | Single column definition (type, nullable, values, pattern)  |

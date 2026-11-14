@@ -679,6 +679,9 @@ method(read_file_execution, DTAFile) <- function(x, ...) {
 #'       must match the object's filename or pattern.}
 #'     \item{specs}{A \code{DTAColumnSpecCollection} declaring the columns, or
 #'       \code{NULL} (the default). See the section below for why it matters.}
+#'     \item{column_names}{Character vector or \code{NULL}. Column names to use
+#'       instead of the file's header, verbatim; the header line is still
+#'       skipped. Used by matrix datasets.}
 #'   }
 #' @section Why the specs are handed to the reader:
 #'   A reader that knows nothing about the specification has to guess a type per
@@ -722,9 +725,9 @@ if (!exists("read_file", mode = "function", inherits = FALSE)) {
   read_file <- new_generic("read_file", "x")
 }
 
-method(read_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL) {
+method(read_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL, column_names = NULL) {
   file <- dta_check_readable_file(x, file, namecheck, "read_file")
-  read_file_execution(x, file, specs = specs)
+  read_file_execution(x, file, specs = specs, column_names = column_names)
 }
 
 
@@ -835,6 +838,9 @@ method(open_file_execution, DTAFile) <- function(x, ...) {
 #'       \code{NULL} (the default). Passed to the reader so that a column the
 #'       specification declares as text is parsed as text rather than inferred
 #'       -- see \code{\link{read_file}()} for why that matters.}
+#'     \item{column_names}{Character vector or \code{NULL}. Column names to use
+#'       instead of the file's header, verbatim; the header line is still
+#'       skipped. Used by matrix datasets.}
 #'   }
 #' @return An \code{arrow::Dataset}.
 #' @seealso \code{\link{read_file}()} for the materialising counterpart, and
@@ -857,9 +863,9 @@ if (!exists("open_file", mode = "function", inherits = FALSE)) {
 }
 
 #' @export
-method(open_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL) {
+method(open_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL, column_names = NULL) {
   file <- dta_check_readable_file(x, file, namecheck, "open_file")
-  open_file_execution(x, file, specs = specs)
+  open_file_execution(x, file, specs = specs, column_names = column_names)
 }
 
 

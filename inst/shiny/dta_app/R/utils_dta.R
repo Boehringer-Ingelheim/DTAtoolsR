@@ -1243,6 +1243,9 @@ dta_has_import_issues <- function(ds) {
 dta_drop_provenance <- function(ds, keys) {
   prov <- tryCatch(ds@provenance, error = function(e) NULL)
   if (length(prov) > 0) try(ds@provenance <- prov[setdiff(names(prov), keys)], silent = TRUE)
+  # A matrix's raw heads are keyed by table name just the same.
+  heads <- tryCatch(ds@heads, error = function(e) NULL)
+  if (length(heads) > 0) try(ds@heads <- heads[setdiff(names(heads), keys)], silent = TRUE)
   ds
 }
 
@@ -1314,6 +1317,7 @@ dta_unload_all <- function(dta, dataset) {
       ds@tables <- list()
     }
     try(ds@provenance <- list(), silent = TRUE)
+    if (length(tryCatch(ds@heads, error = function(e) NULL)) > 0) try(ds@heads <- list(), silent = TRUE)
     dta@datasets[[dataset]] <- ds
     dta
   })
@@ -2355,7 +2359,15 @@ dta_supported_types <- function() {
     get("__DTAtools_supported_dataset_types__", envir = asNamespace("DTAtools")),
     error = function(e) NULL
   )
-  types %||% c("tabular", "file")
+  types %||% c("tabular", "file", "matrix")
+}
+
+# The YAML key a dataset body keeps its column specs under: "row_labels" for a
+# matrix, "columns" otherwise. The helper is unexported, so it is reached by
+# namespace (the app's helpers are sourced into an environment that cannot see
+# unexported package functions).
+dta_dataset_spec_key <- function(body) {
+  get("dta_dataset_spec_key", envir = asNamespace("DTAtools"))(body)
 }
 
 # Supported column-structure backends (drives the Edit-columns backend dropdown).
@@ -2401,6 +2413,11 @@ dta_condition_operators <- function() {
 
 # Drop NULL and zero-length elements recursively so emitted YAML has no blanks.
 .dta_compact <- function(x) {
+  # A list classed "dta_verbatim" is emitted as it is (a matrix corner holds a
+  # meaningful NULL: "no header field here").
+  if (inherits(x, "dta_verbatim")) {
+    return(x)
+  }
   if (is.list(x)) {
     x <- lapply(x, .dta_compact)
     keep <- vapply(x, function(v) !(is.null(v) || length(v) == 0), logical(1))
@@ -2883,7 +2900,19 @@ dta_dataset_to_list <- function(ds, dta = NULL, apply_default = TRUE) {
   }
   cols <- tryCatch(ds@specs@columns, error = function(e) NULL)
   if (!is.null(cols) && length(cols) > 0) {
-    out$columns <- unname(lapply(cols, dta_column_to_list))
+    out[[if (identical(out$type, "matrix")) "row_labels" else "columns"]] <-
+      unname(lapply(cols, dta_column_to_list))
+  }
+  if (identical(out$type, "matrix")) {
+    mx <- tryCatch(as.list(ds@matrix), error = function(e) NULL)
+    if (!is.null(mx)) {
+      # A NULL corner entry (first only) is a header with no field there.
+      corner <- mx$header$corner
+      if (is.list(corner) && any(vapply(corner, is.null, logical(1)))) {
+        class(mx$header$corner) <- "dta_verbatim"
+      }
+      out$matrix <- mx
+    }
   }
   rules <- tryCatch(ds@specs@rules, error = function(e) NULL)
   if (!is.null(rules) && length(rules) > 0) {
@@ -3529,6 +3558,8 @@ dta_move_rule <- function(dta, dataset, index, direction) {
 dta_handler_types <- function(dataset_type = "tabular") {
   if (identical(dataset_type, "file")) {
     "any"
+  } else if (identical(dataset_type, "matrix")) {
+    c("csv", "tsv")
   } else {
     c("csv", "tsv", "sas7bdat", "xpt")
   }
@@ -4024,7 +4055,12 @@ dta_specs_signature <- function(ds) {
       dta_rule_to_list
     )
   )
-  tryCatch(yaml::as.yaml(list(columns = unname(cols), rules = unname(rules))),
+  mx <- if (identical(tryCatch(ds@type, error = function(e) NULL), "matrix")) {
+    tryCatch(as.list(ds@matrix), error = function(e) NULL)
+  }
+  sig <- list(columns = unname(cols), rules = unname(rules))
+  if (!is.null(mx)) sig$matrix <- mx
+  tryCatch(yaml::as.yaml(sig),
     error = function(e) ""
   )
 }
@@ -4050,6 +4086,11 @@ dta_transfer_bound_data <- function(dta, dataset, old_ds, keep_validation = TRUE
     prov <- tryCatch(old_ds@provenance, error = function(e) list()) %||% list()
     bound <- if (identical(ty, "file")) new_ds@file_paths else names(new_ds@tables)
     try(new_ds@provenance <- prov[intersect(names(prov), bound)], silent = TRUE)
+    # Raw heads (matrix only) travel with their tables the same way.
+    old_heads <- tryCatch(old_ds@heads, error = function(e) NULL)
+    if (!is.null(old_heads) && "heads" %in% S7::prop_names(new_ds)) {
+      new_ds@heads <- old_heads[intersect(names(old_heads), bound)]
+    }
     if (isTRUE(keep_validation)) {
       new_ds@validation_index <- tryCatch(old_ds@validation_index, error = function(e) list()) %||% list()
       new_ds@validation_store <- tryCatch(old_ds@validation_store, error = function(e) list()) %||% list()

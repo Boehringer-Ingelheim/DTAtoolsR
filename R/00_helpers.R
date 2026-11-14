@@ -148,7 +148,7 @@ dta_narrow_rows <- function(v) {
 }
 
 `__DTAtools_supported_backends__` <- c("SAS")
-`__DTAtools_supported_dataset_types__` <- c("tabular", "file")
+`__DTAtools_supported_dataset_types__` <- c("tabular", "file", "matrix")
 `__DTAtools_stream_modes__` <- c("auto", "always", "never")
 
 # The size above which `stream = "auto"` keeps a file lazy rather than reading
@@ -579,19 +579,28 @@ DTAColumnSpecStructureFactory <- function(
 #' @title Create a DTADataSet Object
 #'
 #' @description
-#' Constructs a DTADataSetTabular or DTADataSetFile object, according to
-#' `type`.
+#' Constructs a DTADataSetTabular, DTADataSetFile or DTADataSetMatrix object,
+#' according to `type`.
 #'
-#' @param type Character. Dataset type, \code{"tabular"} or \code{"file"}.
-#' @param columns A list with column specifications (optional)
+#' @param type Character. Dataset type, \code{"tabular"}, \code{"file"} or
+#'   \code{"matrix"}.
+#' @param columns A list with column specifications (optional). Not allowed for
+#'   a \code{"matrix"}, whose row-label columns are given as \code{row_labels}.
 #' @param rules A list of rules specifications (optional)
 #' @param files Specification of the dataset's file handlers (optional). Either
 #'   a single named list -- one handler, the shape a YAML \code{files:} mapping
 #'   parses to -- or an unnamed list of such lists, one per handler, the shape a
 #'   YAML \code{files:} sequence parses to. \code{NULL} or an empty list yields a
 #'   dataset with no file handlers.
-#' @param ... Further arguments passed on to the \code{DTADataSetTabular()}
-#'   or \code{DTADataSetFile()} constructor, according to \code{type}.
+#' @param matrix A list with the settings of a matrix dataset (the YAML
+#'   \code{matrix:} block), or a \code{DTAMatrixSpec}. Only for
+#'   \code{type = "matrix"}.
+#' @param row_labels A list with the column specifications of the row-label
+#'   columns of a matrix dataset, matched to the file's leading columns by
+#'   position. Only for \code{type = "matrix"}.
+#' @param ... Further arguments passed on to the \code{DTADataSetTabular()},
+#'   \code{DTADataSetFile()} or \code{DTADataSetMatrix()} constructor,
+#'   according to \code{type}.
 #' @importFrom cli cli_abort
 #' @return An object derived from class \code{DTADataSet} like \code{DTADataSetTabular},
 #' depending on \code{type}.
@@ -613,19 +622,60 @@ DTAColumnSpecStructureFactory <- function(
 #'   )
 #' )
 #'
-#' @seealso \code{\link{DTADataSet}}, \code{\link{DTADataSetTabular}}
+#' # A matrix dataset: row-label columns, then the settings of the matrix.
+#' DTADataSetFactory(
+#'   type = "matrix",
+#'   id = "counts",
+#'   files = list(type = "tsv", filename = "counts.tsv"),
+#'   row_labels = list(list(id = "GENE", type = "SAS Char", nullable = FALSE)),
+#'   matrix = list(
+#'     header = list(corner = "blank"),
+#'     cells = list(type = "SAS Int", range = list(min = 0))
+#'   )
+#' )
+#'
+#' @seealso \code{\link{DTADataSet}}, \code{\link{DTADataSetTabular}},
+#'   \code{\link{DTADataSetMatrix}}
 #' @export
 DTADataSetFactory <- function(
   type,
   columns = NULL,
   rules = NULL,
   files = NULL,
+  matrix = NULL,
+  row_labels = NULL,
   ...
 ) {
   # check that type is not NULL and
   if (!type %in% `__DTAtools_supported_dataset_types__`) {
     cli_abort(
       "'type' prefix '{type}'must be one of the supported: {str_flatten_comma(`__DTAtools_supported_dataset_types__`)}"
+    )
+  }
+
+  if (!identical(type, "matrix")) {
+    if (!is.null(row_labels)) {
+      cli_abort(
+        c(
+          "{.field row_labels} belongs to a {.val matrix} dataset, not to type {.val {type}}.",
+          "i" = "Write {.field columns} for this type."
+        ),
+        class = "dta_row_labels_key"
+      )
+    }
+    if (!is.null(matrix)) {
+      cli_abort(
+        "{.field matrix} belongs to a {.val matrix} dataset, not to type {.val {type}}.",
+        class = "dta_matrix_key"
+      )
+    }
+  } else if (!is.null(columns)) {
+    cli_abort(
+      c(
+        "A {.val matrix} dataset has no {.field columns}.",
+        "i" = "Use {.field row_labels}; the data columns are described by {.field matrix.header} and {.field matrix.cells}."
+      ),
+      class = "dta_matrix_columns_key"
     )
   }
 
@@ -645,8 +695,36 @@ DTADataSetFactory <- function(
         ...
       ))
     },
+    "matrix" = {
+      return(DTADataSetMatrix(
+        specs = specs_from_list(columns = row_labels, rules = rules),
+        matrix = matrix,
+        files = file_handlers,
+        ...
+      ))
+    },
     cli_abort("Dataset type '{type}' not implemented.")
   )
+}
+
+#' @title The Key That Holds a Dataset's Column Specifications
+#' @description
+#' A `matrix` dataset writes its row-label columns under `row_labels:`; every
+#' other dataset writes `columns:`. This is the one place that says so, for code
+#' that reads or writes a dataset body.
+#' @param body A dataset body as a list (a parsed YAML mapping), fully resolved.
+#'   A body with no `type` (a child template's inline dataset, merged over its
+#'   parent's by key) is decided by the keys present.
+#' @return `"row_labels"` or `"columns"`.
+#' @keywords internal
+dta_dataset_spec_key <- function(body) {
+  type <- body[["type"]]
+  if (is.null(type)) {
+    # A child template's inline dataset may omit `type` (merged over the
+    # parent's by key, template_inherit.R:483): decide from the keys present.
+    return(if (!is.null(body[["row_labels"]]) && is.null(body[["columns"]])) "row_labels" else "columns")
+  }
+  if (identical(type, "matrix")) "row_labels" else "columns"
 }
 
 

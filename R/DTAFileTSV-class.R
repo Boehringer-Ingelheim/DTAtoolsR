@@ -117,7 +117,8 @@ method(read_file_execution, DTAFileTSV) <- function(x, ...) {
     has_header = x@has_header,
     specs = args$specs,
     na = dta_reader_na_values(x),
-    handler = x
+    handler = x,
+    column_names = args$column_names
   )
 }
 
@@ -144,7 +145,8 @@ method(open_file_execution, DTAFileTSV) <- function(x, ...) {
     quote = x@quote,
     has_header = x@has_header,
     na = dta_reader_na_values(x),
-    handler = x
+    handler = x,
+    column_names = args$column_names
   )
 }
 

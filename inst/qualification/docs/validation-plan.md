@@ -88,6 +88,21 @@ the package makes of a transport file's decoded values is in scope: its text
 is read as UTF-8 only, and a version 5 file with rows under 80 bytes cannot
 say how many rows it holds (LIM-017, LIM-018).
 
+**Matrix datasets.** A dataset of type matrix describes a delimited file
+whose header labels the data columns, whose leading columns identify the rows
+and whose remaining cells hold one measurement (counts, expression, genotype
+calls). Its data columns are described by a rule, not listed. Area MATRIX
+checks the header (corner, labels, duplicates, the number of columns), the row
+labels and the row key, the number of rows, and every cell token by token:
+which raw texts are values, which are missing and which are errors, on which
+axis each is reported. The cell contract is written in the requirements as a
+table of tokens, so every expected value comes from a sentence. Every semantic
+case runs on a table held in memory and on one scanned in batches. Four
+behaviours that surprise are recorded as limitations (LIM-023 to LIM-026): a
+blank Char cell is text, the common spellings of "not available" are not
+missing, hexadecimal and signed numbers are accepted, and an empty cell and NA
+are not told apart.
+
 ## 3. Evidence and its properties
 
 Each run writes a bundle whose properties are the ones a regulated record needs.

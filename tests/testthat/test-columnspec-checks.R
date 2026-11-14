@@ -935,3 +935,187 @@ test_that("a failed schema derivation warns once, naming the column, rather than
   expect_match(warnings, "BAD", fixed = TRUE)
   expect_null(schemas[[1]]$schema)
 })
+
+
+# ---- the matrix vocabulary ------------------------------------------------------
+
+test_that("a tabular summary keeps exactly the eight legacy rows and labels", {
+  checks <- dta_columnspec_check_summary(dta_compile_columnspec_schemas(cc_specs()))
+  expect_equal(
+    checks$keyword,
+    c("required", "additionalProperties", "type", "format", "maxLength", "enum", "const", "pattern")
+  )
+  expect_equal(
+    unique(checks$check),
+    c("presence", "extra", "format", "length", "values", "pattern")
+  )
+  expect_null(attr(checks, "matrix"))
+  expect_false("matrix_only" %in% names(checks))
+})
+
+test_that("a matrix summary adds the structural rows and reports presence as not applicable", {
+  cell <- DTAColumnSpecCell(
+    id = "VAL", type = "SAS Num", minimum = 0, maximum = 9, finite = TRUE
+  )
+  schemas <- dta_compile_columnspec_schemas(
+    DTAColumnSpecCollection(columns = list(VAL = cell))
+  )
+  checks <- dta_columnspec_check_summary(
+    schemas,
+    matrix = TRUE,
+    structure_declared = c(corner = 2L, propertyNames = 3L, minItems = 1L)
+  )
+  expect_true(attr(checks, "matrix"))
+  expect_equal(
+    checks$keyword,
+    c(
+      "required", "additionalProperties", "type", "format", "maxLength", "enum",
+      "const", "pattern", "corner", "propertyNames", "uniqueNames",
+      "minProperties", "maxProperties", "minItems", "maxItems",
+      "minimum", "maximum", "finite"
+    )
+  )
+  expect_equal(cc_status(checks, "required"), "not_applicable")
+  expect_equal(cc_status(checks, "additionalProperties"), "not_applicable")
+  expect_equal(cc_status(checks, "minimum"), "passed")
+  expect_equal(cc_status(checks, "finite"), "passed")
+  expect_equal(cc_status(checks, "corner"), "passed")
+  expect_equal(cc_status(checks, "uniqueNames"), "not_applicable")
+  expect_equal(cc_row(checks, "propertyNames")$columns_declared, 3L)
+  expect_equal(cc_row(checks, "propertyNames")$columns_checked, 3L)
+})
+
+test_that("a matrix finding fails its row, and the report says so in structure terms", {
+  cell <- DTAColumnSpecCell(id = "VAL", type = "SAS Num", maximum = 9)
+  schemas <- dta_compile_columnspec_schemas(
+    DTAColumnSpecCollection(columns = list(VAL = cell))
+  )
+  errors <- data.frame(
+    row = NA_integer_, column = NA_character_, keyword = "minItems",
+    message = "too few rows", columnspec = "10", data = NA_character_,
+    stringsAsFactors = FALSE
+  )
+  checks <- dta_columnspec_check_summary(
+    schemas,
+    tally = dta_columnspec_error_tally(errors),
+    matrix = TRUE,
+    structure_declared = c(minItems = 1L)
+  )
+  expect_equal(cc_status(checks, "minItems"), "failed")
+  expect_equal(cc_row(checks, "minItems")$n_errors, 1L)
+
+  out <- cc_messages(dta_report_columnspec_checks(checks))
+  expect_match(out, "Dimensions check failed: 1 finding", fixed = TRUE)
+  expect_match(out, "a matrix takes its columns from the header by position", fixed = TRUE)
+})
+
+test_that("an NA column is filled from columnspec for required only", {
+  frame <- data.frame(
+    row = c(NA, NA), column = c(NA, NA), keyword = c("minItems", "required"),
+    message = c("too few", "missing"), columnspec = c("10", "GONE"),
+    data = NA_character_, stringsAsFactors = FALSE
+  )
+  tally <- dta_columnspec_error_tally(frame)
+  expect_equal(tally$n_errors[["minItems"]], 1)
+  expect_equal(tally$columns[["minItems"]], character(0))
+  expect_equal(tally$columns[["required"]], "GONE")
+})
+
+test_that("every vocabulary keyword has a tally slot and a report label", {
+  kinds <- dta_columnspec_check_kinds()
+  expect_equal(sum(!kinds$matrix_only), 8)
+  expect_true(all(kinds$check %in% names(`__DTAtools_columnspec_check_labels__`)))
+  expect_true(all(kinds$check %in% names(`__DTAtools_columnspec_check_absent__`)))
+  expect_setequal(names(dta_empty_columnspec_tally()$n_errors), kinds$keyword)
+})
+
+# ---- review fixes: matrix-only rows in a tabular summary -------------------------
+
+test_that("a tabular summary keeps a matrix-only row that holds violations", {
+  matrix_only <- dta_columnspec_check_kinds()
+  matrix_only <- matrix_only$keyword[matrix_only$matrix_only]
+  expect_length(matrix_only, 10)
+  schemas <- dta_compile_columnspec_schemas(cc_specs())
+  for (kw in matrix_only) {
+    tally <- dta_empty_columnspec_tally()
+    tally$n_errors[[kw]] <- 1
+    checks <- dta_columnspec_check_summary(schemas, tally = tally)
+    expect_equal(cc_status(checks, kw), "failed", info = kw)
+    # only that one extra row appears
+    expect_equal(nrow(checks), 9L, info = kw)
+  }
+})
+
+test_that("a tabular dataset holding a cell spec reports its range and finite findings", {
+  specs <- DTAColumnSpecCollection(columns = list(
+    V = DTAColumnSpecCell(
+      id = "V", type = "SAS Num", nullable = TRUE, minimum = 0, finite = TRUE
+    )
+  ))
+  tbl <- data.frame(V = c(1, -1, Inf))
+
+  eager <- NULL
+  out_eager <- cc_messages(eager <- validate_table_detailed(specs, tbl, verbose = TRUE))
+  streamed <- NULL
+  out_stream <- cc_messages(
+    streamed <- dta_validate_table_stream(
+      specs,
+      dta_as_batch_reader(arrow::as_arrow_table(tbl), batch_rows = 1L),
+      verbose = TRUE, coerce = FALSE, known_columns = names(tbl)
+    )
+  )
+  for (d in list(eager, streamed)) {
+    expect_equal(cc_status(d$columnspec_checks, "minimum"), "failed")
+    expect_equal(cc_status(d$columnspec_checks, "finite"), "failed")
+  }
+  for (out in c(out_eager, out_stream)) {
+    expect_false(grepl("All column spec checks passed", out, fixed = TRUE))
+    expect_match(out, "Range check failed", fixed = TRUE)
+    expect_match(out, "Finite values check failed", fixed = TRUE)
+  }
+})
+
+test_that("the matrix finding count is pluralised on the number, not the string", {
+  schemas <- dta_compile_columnspec_schemas(cc_specs())
+  summary_for <- function(n) {
+    tally <- dta_empty_columnspec_tally()
+    tally$n_errors[["minItems"]] <- n
+    dta_columnspec_check_summary(
+      schemas,
+      tally = tally, matrix = TRUE, structure_declared = c(minItems = 1L)
+    )
+  }
+  expect_match(cc_messages(dta_report_columnspec_checks(summary_for(1))), "1 finding", fixed = TRUE)
+  out4 <- cc_messages(dta_report_columnspec_checks(summary_for(4)))
+  expect_match(out4, "4 findings", fixed = TRUE)
+})
+
+test_that("an unsettled header row does not claim declaring columns", {
+  schemas <- dta_compile_columnspec_schemas(cc_specs())
+  checks <- dta_columnspec_check_summary(
+    schemas,
+    settled = character(0), matrix = TRUE,
+    structure_declared = c(corner = 2L, minItems = 1L)
+  )
+  expect_equal(cc_status(checks, "corner"), "not_checked")
+  out <- cc_messages(dta_report_columnspec_checks(checks))
+  expect_match(out, "Header check not checked", fixed = TRUE)
+  expect_false(grepl("Header check not checked: [^.]*declaring column", out))
+  expect_false(grepl("Dimensions check not checked: [^.]*declaring column", out))
+})
+
+test_that("the report explains the range, finite and structure keywords", {
+  explain <- function(kw, spec = "5") {
+    .report_columnspec_expected_text(
+      data.frame(columnspec_keyword = kw, columnspec_columnspec = spec, stringsAsFactors = FALSE),
+      html = FALSE
+    )
+  }
+  expect_match(explain("minimum"), "below the declared minimum (5)", fixed = TRUE)
+  expect_match(explain("maximum"), "above the declared maximum (5)", fixed = TRUE)
+  expect_match(explain("finite"), "must be finite", fixed = TRUE)
+  expect_match(explain("corner"), "declared corner", fixed = TRUE)
+  expect_match(explain("uniqueNames"), "must be unique", fixed = TRUE)
+  expect_match(explain("minItems"), "fewer data rows", fixed = TRUE)
+  expect_match(explain("maxProperties"), "more data columns", fixed = TRUE)
+})

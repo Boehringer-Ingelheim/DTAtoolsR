@@ -877,11 +877,196 @@ dta_lint_dataset_list <- function(d, label, container_ids = NULL) {
       ))
     }
     out <- rbind(out, dta_lint_files_list(d[["files"]], label, container_ids))
-    if (!identical(type, "tabular")) {
-      return(out)
+    if (!(type %in% c("tabular", "matrix"))) {
+      return(rbind(out, dta_lint_matrix_keys(d, label, is_matrix = FALSE)))
     }
   }
-  rbind(out, dta_lint_specs_lists(d[["columns"]], d[["rules"]], label))
+  is_matrix <- identical(type, "matrix")
+  if (is_matrix) {
+    out <- rbind(
+      out,
+      dta_lint_matrix_keys(d, label, is_matrix = TRUE),
+      dta_lint_matrix_files(d[["files"]], label)
+    )
+  } else if (!is.null(type)) {
+    out <- rbind(out, dta_lint_matrix_keys(d, label, is_matrix = FALSE))
+  }
+  # The key the specs are written under: `row_labels` for a matrix.
+  key <- dta_dataset_spec_key(d)
+  out <- rbind(out, dta_lint_specs_lists(d[[key]], d[["rules"]], label, key = key))
+  if (is_matrix) {
+    out <- rbind(out, dta_lint_matrix_block(d[["matrix"]], label, d[[key]], d[["rules"]]))
+  }
+  out
+}
+
+# The keys that belong to one dataset type and sit on another: `columns` on a
+# matrix, `row_labels` or `matrix` anywhere else; and a matrix without row labels.
+dta_lint_matrix_keys <- function(d, label, is_matrix) {
+  out <- dta_lint_empty()
+  if (is_matrix) {
+    if (!is.null(d[["columns"]])) {
+      out <- rbind(out, dta_lint_row(
+        label, "dataset", label, "error", "matrix_columns_key",
+        "A matrix dataset has no 'columns': use 'row_labels'; the data columns are described by 'matrix.header' and 'matrix.cells'."
+      ))
+    }
+    rl <- d[["row_labels"]]
+    if (is.null(rl) || length(rl) == 0L) {
+      out <- rbind(out, dta_lint_row(
+        label, "dataset", label, "error", "matrix_row_labels_missing",
+        "A matrix dataset needs at least one row-label column under 'row_labels'."
+      ))
+    }
+  } else {
+    if (!is.null(d[["row_labels"]])) {
+      out <- rbind(out, dta_lint_row(
+        label, "dataset", label, "error", "row_labels_key",
+        "'row_labels' belongs to a matrix dataset: write 'columns' for this type."
+      ))
+    }
+    if (!is.null(d[["matrix"]])) {
+      out <- rbind(out, dta_lint_row(
+        label, "dataset", label, "error", "matrix_key",
+        "'matrix' belongs to a matrix dataset (type: matrix)."
+      ))
+    }
+  }
+  out
+}
+
+# A matrix reads CSV or TSV files with a header line, nothing else.
+dta_lint_matrix_files <- function(files, dataset) {
+  out <- dta_lint_empty()
+  if (is.null(files) || length(files) == 0L || !is.list(files)) {
+    return(out)
+  }
+  nms <- names(files)
+  if (!is.null(nms) && all(nzchar(nms))) {
+    files <- list(files)
+  }
+  for (i in seq_along(files)) {
+    entry <- files[[i]]
+    if (!is.list(entry)) {
+      next
+    }
+    id <- if (is.null(entry[["filename"]])) paste0("#", i) else paste(unlist(entry[["filename"]]), collapse = ", ")
+    type <- entry[["type"]]
+    bad_type <- is.character(type) && length(type) == 1L && !(type %in% c("csv", "tsv"))
+    no_header <- identical(entry[["has_header"]], FALSE)
+    if (bad_type || no_header) {
+      out <- rbind(out, dta_lint_row(
+        dataset, "file", id, "error", "matrix_file_type",
+        "A matrix dataset reads CSV or TSV files with a header line (type: csv or tsv, has_header: true)."
+      ))
+    }
+  }
+  out
+}
+
+# The `matrix:` block, judged by building it: every abort class of
+# dta_matrix_spec_from_list() becomes a finding coded after the class
+# (dta_matrix_field_unknown -> matrix_field_unknown). The cross-checks against
+# the row labels (row key, key nullable, corner length) and the reserved rule ids
+# do not depend on the build succeeding: they read what the block says directly,
+# where it says it plainly, so one run reports every independent problem.
+dta_lint_matrix_block <- function(m, dataset, row_labels = NULL, rules = NULL) {
+  out <- dta_lint_empty()
+  add <- function(object, id, code, message) {
+    out <<- rbind(out, dta_lint_row(dataset, object, id, "error", code, message))
+  }
+  if (is.null(m)) {
+    add("dataset", dataset, "matrix_field_missing", "A matrix dataset needs its 'matrix' block.")
+    return(out)
+  }
+  corner_raw <- if (is.list(m) && is.list(m[["header"]])) m[["header"]][["corner"]] else NULL
+  corner_missing <- is.list(m) && is.list(m[["header"]]) && length(m[["header"]]) > 0L &&
+    is.null(corner_raw) && !is.null(m[["cells"]])
+  built <- NULL
+  if (corner_missing) {
+    add("dataset", dataset, "matrix_corner_missing", "'matrix.header.corner' is required.")
+  } else {
+    built <- tryCatch(dta_matrix_spec_from_list(m), error = function(e) e)
+    if (inherits(built, "error")) {
+      cls <- grep("^dta_", class(built), value = TRUE)
+      code <- if (length(cls) > 0L) sub("^dta_", "", cls[[1L]]) else "matrix_invalid"
+      add("dataset", dataset, code, dta_condition_text(built))
+      built <- NULL
+    }
+  }
+
+  n_values <- if (!is.null(built)) length(built@header@values) else 0L
+  if (n_values > 0L && built@n_columns[[1L]] > n_values) {
+    add(
+      "dataset", dataset, "matrix_header_count_unsatisfiable",
+      sprintf(
+        "'matrix.header.values' lists %d entries but 'matrix.header.count' needs at least %d columns.",
+        n_values, as.integer(built@n_columns[[1L]])
+      )
+    )
+  }
+
+  # What the cross-checks need: the key (NULL when the block does not say it
+  # plainly) and the number of corner entries (NULL unless the corner is a list).
+  rk_raw <- if (is.list(m) && is.list(m[["rows"]])) m[["rows"]][["key"]] else NULL
+  plain_key <- function(k) {
+    k <- if (is.list(k)) unlist(k, use.names = FALSE) else k
+    if (is.character(k) && length(k) > 0L && !anyNA(k)) k else NULL
+  }
+  corner_n <- if (!is.null(built)) {
+    if (built@corner_mode == "list") length(built@corner) else NULL
+  } else if (is.list(corner_raw) && !(length(corner_raw) == 1L && is.character(corner_raw[[1L]]) &&
+    length(corner_raw[[1L]]) == 1L && isTRUE(corner_raw[[1L]] %in% c("named", "blank")))) {
+    length(corner_raw)
+  } else if (is.character(corner_raw) && length(corner_raw) > 1L) {
+    length(corner_raw)
+  }
+
+  ids <- vapply(
+    Filter(is.list, as.list(row_labels)),
+    function(cl) as.character(cl[["id"]] %||% NA_character_)[[1L]], character(1)
+  )
+  ids <- unname(ids[!is.na(ids)])
+  if (length(ids) > 0L) {
+    key <- if (!is.null(built)) {
+      built@row_key %||% ids[[1L]]
+    } else if (is.null(rk_raw)) {
+      ids[[1L]]
+    } else {
+      plain_key(rk_raw)
+    }
+    if (!is.null(key)) {
+      if (!all(key %in% ids)) {
+        add(
+          "dataset", dataset, "matrix_row_key_invalid",
+          sprintf("'matrix.rows.key' names %s, which is not a row-label id.", paste(setdiff(key, ids), collapse = ", "))
+        )
+      }
+      for (cl in Filter(is.list, as.list(row_labels))) {
+        if (isTRUE(cl[["id"]] %in% key) && isTRUE(cl[["nullable"]])) {
+          add(
+            "column", cl[["id"]], "matrix_key_nullable",
+            sprintf("The row key column '%s' cannot be nullable: a row needs an identity.", cl[["id"]])
+          )
+        }
+      }
+    }
+    if (!is.null(corner_n) && corner_n != length(ids)) {
+      add(
+        "dataset", dataset, "matrix_corner_invalid",
+        sprintf(
+          "'matrix.header.corner' lists %d entries but the dataset has %d row-label columns.",
+          corner_n, length(ids)
+        )
+      )
+    }
+  }
+  for (r in Filter(is.list, as.list(rules))) {
+    if (is.character(r[["id"]]) && length(r[["id"]]) == 1L && startsWith(r[["id"]], ".matrix:")) {
+      add("rule", r[["id"]], "matrix_rule_id_reserved", "Rule ids starting with '.matrix:' are reserved.")
+    }
+  }
+  out
 }
 
 # The file entries of a dataset, judged without building them: a key the
@@ -964,14 +1149,14 @@ dta_lint_files_list <- function(files, dataset, container_ids = NULL) {
 
 # Builds every column and rule from its raw list, one by one, then runs the
 # cross-object checks on whatever built.
-dta_lint_specs_lists <- function(columns, rules, dataset) {
+dta_lint_specs_lists <- function(columns, rules, dataset, key = "columns") {
   fb <- dta_findings_builder()
   ok_cols <- list()
   ok_rules <- list()
   declared <- character(0)
 
   if (length(columns) > 0L && !is.list(columns)) {
-    fb$add("dataset", dataset, "error", "column_spec_invalid", "'columns' must be a list.")
+    fb$add("dataset", dataset, "error", "column_spec_invalid", sprintf("'%s' must be a list.", key))
     columns <- list()
   }
   for (i in seq_along(columns)) {

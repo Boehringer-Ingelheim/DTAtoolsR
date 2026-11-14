@@ -505,7 +505,8 @@ vocabulary_slots:
 ```
 
 The supported target form is `datasets.<dataset id>.columns.<column id>.values`. The dataset and column ids must refer to objects the
-template actually builds.
+template actually builds. For a `type: matrix` dataset, whose column specs are its row labels, write `row_labels` in place of `columns`:
+`datasets.<dataset id>.row_labels.<row label id>.values`. The segment must match the dataset's own key.
 
 `mode` is `closed` or `open`. `closed` only offers vocabulary terms; `open` also permits the author to type additional terms. The final document
 still receives the selected values as its permitted-value list. `include` and `exclude` narrow the terms offered by the vocabulary, and
@@ -659,7 +660,8 @@ options:
     help: Name of the organisation supplying this dataset.
 ```
 
-Dataset paths address columns and rules by their `id`, not by list position. The specific path grammar is implemented by the dataset-template
+Dataset paths address columns and rules by their `id`, not by list position. A `type: matrix` dataset keeps its column specs under
+`row_labels:` instead of `columns:`, so its paths read `dataset.row_labels.<id>.<field>`; a path that names the other one fails with a hint. The specific path grammar is implemented by the dataset-template
 engine; validate the target rather than assuming any dotted string is valid. Dataset-template options are supplied by the importing creation template entry's `options:` mapping, or by the dataset-template caller. They are not prompted as creation-template options merely because they
 exist in the imported file.
 
@@ -769,6 +771,25 @@ datasets:
 
 `set` paths are relative to the dataset body. Examples include `name`, `description`, `files.filename`, and `columns.SOURCE.values`. Column and rule
 paths are addressed by ID. Do not use a positional index in a patch path.
+
+For a `type: matrix` dataset the same operations act on its `row_labels:` list (the operation names do not change), and `set` paths use
+`row_labels.<id>.<field>`; the `matrix:` block is reached with `matrix.<key>` paths. A short example:
+
+```yaml
+dataset:
+  id: gene_counts
+  type: matrix
+  files: { filename: counts.tsv, type: tsv }
+  row_labels:
+    - id: GENE_ID
+      type: SAS Char
+      nullable: No
+  matrix:
+    header: { corner: [gene_id], pattern: '^S[0-9]{4}$' }
+    cells: { type: SAS Num, range: { min: 0 } }
+```
+
+with, in a creation template, `patch: { modify_columns: [{ id: GENE_ID, pattern: '^ENSG' }], set: { matrix.cells.type: SAS Int } }`.
 
 The generic collection form is also accepted under `patch.columns:`. It supports the collection verbs `inherit`, `remove`, `add`, `modify`, and
 `order`:

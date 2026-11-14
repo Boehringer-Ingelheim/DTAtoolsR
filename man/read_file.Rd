@@ -17,6 +17,9 @@ parameters.}
 must match the object's filename or pattern.}
 \item{specs}{A \code{DTAColumnSpecCollection} declaring the columns, or
 \code{NULL} (the default). See the section below for why it matters.}
+\item{column_names}{Character vector or \code{NULL}. Column names to use
+instead of the file's header, verbatim; the header line is still
+skipped. Used by matrix datasets.}
 }}
 }
 \value{

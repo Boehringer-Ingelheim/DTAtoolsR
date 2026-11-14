@@ -66,8 +66,10 @@
 #'     Inside each repetition, seven placeholders resolve to that dataset's
 #'     values: `{DATASET_ID}`, `{DATASET_NAME}` (its id where no name is set),
 #'     `{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`, `{DATASET_FILE_COUNT}`,
-#'     `{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}` (the last two are
-#'     `0` for a non-tabular dataset). A bare dataset block
+#'     `{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}` (both `0` for a
+#'     non-tabular dataset; a matrix dataset is tabular here, so its column
+#'     count is the number of its row-label columns, not of its data columns).
+#'     A bare dataset block
 #'     (`{COLUMN_SPECS}`, `{VALIDATION_RULES}`, `{FILE_SPECS}`, `{DATASETS}`)
 #'     alone in a paragraph of the region is bound to the repetition's dataset
 #'     (a bare `{COLUMN_SPECS}` or `{VALIDATION_RULES}` renders nothing for a

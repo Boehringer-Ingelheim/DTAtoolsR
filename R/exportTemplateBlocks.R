@@ -390,12 +390,16 @@
   }
   for (nm in names(sets)) {
     if (isTRUE(heading)) {
-      doc <- .tv_block_heading(doc, paste0("Column Specifications \u2014 ", dta_dataset_heading(sets[[nm]])), level = 2)
+      doc <- .tv_block_heading(doc, paste0(.column_specs_title(sets[[nm]]), " \u2014 ", dta_dataset_heading(sets[[nm]])), level = 2)
     }
     doc <- .tv_block_table(
       doc, .build_column_specs_table(sets[[nm]]@specs, width = NULL),
       "No column specifications available."
     )
+    if (.is_matrix_dataset(sets[[nm]])) {
+      doc <- .tv_block_heading(doc, "Matrix layout", level = 3)
+      doc <- .tv_block_table(doc, .kv_table(.matrix_layout_rows(sets[[nm]])), "")
+    }
   }
   doc
 }
@@ -467,11 +471,15 @@
     doc <- .tv_block_table(doc, .build_file_specs_table(ds@files, width = NULL, ctx = ctx, dataset = ds@id), "No files specified.")
 
     if (inherits(ds, "DTAtools::DTADataSetTabular")) {
-      doc <- .tv_block_heading(doc, "Column Specifications", level = 3)
+      doc <- .tv_block_heading(doc, .column_specs_title(ds), level = 3)
       doc <- .tv_block_table(
         doc, .build_column_specs_table(ds@specs, width = NULL),
         "No column specifications available."
       )
+      if (.is_matrix_dataset(ds)) {
+        doc <- .tv_block_heading(doc, "Matrix layout", level = 3)
+        doc <- .tv_block_table(doc, .kv_table(.matrix_layout_rows(ds)), "")
+      }
       doc <- .tv_block_heading(doc, "Validation Rules", level = 3)
       doc <- .tv_block_rules_table(doc, ds@specs@rules)
     }

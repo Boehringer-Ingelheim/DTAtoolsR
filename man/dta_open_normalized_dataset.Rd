@@ -11,7 +11,8 @@ dta_open_normalized_dataset(
   quote = "\\"",
   has_header = TRUE,
   na = NULL,
-  handler = NULL
+  handler = NULL,
+  column_names = NULL
 )
 }
 \arguments{
@@ -27,6 +28,8 @@ column is read as text; see \code{\link[=dta_delim_reader_plan]{dta_delim_reader
 
 \item{handler}{A \code{DTAFileTabular} (or subclass) whose \code{newlines_in_values}
 and \code{encoding} apply, or \code{NULL} for the defaults.}
+
+\item{column_names}{Character vector or \code{NULL}; see \code{\link[=dta_delim_reader_plan]{dta_delim_reader_plan()}}.}
 }
 \value{
 An \code{arrow::Dataset}.

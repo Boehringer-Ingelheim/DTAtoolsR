@@ -696,9 +696,12 @@ write_dta <- function(
     },
     if (tabular) {
       .md_section(
-        "Column Specifications",
+        .column_specs_title(dataset),
         if (length(columns) > 0) columns else "No column specifications available."
       )
+    },
+    if (.is_matrix_dataset(dataset)) {
+      .md_section("Matrix layout", .md_kv_table(.matrix_layout_rows(dataset)))
     },
     if (tabular && isTRUE(include_rules)) {
       .md_section("Validation Rules", .md_rules_body(rules, guide = guide_shown, level = level))

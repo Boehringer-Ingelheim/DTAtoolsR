@@ -910,6 +910,99 @@ RULE_READING_GUIDE_TITLE <- "How to read the rules"
   )
 }
 
+.is_matrix_dataset <- function(dataset) inherits(dataset, "DTAtools::DTADataSetMatrix")
+
+# Title of the column table: a matrix lists its row-label columns only.
+.column_specs_title <- function(dataset) {
+  if (.is_matrix_dataset(dataset)) "Row label columns" else "Column Specifications"
+}
+
+# The "Matrix layout" key/value rows of a matrix dataset (key, value; plain
+# English, unescaped). A row whose value is absent is omitted.
+.matrix_layout_rows <- function(dataset) {
+  m <- as.list(dataset@matrix)
+  h <- m$header
+  cl <- m$cells
+  # Shortest decimal text that reads back as the same double; scientific
+  # notation is left to format() so 1e300 stays short.
+  num <- function(v) {
+    s <- format(v, digits = 15, trim = TRUE)
+    if (is.finite(v) && as.numeric(s) != v) s <- format(v, digits = 17, trim = TRUE)
+    s
+  }
+  count <- function(n) {
+    lo <- n[[1L]]
+    hi <- n[[2L]]
+    if (lo == hi) {
+      paste("exactly", num(lo))
+    } else if (is.infinite(hi)) {
+      paste("at least", num(lo))
+    } else if (lo == 0) {
+      paste("at most", num(hi))
+    } else {
+      paste0(num(lo), "\u2013", num(hi))
+    }
+  }
+  corner <- h$corner
+  corner <- if (is.character(corner) && length(corner) == 1L && corner %in% c("named", "blank")) {
+    if (corner == "named") paste0("named: ", paste(dta_matrix_label_ids(dataset), collapse = ", ")) else "blank"
+  } else {
+    paste(
+      vapply(corner, function(e) if (is.null(e)) "(no field)" else if (nzchar(e)) e else "(blank)", character(1)),
+      collapse = ", "
+    )
+  }
+  label_rule <- if (!is.null(h$pattern)) {
+    paste("matches", h$pattern)
+  } else if (!is.null(h$values)) {
+    paste("one of", paste(unlist(h$values), collapse = ", "))
+  }
+  if (!is.null(h$length)) {
+    label_rule <- paste(c(label_rule, paste("at most", num(h$length), "characters")), collapse = "; ")
+  }
+  label_rule <- paste(
+    c(label_rule, "labels must be unique and must not repeat a row-label id"),
+    collapse = "; "
+  )
+  key <- m$rows$key
+  key_txt <- if (!is.null(key)) {
+    paste0(
+      paste(key, collapse = " + "),
+      if (length(key) > 1L) " (unique together, no missing values)" else " (unique, no missing values)"
+    )
+  }
+  rng <- cl$range
+  range_txt <- if (!is.null(rng)) {
+    paste0(
+      "[", if (is.null(rng$min)) "no lower bound" else num(rng$min), ", ",
+      if (is.null(rng$max)) "no upper bound" else num(rng$max), "]"
+    )
+  }
+  rows <- list(
+    "Header corner" = corner,
+    "Column label" = h$label,
+    "Column label description" = h$description,
+    "Column label rule" = label_rule,
+    "Data columns" = count(dataset@matrix@n_columns),
+    "Row key" = key_txt,
+    "Data rows" = if (all(as.numeric(dataset@matrix@n_rows) == c(0, Inf))) "any number" else count(dataset@matrix@n_rows),
+    "Cell label" = cl$label,
+    "Cell description" = cl$description,
+    "Cell type" = cl$type,
+    "Missing cells" = if (isTRUE(cl$nullable)) "allowed" else "not allowed",
+    "Cell values" = if (!is.null(cl$values)) paste(unlist(cl$values), collapse = ", "),
+    "Cell pattern" = cl$pattern,
+    "Cell length" = if (!is.null(cl$length) && identical(dta_cell_type(dataset@matrix@cells), "Char")) paste("at most", num(cl$length), "characters"),
+    "Cell format" = cl$format,
+    "Cell range" = range_txt,
+    "Infinite values" = if (identical(dta_cell_type(dataset@matrix@cells), "Num") && !is.null(cl$infinite)) {
+      if (isTRUE(cl$infinite)) "allowed" else "not allowed"
+    }
+  )
+  rows <- Filter(function(v) length(v) == 1L && !is.na(v) && nzchar(v), rows)
+  .pairs_df(unlist(rows))
+}
+
 #' Add Column Specifications + Validation Rules sections for one dataset (DOCX).
 #' Used standalone by write_dataset_metadata() (heading_level = 1) and embedded
 #' within write_dta()'s per-dataset "Datasets" section (heading_level = 3);
@@ -941,7 +1034,7 @@ RULE_READING_GUIDE_TITLE <- "How to read the rules"
     doc <- .end_section_orientation(doc, "portrait", furniture_meta, furniture = furniture)
   }
 
-  doc <- add_section_heading(doc, "Column Specifications")
+  doc <- add_section_heading(doc, .column_specs_title(dataset))
   ft <- .build_column_specs_table(dataset@specs)
   if (!is.null(ft)) {
     doc <- flextable::body_add_flextable(doc, ft)
@@ -949,6 +1042,11 @@ RULE_READING_GUIDE_TITLE <- "How to read the rules"
     doc <- .add_body_par(doc, "No column specifications available.", italic = TRUE, color = THEME_COLORS$gray_mid)
   }
   doc <- .add_spacer(doc)
+  if (.is_matrix_dataset(dataset)) {
+    doc <- add_section_heading(doc, "Matrix layout")
+    doc <- flextable::body_add_flextable(doc, .kv_table(.matrix_layout_rows(dataset)), align = "left")
+    doc <- .add_spacer(doc)
+  }
 
   if (include_rules) {
     doc <- add_section_heading(doc, "Validation Rules")

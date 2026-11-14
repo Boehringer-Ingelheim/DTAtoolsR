@@ -484,3 +484,135 @@ requirements:
       bar is static page chrome outside the server function, which
       shiny::testServer() never renders, so the test renders the UI function
       itself and reads the HTML.
+
+  # ---- matrix datasets in the application ------------------------------------
+
+  - id: REQ-APP-033
+    text: >
+      Saving a document that holds a dataset of type matrix shall write the
+      dataset's row-label column specifications under the key row_labels, in
+      the order declared, and its matrix settings under the key matrix, and
+      shall write no columns key for it. A corner list whose first entry is
+      null shall be written with that entry as the YAML null, so that reading
+      the saved text back yields a dataset with the same row labels and the
+      same corner, and saving that dataset again shall give the identical
+      text.
+    risk: high
+    category: integrity
+    covers: [run_dta_app, read_dta_from_yaml]
+    source: >
+      PLAN-matrix-dataset.md 4.6, T1;
+      inst/shiny/dta_app/R/utils_dta.R (dta_dataset_to_list, .dta_compact)
+    notes: >
+      The application drops empty entries recursively before it writes YAML,
+      and the null in a corner means "the header has no field above the first
+      row label"; dropping it would shift every later corner entry onto the
+      wrong row label.
+
+  - id: REQ-APP-034
+    text: >
+      A matrix dataset's recorded header, the raw header fields of each table
+      loaded with load_file(), shall survive the application's session dump and
+      restore: after a dump written with saveRDS() and read back, the restored
+      dataset shall hold the same recorded header for the table, and checking
+      it shall find no missing-header or load-it-again finding.
+    risk: high
+    category: integrity
+    covers: [run_dta_app, load_file, check]
+    source: >
+      PLAN-matrix-dataset.md D13, 4.7, T10;
+      inst/shiny/dta_app/R/utils_dta.R (dta_dump_session, dta_restore_session)
+    notes: >
+      PINNED STRUCTURALLY through the dump and restore helpers, which the
+      restore button calls: the harness has no browser to press it.
+
+  - id: REQ-APP-035
+    text: >
+      Applying edited raw YAML that changes the matrix block of a dataset with
+      loaded data shall re-validate that dataset without the user pressing
+      check, so that its verdict and findings reflect the new settings, and
+      shall leave the verdict of a dataset whose settings did not change as it
+      was.
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-dataset.md T15;
+      inst/shiny/dta_app/R/utils_dta.R (dta_specs_signature)
+    notes: >
+      A verdict reached against one matrix block and shown against another
+      would be a pass on settings nobody wrote.
+
+  - id: REQ-APP-036
+    text: >
+      Applying edited raw YAML that changes the type of one dataset shall drop
+      that dataset's bound tables, recorded headers and upload records and
+      leave it in the no-data state, and shall leave the bound tables, upload
+      records, recorded headers and verdicts of every other dataset
+      unchanged.
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-dataset.md T10;
+      inst/shiny/dta_app/R/utils_dta.R (dta_transfer_bound_data)
+    notes: >
+      A table bound under one type read as another would be judged by
+      specifications it was never loaded against.
+
+  - id: REQ-APP-037
+    text: >
+      Applying edited raw YAML that changes the corner of a matrix dataset
+      with a loaded table shall not raise: the next check shall report the
+      dataset as failing, with a finding telling the user to load the file
+      again, because the recorded header no longer yields the table's column
+      names under the new specification.
+    risk: high
+    category: integrity
+    covers: [run_dta_app, check, messages]
+    source: PLAN-matrix-dataset.md D13, T11; REQ-MATRIX-045
+
+  - id: REQ-APP-038
+    text: >
+      Unloading one table of a matrix dataset shall drop that table's recorded
+      header and keep the recorded headers of the dataset's other tables;
+      unloading every table shall drop every recorded header.
+    risk: medium
+    category: integrity
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-dataset.md 4.7, T10;
+      inst/shiny/dta_app/R/utils_dta.R (dta_unload_table, dta_unload_all,
+      dta_drop_provenance)
+    notes: >
+      PINNED STRUCTURALLY through the unload helpers the remove-file control
+      calls: the harness has no browser to press it.
+
+  - id: REQ-APP-039
+    text: >
+      The application shall list matrix among the dataset types it supports,
+      beside tabular and file, and for a dataset of type matrix shall offer
+      only csv and tsv as the type of a file entry, while tabular datasets
+      keep csv, tsv, sas7bdat and xpt and file datasets any type.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-dataset.md D11, D12;
+      inst/shiny/dta_app/R/utils_dta.R (dta_supported_types, dta_handler_types)
+    notes: >
+      PINNED STRUCTURALLY: the offered types are read from the helpers that
+      build the dropdown, not from a rendered dropdown.
+
+  - id: REQ-APP-040
+    text: >
+      A specification with matrix datasets loaded into the application, with a
+      file bound to each, shall validate: a conforming delivery shall be
+      reported as passing, and a delivery with a cell below the declared
+      minimum shall be reported as failing, with one finding of keyword minimum
+      at the row and column of that cell, which the application shall allow the
+      user to inspect, the inspected row showing the offending value.
+    risk: high
+    category: functional
+    covers: [run_dta_app, check, messages]
+    source: PLAN-matrix-dataset.md D1, 3.5; REQ-MATRIX-039

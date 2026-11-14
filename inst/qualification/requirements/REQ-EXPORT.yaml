@@ -41,7 +41,8 @@ requirements:
       column-specifications table naming every declared column's id, label,
       type (with its declared length, when one is declared), nullability and
       permitted-values-or-pattern text, in the order the
-      specification declares them.
+      specification declares them. For a dataset of type matrix the columns
+      are its row-label columns, in the order written (see REQ-EXPORT-046).
     risk: high
     category: functional
     covers: [write_dta]
@@ -831,3 +832,22 @@ requirements:
     category: functional
     covers: [export_with_template]
     source: R/exportTemplateDocx.R
+
+  - id: REQ-EXPORT-046
+    text: >
+      write_dta() shall render, for a dataset of type matrix, a table of its
+      row-label columns under the heading "Row label columns" in place of the
+      column-specifications heading, and, once for that dataset, a block under
+      the heading "Matrix layout" stating the matrix contract: the expected
+      header text above each row-label column, distinguishing a position with
+      no field from a blank one; for the data columns and for the data rows,
+      each finite bound and which side it is, and which side, if any, is
+      unbounded; the row-key columns; the cell type; whether missing cells are
+      allowed; and, only when declared, the cell range (an open side
+      identified as such), whether infinite values are allowed, and the
+      header and cell descriptions. A document with no matrix dataset shall
+      contain neither heading.
+    risk: medium
+    category: functional
+    covers: [write_dta]
+    source: R/documentBuilders.R; PLAN-matrix-dataset.md 4

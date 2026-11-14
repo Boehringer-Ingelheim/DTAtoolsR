@@ -105,8 +105,10 @@ markers must be alone in their paragraph, and a region does not nest.
 Inside each repetition, seven placeholders resolve to that dataset's
 values: \code{{DATASET_ID}}, \code{{DATASET_NAME}} (its id where no name is set),
 \code{{DATASET_TYPE}}, \code{{DATASET_DESCRIPTION}}, \code{{DATASET_FILE_COUNT}},
-\code{{DATASET_COLUMN_COUNT}} and \code{{DATASET_RULE_COUNT}} (the last two are
-\code{0} for a non-tabular dataset). A bare dataset block
+\code{{DATASET_COLUMN_COUNT}} and \code{{DATASET_RULE_COUNT}} (both \code{0} for a
+non-tabular dataset; a matrix dataset is tabular here, so its column
+count is the number of its row-label columns, not of its data columns).
+A bare dataset block
 (\code{{COLUMN_SPECS}}, \code{{VALIDATION_RULES}}, \code{{FILE_SPECS}}, \code{{DATASETS}})
 alone in a paragraph of the region is bound to the repetition's dataset
 (a bare \code{{COLUMN_SPECS}} or \code{{VALIDATION_RULES}} renders nothing for a
