@@ -138,6 +138,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   check as "validation artifact predates import checking"; it says the scan
   stopped before every value was read.
 
+### Fixed
+
+- The `validate-templates` workflow written by `create_template_repo()` uses
+  `r-lib/actions` v2.14.0. With v2.12.1 it failed on Ubuntu 26.04 runners
+  (now `ubuntu-latest`) before installing anything, because `sudo-rs` ignores
+  `sudo -E`.
+
 ## [0.27.0] - 2026-11-12
 
 ### Added
