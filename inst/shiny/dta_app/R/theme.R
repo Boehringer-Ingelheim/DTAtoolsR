@@ -415,7 +415,7 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
        the landing drop (label, and a field that shrinks instead of pushing the
        Browse button out of a 320px sidebar). While a file is dragged over
        ANY zone it highlights; the Delivery zone says what dropping does. */
-    .delivery-block { margin: 10px 0 12px; }
+    .delivery-block { margin: 2px 0 6px; }
     .delivery-drop .shiny-input-container { width: 100%; }
     .delivery-drop .control-label { font-size: .8125rem; font-weight: 500; color: var(--bi-ink); }
     .delivery-drop .input-group { position: relative; padding: 10px 12px; flex-wrap: nowrap; }
@@ -448,7 +448,6 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
     .dp-warn .dp-glyph { color: var(--bi-warn-dark); }
     .dp-none .dp-glyph { color: var(--bi-grey); }
     .dp-last, .dp-links { margin-top: 6px; color: var(--bi-grey); }
-    .delivery-block .msg-hint { margin-top: 8px; padding: 0 2px; }
     .dv-back { margin-bottom: 6px; font-size: .8125rem; }
     /* The ambiguity dialog: the table scrolls, the footer buttons stay on one line. */
     .amb-body { max-height: max(12rem, calc(100vh - 33rem)); overflow-y: auto; }
@@ -710,6 +709,23 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
        (not-checked/pass/fail/no-data); the background encodes selection only
        (a brand tint), so the two never collide. */
     .dataset-nav-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 2px; }
+    /* A long list scrolls in its own box, so Delivery and Check all datasets
+       below it stay in reach. The box is the output element itself, which
+       Shiny keeps while it swaps the list inside, so the scroll position
+       survives a re-render; the Datasets label stays pinned at its top.
+       Shiny draws a filled output as display: contents, which has no box to
+       scroll, hence the block (only while filled: empty, it stays hidden). */
+    #dataset_nav_ui:not(:empty) { display: block; }
+    #dataset_nav_ui {
+      /* 37rem: what sits under the list (Delivery, Check all, Export, the
+         messages dock) in view mode, so Check all stays above the dock. */
+      max-height: clamp(12rem, calc(100vh - 37rem), 30rem); overflow-y: auto;
+      overscroll-behavior: contain; scrollbar-width: thin; padding-right: 2px;
+    }
+    #dataset_nav_ui .section-label {
+      position: sticky; top: 0; z-index: 1;
+      margin: 0; padding: 6px 0 4px; background: var(--bi-surface);
+    }
     .dataset-nav-row {
       display: flex; align-items: center; gap: 8px;
       padding: 6px 6px 6px 10px;
@@ -757,10 +773,10 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
     }
     .dataset-nav-row .nav-check:hover { background: var(--bi-surface); border-color: var(--bi-pass-border); }
 
-    /* Add dataset sits directly above Check all datasets (btn-primary, the
-       sidebar's actual call to action) -- btn-sm + btn-outline-secondary
-       alone still draws a full-width bordered box the same size as that
-       button, so this drops the border and dims the text further at rest,
+    /* Add dataset sits under the list, above Delivery and Check all datasets
+       (btn-primary, the sidebar's actual call to action) -- btn-sm +
+       btn-outline-secondary alone still draws a full-width bordered box the
+       size of that button, so this drops the border and dims the text further at rest,
        leaving only a hover/focus state as the affordance that it is
        clickable at all. Reads as a small addition to the list above it, not
        a second primary action. */
