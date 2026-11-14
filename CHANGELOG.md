@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **A Copy button on the Raw YAML tab.** One click puts the editor's whole
+  text on the clipboard, including edits not yet applied. It is shown while the
+  document is read-only as well.
 - **Containers are a section of the specification.** A top-level `containers:`
   list names the delivery archives once (`id`, `filename`, `description`,
   `default`); file entries refer to a container by its id in `container:`, so

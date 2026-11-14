@@ -405,6 +405,63 @@ client_id_js <- "
 # installed server-side, aceEditor() is never called and neither the wrapper
 # nor ace.js itself is ever added to the page -- so every step bails out
 # quietly rather than erroring.
+# Raw YAML tab "Copy" button: puts the editor's whole text on the clipboard.
+# Deliberately client-side and a plain <button> (not an actionButton): there is
+# nothing for the server to do, and the click guard only watches
+# `.action-button`. It reads the live editor, so unapplied edits are copied too
+# -- what is on screen is what lands on the clipboard. The tab is re-rendered
+# wholesale by output$main, hence the delegated handler.
+copy_yaml_js <- "
+(function(){
+  function editorText() {
+    var el = document.getElementById('raw_yaml_editor');
+    if (!el) return null;
+    if (typeof ace !== 'undefined' && el.classList.contains('ace_editor')) {
+      return ace.edit(el).getValue();
+    }
+    return el.value;   // plain <textarea> fallback (shinyAce not installed)
+  }
+  function legacyCopy(text) {
+    var ta = document.createElement('textarea');
+    var prev = document.activeElement;   // select() steals focus; give it back
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+    if (prev && prev.focus) prev.focus();
+    return ok;
+  }
+  function flash(btn, label) {
+    if (!btn.dataset.dtaLabel) btn.dataset.dtaLabel = btn.textContent;
+    btn.textContent = label;
+    clearTimeout(btn.dtaCopyTimer);
+    btn.dtaCopyTimer = setTimeout(function(){
+      btn.textContent = btn.dataset.dtaLabel;
+    }, 1500);
+  }
+  $(document).on('click', '#copy_yaml', function(){
+    var btn = this, text = editorText();
+    // null (no editor) or undefined (Ace not built yet / failed to load, so
+    // the element is a bare <pre> with no .value): never copy those.
+    if (typeof text !== 'string') return;
+    var done = function(ok){ flash(btn, ok ? 'Copied' : 'Copy failed'); };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(
+        function(){ done(true); },
+        function(){ done(legacyCopy(text)); }
+      );
+    } else {
+      done(legacyCopy(text));
+    }
+  });
+})();
+"
+
 yaml_ace_resize_js <- "
 (function(){
   function wireAceResize(wrap, attempt) {
@@ -478,6 +535,7 @@ ui_page <- function(cfg) {
       tags$script(shiny::HTML(download_trigger_js)),
       tags$script(shiny::HTML(client_id_js)),
       tags$script(shiny::HTML(yaml_ace_resize_js)),
+      tags$script(shiny::HTML(copy_yaml_js)),
       tags$script(shiny::HTML(modal_unsuspend_js)),
       tags$script(shiny::HTML(modal_state_js)),
       # Unlike the eight above, this one is a function in R/ui_components.R
@@ -10125,7 +10183,16 @@ server <- function(input, output, session) {
                 div(
                   class = "yaml-edit-bar",
                   uiOutput("yaml_edit_hint"),
-                  uiOutput("yaml_edit_actions")
+                  uiOutput("yaml_edit_actions"),
+                  # Always present, read-only or not: copying edits nothing.
+                  # Wired client-side by copy_yaml_js; not an actionButton.
+                  tags$button(
+                    id = "copy_yaml", type = "button",
+                    class = "btn btn-sm btn-outline-secondary yaml-copy",
+                    title = "Copy the whole YAML to the clipboard",
+                    `aria-live` = "polite",
+                    "Copy"
+                  )
                 ),
                 uiOutput("yaml_validation_msg"),
                 uiOutput("spec_check"),

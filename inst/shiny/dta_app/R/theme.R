@@ -647,6 +647,7 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
     .yaml-edit-bar { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
     .yaml-edit-bar .msg-hint { flex: 1 1 auto; }
     .yaml-edit-actions { flex: none; display: flex; gap: 6px; }
+    .yaml-edit-bar .yaml-copy { flex: none; }
     textarea#raw_yaml_editor {
       background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 8px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
