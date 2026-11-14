@@ -44,6 +44,8 @@ once installed).
   allowed values, and regex patterns
 - Cross-column rule validation (`col_condition`, `col_range`,
   `col_unique`, `group_condition`)
+- Matrix validation (`type: matrix`, `DTADataSetMatrix`) for omics count and
+  genotype matrices: header, row labels, dimensions and every cell
 - File-presence validation (`DTADataSetFile`) for non-tabular deliverables
 - Detailed, queryable validation results (`results()`, `messages()`,
   `inspect()`, `explain_messages()`)
@@ -163,8 +165,8 @@ section](vignettes/DTAtools.Rmd) for the full treatment.
 `DTAtools` organises objects into a layered hierarchy that maps directly to
 how a Data Transmission Specification (DTS) is structured — a top-level `DTA`
 holding metadata and one or more datasets, each either fully-validated
-tabular data (`DTADataSetTabular`) or a simple file-presence check
-(`DTADataSetFile`):
+tabular data (`DTADataSetTabular`), an omics matrix (`DTADataSetMatrix`) or a
+simple file-presence check (`DTADataSetFile`):
 
 <p align="center">
   <img src="img/DTAtools_architecture.svg" alt="DTAtools package architecture diagram" width="100%" />
@@ -205,6 +207,10 @@ DTA                              ← top-level agreement container
     |   |
     │   └── tables (named list)  ← actual data as Arrow Tables
     │       └── <table_name>     ← populated via load_file() or constructor
+    │
+    ├── DTADataSetMatrix         ← omics matrix (DTADataSetTabular subclass):
+    |                                row_labels + header/rows/cells, no
+    |                                per-column specs
     │
     └── DTADataSetFile           ← non-tabular: file presence/readability check
         ├── file_paths           ← bound file paths (via load_file() or paths=)
@@ -874,7 +880,8 @@ Seven placeholders resolve inside a repetition to that one dataset's own values:
 `{DATASET_ID}`, `{DATASET_NAME}` (the id when the dataset has no name),
 `{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`, `{DATASET_FILE_COUNT}`,
 `{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}` (the last two are `0`
-for a non-tabular dataset). A dataset block marker
+for a non-tabular dataset; a matrix dataset counts its row-label columns, not
+its data columns). A dataset block marker
 written bare inside a region binds to the current dataset and contributes only
 its table, without the heading it would generate outside a region — the
 region's own paragraphs are what supply the heading. An explicit
@@ -1366,6 +1373,7 @@ row-level validation.
 | `DTAMetaData`             | Agreement metadata (title, version, contacts, transmission) |
 | `DTADataSet`              | Abstract base class for all dataset types                   |
 | `DTADataSetTabular`       | Dataset with column specs, rules, and data tables            |
+| `DTADataSetMatrix`        | Omics matrix: row labels + header, row and cell checks       |
 | `DTADataSetFile`          | Dataset that checks file presence and readability only       |
 | `DTAColumnSpecCollection` | Named list of column specs + optional list of rules           |
 | `DTAColumnSpec`           | Single column definition (type, nullable, values, pattern)   |

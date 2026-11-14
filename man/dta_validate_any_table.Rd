@@ -12,7 +12,8 @@ dta_validate_any_table(
   max_errors = getOption("DTAtools.max_errors", 10000L),
   use_threads = TRUE,
   fail_fast = FALSE,
-  on_missing_column = c("scan", "stop")
+  on_missing_column = c("scan", "stop"),
+  structure = NULL
 )
 }
 \arguments{
@@ -58,6 +59,15 @@ Note this gate runs ahead of the lazy/in-memory dispatch, so unlike
 \code{fail_fast} it applies to a materialised table as well -- the column names
 are available whatever the holding. When they cannot be obtained without
 consuming the table, the gate is skipped and the scan proceeds as usual.}
+
+\item{structure}{\code{NULL} (the default: a plain tabular table), or the
+structural findings of a matrix dataset -- a list with \code{findings} (a
+column spec error frame of header findings), \code{rows} (\code{c(min, max)}
+row-count bounds) and \code{declared} (per-keyword counts for the check
+summary). Any non-\code{NULL} value selects the matrix path; no other field is
+read. Findings are ordered header, row count, cells on every path and at
+every cap. The retained frame may hold one row more than \code{max_errors} when
+the row-count finding is inserted into the head. \code{on_missing_column = "stop"} has no effect when \code{structure} is supplied.}
 }
 \value{
 A validation details list.

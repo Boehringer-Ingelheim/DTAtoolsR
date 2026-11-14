@@ -12,7 +12,8 @@ dta_delim_reader_plan(
   has_header = TRUE,
   na = NULL,
   handler = NULL,
-  encoding = NULL
+  encoding = NULL,
+  column_names = NULL
 )
 }
 \arguments{
@@ -34,6 +35,10 @@ the handler declares. The one caller that supplies it is
 UTF-8 copy and is planning a read of \emph{that}: the handler still says
 \code{latin1}, and honouring it here would decode the copy's header a second
 time. \code{NULL} leaves the handler in charge, which is every other route.}
+
+\item{column_names}{Character vector or \code{NULL}. Names to use instead of the
+file's header, verbatim (neither cleaned nor de-duplicated); the header
+line is still skipped. Used by matrix datasets.}
 }
 \value{
 A list with \code{path}, \code{column_names}, \code{skip}, \code{col_types},

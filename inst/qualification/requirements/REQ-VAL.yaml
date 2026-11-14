@@ -163,11 +163,20 @@ requirements:
       length, values and pattern. The type check and the SAS format check
       (keywords "type" and "format") are reported as separate rows under the
       one label format, and the format row is not_applicable when no column
-      declares a format that constrains anything.
+      declares a format that constrains anything. The labels header,
+      dimensions, range and finite are matrix-only. For a dataset of type
+      matrix they are reported as well: header for the corner, label and
+      uniqueness findings, dimensions for the data-column and data-row counts,
+      range for the minimum and maximum findings and finite for the finite
+      findings; and for such a dataset presence and extra are reported
+      not_applicable, because a matrix takes its columns from the header by
+      position. For every other dataset a matrix-only label is absent, unless a
+      finding with one of its keywords was reported, in which case the label
+      appears and is failed.
     risk: medium
     category: interface
     covers: [validation_errors]
-    source: R/columnSpecChecks.R
+    source: R/columnSpecChecks.R; PLAN-matrix-dataset.md 3.5 vocabulary
 
   # ---- check() and its arguments --------------------------------------------
 

@@ -86,6 +86,26 @@ assessment:
       One case per handler property and per compression; explicit cases for
       empty, header-only, malformed and oddly-encoded files.
 
+  - area: MATRIX
+    title: Matrix datasets (type matrix)
+    severity: critical
+    probability: high
+    detectability: low
+    rationale: >
+      The header decides what every later column is called, so a header read
+      wrongly misaligns every cell finding after it, and a cell token
+      classified the wrong way (a value, a missing value or an error) is a value
+      never checked: a supplier's N/A, NaN, -Inf or 0x1F is judged by a rule
+      nobody sees being applied. A matrix may have tens of thousands of columns
+      and rows, so a single misjudged token is invisible in the summary.
+    depth: >
+      One case per rule of the header, the rows and the dimensions, and one per
+      row of the cell contract with every token listed in the requirement,
+      for each of the three cell types; every semantic case runs on a table held
+      in memory and on one scanned in batches, and a generated file with
+      defects placed at chosen positions is compared between the two with the
+      findings written down from the injection plan.
+
   - area: CONT
     title: Container deliveries (zip archives, SAS transport libraries)
     severity: critical

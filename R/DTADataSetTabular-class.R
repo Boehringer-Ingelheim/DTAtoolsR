@@ -760,9 +760,12 @@ create_example_DTADataSetTabular <- function(index = 1) {
 #' @importFrom stringr str_c str_glue
 #' @name print
 #' @export
-method(print, DTADataSetTabular) <- function(x, ...) {
+method(print, DTADataSetTabular) <- function(x, ...) dta_print_tabular(x)
+
+# The body of print() for a tabular dataset; the matrix method prints it first.
+dta_print_tabular <- function(x, class_label = "DTADataSetTabular") {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTADataSetTabular}> : {.field {x@id}}")
+  cli_text("<{.emph {class_label}}> : {.field {x@id}}")
 
   print_info(x)
 
@@ -881,11 +884,8 @@ method(load_file, DTADataSetTabular) <- function(
   # dataset's method already does. Without the default a caller who omitted it
   # hit R's own "argument is missing" from inside the guard below.
   handler_index = 1,
-  # The compression suffix is stripped BEFORE the extension, so `x.csv` and
-  # `x.csv.gz` name the same table. Stripping only the last extension made a
-  # gzipped redelivery land under `x.csv` -- a second table beside `x`, with the
-  # first one's data and verdict left standing next to it.
-  name = tools::file_path_sans_ext(dta_strip_compression_extension(basename(file))),
+  # See dta_default_table_name() for why the compression suffix goes first.
+  name = dta_default_table_name(file),
   stream = getOption("DTAtools.stream", "auto")
 ) {
   # An object restored from an older version lacks properties its class now has.
@@ -912,6 +912,51 @@ method(load_file, DTADataSetTabular) <- function(
   }
   dta_assert_not_container(x, handler, file)
 
+  dta_load_tabular(x, file, handler, name, stream)
+}
+
+# The compression suffix is stripped BEFORE the extension, so `x.csv` and
+# `x.csv.gz` name the same table. Stripping only the last extension made a
+# gzipped redelivery land under `x.csv` -- a second table beside `x`, with the
+# first one's data and verdict left standing next to it.
+#' @keywords internal
+dta_default_table_name <- function(file) {
+  tools::file_path_sans_ext(dta_strip_compression_extension(basename(file)))
+}
+
+# Whether `load_file()` keeps the file lazy. One function, because the matrix
+# method must know BEFORE it reads whether the table is coerced here (eager) or
+# per batch by check() (lazy), and the two must never disagree.
+#' @keywords internal
+dta_load_is_lazy <- function(stream, file, handler) {
+  lazy <- dta_resolve_stream_mode(stream, file)
+
+  # A SAS dataset has no lazy reader. "auto" is a guess about size, not an
+  # instruction, so it falls back to reading into memory -- and says so, because
+  # that is the one case where the guess was "too big". An explicit
+  # `stream = "always"` is an instruction, and still reaches open_file(), whose
+  # base method refuses it.
+  if (
+    lazy &&
+      inherits(handler, "DTAtools::DTAFileSAS7BDAT") &&
+      !(isTRUE(stream) || identical(stream, "always"))
+  ) {
+    cli::cli_inform(
+      "Reading {.path {file}} into memory: a SAS dataset cannot be streamed.",
+      class = "dta_sas7bdat_in_memory"
+    )
+    lazy <- FALSE
+  }
+  lazy
+}
+
+# The body of load_file() after its guards, shared by the tabular and the matrix
+# method. `column_names` (verbatim names for the file's columns; the header line
+# is skipped) and `coerce_specs` (what an eager table is typed by) are what a
+# matrix changes; the defaults are tabular behaviour.
+#' @keywords internal
+dta_load_tabular <- function(x, file, handler, name, stream, column_names = NULL, coerce_specs = x@specs,
+                             lazy = dta_load_is_lazy(stream, file, handler)) {
   # How it arrived: on its own. load_delivery() overwrites this with its chain.
   rec <- list(file = basename(file), container = character(), via = "file")
 
@@ -942,24 +987,6 @@ method(load_file, DTADataSetTabular) <- function(
   #   unparseable cell turns a whole declared-numeric column into text. Applying
   #   the declared type makes the column a number, that one cell NA, and that one
   #   cell an import error.
-  lazy <- dta_resolve_stream_mode(stream, file)
-
-  # A SAS dataset has no lazy reader. "auto" is a guess about size, not an
-  # instruction, so it falls back to reading into memory -- and says so, because
-  # that is the one case where the guess was "too big". An explicit
-  # `stream = "always"` is an instruction, and still reaches open_file(), whose
-  # base method refuses it.
-  if (
-    lazy &&
-      inherits(handler, "DTAtools::DTAFileSAS7BDAT") &&
-      !(isTRUE(stream) || identical(stream, "always"))
-  ) {
-    cli::cli_inform(
-      "Reading {.path {file}} into memory: a SAS dataset cannot be streamed.",
-      class = "dta_sas7bdat_in_memory"
-    )
-    lazy <- FALSE
-  }
 
   if (lazy) {
     # Lazy: the table is a scan plan, not data. The second half of the read --
@@ -967,15 +994,15 @@ method(load_file, DTADataSetTabular) <- function(
     # there are no rows yet. It happens per batch inside check(), which is the
     # only thing that ever pulls rows through. So import_issues stays empty
     # until check() has run; the issues are the same ones, found later.
-    x@tables[[name]] <- open_file(handler, file, specs = x@specs)
+    x@tables[[name]] <- open_file(handler, file, specs = x@specs, column_names = column_names)
     x@import_issues[[name]] <- NULL
 
     return(dta_set_provenance(x, name, rec))
   }
 
   coerced <- dta_coerce_table_to_specs(
-    handler |> read_file(file, specs = x@specs),
-    x@specs
+    handler |> read_file(file, specs = x@specs, column_names = column_names),
+    coerce_specs
   )
 
   x@tables[[name]] <- coerced$table
@@ -1108,6 +1135,29 @@ dta_unspecified_validation_row <- function(table_name, target_type = "table") {
     )
   )
 }
+
+# ---- hooks of check() ---------------------------------------------------------
+#
+# Three points where a subclass changes what check() does without a copy of it.
+# A tabular dataset returns today's value from each; DTADataSetMatrix overrides
+# them (R/DTADataSetMatrix-class.R).
+
+# The column specs `table` is validated against.
+#' @keywords internal
+dta_table_specs <- S7::new_generic("dta_table_specs", "x", function(x, table, ...) S7_dispatch())
+method(dta_table_specs, DTADataSetTabular) <- function(x, table, ...) x@specs
+
+# What decides that a recorded verdict is out of date as far as the specs go.
+#' @keywords internal
+dta_specs_fingerprint <- S7::new_generic("dta_specs_fingerprint", "x", function(x, ...) S7_dispatch())
+method(dta_specs_fingerprint, DTADataSetTabular) <- function(x, ...) as.list(x@specs)
+
+# NULL, or list(failure, structure): `failure` is a message that makes the table
+# this table's failure (and nothing is validated), `structure` what the engine
+# is handed as `structure =`.
+#' @keywords internal
+dta_table_structure <- S7::new_generic("dta_table_structure", "x", function(x, name, table, ...) S7_dispatch())
+method(dta_table_structure, DTADataSetTabular) <- function(x, name, table, ...) NULL
 
 #' @title Validation Status for DTADataSetTabular
 #' @description Returns a compact status table for validated tables.
@@ -1466,7 +1516,7 @@ S7::method(check, DTADataSetTabular) <- function(
 
   # Table-specific validation logic (override parent)
   target_tables <- dta_table_id_to_names(x, tables_to_check)
-  specs_hash <- dta_hash_object(as.list(x@specs))
+  specs_hash <- dta_hash_object(dta_specs_fingerprint(x))
   output_rows <- list()
 
   # A dataset with no table bound is the ordinary state of a specification
@@ -1616,14 +1666,24 @@ S7::method(check, DTADataSetTabular) <- function(
     # (NA size, NA mtime), so a repeated check() skips exactly as it would for
     # an undelivered file target rather than re-reporting the same absence.
     absent_files <- dta_missing_table_files(current_table)
-    if (length(absent_files) > 0) {
-      absence <- list(
-        ok = FALSE,
-        message = sprintf(
-          "Table '%s' cannot be read: file '%s' not found.",
-          table_name, absent_files[[1]]
-        )
+
+    # What a matrix adds to a table (its header findings, the row bounds) is
+    # derived from state recorded at load time, so it can have gone stale. That
+    # is this table's failure, reported exactly as an absent file is, and never
+    # an abort: check(DTA) runs its datasets unguarded.
+    table_structure <- dta_table_structure(x, table_name, current_table)
+
+    failure_message <- if (length(absent_files) > 0) {
+      sprintf(
+        "Table '%s' cannot be read: file '%s' not found.",
+        table_name, absent_files[[1]]
       )
+    } else {
+      table_structure$failure
+    }
+
+    if (!is.null(failure_message)) {
+      absence <- list(ok = FALSE, message = failure_message)
       details <- dta_file_validation_details(absence)
 
       if (!isTRUE(quiet)) {
@@ -1686,14 +1746,15 @@ S7::method(check, DTADataSetTabular) <- function(
     }
 
     details <- dta_validate_any_table(
-      x@specs,
+      dta_table_specs(x, current_table),
       current_table,
       verbose = !isTRUE(quiet),
       batch_rows = batch_rows,
       max_errors = max_errors,
       use_threads = use_threads,
       fail_fast = fail_fast,
-      on_missing_column = on_missing_column
+      on_missing_column = on_missing_column,
+      structure = table_structure$structure
     )
 
     # A materialised table has its import issues recorded already, at import

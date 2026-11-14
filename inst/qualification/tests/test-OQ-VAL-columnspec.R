@@ -861,3 +861,82 @@ test_that("OQ-VAL-044 | BESTw. constrains nothing, and the format check reports 
     as.character(broken_checks$check[broken_checks$keyword %in% c("type", "format")])
   )
 })
+
+# ---- the matrix-only labels ------------------------------------------------------
+
+test_that("OQ-VAL-052 | a matrix reports the header, dimensions, range and finite checks too, and presence and extra as not applicable | REQ-VAL-013", {
+  ds <- mx_ds(
+    header = list(pattern = "^S[0-9]+$"),
+    rows = list(count = list(min = 5)),
+    cells = list(type = "SAS Num", nullable = FALSE, range = list(min = 0, max = 10), infinite = FALSE)
+  )
+  # Two rows against a minimum of 5: the dimensions check fails; one cell below
+  # the minimum: the range check fails; everything else is judged and holds.
+  path <- mx_path("\tS1\tS2\nr1\t-1\t2\nr2\t3\t4\n")
+  mx_each(ds, path, function(d, stream) {
+    ck <- mx_checks(d)
+    status <- function(keyword) as.character(ck$status[ck$keyword == keyword])
+    qa_step(
+      sprintf("the six tabular labels and the four matrix-only labels (%s)", stream),
+      sort(c(
+        "presence", "extra", "format", "length", "values", "pattern",
+        "header", "dimensions", "range", "finite"
+      ), method = "radix"),
+      sort(unique(as.character(ck$check)), method = "radix")
+    )
+    qa_step(
+      sprintf("a matrix takes its columns from the header, so presence and extra do not apply (%s)", stream),
+      c("not_applicable", "not_applicable"), c(status("required"), status("additionalProperties"))
+    )
+    qa_step(
+      sprintf("the row-count check failed (%s)", stream),
+      c("failed", "passed"), c(status("minItems"), status("corner"))
+    )
+    qa_step(
+      sprintf("the range check failed on the minimum and held on the maximum (%s)", stream),
+      c("failed", "passed"), c(status("minimum"), status("maximum"))
+    )
+    qa_step(
+      sprintf("the finite check held (%s)", stream),
+      "passed", status("finite")
+    )
+  })
+})
+
+test_that("OQ-VAL-053 | outside a matrix a matrix-only label appears only when a finding with its keyword was reported | REQ-VAL-013 | tags: white-box", {
+  dir <- qa_tempdir()
+  # A tabular dataset can carry the cell specification of a matrix; this is the
+  # only way to produce a range finding without a matrix dataset.
+  cell <- DTAtools:::DTAColumnSpecCell(id = "X", type = "SAS Num", nullable = FALSE, minimum = 0)
+  specs <- DTAColumnSpecCollection(columns = list(
+    ID = DTAColumnSpec(id = "ID", type = "SAS Char", nullable = FALSE),
+    X = cell
+  ))
+  labels_for <- function(x_values) {
+    path <- file.path(dir, paste0("t", length(x_values), x_values[[1]], ".csv"))
+    utils::write.csv(data.frame(ID = c("a", "b"), X = x_values), path, row.names = FALSE)
+    ds <- DTADataSetTabular(id = "t", specs = specs, files = list(DTAFileCSV(filename = basename(path))))
+    d <- check(load_file(ds, file = path, stream = "never"), persist = FALSE, quiet = TRUE)
+    validation_errors(d, names(tables(d))[[1]])$columnspec_checks
+  }
+
+  clean <- labels_for(c(1, 2))
+  qa_step(
+    "no matrix-only finding: the six tabular labels only",
+    sort(c("presence", "extra", "format", "length", "values", "pattern"), method = "radix"),
+    sort(unique(as.character(clean$check)), method = "radix")
+  )
+  broken <- labels_for(c(-1, 2))
+  qa_step(
+    "a below-minimum finding brings the range label in, failed",
+    c("range", "failed"),
+    c(
+      unique(as.character(broken$check[broken$keyword == "minimum"])),
+      as.character(broken$status[broken$keyword == "minimum"])
+    )
+  )
+  qa_step(
+    "and no other matrix-only label",
+    character(0), setdiff(as.character(broken$check), c("presence", "extra", "format", "length", "values", "pattern", "range"))
+  )
+})

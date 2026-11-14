@@ -392,3 +392,23 @@ test_that("OQ-FILE-056 | a UTF-16 file is refused with the same advice in every 
     )
   }
 })
+
+test_that("OQ-FILE-067 | a header row over 1 MiB of quoted labels is read whole, not aborted as a quoted line break | REQ-FILE-043", {
+  dir <- qa_tempdir()
+  labels <- paste0("\"label number ", seq_len(60000L), "\"", collapse = ",")
+  path <- file.path(dir, "wide.csv")
+  writeBin(charToRaw(paste0(labels, "\n", strrep("1,", 59999L), "1\n")), path)
+  qa_check("the header row is longer than 1 MiB", file.size(path) > 1048576)
+
+  handler <- DTAFileCSV(filename = "wide.csv")
+  read <- read_file(handler, path)
+  qa_step("read_file(): one row of 60000 columns", c(1L, 60000L), dim(as.data.frame(read)))
+  qa_step(
+    "the last column is named by the last label",
+    "label number 60000", utils::tail(names(as.data.frame(read)), 1)
+  )
+
+  opened <- open_file(handler, path)
+  qa_step("open_file(): the same 60000 columns", 60000L, length(names(opened)))
+  qa_step("and the first and last labels", c("label number 1", "label number 60000"), names(opened)[c(1, 60000)])
+})

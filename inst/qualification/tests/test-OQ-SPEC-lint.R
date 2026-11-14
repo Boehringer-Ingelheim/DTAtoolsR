@@ -373,3 +373,73 @@ test_that("OQ-SPEC-055 | a numeric operator on a Date, Time or DateTime column i
   )
   qa_check("the specification with the warning still constructs", !inherits(built, "condition"))
 })
+
+# ---- matrix datasets ----------------------------------------------------------
+
+# The error codes lint_dta() reports for one dataset list.
+sl_codes <- function(body, severity = "error") {
+  out <- lint_dta(body)
+  sort(out$code[out$severity == severity], method = "radix")
+}
+
+test_that("OQ-SPEC-058 | lint_dta() reports each problem of a matrix dataset under its own code, and a clean one with no row | REQ-SPEC-032", {
+  qa_step("a clean matrix dataset, as a bare dataset", 0L, nrow(lint_dta(mx_body())))
+  qa_step("inside a document", 0L, nrow(lint_dta(list(datasets = list(mx_body())))))
+  qa_step(
+    "as a DTADataSetMatrix object",
+    0L, nrow(lint_dta(dta_dataset_from_list(mx_body())))
+  )
+
+  labels <- list(list(id = "ID", type = "SAS Char"))
+  tabular <- list(id = "t", type = "tabular", files = list(filename = "t.csv", type = "csv"))
+  matrix <- function(header = list(corner = "blank"), cells = list(type = "SAS Int"), ...) {
+    mx_body(matrix = c(list(header = header, cells = cells), list(...)))
+  }
+  cases <- list(
+    list("columns on a matrix", mx_body(columns = labels), "matrix_columns_key"),
+    list("row_labels on a tabular dataset", c(tabular, list(row_labels = labels)), "row_labels_key"),
+    list("matrix on a tabular dataset", c(tabular, list(matrix = list(cells = list(type = "SAS Int")))), "matrix_key"),
+    list(
+      "matrix on a file dataset",
+      list(id = "f", type = "file", files = list(filename = "f.pdf", type = "any"), matrix = list()),
+      "matrix_key"
+    ),
+    list("no row label", mx_body(row_labels = list()), "matrix_row_labels_missing"),
+    list(
+      "a SAS file", mx_body(files = list(filename = "m.sas7bdat", type = "sas7bdat")),
+      "matrix_file_type"
+    ),
+    list(
+      "a file without a header line",
+      mx_body(files = list(filename = "m.tsv", type = "tsv", has_header = FALSE)), "matrix_file_type"
+    ),
+    list("no matrix block", mx_body(matrix = NULL), "matrix_field_missing"),
+    list("no cells block", mx_body(matrix = list(header = list(corner = "blank"))), "matrix_field_missing"),
+    list("an unknown key under matrix", matrix(rnage = 1), "matrix_field_unknown"),
+    list("an unknown key under cells", matrix(cells = list(type = "SAS Int", rnage = 1)), "matrix_field_unknown"),
+    list("a data-column count of 0", matrix(header = list(corner = "blank", count = 0)), "matrix_count_invalid"),
+    list("a corner that is a number", matrix(header = list(corner = 7)), "matrix_corner_invalid"),
+    list("a corner list of two entries for one row label", matrix(header = list(corner = list("a", "b"))), "matrix_corner_invalid"),
+    list("a row key that is not a row label", matrix(rows = list(key = "NOPE")), "matrix_row_key_invalid"),
+    list(
+      "a key column declared nullable",
+      mx_body(row_labels = list(list(id = "ID", type = "SAS Char", nullable = TRUE))), "matrix_key_nullable"
+    ),
+    list("a bound written as the text 1e3", matrix(cells = list(type = "SAS Num", range = list(min = "1e3"))), "matrix_number_text"),
+    list(
+      "a rule id that starts with .matrix:",
+      mx_body(rules = list(list(id = ".matrix:mine", type = "col_unique", columns = "ID"))),
+      "matrix_rule_id_reserved"
+    ),
+    list("a range on a Char cell", matrix(cells = list(type = "SAS Char", range = list(min = 1))), "cell_range_type"),
+    list("a range with min above max", matrix(cells = list(type = "SAS Int", range = list(min = 5, max = 1))), "cell_range_invalid"),
+    list("infinite on an Int cell", matrix(cells = list(type = "SAS Int", infinite = TRUE)), "cell_finite_type"),
+    list(
+      "a rule naming a data column",
+      mx_body(rules = list(list(id = "r", type = "col_unique", columns = "S1"))), "rule_column_undeclared"
+    )
+  )
+  for (cs in cases) {
+    qa_step(sprintf("%s is exactly one error, with its code", cs[[1]]), cs[[3]], sl_codes(cs[[2]]))
+  }
+})

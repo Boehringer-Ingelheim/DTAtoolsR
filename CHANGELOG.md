@@ -69,6 +69,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   is now a select of the document's containers. Findings appear wherever a
   verdict is shown: the summary banner, the validation summary, the sidebar, the
   Delivery view and the loaded-file chips.
+- **Matrix datasets (`type: matrix`, `DTADataSetMatrix`).** For omics-style
+  matrices (gene counts, miRNA counts, genotypes) where the data columns are
+  samples and are far too many, or too variable, to list one by one. A matrix
+  dataset describes the row-label columns once under `row_labels:` and the
+  data columns once under `matrix:`. It validates the header (the corner text
+  above the row labels, each data label against a pattern or a closed list,
+  duplicates, the number of data columns), the row labels and the row key
+  (unique, non-missing, row count), the dimensions (exact, flexible or
+  `min`/`max`) and every cell (type, range, missing, infinite; `NaN` is never
+  a value). It works in memory and streamed, inside containers and
+  `load_delivery()`, in exported documents and in the app. Example data:
+  `inst/extdata/matrix_dta.yaml`.
 
 ### Changed
 
@@ -104,13 +116,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - A dataset-only YAML no longer flags an undotted `container:` value at lint
   time: it is a container id, which only the document can resolve, and it fails
   at `load_delivery()` instead.
+- Validation of very wide files is faster: columns are coerced one by one, and
+  the reader is given a schema instead of inferring one.
 
 ### Fixed
 
+- A quoted header longer than 1 MiB no longer aborts as a "quoted line break"
+  when the file is read, for tabular files as well as matrices.
+- A numeric cell holding the text `NaN` (or `nan`, `-nan`) is now missing after
+  import, like every other value that cannot be converted. It used to stay `NaN`
+  in the loaded table, so a non-nullable column got no `type` finding when read
+  eagerly while the streamed scan reported one. Both now report the
+  `not_convertible` import finding, plus the `type` finding when the column is
+  not nullable.
+- `explain_messages()`, `inspect()` and the HTML validation report no longer
+  show "Actual: (missing / not present)" or duplicated empty rows for a finding
+  with no row number or no column (a matrix header or dimension finding) once
+  the table also has other findings. A missing field now selects only the
+  entries that are themselves missing it.
+- A `fail_fast` scan that stopped early no longer reports the unsettled import
+  check as "validation artifact predates import checking"; it says the scan
+  stopped before every value was read.
 - The `validate-templates` workflow written by `create_template_repo()` uses
   `r-lib/actions` v2.14.0. With v2.12.1 it failed on Ubuntu 26.04 runners
   (now `ubuntu-latest`) before installing anything, because `sudo-rs` ignores
   `sudo -E`.
+- The app's template comparison no longer aborts with "argument 1 is not a
+  vector" when both sides have nothing to compare, for example two documents
+  with no datasets and no metadata fields. It now reports no differences.
 
 ## [0.27.0] - 2026-11-12
 

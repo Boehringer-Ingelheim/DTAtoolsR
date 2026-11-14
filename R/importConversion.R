@@ -401,6 +401,9 @@ dta_coerce_column <- function(values, target) {
 
   offending <- which(converted$unconvertible)
   reason <- rep("not_convertible", length(offending))
+  # The strict converter can leave NaN at an unconvertible token ("NaN"); as a
+  # typed value it must be missing, like every other unconvertible one.
+  out[offending] <- NA_real_
 
   if (identical(target, "integer")) {
     not_whole <- !is.na(out) & (!is.finite(out) | out != trunc(out))
@@ -503,28 +506,35 @@ dta_coerce_table_to_specs <- function(table, specs, type_map = NULL, max_rows_pe
   n_total <- 0
   changed <- FALSE
 
-  for (column in names(df)) {
-    # A precompiled map is just dta_spec_r_type(specs, column), looked up
-    # rather than re-derived -- see dta_compile_spec_types() for why that
-    # matters on the streaming path, where this runs once per batch.
-    target <- if (!is.null(type_map)) {
-      if (column %in% names(type_map)) type_map[[column]] else NA_character_
-    } else {
-      dta_spec_r_type(specs, column)
-    }
+  # Per-column work happens on the bare list and the data.frame is rebuilt once
+  # at the end: `[[<-.data.frame` re-validates and copies on every assignment,
+  # which made this loop quadratic in the column count.
+  cols <- unclass(df)
+  df_class <- class(df)
+  col_names <- names(df)
+  # Drop the original: `cols` holds the same column vectors, and keeping the
+  # data.frame alive through the loop doubled the peak on a wide table.
+  df <- NULL
+  # A precompiled map is just dta_spec_r_type(specs, column), looked up
+  # rather than re-derived -- see dta_compile_spec_types() for why that
+  # matters on the streaming path, where this runs once per batch.
+  targets <- if (!is.null(type_map)) {
+    unname(type_map[match(col_names, names(type_map))])
+  } else {
+    vapply(col_names, function(column) dta_spec_r_type(specs, column), character(1), USE.NAMES = FALSE)
+  }
 
-    # No spec for this column: it is left exactly as read, not dropped.
-    if (is.na(target)) {
-      next
-    }
+  for (i in which(!is.na(targets))) {
+    column <- col_names[[i]]
+    target <- targets[[i]]
 
-    coerced <- dta_coerce_column(df[[column]], target)
+    coerced <- dta_coerce_column(.subset2(cols, column), target)
 
     if (is.null(coerced)) {
       next
     }
 
-    df[[column]] <- coerced$values
+    cols[[column]] <- coerced$values
     changed <- TRUE
 
     n_offending <- length(coerced$offending)
@@ -573,6 +583,9 @@ dta_coerce_table_to_specs <- function(table, specs, type_map = NULL, max_rows_pe
   }
 
   attr(issues, "n_import_errors") <- dta_narrow_count(n_total)
+
+  class(cols) <- df_class
+  df <- cols
 
   # Nothing was typed and nothing failed: hand back the original object rather
   # than paying for a round trip that cannot have changed anything.

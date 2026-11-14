@@ -564,6 +564,32 @@ dta_error_sink_add <- function(sink, errs, n_total = NULL) {
   sink
 }
 
+# Appends rows to the FIRST spill part, so they collect() right after the rows
+# that overflowed first. The matrix row-count finding uses it when the header
+# findings alone overflowed the cap: the header findings are the sink's first
+# addition, hence exactly the first part, and the row-count row belongs behind
+# them and ahead of every cell.
+dta_error_sink_append_first_spill <- function(sink, errs) {
+  path <- file.path(sink$spill_dir, sprintf("part-%06d.rds", 1L))
+  saveRDS(rbind(readRDS(path), errs), path)
+  sink$spilled <- sink$spilled + nrow(errs)
+  invisible(sink)
+}
+
+# Puts rows AHEAD of everything already spilled (or starts the spill with them).
+# The matrix row-count finding uses it when the retained head is already full:
+# in memory the cap is applied after the row count is prepended, so the row
+# that no longer fits is the one that belongs at the front of the spill.
+dta_error_sink_prepend_spill <- function(sink, errs) {
+  if (sink$spilled == 0) {
+    return(dta_error_sink_spill(sink, errs))
+  }
+  path <- file.path(sink$spill_dir, sprintf("part-%06d.rds", 1L))
+  saveRDS(rbind(errs, readRDS(path)), path)
+  sink$spilled <- sink$spilled + nrow(errs)
+  invisible(sink)
+}
+
 dta_error_sink_collect <- function(sink) {
   if (length(sink$parts) == 0) {
     if (sink$spilled > 0 && !is.null(sink$prototype)) {
@@ -822,6 +848,13 @@ collect_full_errors <- function(details, axis = c("columnspec", "import", "impor
 #'   before the field existed, which is the difference between recording nothing
 #'   and falling back to the merged frame. Consumers that do not know the field
 #'   ignore it: it is an extra list element, and nothing enumerates `details`.
+#' @param structure `NULL` (a plain table) or the structural findings of a
+#'   matrix dataset (see `dta_validate_any_table()`): `findings`, `rows` and
+#'   `declared`. The header findings enter the error sink first, the row-count
+#'   finding follows them and the cells come last, on every cap: when the header
+#'   findings alone overflow the cap, the row-count row is appended to the first
+#'   spill part. Otherwise it is inserted into the retained head, which may then
+#'   hold one row more than `max_errors`.
 #' @keywords internal
 dta_validate_table_stream <- function(specs,
                                       reader,
@@ -830,7 +863,8 @@ dta_validate_table_stream <- function(specs,
                                       coerce = TRUE,
                                       fail_fast = FALSE,
                                       precomputed = list(),
-                                      known_columns = character(0)) {
+                                      known_columns = character(0),
+                                      structure = NULL) {
   rules_list <- tryCatch(specs@rules, error = function(e) NULL)
   if (is.null(rules_list)) {
     rules_list <- list()
@@ -900,6 +934,16 @@ dta_validate_table_stream <- function(specs,
 
   if (isTRUE(verbose)) {
     cli::cli_h3("validating with column specs")
+  }
+
+  # Header findings of a matrix dataset enter the sink BEFORE the first cell, so
+  # retention keeps them ahead of everything the scan finds. The batch loop
+  # below is never skipped because of them.
+  n_header_retained <- 0L
+  if (!is.null(structure) && NROW(structure$findings) > 0) {
+    columnspec_tally <- dta_columnspec_tally_add(columnspec_tally, structure$findings)
+    dta_error_sink_add(columnspec_sink, structure$findings)
+    n_header_retained <- columnspec_sink$retained
   }
 
   repeat {
@@ -1146,6 +1190,71 @@ dta_validate_table_stream <- function(specs,
   }
 
   full_error <- dta_error_sink_collect(columnspec_sink)
+
+  # The row-count finding of a matrix dataset, from the scan's row total: after
+  # the header rows, before the cells. rbind() keeps attributes only from its
+  # first argument, so the sink's are put back by hand.
+  if (!is.null(structure)) {
+    rowcount <- dta_matrix_rowcount_finding(row_offset, structure$rows, partial = partial_scan)
+    if (!is.null(rowcount)) {
+      sink_attrs <- if (is.null(full_error)) {
+        list()
+      } else {
+        attributes(full_error)[intersect(
+          c("truncated", "spilled_rows", "spill_dir"),
+          names(attributes(full_error))
+        )]
+      }
+      header_overflowed <- NROW(structure$findings) > n_header_retained
+      sink_full <- !is.null(columnspec_sink$max) &&
+        columnspec_sink$retained >= columnspec_sink$max
+      full_error <- if (header_overflowed) {
+        # The header findings alone overflowed the cap, so the row count sorts
+        # into the spill (right behind them), not into the retained head.
+        dta_error_sink_append_first_spill(columnspec_sink, rowcount)
+        sink_attrs$spilled_rows <- columnspec_sink$spilled
+        full_error
+      } else if (sink_full) {
+        # The head is already full: like the in-memory path, which caps after
+        # prepending, the row count takes its place and the last retained row
+        # (or the row count itself, when the header fills the cap) moves to the
+        # front of the spill.
+        base <- if (is.null(full_error)) rowcount[0, , drop = FALSE] else full_error
+        at <- min(n_header_retained, nrow(base))
+        combined <- rbind(
+          base[seq_len(at), , drop = FALSE],
+          rowcount,
+          base[seq_len(nrow(base) - at) + at, , drop = FALSE]
+        )
+        n_keep <- nrow(base)
+        dta_error_sink_prepend_spill(
+          columnspec_sink,
+          combined[n_keep + 1L, , drop = FALSE]
+        )
+        columnspec_sink$truncated <- TRUE
+        sink_attrs$truncated <- TRUE
+        sink_attrs$spilled_rows <- columnspec_sink$spilled
+        sink_attrs$spill_dir <- columnspec_sink$spill_dir
+        combined[seq_len(n_keep), , drop = FALSE]
+      } else if (is.null(full_error)) {
+        rowcount
+      } else {
+        at <- min(n_header_retained, nrow(full_error))
+        rbind(
+          full_error[seq_len(at), , drop = FALSE],
+          rowcount,
+          full_error[seq_len(nrow(full_error) - at) + at, , drop = FALSE]
+        )
+      }
+      rownames(full_error) <- NULL
+      for (a in names(sink_attrs)) {
+        attr(full_error, a) <- sink_attrs[[a]]
+      }
+      columnspec_sink$total <- columnspec_sink$total + 1
+      columnspec_tally <- dta_columnspec_tally_add(columnspec_tally, rowcount)
+    }
+  }
+
   summarised_error <- dta_summarise_columnspec_errors(full_error)
   has_columnspec_errors <- columnspec_sink$total > 0
 
@@ -1179,10 +1288,25 @@ dta_validate_table_stream <- function(specs,
     # same standard two branches up.
     setdiff(dta_columnspec_check_kinds()$keyword, "additionalProperties")
   }
+  if (!is.null(structure) && !is.null(columnspec_settled)) {
+    # Header findings are decided from the names before the first batch; the
+    # row count is settled by a full scan, and by a partial one only where the
+    # rows seen already decide it (a certain failure is `failed` regardless).
+    columnspec_settled <- union(
+      columnspec_settled,
+      c(
+        setdiff(dta_matrix_structure_keywords(), c("minItems", "maxItems")),
+        if (!partial_scan || row_offset >= structure$rows[[1]]) "minItems",
+        if (!partial_scan) "maxItems"
+      )
+    )
+  }
   columnspec_checks <- dta_columnspec_check_summary(
     columnspec_schemas,
     tally = columnspec_tally,
-    settled = columnspec_settled
+    settled = columnspec_settled,
+    matrix = !is.null(structure),
+    structure_declared = structure$declared
   )
 
   if (isTRUE(verbose)) {
@@ -2224,6 +2348,15 @@ dta_table_column_names <- function(table) {
 #'   `fail_fast` it applies to a materialised table as well -- the column names
 #'   are available whatever the holding. When they cannot be obtained without
 #'   consuming the table, the gate is skipped and the scan proceeds as usual.
+#' @param structure `NULL` (the default: a plain tabular table), or the
+#'   structural findings of a matrix dataset -- a list with `findings` (a
+#'   column spec error frame of header findings), `rows` (`c(min, max)`
+#'   row-count bounds) and `declared` (per-keyword counts for the check
+#'   summary). Any non-`NULL` value selects the matrix path; no other field is
+#'   read. Findings are ordered header, row count, cells on every path and at
+#'   every cap. The retained frame may hold one row more than `max_errors` when
+#'   the row-count finding is inserted into the head. `on_missing_column =
+#'   "stop"` has no effect when `structure` is supplied.
 #' @return A validation details list.
 #' @keywords internal
 dta_validate_any_table <- function(specs,
@@ -2233,15 +2366,19 @@ dta_validate_any_table <- function(specs,
                                    max_errors = getOption("DTAtools.max_errors", 10000L),
                                    use_threads = TRUE,
                                    fail_fast = FALSE,
-                                   on_missing_column = c("scan", "stop")) {
+                                   on_missing_column = c("scan", "stop"),
+                                   structure = NULL) {
   on_missing_column <- match.arg(on_missing_column)
+  dta_check_structure(structure)
 
   # The structural gate, applied here rather than only at the file entry point,
   # so it is reachable from check() -- which is where a caller with a 60 GB
   # table actually stands. It needs the column names before a row is read; when
   # the holding cannot be asked for them cheaply, the gate is skipped and the
   # scan proceeds exactly as it always did.
-  if (identical(on_missing_column, "stop")) {
+  # A matrix dataset has no "missing column" to stop on: its header findings are
+  # part of `structure`, so `"stop"` has no effect when one is supplied.
+  if (identical(on_missing_column, "stop") && is.null(structure)) {
     column_names <- dta_table_column_names(table)
     if (length(column_names) > 0) {
       findings <- dta_structure_findings(specs, column_names)
@@ -2283,7 +2420,7 @@ dta_validate_any_table <- function(specs,
     # to fall back on.
     return(validate_table_detailed(
       specs, as.data.frame(table),
-      verbose = verbose, max_errors = max_errors
+      verbose = verbose, max_errors = max_errors, structure = structure
     ))
   }
 
@@ -2348,7 +2485,8 @@ dta_validate_any_table <- function(specs,
     coerce = TRUE,
     fail_fast = fail_fast,
     precomputed = precomputed,
-    known_columns = column_names
+    known_columns = column_names,
+    structure = structure
   )
 }
 

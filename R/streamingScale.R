@@ -311,11 +311,13 @@ dta_arrow_unique_eligible <- function(rule, source, specs = NULL) {
 #' eight values `NaN, NaN, <missing>, <missing>, -0, 0, 1.5, 1.50`, which
 #' `duplicated()` calls 4 duplicates: without the fold Acero reported 3.
 #'
-#' No `NaN` normalisation is applied, deliberately. Acero already groups `NaN`
-#' with itself and apart from null, which is exactly what the R key does --
-#' `dta_row_key()` masks only `is.na(x) & !is.nan(x)`, leaving `NaN` its own
-#' rendering. Folding `NaN` into null as well took those same eight values to 5
-#' duplicates, one more than the table contains.
+#' `NaN` is folded into null as well. A `NaN` here can only come from a `NaN`
+#' token in the text, and the import typing (`dta_coerce_table_to_specs()`)
+#' reports such a token as not convertible and stores it as missing -- so the
+#' R key, which treats all missing values as one, sees it as missing too. Left
+#' unfolded, Acero grouped `NaN` apart from null and counted one duplicate fewer
+#' than the eager path on the same file. On the eight values above, the eager
+#' path and the double fold both count 5 duplicates.
 #' @param specs A `DTAColumnSpecCollection`. Consulted by
 #'   [dta_arrow_unique_eligible()] for the key columns' declared types, which
 #'   decide which key columns are normalised as numbers before grouping.
@@ -389,14 +391,17 @@ dta_stream_unique_precompute <- function(specs, source, rules_list) {
         }
         if (length(numeric_cols) > 0) {
           # See the "Declared-numeric key columns" section above for why the
-          # cast is safe and why the zero fold is needed but a NaN fold is not.
+          # cast is safe and why both folds (NaN to null, -0 to 0) are needed.
           query <- dplyr::mutate(
             query,
             dplyr::across(dplyr::all_of(numeric_cols), ~ as.numeric(.x))
           )
           query <- dplyr::mutate(
             query,
-            dplyr::across(dplyr::all_of(numeric_cols), ~ dplyr::if_else(.x == 0, 0, .x))
+            dplyr::across(
+              dplyr::all_of(numeric_cols),
+              ~ dplyr::if_else(is.nan(.x), NA_real_, dplyr::if_else(.x == 0, 0, .x))
+            )
           )
         }
 

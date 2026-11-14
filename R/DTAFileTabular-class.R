@@ -267,8 +267,9 @@ method(open_file_execution, DTAFileTabular) <- function(x, ...) {
 #'   `read_file_execution()` and `open_file_execution()` are exported, so a
 #'   caller can reach this failure through either -- and naming the wrong one
 #'   sends them looking in the wrong place.
-#' @return A list with `file` (the path) and `specs` (a
-#'   `DTAColumnSpecCollection`, or `NULL` when the caller supplied none).
+#' @return A list with `file` (the path), `specs` (a
+#'   `DTAColumnSpecCollection`, or `NULL` when the caller supplied none) and
+#'   `column_names` (a character vector, or `NULL`).
 #' @keywords internal
 dta_reader_args <- function(..., .caller = "read_file_execution") {
   args <- list(...)
@@ -302,7 +303,25 @@ dta_reader_args <- function(..., .caller = "read_file_execution") {
     file <- positional[[1]]
   }
 
-  list(file = file, specs = specs)
+  list(file = file, specs = specs, column_names = pick("column_names"))
+}
+
+#' @title Refuse Column Names for a Format That Has No Header Line
+#' @description
+#' `column_names` rename the columns of a delimited file whose header is data
+#' (matrix datasets). A SAS dataset or transport file carries its own names, so
+#' a supplied vector would be silently ignored; it aborts instead.
+#' @param args The list returned by [dta_reader_args()].
+#' @return `invisible(NULL)`; aborts with class `dta_column_names_unsupported`.
+#' @keywords internal
+dta_refuse_column_names <- function(args) {
+  if (!is.null(args$column_names)) {
+    cli::cli_abort(
+      "{.arg column_names} can be supplied only for delimited files.",
+      class = "dta_column_names_unsupported"
+    )
+  }
+  invisible(NULL)
 }
 
 #' @title Apply the Column-Name Cleaning Rule to a Table
@@ -639,11 +658,14 @@ dta_check_encoding_supported <- function(encoding, path) {
     return(invisible(TRUE))
   }
 
-  cli::cli_abort(c(
-    "{.val {encoding}} is not an encoding this platform can convert from.",
-    "x" = "{.path {path}} is declared as {.val {encoding}}.",
-    "i" = "{.code iconvlist()} lists the names the platform accepts; R also takes its own aliases {.val latin1} and {.val UTF-8}."
-  ))
+  cli::cli_abort(
+    c(
+      "{.val {encoding}} is not an encoding this platform can convert from.",
+      "x" = "{.path {path}} is declared as {.val {encoding}}.",
+      "i" = "{.code iconvlist()} lists the names the platform accepts; R also takes its own aliases {.val latin1} and {.val UTF-8}."
+    ),
+    class = "dta_encoding_unsupported"
+  )
 }
 
 #' @title The Last Line-Break Byte in a Block
@@ -1052,14 +1074,207 @@ dta_refresh_transcoded_dataset <- function(table) {
   do.call(dta_open_normalized_dataset, plan$args)
 }
 
+#' @title The First Records of a Delimited File, as Raw Bytes
+#' @description
+#' Reads the head of a (possibly gzip-compressed) delimited file in chunks, with
+#' no size cap on the first record, until `n` records are complete or the file
+#' ends: a header of 60,000 quoted labels is several MiB, and reading a fixed
+#' first block would mistake the cut for an open quote. Each byte is classified
+#' once: the scan state is kept between chunks.
+#'
+#' A leading UTF-8 BOM is dropped, and empty lines (LF, CRLF or a lone CR) are
+#' skipped before the first record and between records, as Arrow does with
+#' `ignore_empty_lines = TRUE`. A record ends at the first line end OUTSIDE
+#' quotes. A quote only means something where it opens a field (record start or
+#' right after `delim`); a mid-field one (`5" pipe`) is literal. Inside a quoted
+#' field a doubled quote is an escape. Line ends, quotes and delimiters are
+#' single ASCII bytes in every encoding this package accepts for tabular
+#' reading, so no decoding is needed.
+#'
+#' A line end INSIDE quotes cuts the record there (and flags it `multiline`)
+#' unless it is a later record and `newlines_in_values` is `TRUE`: the callers
+#' abort on a multiline header, and an unterminated quote must not drag the
+#' whole file into memory. A cut record is the last one returned. A later
+#' record that is still unfinished after `max_scan` bytes is cut as well, with
+#' `multiline` `NA` (unknown).
+#' @param path Character path to the delimited file.
+#' @param n Number of records wanted.
+#' @param quote The quote character, or `""` for none.
+#' @param delim The field delimiter.
+#' @param newlines_in_values Whether records after the first may hold quoted
+#'   line breaks.
+#' @param max_scan Bytes a record after the first may span before it is given up.
+#' @return A list: `records` (a list of raw vectors, without the line
+#'   terminator; fewer than `n` at end of file or after a cut), `blank` (empty
+#'   lines before the first record) and `multiline` (per record, whether it
+#'   holds a line break inside quotes; `NA` when unknown).
+#' @keywords internal
+dta_head_records <- function(
+  path,
+  n = 2L,
+  quote = '"',
+  delim = ",",
+  newlines_in_values = FALSE,
+  max_scan = 64 * 1048576
+) {
+  input <- if (tolower(tools::file_ext(path)) %in% dta_compression_extensions()) {
+    gzfile(path, open = "rb")
+  } else {
+    file(path, open = "rb")
+  }
+  on.exit(close(input), add = TRUE)
+
+  lf <- as.raw(0x0a)
+  cr <- as.raw(0x0d)
+  q <- if (nzchar(quote)) charToRaw(quote)[[1L]] else NULL
+  d <- charToRaw(delim)[[1L]]
+  buf <- raw(0)
+  eof <- FALSE
+
+  # Doubling the request each time keeps a huge first record linear.
+  more <- function() {
+    chunk <- readBin(input, "raw", n = max(1048576L, length(buf)))
+    if (length(chunk) == 0L) eof <<- TRUE
+    buf <<- c(buf, chunk)
+  }
+
+  # The record starting at `s`. Only the bytes read since the last call are
+  # classified; `st` carries the rest. Returns the record's last byte, where the
+  # next one starts and whether it spans lines -- or NULL when the buffer ends
+  # before it is certain (more input could still change the answer).
+  st <- NULL
+  scan_record <- function(s, ok_newlines) {
+    if (is.null(st) || st$s != s) {
+      st <<- list(s = s, from = s, open = FALSE, multiline = FALSE)
+    }
+    len <- length(buf)
+    from <- st$from
+    open <- st$open
+    multiline <- st$multiline
+
+    # A trailing CR may be half a CRLF, and a trailing run of quotes may go on:
+    # both wait for the next chunk.
+    lim <- len
+    if (!eof && len >= from) {
+      if (buf[[len]] == cr) {
+        lim <- len - 1L
+      } else if (!is.null(q) && buf[[len]] == q) {
+        other <- which(buf[from:len] != q)
+        lim <- if (length(other)) from + max(other) - 1L else from - 1L
+      }
+    }
+
+    if (lim >= from) {
+      seg <- buf[from:lim]
+      ends <- which(seg == lf | seg == cr) + (from - 1L)
+      pq <- if (is.null(q)) integer(0) else which(seg == q) + (from - 1L)
+      if (length(pq)) {
+        first <- c(TRUE, diff(pq) != 1L)
+        run_at <- pq[first]
+        run_len <- diff(c(which(first), length(pq) + 1L))
+        # A run opens a quoted field only at a field start: record start or
+        # right after `delim`. Of `m` quotes, the first opens and the rest pair
+        # up, the last of an odd rest closing again; so a closed run opens iff
+        # it starts a field and `m` is odd, an open run closes iff `m` is odd.
+        odd <- run_len %% 2L == 1L
+        opens <- odd & (run_at == s | buf[pmax(run_at - 1L, 1L)] == d)
+        ends_before <- findInterval(run_at, ends)
+      } else {
+        run_at <- integer(0)
+      }
+
+      lo <- 1L
+      # A line end found while scanning: ends the record when outside quotes.
+      # Inside quotes it is skipped, or cuts the record where it is.
+      at_end <- function(e) {
+        if (!open) {
+          crlf <- buf[[e]] == cr && e < len && buf[[e + 1L]] == lf
+          return(list(end = e - 1L, nxt = e + if (crlf) 2L else 1L, multiline = multiline))
+        }
+        if (!ok_newlines) {
+          return(list(end = e - 1L, nxt = e + 1L, multiline = TRUE, cut = TRUE))
+        }
+        NULL
+      }
+      for (i in seq_along(run_at)) {
+        if (ends_before[[i]] >= lo) {
+          r <- at_end(ends[[lo]])
+          if (!is.null(r)) {
+            return(r)
+          }
+          multiline <- TRUE
+          lo <- ends_before[[i]] + 1L
+        }
+        open <- if (open) !odd[[i]] else opens[[i]]
+      }
+      if (lo <= length(ends)) {
+        r <- at_end(ends[[lo]])
+        if (!is.null(r)) {
+          return(r)
+        }
+        multiline <- TRUE
+      }
+      st <<- list(s = s, from = lim + 1L, open = open, multiline = multiline)
+    }
+
+    if (eof) {
+      return(list(end = len, nxt = len + 1L, multiline = st$open || st$multiline))
+    }
+    NULL
+  }
+
+  more()
+  # Arrow drops a leading BOM, so a line holding only the BOM is empty.
+  pos <- if (length(buf) >= 3L && all(buf[1:3] == as.raw(c(0xef, 0xbb, 0xbf)))) 4L else 1L
+  records <- list()
+  multiline <- logical(0)
+  blank <- 0L
+
+  while (length(records) < n) {
+    repeat {
+      len <- length(buf)
+      if (pos > len) {
+        if (eof) break
+        more()
+      } else if (buf[[pos]] != lf && buf[[pos]] != cr) {
+        break
+      } else if (buf[[pos]] == cr && pos == len && !eof) {
+        more()
+      } else {
+        pos <- pos + if (buf[[pos]] == cr && pos < len && buf[[pos + 1L]] == lf) 2L else 1L
+        if (length(records) == 0L) blank <- blank + 1L
+      }
+    }
+    if (pos > length(buf)) break
+
+    later <- length(records) > 0L
+    repeat {
+      r <- scan_record(pos, later && isTRUE(newlines_in_values))
+      if (!is.null(r)) break
+      if (later && length(buf) - pos + 1L >= max_scan) {
+        r <- list(end = length(buf), nxt = length(buf) + 1L, multiline = NA, cut = TRUE)
+        break
+      }
+      more()
+    }
+    records[[length(records) + 1L]] <- buf[pos:r$end]
+    multiline <- c(multiline, r$multiline)
+    if (isTRUE(r$cut)) break
+    pos <- r$nxt
+  }
+
+  list(records = records, blank = blank, multiline = multiline)
+}
+
 #' @title Where the Header Line Really Is
 #' @description
 #' Arrow takes the column names from the first NON-EMPTY line
 #' (`ignore_empty_lines = TRUE`), but `skip_rows` counts PHYSICAL lines, empty
 #' ones included. Skipping one line after a leading blank line therefore left
-#' the header to be parsed as a data row. This reads the first bytes to count
-#' the leading empty lines (LF or CRLF), so that the skip can include them, and
-#' to notice a header with a quoted line break, which `skip_rows` would split.
+#' the header to be parsed as a data row. This reads the head of the file
+#' ([dta_head_records()]) to count the leading empty lines (LF, CRLF or a lone
+#' CR), so that the skip can include them, and to notice a header with a quoted
+#' line break, which `skip_rows` would split.
 #' @param path Character path to the delimited file.
 #' @param quote The quote character, or `""` for none.
 #' @param delim The field delimiter (a quote opens a field only after one).
@@ -1067,56 +1282,124 @@ dta_refresh_transcoded_dataset <- function(table) {
 #'   line holds an unbalanced quote, i.e. a quoted line break).
 #' @keywords internal
 dta_header_layout <- function(path, quote = '"', delim = ",") {
-  input <- if (tolower(tools::file_ext(path)) %in% dta_compression_extensions()) {
-    gzfile(path, open = "rb")
+  # The callers abort on a multiline header, so the first record is cut at the
+  # first quoted line end and nothing past it is read.
+  h <- dta_head_records(path, 1L, quote, delim)
+  list(blank = h$blank, multiline = isTRUE(h$multiline[1L]))
+}
+
+#' @title The Header Fields of a Matrix File, Verbatim
+#' @description
+#' Tokenises the first two records of a delimited file for a matrix dataset,
+#' whose header is data (labels), not column names. Each record is parsed ALONE
+#' by Arrow, every field as `binary()` and with no missing-value markers, so
+#' `007`, `1e3`, `NA`, `""` and `.` arrive exactly as written and a latin1 byte
+#' survives; only then are the bytes decoded from the handler's encoding and
+#' cleaned by [dta_clean_column_names()]. Each record is written to a
+#' temporary file with a trailing newline and a block larger than itself,
+#' because Arrow needs both to parse a single record.
+#' @param handler A `DTAFileTabular` (or subclass) with `sep` and `quote`.
+#' @param path Character path to the delimited file.
+#' @return A list: `fields` (cleaned header fields, UTF-8), `n_header`,
+#'   `n_first_row` (`NA_integer_` when there is no data row) and `hint`
+#'   (`NULL`, `"preamble"` or `"delimiter"`).
+#' @keywords internal
+dta_matrix_read_head <- function(handler, path) {
+  settings <- dta_reader_parse_settings(handler)
+  dta_refuse_wide_encoding(settings$encoding, path)
+  dta_check_encoding_supported(settings$encoding, path)
+
+  delim <- handler@sep
+  quote <- handler@quote
+  recs <- dta_head_records(
+    path,
+    2L,
+    quote,
+    delim,
+    newlines_in_values = isTRUE(settings$newlines_in_values)
+  )
+
+  if (length(recs$records) == 0L) {
+    return(list(fields = character(0), n_header = 0L, n_first_row = NA_integer_, hint = NULL))
+  }
+  if (isTRUE(recs$multiline[[1L]])) {
+    cli::cli_abort(c(
+      "The header of {.path {path}} contains a quoted line break.",
+      "x" = "Column names spanning more than one line cannot be read.",
+      "i" = "Put the header on a single line."
+    ))
+  }
+
+  parse_options <- arrow::csv_parse_options(
+    delimiter = delim,
+    quoting = nzchar(quote),
+    quote_char = quote,
+    double_quote = TRUE,
+    escaping = FALSE,
+    escape_char = "\\",
+    newlines_in_values = settings$newlines_in_values,
+    ignore_empty_lines = TRUE
+  )
+
+  tokenise <- function(bytes) {
+    tmp <- tempfile(fileext = ".csv")
+    on.exit(unlink(tmp), add = TRUE)
+    writeBin(c(bytes, as.raw(0x0a)), tmp)
+    k <- sum(bytes == charToRaw(delim)[[1L]]) + 1L
+    nms <- paste0("f", seq_len(k) - 1L)
+    # One schema call on a named list: the names f0.. are never empty.
+    col_types <- arrow::schema(stats::setNames(rep(list(arrow::binary()), k), nms))
+    arrow::read_delim_arrow(
+      tmp,
+      parse_options = parse_options,
+      read_options = arrow::csv_read_options(
+        autogenerate_column_names = TRUE,
+        block_size = max(dta_stream_block_size(), length(bytes) + 65536L)
+      ),
+      convert_options = arrow::csv_convert_options(
+        # Nothing is missing in a header: every field is a label, verbatim.
+        # `col_types` goes here: the `col_types` argument of read_delim_arrow()
+        # is dropped for a schema when the names are autogenerated.
+        null_values = character(0),
+        strings_can_be_null = FALSE,
+        col_types = col_types
+      ),
+      as_data_frame = FALSE
+    )
+  }
+
+  header <- lapply(as.data.frame(tokenise(recs$records[[1L]])), `[[`, 1L)
+  fields <- vapply(header, rawToChar, "")
+  if (dta_encoding_is_utf8(settings$encoding)) {
+    Encoding(fields) <- "UTF-8"
   } else {
-    file(path, open = "rb")
+    converted <- iconv(fields, from = settings$encoding, to = "UTF-8")
+    fields <- ifelse(is.na(converted), fields, converted)
   }
-  on.exit(close(input), add = TRUE)
-  bytes <- readBin(input, "raw", n = 1048576L)
+  fields <- dta_clean_column_names(unname(fields))
 
-  # Line ends and quotes are single ASCII bytes in every encoding this package
-  # accepts for tabular reading, so no decoding is needed.
-  lf <- as.raw(0x0a)
-  cr <- as.raw(0x0d)
-  n <- length(bytes)
-
-  # Arrow drops a leading BOM, so a line holding only the BOM is empty.
-  pos <- if (n >= 3L && all(bytes[1:3] == as.raw(c(0xef, 0xbb, 0xbf)))) 4L else 1L
-
-  # A line ends at LF, CRLF or a lone CR.
-  blank <- 0L
-  while (pos <= n && (bytes[[pos]] == lf || bytes[[pos]] == cr)) {
-    pos <- pos + if (bytes[[pos]] == cr && pos < n && bytes[[pos + 1L]] == lf) 2L else 1L
-    blank <- blank + 1L
-  }
-  if (pos > n || !nzchar(quote)) {
-    return(list(blank = blank, multiline = FALSE))
+  # A second record cut at a quoted line break (or given up as too long) has
+  # no known width: the gate is skipped and Arrow reports the data itself.
+  second_multiline <- if (length(recs$multiline) < 2L) NA else recs$multiline[[2L]]
+  n_first_row <- if (length(recs$records) < 2L) {
+    NA_integer_
+  } else if (is.na(second_multiline) || (second_multiline && !isTRUE(settings$newlines_in_values))) {
+    NA_integer_
+  } else {
+    tokenise(recs$records[[2L]])$num_columns
   }
 
-  rest <- bytes[pos:n]
-  eol <- which(rest == lf | rest == cr)[1L]
-  line <- if (is.na(eol)) rest else rest[seq_len(eol - 1L)]
-
-  # A quote only means something where it opens a field (line start or right
-  # after the delimiter); a mid-field one (`5" pipe`) is literal. Inside a
-  # quoted field a doubled quote is an escape. Still open at the end of the
-  # line means the quoted field holds a line break.
-  q <- which(line == charToRaw(quote)[[1]])
-  d <- charToRaw(delim)[[1]]
-  open <- FALSE
-  i <- 1L
-  while (i <= length(q)) {
-    if (!open) {
-      open <- q[[i]] == 1L || line[[q[[i]] - 1L]] == d
-    } else if (i < length(q) && q[[i + 1L]] == q[[i]] + 1L) {
-      i <- i + 1L
-    } else {
-      open <- FALSE
-    }
-    i <- i + 1L
+  first <- recs$records[[1L]]
+  hint <- if (length(first) > 0L && first[[1L]] == as.raw(0x23)) {
+    "preamble"
+  } else if (
+    length(fields) == 1L &&
+      any(vapply(c(";", "\t", ",", "|"), function(s) s != delim && grepl(s, fields, fixed = TRUE), NA))
+  ) {
+    "delimiter"
   }
-  list(blank = blank, multiline = open)
+
+  list(fields = fields, n_header = length(fields), n_first_row = n_first_row, hint = hint)
 }
 
 #' @title The Header Names of a Delimited File
@@ -1254,6 +1537,9 @@ dta_delim_header_names <- function(path, parse_options, has_header, encoding = "
 #'   UTF-8 copy and is planning a read of *that*: the handler still says
 #'   `latin1`, and honouring it here would decode the copy's header a second
 #'   time. `NULL` leaves the handler in charge, which is every other route.
+#' @param column_names Character vector or `NULL`. Names to use instead of the
+#'   file's header, verbatim (neither cleaned nor de-duplicated); the header
+#'   line is still skipped. Used by matrix datasets.
 #' @return A list with `path`, `column_names`, `skip`, `col_types`,
 #'   `parse_options`, `encoding` and `na`.
 #' @keywords internal
@@ -1265,7 +1551,8 @@ dta_delim_reader_plan <- function(
   has_header = TRUE,
   na = NULL,
   handler = NULL,
-  encoding = NULL
+  encoding = NULL,
+  column_names = NULL
 ) {
   settings <- dta_reader_parse_settings(handler)
 
@@ -1288,12 +1575,27 @@ dta_delim_reader_plan <- function(
     ignore_empty_lines = TRUE
   )
 
-  raw_names <- dta_delim_header_names(
-    path,
-    parse_options = parse_options,
-    has_header = has_header,
-    encoding = settings$encoding
-  )
+  if (!is.null(column_names)) {
+    if (!isTRUE(has_header)) {
+      cli::cli_abort(
+        "{.arg column_names} needs a file with a header line to skip.",
+        class = "dta_column_names_invalid"
+      )
+    }
+    if (!is.character(column_names) || length(column_names) == 0L || anyNA(column_names) || anyDuplicated(column_names)) {
+      cli::cli_abort(
+        "{.arg column_names} must be a non-empty character vector without missing or repeated values.",
+        class = "dta_column_names_invalid"
+      )
+    }
+  } else {
+    raw_names <- dta_delim_header_names(
+      path,
+      parse_options = parse_options,
+      has_header = has_header,
+      encoding = settings$encoding
+    )
+  }
 
   skip <- 0L
   if (isTRUE(has_header)) {
@@ -1311,7 +1613,14 @@ dta_delim_reader_plan <- function(
 
   # With no header there is nothing to clean: Arrow's generated names (f0,
   # f1, ...) are used as-is.
-  cleaned <- if (isTRUE(has_header)) dta_clean_column_names(raw_names) else raw_names
+  # Supplied names are used verbatim: dta_clean_column_names() is not idempotent.
+  cleaned <- if (!is.null(column_names)) {
+    column_names
+  } else if (isTRUE(has_header)) {
+    dta_clean_column_names(raw_names)
+  } else {
+    raw_names
+  }
 
   duplicated_names <- unique(cleaned[duplicated(cleaned)])
   if (length(duplicated_names) > 0) {
@@ -1330,7 +1639,8 @@ dta_delim_reader_plan <- function(
   } else {
     # Built from fields rather than named arguments: a header may legitimately
     # carry an empty name, and an empty argument name is positional.
-    arrow::schema(lapply(cleaned, function(nm) arrow::field(nm, arrow::utf8())))
+    utf8_type <- arrow::utf8()
+    arrow::schema(lapply(cleaned, function(nm) arrow::field(nm, utf8_type)))
   }
 
   list(
@@ -1389,6 +1699,7 @@ dta_delim_reader_plan <- function(
 #'   (the default) to keep Arrow's own default (`c("", "NA")`) unchanged.
 #' @param handler A `DTAFileTabular` (or subclass) whose `newlines_in_values`
 #'   and `encoding` apply, or `NULL` for the defaults.
+#' @param column_names Character vector or `NULL`; see [dta_delim_reader_plan()].
 #' @return An `arrow::Dataset`.
 #' @keywords internal
 dta_open_normalized_dataset <- function(
@@ -1398,7 +1709,8 @@ dta_open_normalized_dataset <- function(
   quote = '"',
   has_header = TRUE,
   na = NULL,
-  handler = NULL
+  handler = NULL,
+  column_names = NULL
 ) {
   dta_refuse_sas7bdat(path)
   settings <- dta_reader_parse_settings(handler)
@@ -1428,7 +1740,8 @@ dta_open_normalized_dataset <- function(
     handler = handler,
     # The copy is UTF-8 by construction; the handler still declares the
     # source's encoding, and honouring that here would decode the copy twice.
-    encoding = if (transcoded) "UTF-8" else NULL
+    encoding = if (transcoded) "UTF-8" else NULL,
+    column_names = column_names
   )
 
   open_args <- list(
@@ -1473,7 +1786,8 @@ dta_open_normalized_dataset <- function(
       quote = quote,
       has_header = has_header,
       na = na,
-      handler = handler
+      handler = handler,
+      column_names = column_names
     )
   ))
 }
@@ -1500,6 +1814,7 @@ dta_open_normalized_dataset <- function(
 #'   (the default) to keep Arrow's own default (`c("", "NA")`) unchanged.
 #' @param handler A `DTAFileTabular` (or subclass) whose `newlines_in_values`
 #'   and `encoding` apply, or `NULL` for the defaults.
+#' @param column_names Character vector or `NULL`; see [dta_delim_reader_plan()].
 #' @return An Arrow `Table`.
 #' @keywords internal
 dta_read_delim_normalized <- function(
@@ -1509,7 +1824,8 @@ dta_read_delim_normalized <- function(
   has_header,
   specs = NULL,
   na = NULL,
-  handler = NULL
+  handler = NULL,
+  column_names = NULL
 ) {
   dta_refuse_wide_encoding(dta_reader_parse_settings(handler)$encoding, path)
 
@@ -1520,7 +1836,8 @@ dta_read_delim_normalized <- function(
     quote = quote,
     has_header = has_header,
     na = na,
-    handler = handler
+    handler = handler,
+    column_names = column_names
   )
 
   read_args <- list(

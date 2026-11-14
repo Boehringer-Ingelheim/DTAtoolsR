@@ -593,3 +593,18 @@ requirements:
     category: interface
     covers: [DTAFile, DTAFileCSV, DTAFileAny, min_number_of_files, max_number_of_files]
     source: R/DTAFile-class.R (validator)
+
+  - id: REQ-FILE-043
+    text: >
+      A delimited file whose header row is longer than 1 MiB and whose header
+      fields are quoted shall be read with the whole of that row as its header,
+      not aborted as a quoted line break: a comma-separated file with 60000
+      quoted header labels and one data row of 60000 values shall read to a
+      table of 60000 columns, the last of them named by the last label.
+    risk: medium
+    category: integrity
+    covers: [read_file, open_file]
+    source: R/DTAFileTabular-class.R; CHANGELOG Unreleased, Fixed
+    notes: >
+      Wide matrix deliveries (tens of thousands of samples) made the header
+      row exceed the 1 MiB window in which a quoted line break is looked for.

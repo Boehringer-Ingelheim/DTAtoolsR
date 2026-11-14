@@ -721,6 +721,7 @@ test_that("a field a term-list choice or party fills is not shown with the base 
     pre[["The supplier: organisation and contacts"]], "From the supplier profile you choose"
   )
   expect_identical(sum(grepl("upplier", names(pre))), 1L)
+  expect_match(e$summary, "1 column, 0 rules", fixed = TRUE)
   expect_false(any(grepl("Base Supplier", e$prefilled$Value, fixed = TRUE)))
 })
 

@@ -649,9 +649,10 @@ normalise_values_from <- function(x, column_id = "<column>") {
 # through machinery that already exists.
 
 # The one target shape a vocabulary slot may write:
-# "datasets.<dataset name>.columns.<column id>.values".
+# "datasets.<dataset name>.columns.<column id>.values" (a matrix dataset keeps
+# its row labels under `row_labels`, which is accepted in the same place).
 #
-# Returns list(dataset=, column=) or NULL. Checked up front for the same
+# Returns list(dataset=, column=, segment=) or NULL. Checked up front for the same
 # reason party_slot_target_valid() checks its own: a malformed target would
 # otherwise fail somewhere far from the YAML that caused it.
 #
@@ -669,14 +670,14 @@ vocabulary_slot_target_parts <- function(target) {
     return(NULL)
   }
   if (!identical(parts[[1]], "datasets") ||
-    !identical(parts[[3]], "columns") ||
+    !(parts[[3]] %in% c("columns", "row_labels")) ||
     !identical(parts[[5]], "values")) {
     return(NULL)
   }
   if (!nzchar(parts[[2]]) || !nzchar(parts[[4]])) {
     return(NULL)
   }
-  list(dataset = parts[[2]], column = parts[[4]])
+  list(dataset = parts[[2]], column = parts[[4]], segment = parts[[3]])
 }
 
 # Normalise a template's `vocabulary_slots:`, filling in defaults and rejecting
@@ -707,7 +708,7 @@ normalise_vocabulary_slots <- function(slots) {
     if (is.null(parts)) {
       cli::cli_abort(c(
         "Vocabulary slot {.val {id}} has an invalid {.field target} {.val {target}}.",
-        "i" = "Expected {.code datasets.<dataset>.columns.<column>.values}."
+        "i" = "Expected {.code datasets.<dataset>.columns.<column>.values} ({.code row_labels} instead of {.code columns} for a matrix dataset)."
       ))
     }
 
@@ -749,6 +750,7 @@ normalise_vocabulary_slots <- function(slots) {
       target = target,
       dataset = parts$dataset,
       column = parts$column,
+      segment = parts$segment,
       vocabulary = vocab_ref,
       field = field,
       mode = mode,
@@ -863,7 +865,8 @@ resolve_vocabulary_slot_overrides <- function(slots, selections, resolve_vocab) 
       next
     }
     out[[length(out) + 1L]] <- list(
-      dataset = slot$dataset, column = slot$column, values = values, slot = slot$id
+      dataset = slot$dataset, column = slot$column, values = values, slot = slot$id,
+      segment = slot$segment %||% "columns"
     )
   }
   out
@@ -889,7 +892,8 @@ apply_vocabulary_slot_overrides <- function(ds, overrides) {
     return(ds)
   }
 
-  columns <- ds$columns %||% list()
+  key <- dta_dataset_spec_key(ds)
+  columns <- ds[[key]] %||% list()
   ids <- if (length(columns) > 0) {
     vapply(columns, function(col) as.character(col$id %||% ""), character(1))
   } else {
@@ -897,6 +901,12 @@ apply_vocabulary_slot_overrides <- function(ds, overrides) {
   }
 
   for (o in mine) {
+    if (!identical(o$segment %||% "columns", key)) {
+      cli::cli_abort(c(
+        "Vocabulary slot {.val {o$slot}} targets {.code {o$segment}} of dataset {.val {ds_name}}, which keeps its column specs under {.code {key}}.",
+        "i" = "Write the target as {.code datasets.{ds_name}.{key}.<id>.values}."
+      ))
+    }
     hit <- match(o$column, ids)
     if (is.na(hit)) {
       cli::cli_abort(c(
@@ -916,7 +926,7 @@ apply_vocabulary_slot_overrides <- function(ds, overrides) {
     columns[[hit]] <- col
   }
 
-  ds$columns <- columns
+  ds[[key]] <- columns
   ds
 }
 
@@ -1004,7 +1014,7 @@ vocabulary_resolver <- function(index) {
 # (perfectly normal, and the case for every template written before this
 # feature existed).
 dataset_has_vocabulary_binding <- function(ds) {
-  columns <- ds$columns %||% list()
+  columns <- ds[[dta_dataset_spec_key(ds)]] %||% list()
   if (length(columns) == 0) {
     return(FALSE)
   }
@@ -1035,7 +1045,8 @@ dataset_has_vocabulary_binding <- function(ds) {
 # genuinely ambiguous case, and validate_template() flags exactly that, where
 # the raw per-file YAML makes the two distinguishable.
 expand_column_vocabularies <- function(ds, resolve_vocab, dataset_name = NULL) {
-  columns <- ds$columns %||% list()
+  key <- dta_dataset_spec_key(ds)
+  columns <- ds[[key]] %||% list()
   if (length(columns) == 0) {
     return(ds)
   }
@@ -1074,6 +1085,6 @@ expand_column_vocabularies <- function(ds, resolve_vocab, dataset_name = NULL) {
     columns[[i]] <- col
   }
 
-  ds$columns <- columns
+  ds[[key]] <- columns
   ds
 }

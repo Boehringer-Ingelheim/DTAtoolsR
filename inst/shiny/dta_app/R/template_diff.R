@@ -89,7 +89,7 @@
   if (is.null(x)) {
     return(out)
   }
-  if (!is.list(x)) {
+  if (!is.list(x) || inherits(x, "dta_verbatim")) {
     if (is.null(prefix) || !nzchar(prefix)) {
       # A bare non-list value with no path to hang it on cannot occur from a
       # real call (every caller here starts from a named top-level list or a
@@ -157,7 +157,8 @@ dta_metadata_leaves <- function(md) {
 #                                             flattened generically.
 #   "<dataset>.columns.<COLUMN_ID>.<field>"  each column, keyed by its OWN
 #                                             `id`, never by its position in
-#                                             the list.
+#                                             the list (`row_labels` instead
+#                                             of `columns` for a matrix).
 #
 # Keying columns by id (not position) is the whole point: dta_column_to_list()
 # always includes `id`, so build the key from THAT rather than from the
@@ -181,8 +182,10 @@ dta_dataset_leaves <- function(dta) {
     # explicit (file name -> id) is no change at all.
     lst <- dta_dataset_to_list(ds, dta, apply_default = FALSE)
 
-    cols <- lst$columns
-    lst$columns <- NULL
+    # A matrix keeps its row labels under `row_labels`; keyed by id the same way.
+    key <- dta_dataset_spec_key(lst)
+    cols <- lst[[key]]
+    lst[[key]] <- NULL
     out <- c(out, .dta_leaf_flatten(lst, nm))
 
     for (col in cols) {
@@ -191,7 +194,7 @@ dta_dataset_leaves <- function(dta) {
         next
       }
       col$id <- NULL
-      out <- c(out, .dta_leaf_flatten(col, paste(nm, "columns", cid, sep = ".")))
+      out <- c(out, .dta_leaf_flatten(col, paste(nm, key, cid, sep = ".")))
     }
   }
   out
@@ -262,8 +265,11 @@ dta_diff_display_value <- function(x) {
 # not, and a diff whose row order depends on which machine produced it would
 # be a needless, previously-bitten difference (see the locale-collation
 # lesson elsewhere in this codebase's history).
+#
+# as.character(): an empty leaf map has NULL names, so two of them union to
+# NULL, which sort(method = "radix") rejects ("not a vector").
 dta_diff_two_way <- function(a_leaves, b_leaves) {
-  keys <- sort(union(names(a_leaves), names(b_leaves)), method = "radix")
+  keys <- sort(as.character(union(names(a_leaves), names(b_leaves))), method = "radix")
 
   rows <- list()
   for (k in keys) {
@@ -548,8 +554,9 @@ dta_template_provenance <- function(dta) {
 # conflict identically to editing one -- there is no separate "removal" case
 # to special-case here.
 .rebase_classify_three_way <- function(ancestor_leaves, current_leaves, target_leaves) {
+  # as.character(): see dta_diff_two_way() -- all-empty maps have NULL names.
   keys <- sort(
-    union(union(names(ancestor_leaves), names(current_leaves)), names(target_leaves)),
+    as.character(union(union(names(ancestor_leaves), names(current_leaves)), names(target_leaves))),
     method = "radix"
   )
 
@@ -611,7 +618,8 @@ dta_template_provenance <- function(dta) {
 # `conflicts`, with `ancestor` reported as NA (genuinely unknown, not merely
 # absent) rather than guessed at from either side.
 .rebase_classify_two_way <- function(current_leaves, target_leaves) {
-  keys <- sort(union(names(current_leaves), names(target_leaves)), method = "radix")
+  # as.character(): see dta_diff_two_way() -- empty maps have NULL names.
+  keys <- sort(as.character(union(names(current_leaves), names(target_leaves))), method = "radix")
 
   conflict_rows <- list()
   for (k in keys) {

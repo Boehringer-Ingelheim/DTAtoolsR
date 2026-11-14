@@ -114,9 +114,18 @@ validate_table <- function(specs, table, verbose = TRUE) {
 #'   computed from the complete frames, so the counts stay exact and no verdict
 #'   can be an artefact of truncation. A frame that lost rows is flagged with a
 #'   `"truncated"` attribute.
+#' @param structure `NULL` (a plain table: the tabular path), or the structural
+#'   findings of a matrix dataset: a list with `findings` (header findings, a
+#'   column spec error frame), `rows` (`c(min, max)` row-count bounds) and
+#'   `declared` (the per-keyword counts for the check summary). Any non-`NULL`
+#'   value selects the matrix path; no other field is read. They are placed
+#'   ahead of the cell findings: header, row count, cells. The retained frame
+#'   may hold one row more than `max_errors` when the row-count finding is
+#'   inserted into the head.
 #' @noRd
 #' @keywords internal
-validate_table_detailed <- function(specs, table, verbose = TRUE, max_errors = NULL) {
+validate_table_detailed <- function(specs, table, verbose = TRUE, max_errors = NULL,
+                                    structure = NULL) {
   # Guarded here rather than in each entry point, because this is where both
   # of them arrive: `validate_table()` and the streaming scan's in-memory
   # fallback.
@@ -186,6 +195,22 @@ validate_table_detailed <- function(specs, table, verbose = TRUE, max_errors = N
   summarised_error <- schema_result$summarised_error
   full_error <- schema_result$full_error
 
+  # Structure of a matrix dataset: header findings, then the row-count finding,
+  # then the cells, so retention keeps the structural rows first.
+  if (!is.null(structure)) {
+    full_error <- rbind(
+      structure$findings,
+      dta_matrix_rowcount_finding(nrow(table), structure$rows),
+      full_error
+    )
+    rownames(full_error) <- NULL
+    summarised_error <- dta_summarise_columnspec_errors(full_error)
+    # No findings at all is `NULL`, as on the tabular and streaming paths.
+    if (nrow(full_error) == 0) {
+      full_error <- NULL
+    }
+  }
+
   # A column the specs do not declare. `dta_columnspec_errors()` iterates the
   # SPECS, so it cannot report one: an undeclared column is not a constraint
   # that failed, it is a column the loop never visits. Decided here from the
@@ -223,7 +248,15 @@ validate_table_detailed <- function(specs, table, verbose = TRUE, max_errors = N
   columnspec_checks <- dta_columnspec_check_summary(
     columnspec_schemas,
     tally = dta_columnspec_error_tally(full_error),
-    settled = if (scanned_rows) NULL else c("required", "additionalProperties")
+    settled = if (scanned_rows) {
+      NULL
+    } else if (is.null(structure)) {
+      c("required", "additionalProperties")
+    } else {
+      c("required", "additionalProperties", dta_matrix_structure_keywords())
+    },
+    matrix = !is.null(structure),
+    structure_declared = structure$declared
   )
 
   if (isTRUE(verbose)) {
@@ -684,4 +717,69 @@ as.data.frame.dta_validation_details <- function(
   }
 
   out
+}
+
+# ---- matrix structure ---------------------------------------------------------
+
+# Keywords of the header and dimension findings of a matrix dataset.
+dta_matrix_structure_keywords <- function() {
+  c(
+    "corner", "propertyNames", "uniqueNames", "minProperties", "maxProperties",
+    "minItems", "maxItems"
+  )
+}
+
+# Refuses a malformed `structure` up front. It is internal, so a bad shape is a
+# programming error in the caller, not something to coerce: a findings frame
+# with other columns would otherwise fail inside rbind() far from its cause.
+dta_check_structure <- function(structure) {
+  if (is.null(structure)) {
+    return(invisible(NULL))
+  }
+  findings <- structure$findings
+  rows <- structure$rows
+  problem <- if (!is.data.frame(findings) ||
+    !identical(names(findings), names(dta_empty_columnspec_errors()))) {
+    "{.field findings} must be a data frame with exactly the columns of a column spec error frame."
+  } else if (!is.numeric(rows) || length(rows) != 2L || anyNA(rows) || rows[[1]] > rows[[2]]) {
+    "{.field rows} must be a numeric {.code c(min, max)} with {.code min <= max}."
+  }
+  if (!is.null(problem)) {
+    cli::cli_abort(
+      c("Invalid {.arg structure}.", x = problem),
+      class = "dta_structure_invalid"
+    )
+  }
+  invisible(NULL)
+}
+
+#' @title Row-Count Finding of a Matrix Dataset
+#' @param n Number of data rows seen.
+#' @param rows `c(min, max)`, `max` possibly `Inf`.
+#' @param partial `TRUE` when the scan stopped early: `n` is then a lower bound,
+#'   so only a certain failure (`n` already above `max`) is reported.
+#' @return A one-row column spec error frame, or `NULL` when within bounds.
+#' @noRd
+dta_matrix_rowcount_finding <- function(n, rows, partial = FALSE) {
+  fmt <- function(x) format(x, scientific = FALSE, trim = TRUE)
+  if (!isTRUE(partial) && n < rows[[1]]) {
+    keyword <- "minItems"
+    bound <- rows[[1]]
+    msg <- sprintf("must have at least %s rows (has %s)", fmt(bound), fmt(n))
+  } else if (n > rows[[2]]) {
+    keyword <- "maxItems"
+    bound <- rows[[2]]
+    msg <- sprintf("must have at most %s rows (has %s)", fmt(bound), fmt(n))
+  } else {
+    return(NULL)
+  }
+  data.frame(
+    row = NA_integer_,
+    column = NA_character_,
+    keyword = keyword,
+    message = msg,
+    columnspec = fmt(bound),
+    data = fmt(n),
+    stringsAsFactors = FALSE
+  )
 }

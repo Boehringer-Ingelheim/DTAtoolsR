@@ -441,7 +441,7 @@ deviations:
 limitations:
   - id: LIM-001
     title: A row whose every field is empty is dropped by the CSV reader
-    affects: [REQ-FILE-001]
+    affects: [REQ-FILE-001, REQ-MATRIX-022]
     reference: tests/testthat/test-validation-oracle.R:296
     consequence: >
       A line with no content at all is treated as a record separator and
@@ -528,7 +528,7 @@ limitations:
 
   - id: LIM-002
     title: '"NaN" in a text column is classified as unconvertible, not missing'
-    affects: [REQ-TYPE-003]
+    affects: [REQ-TYPE-003, REQ-MATRIX-033]
     reference: tests/testthat/helper-validation-corpus.R:338
     consequence: >
       The string "NaN" parses to NaN, and is.na(NaN) is TRUE, so the strict
@@ -759,3 +759,53 @@ limitations:
       delivery arrives and a file matches several datasets, which
       load_delivery() reports as ambiguous (REQ-CONT-020) and the caller
       resolves with route.
+
+  - id: LIM-023
+    title: A cell of blanks only is present text in a Char matrix cell
+    affects: [REQ-MATRIX-036]
+    reference: R/DTADataSetMatrix-class.R; tests/test-OQ-MATRIX-cells.R (OQ-MATRIX-034)
+    consequence: >
+      In a SAS Num or SAS Int matrix cell a field of blanks only is missing,
+      but in a SAS Char cell it is present text, as it is in a tabular Char
+      column. A Char cell spec that is not nullable therefore accepts a cell of
+      spaces without a finding, and a supplier's padded empty cell is not
+      reported as missing. A delivery that must have text in every cell
+      constrains the cell with a pattern that needs a non-blank character.
+
+  - id: LIM-024
+    title: The common spellings of "not available" are not missing values
+    affects: [REQ-MATRIX-034]
+    reference: R/DTADataSetMatrix-class.R; tests/test-OQ-MATRIX-cells.R (OQ-MATRIX-032)
+    consequence: >
+      A matrix cell is missing only when it is an empty field, the text NA, a
+      quoted empty string, a quoted NA, or a token declared in
+      files.missing_values (case-sensitive). N/A, NULL, null, n/a, #N/A and a
+      field written " NA " with surrounding blanks are not missing: in a SAS
+      Num or SAS Int cell each is reported on the import axis as not
+      convertible, and in a SAS Char cell each is kept as text. A supplier
+      who writes one of them must either be asked to write NA or have the
+      spelling declared in files.missing_values.
+
+  - id: LIM-025
+    title: Hexadecimal, signed and zero-padded numbers are accepted in a matrix cell
+    affects: [REQ-MATRIX-026, REQ-MATRIX-029]
+    reference: R/importConversion.R; tests/test-OQ-MATRIX-cells.R (OQ-MATRIX-024, OQ-MATRIX-027)
+    consequence: >
+      A matrix cell is typed exactly as a tabular column of the same type, and
+      the strict numeric conversion accepts 0x1F (as 31), +12 and 012 (both as
+      12). A supplier's leading plus sign, leading zero or hexadecimal text in
+      a numeric cell is therefore read as a number and never reported. A
+      delivery in which such text would be an error constrains the cell as SAS
+      Char with a pattern, or relies on the range to catch the value it
+      becomes.
+
+  - id: LIM-026
+    title: An empty cell and NA are not distinguished
+    affects: [REQ-MATRIX-036]
+    reference: R/DTADataSetMatrix-class.R; tests/test-OQ-MATRIX-cells.R (OQ-MATRIX-034)
+    consequence: >
+      There is one notion of a missing matrix cell: an empty field and the
+      text NA are both missing, and nullable decides whether either is
+      allowed. A specification cannot allow one and refuse the other, so a
+      delivery in which an empty cell means "not measured" and NA means "not
+      applicable" cannot have the two told apart by the validator.

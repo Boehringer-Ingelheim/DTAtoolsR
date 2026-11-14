@@ -517,15 +517,15 @@
 .tgc_path_text <- function(path, ds_titles = character(0)) {
   path <- sub("^base\\.", "", as.character(path))
   parts <- strsplit(path, ".", fixed = TRUE)[[1]]
-  m <- regmatches(path, regexec("^datasets?\\.(?:([^.]+)\\.)?columns\\.([^.]+)\\.values$", path, perl = TRUE))[[1]]
-  if (length(m) == 3) {
+  m <- regmatches(path, regexec("^datasets?\\.(?:([^.]+)\\.)?(columns|row_labels)\\.([^.]+)\\.values$", path, perl = TRUE))[[1]]
+  if (length(m) == 4) {
     where <- if (nzchar(m[[2]])) {
       title <- if (m[[2]] %in% names(ds_titles)) ds_titles[[m[[2]]]] else m[[2]]
       paste0(" in ", title)
     } else {
       ""
     }
-    return(paste0("Allowed values of column ", m[[3]], where))
+    return(paste0("Allowed values of ", if (identical(m[[3]], "row_labels")) "row label " else "column ", m[[4]], where))
   }
   if (length(parts) > 1 && identical(parts[[1]], "metadata")) {
     parts <- parts[-1]
@@ -782,7 +782,7 @@
       "Produces %s (%s).", .tgc_plural(length(datasets), "dataset"),
       paste(vapply(datasets, function(d) {
         about <- stats::setNames(d$about$value, d$about$key)
-        sprintf("%s, %s columns, %s", d$title, about[["Columns"]], .tgc_plural(as.integer(about[["Rules"]]), "rule"))
+        sprintf("%s, %s, %s", d$title, .tgc_plural(as.integer(about[["Columns"]]), "column"), .tgc_plural(as.integer(about[["Rules"]]), "rule"))
       }, character(1)), collapse = "; ")
     )
   }
@@ -1480,7 +1480,8 @@
 
   # Column provenance: which term list feeds a column's allowed values.
   notes <- character(0)
-  for (cl in def[["dataset"]][["columns"]] %||% list()) {
+  spec_key <- dta_dataset_spec_key(def[["dataset"]])
+  for (cl in def[["dataset"]][[spec_key]] %||% list()) {
     vf <- cl[["values_from"]]
     ref <- if (is.list(vf)) .tgc_chr(vf[["vocabulary"]]) else .tgc_chr(vf)
     if (nzchar(ref)) {
@@ -1493,7 +1494,7 @@
   if (is.null(ds)) {
     note <- "A sample dataset could not be built from this template; the columns below are read straight from the file."
     ctx$problem(row$path, note)
-    raw <- def[["dataset"]][["columns"]] %||% list()
+    raw <- def[["dataset"]][[spec_key]] %||% list()
     cols <- .tgc_df(.tgc_col_headers, lapply(raw, function(cl) {
       c(
         paste(c(.tgc_chr(cl[["id"]]), .tgc_chr(cl[["label"]])[nzchar(.tgc_chr(cl[["label"]]))]), collapse = "\n"),
@@ -1529,8 +1530,14 @@
     title = row$label, id = row$id, version = row$version,
     description = .tgc_chr(def[["description"]]),
     summary = sprintf(
-      "Defines the dataset '%s' with %s columns and %s. Used by %s.",
-      title_ds, about_v[["Columns"]], .tgc_plural(nrules, "rule"),
+      "Defines the dataset '%s' with %s and %s. Used by %s.",
+      title_ds,
+      if (identical(spec_key, "row_labels")) {
+        .tgc_plural(as.integer(about_v[["Columns"]]), "row label")
+      } else {
+        .tgc_plural(as.integer(about_v[["Columns"]]), "column")
+      },
+      .tgc_plural(nrules, "rule"),
       if (length(users) == 0) "no DTA template" else .tgc_plural(length(users), "DTA template")
     ),
     at_a_glance = do.call(.tgc_kv, c(
