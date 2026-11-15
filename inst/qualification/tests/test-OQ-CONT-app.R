@@ -613,22 +613,23 @@ test_that("OQ-CONT-056 | a loose file on a dataset's zone is the individual chec
   })
 })
 
-test_that("OQ-CONT-057 | the Delivery zone is offered where it is needed, loads the whole delivery and opens a Delivery view that names every file | REQ-CONT-030", {
+test_that("OQ-CONT-057 | the Delivery zone is offered for every document with a dataset, loads the whole delivery and opens a Delivery view that names every file | REQ-CONT-030", {
   app <- qapp_skip_unless_app_installed()
   qapp_clean_session_files()
   ap_notes()
   ap_tabs()
 
-  # The zone is offered for two datasets or for any container, not for one
-  # plain dataset.
+  # The zone is offered for every document with a dataset: one plain dataset,
+  # two datasets, one dataset with a container.
   one_container <- ap_yaml(c(
     AP_META, AP_DEFAULT, "datasets:", ap_ds("ae", "{filename: ae.csv, type: csv}", AP_AE_COLS)
   ))
   two <- ap_spec()
   ap_serve(app, {
+    qa_step("no document is offered no Delivery zone", FALSE, output$delivery_zone)
     session$setInputs(dta_file = qapp_file_input("clinical_dta.yaml"))
     qa_step("a document with one dataset and no container has one dataset", 1L, length(rv$structure))
-    qa_step("and is offered no Delivery zone", FALSE, output$delivery_zone)
+    qa_step("and is offered the Delivery zone", TRUE, output$delivery_zone)
   })
   ap_serve(app, {
     session$setInputs(dta_file = cont_fi(two, "spec.yaml"))

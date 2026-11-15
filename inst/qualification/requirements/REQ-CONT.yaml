@@ -625,8 +625,8 @@ requirements:
 
   - id: REQ-CONT-030
     text: >
-      In the interactive application, a document with two or more datasets or
-      with a container in effect shall offer a Delivery zone in the sidebar.
+      In the interactive application, every document with at least one
+      dataset shall offer a Delivery zone in the sidebar.
       A drop on it shall be one delivery of the whole document: it shall bind
       every file to the dataset its expected name matches, record the delivery
       and open a Delivery view that shows the container status, the members of

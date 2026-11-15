@@ -99,7 +99,7 @@ ct_set_input <- function(session, id, value) do.call(session$setInputs, stats::s
 
 # ---- the Delivery block's gate and static wiring ----------------------------------
 
-test_that("the Delivery block is offered for two datasets or any container, not for one plain dataset", {
+test_that("the Delivery block is offered for every document with a dataset, also one plain dataset", {
   clean_session_file()
   one <- app_fixture_path("clinical_dta.yaml")
   two <- ct_spec()
@@ -108,9 +108,11 @@ test_that("the Delivery block is offered for two datasets or any container, not 
   ))
 
   shiny::testServer(app_server_dir(), {
+    expect_false(output$delivery_zone)
     session$setInputs(dta_file = ct_fi(one, "clinical_dta.yaml"))
     expect_length(rv$structure, 1)
-    expect_false(output$delivery_zone)
+    expect_length(rv$dta@containers, 0)
+    expect_true(output$delivery_zone)
   })
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_file = ct_fi(two, "spec.yaml"))
@@ -131,32 +133,33 @@ test_that("the workspace carries the static drop zone, its flag and the tab id t
     session$setInputs(dta_file = ct_fi(spec, "spec.yaml"))
     html <- ui_text(output$main)
     expect_match(html, 'id="delivery_files"', fixed = TRUE)
-    expect_match(html, "Drop the whole delivery (.zip, .xpt or loose files)", fixed = TRUE)
+    expect_match(html, "Drop or choose the whole delivery", fixed = TRUE)
     expect_match(html, "delivery-drop", fixed = TRUE)
     expect_match(html, "output.delivery_zone", fixed = TRUE)
     expect_match(html, 'id="main_tabs"', fixed = TRUE)
     expect_match(html, 'id="delivery_panel"', fixed = TRUE)
-    expect_match(html, 'id="delivery_hint"', fixed = TRUE)
+    expect_false(grepl("delivery_hint", html, fixed = TRUE))
+    # Under the datasets it feeds, before the check that reads them.
+    at <- function(s) regexpr(s, html, fixed = TRUE)[[1]]
+    expect_true(at('id="dataset_nav_ui"') < at('id="delivery_files"'))
+    expect_true(at('id="add_dataset_ui"') < at('id="delivery_files"'))
+    expect_true(at('id="delivery_files"') < at('id="check_all"'))
   })
 })
 
-test_that("the hint says what a drop here means, and adds the packaging warning only with containers", {
+test_that("a one-dataset document without containers offers the container manager in edit mode", {
   clean_session_file()
-  plain <- ct_spec()
-  boxed <- ct_spec(ct_default)
+  one <- app_fixture_path("clinical_dta.yaml")
 
   shiny::testServer(app_server_dir(), {
-    session$setInputs(dta_file = ct_fi(plain, "spec.yaml"))
-    hint <- ui_text(output$delivery_hint)
-    expect_match(hint, "Each file goes to the dataset whose expected name it matches.", fixed = TRUE)
-    expect_false(grepl("judged as delivered", hint, fixed = TRUE))
-  })
-  shiny::testServer(app_server_dir(), {
-    session$setInputs(dta_file = ct_fi(boxed, "spec.yaml"))
-    hint <- ui_text(output$delivery_hint)
-    expect_match(hint, "Files here are judged as delivered.", fixed = TRUE)
-    expect_match(hint, "To check single files before packing them, drop them on a dataset's own zone.", fixed = TRUE)
-    expect_false(grepl("does not conform", hint, fixed = TRUE))
+    session$setInputs(dta_file = ct_fi(one, "clinical_dta.yaml"))
+    expect_length(rv$dta@containers, 0)
+    expect_false(grepl('id="open_containers"', ui_text(output$delivery_panel), fixed = TRUE))
+    unlock_editing(session)
+    expect_true(output$delivery_zone)
+    expect_match(ui_text(output$delivery_panel), 'id="open_containers"', fixed = TRUE)
+    session$setInputs(open_containers = 1)
+    expect_match(ui_text(output$ctr_modal_body), "No containers", fixed = TRUE)
   })
 })
 

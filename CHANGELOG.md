@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **A Copy button on the Raw YAML tab.** One click puts the editor's whole
+  text on the clipboard, including edits not yet applied. It is shown while the
+  document is read-only as well.
 - **Containers are a section of the specification.** A top-level `containers:`
   list names the delivery archives once (`id`, `filename`, `description`,
   `default`); file entries refer to a container by its id in `container:`, so
@@ -59,7 +62,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - `upgrade_dta()` re-stamps a `DTA` or dataset saved by an older version with
   the current classes. It is also done automatically when such an object is
   used, and when the app restores a session.
-- The app has a **Delivery** zone in the sidebar that takes containers and
+- The app has a **Delivery** zone in the sidebar, under the datasets and shown
+  for every document (also one with a single dataset), that takes containers and
   loose files for the whole document, routes the unambiguous files and opens a
   **Delivery view** (containers, members, the routing table, "Check all"). Files
   that match several datasets are asked in a dialog, one row per file with the
@@ -122,6 +126,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - A dataset-only YAML no longer flags an undotted `container:` value at lint
   time: it is a container id, which only the document can resolve, and it fails
   at `load_delivery()` instead.
+- The app's sidebar dataset list scrolls in its own box once it is long, with
+  the "Datasets" label pinned, so what follows it stays in reach.
 - Validation of very wide files is faster: columns are coerced one by one, and
   the reader is given a schema instead of inferring one.
 - **A file the app refuses to load says why, and keeps saying it.** The reason
