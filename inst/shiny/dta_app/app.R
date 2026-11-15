@@ -487,7 +487,13 @@ ui_page <- function(cfg) {
       # in this list is not load-bearing: it installs a capture-phase listener
       # on `document`, which runs ahead of every element's own handler whenever
       # it was registered.
-      click_guard_script()
+      click_guard_script(),
+      # Shiny's selectize, loaded with the page. DT's column filters ship an
+      # older selectize under the same dependency name, and the client keeps
+      # whichever arrives first: once the messages dock had rendered its table,
+      # every later selectizeInput failed to bind ("Unable to find
+      # selectize-plugin-a11y"), taking the rest of its modal's inputs with it.
+      htmltools::findDependencies(selectizeInput("dta_selectize_dep", NULL, choices = NULL))
     ),
     brandbar_ui(cfg),
     div(style = "padding: 18px;", uiOutput("main")),
@@ -1141,6 +1147,10 @@ server <- function(input, output, session) {
     template_vocab_specs = NULL, # vocabulary slots resolved when the options modal opened
     add_ds_msg = NULL, # inline add-dataset result: NULL | list(ok, error)
     add_ds_token = 0, # bump to re-render the add-dataset modal body
+    load_errors = dta_load_errors_empty(), # files that failed to load: dataset, table, file, message
+    mx_token = 0, # bump to re-render the Matrix layout modal body
+    mx_prefill = NULL, # dta_matrix_fields() the Matrix layout modal opened with
+    mx_msg = NULL, # inline Matrix layout result: NULL | list(ok, error)
     create_new_msg = NULL, # inline create-new-DTA result: NULL | list(ok, error)
     create_new_token = 0, # bump to re-render the create-new-DTA modal body
     removing_dataset = NULL, # dataset name the remove-dataset confirm modal targets
@@ -1723,6 +1733,7 @@ server <- function(input, output, session) {
     rv$yaml_text <- yaml_text
     rv$structure <- build_structure(dta)
     rv$uploads <- list()
+    rv$load_errors <- dta_load_errors_empty()
     # A delivery belongs to the document it was loaded into.
     rv$last_delivery <- NULL
     rv$main_view <- "dataset"
@@ -2917,12 +2928,45 @@ server <- function(input, output, session) {
         placeholder = "What this dataset contains, in words"
       ),
       radioButtons("add_ds_type", "Type",
-        choices = c("Tabular" = "tabular", "Files" = "file"),
+        choices = c("Tabular" = "tabular", "Matrix" = "matrix", "Files" = "file"),
         selected = "tabular"
       ),
       div(
         class = "msg-hint",
-        HTML("A <b>Tabular</b> dataset is validated column by column against a specification you define. A <b>Files</b> dataset only checks that the expected files arrive. The type is fixed once the dataset is created — to change it, add a new dataset and remove this one.")
+        HTML("A <b>Tabular</b> dataset is validated column by column against a specification you define. A <b>Matrix</b> dataset is a table whose data columns are not listed, such as gene counts: you describe the row-label columns, the header and what every cell may hold. A <b>Files</b> dataset only checks that the expected files arrive. The type is fixed once the dataset is created — to change it, add a new dataset and remove this one.")
+      ),
+      conditionalPanel(
+        "input.add_ds_type == 'matrix'",
+        textInput("add_ds_mx_label", "First row-label column ID",
+          value = "", width = "100%", placeholder = "e.g. GENE_ID"
+        ),
+        div(
+          class = "msg-hint", style = "margin:-8px 0 12px;",
+          "Identifies each row: the row key. Add row descriptions afterwards under Row labels."
+        ),
+        radioButtons("add_ds_mx_corner", "Header text above the row labels",
+          choiceNames = list(
+            "The row-label ID", "Empty (R write.csv, pandas)",
+            "No field: the header starts with the first data label (R write.table)",
+            "Other text"
+          ),
+          choiceValues = c("named", "blank", "none", "text"),
+          selected = character(0)
+        ),
+        conditionalPanel(
+          "input.add_ds_mx_corner == 'text'",
+          textInput("add_ds_mx_corner_text", NULL,
+            value = "", width = "100%", placeholder = "e.g. gene_id"
+          )
+        ),
+        radioButtons("add_ds_mx_cells", "Cell type",
+          choices = c("SAS Num", "SAS Int", "SAS Char"),
+          selected = character(0), inline = TRUE
+        ),
+        div(
+          class = "msg-hint",
+          "Describe the data columns afterwards under Matrix layout, and add the file entry (csv or tsv) under Files."
+        )
       ),
       uiOutput("add_ds_msg")
     )
@@ -2938,12 +2982,19 @@ server <- function(input, output, session) {
 
   observeEvent(input$add_ds_save, {
     req(editing())
+    # Matrix arguments only for a matrix: a hidden conditional input still
+    # reports its value.
+    is_mx <- identical(input$add_ds_type, "matrix")
     r <- dta_add_dataset(
       isolate(rv$dta),
       id = input$add_ds_id,
       type = input$add_ds_type %||% "tabular",
       name = input$add_ds_name,
-      description = input$add_ds_description
+      description = input$add_ds_description,
+      row_label = if (is_mx) input$add_ds_mx_label,
+      corner = if (is_mx) input$add_ds_mx_corner,
+      corner_text = if (is_mx) input$add_ds_mx_corner_text,
+      cell_type = if (is_mx) input$add_ds_mx_cells
     )
     if (!isTRUE(r$ok)) {
       # The modal stays open with everything the user typed still in it, and
@@ -3041,6 +3092,7 @@ server <- function(input, output, session) {
     if (any(hit)) rv$uploads <- up[!hit]
 
     purge_file_ids(ed)
+    rv$load_errors <- dta_load_errors_clear(rv$load_errors, ed)
 
     st <- rv$status
     if (ed %in% names(st)) rv$status <- st[setdiff(names(st), ed)]
@@ -3054,6 +3106,22 @@ server <- function(input, output, session) {
     sync_yaml_text()
     removeModal()
     showNotification(sprintf("Dataset '%s' removed.", ed_title), type = "message")
+  })
+
+  # Sticky load-failure notices: id -> the datasets whose load errors it reports.
+  # An observer below removes a notice once none of its datasets has a row left.
+  load_notices <- new.env()
+  register_load_notice <- function(id, datasets) {
+    assign(id, as.character(datasets), envir = load_notices)
+  }
+  observe({
+    le <- rv$load_errors
+    for (id in ls(load_notices)) {
+      if (!any(get(id, envir = load_notices) %in% le$dataset)) {
+        removeNotification(id)
+        rm(list = id, envir = load_notices)
+      }
+    }
   })
 
   # --- upload observers (registered once per handler) ---------------------
@@ -3156,8 +3224,11 @@ server <- function(input, output, session) {
       return()
     }
 
+    # A refusal in a single-file entry is cleared by any later load into it.
+    one_slot <- if (isTRUE(mx == 1)) hi else NA_integer_
     loaded <- character(0)
     rejected <- character(0)
+    rej_recs <- list() # parallel to `rejected`: the load-error log's rows
     overwritten <- character(0)
     loaded_recs <- list()
     for (r in seq_len(nrow(fileinfo))) {
@@ -3170,14 +3241,14 @@ server <- function(input, output, session) {
       # G1 -- transfer complete & non-empty (guards truncated/partial uploads).
       if (is.na(sz) || sz <= 0) {
         rejected <- c(rejected, sprintf("'%s' (empty or truncated)", nm))
+        rej_recs[[length(rej_recs) + 1L]] <- list(file = nm, table = tbl, reason = "empty or truncated", slot = one_slot)
         next
       }
       # G3 -- filename must match the handler (mirrors matches_filename()).
       if (!handler_matches(h, nm)) {
-        rejected <- c(
-          rejected,
-          sprintf("'%s' (name does not match %s)", nm, handler_expected(h))
-        )
+        why <- sprintf("name does not match %s", handler_expected(h))
+        rejected <- c(rejected, sprintf("'%s' (%s)", nm, why))
+        rej_recs[[length(rej_recs) + 1L]] <- list(file = nm, table = tbl, reason = why, slot = hi)
         next
       }
       # G4 -- bind via load_file(). Shiny stores the upload under a temp name
@@ -3189,10 +3260,12 @@ server <- function(input, output, session) {
       before <- dta_dataset_content_count(dta_get_dataset(rv$dta, dsname))
       res <- dta_load_file(
         rv$dta,
-        dataset = dsname, file = staged, handler_index = hi, name = tbl
+        dataset = dsname, file = staged, handler_index = hi, name = tbl,
+        display_name = nm
       )
       if (!res$ok) {
         rejected <- c(rejected, sprintf("'%s' (%s)", nm, res$error))
+        rej_recs[[length(rej_recs) + 1L]] <- list(file = nm, table = tbl, reason = res$error, slot = one_slot)
         next
       }
       # G5 -- VERIFY the file landed. A new file increases the count; an
@@ -3200,6 +3273,7 @@ server <- function(input, output, session) {
       after <- dta_dataset_content_count(dta_get_dataset(res$value, dsname))
       if (after <= before && !was_existing) {
         rejected <- c(rejected, sprintf("'%s' (could not be bound)", nm))
+        rej_recs[[length(rej_recs) + 1L]] <- list(file = nm, table = tbl, reason = "could not be bound", slot = one_slot)
         next
       }
       rv$dta <- res$value
@@ -3237,6 +3311,25 @@ server <- function(input, output, session) {
       autosave()
     }
 
+    # The load-error log: a bound table clears its row, and the rows of files
+    # this entry refused by name; a refusal records one. It is what keeps the
+    # reason on screen after the notice is gone.
+    le <- rv$load_errors
+    for (rec in loaded_recs) le <- dta_load_errors_clear(le, dsname, rec$table, slot = hi)
+    for (rec in rej_recs) {
+      le <- dta_load_errors_add(
+        le, dsname, rec$table, rec$file,
+        sprintf("File '%s' was not loaded: %s", rec$file, rec$reason),
+        slot = rec$slot %||% NA_integer_
+      )
+    }
+    rv$load_errors <- le
+    if (length(rej_recs) > 0 && identical(dsname, rv$active)) {
+      session$sendCustomMessage("dta_msgs_dock", "open")
+    }
+    fail_id <- paste0("load_fail_", gsub("[^A-Za-z0-9_-]", "_", dsname))
+    if (length(rej_recs) > 0) register_load_notice(fail_id, dsname)
+
     # ONE reconciled outcome with honest counts: never a
     # success message when nothing was actually bound.
     ow <- if (length(overwritten) > 0) {
@@ -3268,26 +3361,56 @@ server <- function(input, output, session) {
       )
     } else if (length(loaded) > 0) {
       showNotification(
-        sprintf(
-          "Loaded %d file(s) into '%s'%s; rejected %d: %s",
+        load_failure_notice(sprintf(
+          "Loaded %d file(s) into '%s'%s; rejected %d:\n%s\nThe reason is also listed under Validation messages.",
           length(loaded), dsname, ow, length(rejected),
-          paste(rejected, collapse = "; ")
-        ),
-        type = "warning", duration = 10
+          paste(rejected, collapse = "\n")
+        )),
+        type = "warning", duration = NULL, id = fail_id
       )
     } else {
       showNotification(
-        sprintf(
-          "No files added to '%s'. Rejected %d: %s",
-          dsname, length(rejected), paste(rejected, collapse = "; ")
-        ),
-        type = "warning", duration = 10
+        load_failure_notice(sprintf(
+          "No files added to '%s'. Rejected %d:\n%s\nThe reason is also listed under Validation messages.",
+          dsname, length(rejected), paste(rejected, collapse = "\n")
+        )),
+        type = "warning", duration = NULL, id = fail_id
       )
     }
 
     # Clear the fileInput's text field so the control reads empty and is ready
     # for the next drop (runs whether files were accepted or rejected).
     session$sendCustomMessage("dta_reset_fileinput", sprintf("up_%d_%d", ds_idx, hi))
+  }
+
+  # Record a delivery's per-file outcome in the load-error log: a loaded file
+  # clears its row, a refused one adds a row. NA-safe: a row with no dataset
+  # (unused, ignored) says nothing about any slot.
+  record_delivery_outcomes <- function(plan) {
+    if (!is.data.frame(plan) || nrow(plan) == 0) {
+      return(invisible())
+    }
+    le <- rv$load_errors
+    refused_ds <- character(0)
+    for (i in seq_len(nrow(plan))) {
+      ds <- plan$dataset[i]
+      if (is.na(ds) || !(ds %in% dta_dataset_names(rv$dta))) next
+      ty <- tryCatch(dta_get_dataset(rv$dta, ds)@type, error = function(e) NA_character_)
+      tbl <- if (!is.na(plan$item[i])) plan$item[i] else dta_bound_item_name(ty, plan$name[i])
+      if (identical(plan$status[i], "loaded")) {
+        sl <- if ("handler" %in% names(plan)) plan$handler[i] else NA
+        le <- dta_load_errors_clear(le, ds, tbl, slot = if (is.na(sl)) NULL else sl)
+      } else if (identical(plan$status[i], "refused")) {
+        refused_ds <- c(refused_ds, ds)
+        le <- dta_load_errors_add(
+          le, ds, tbl, plan$name[i],
+          sprintf("File '%s' was not loaded: %s", plan$name[i], as.character(plan$reason[i] %||% ""))
+        )
+      }
+    }
+    rv$load_errors <- le
+    if (isTRUE(rv$active %in% refused_ds)) session$sendCustomMessage("dta_msgs_dock", "open")
+    invisible()
   }
 
   # A drop that holds a .zip / .xpt: load it whole into a COPY of the document
@@ -3366,6 +3489,7 @@ server <- function(input, output, session) {
 
     if (!isTRUE(res$ok)) {
       unlink(c(exdir, dirname(copies)), recursive = TRUE)
+      record_delivery_outcomes(plan)
       zero <- identical(origin, "slot") && is.data.frame(plan) && !any(plan$status %in% c("refused", "ambiguous")) &&
         !any(plan$status == "opened" & !is.na(plan$reason))
       if (zero) {
@@ -3377,7 +3501,13 @@ server <- function(input, output, session) {
           paste(archives, collapse = ", "), ds_title(ds_id), paste(expected, collapse = ", ")
         ), type = "warning", duration = 10)
       } else {
-        showNotification(paste("Delivery not loaded:", dta_app_reason(res$error, isTRUE(res$budget_limited))), type = "error", duration = 10)
+        rds <- if (is.data.frame(plan)) unique(plan$dataset[plan$status == "refused" & !is.na(plan$dataset)]) else character(0)
+        # No refused row = no log row to outlive it, so it stays until dismissed.
+        if (length(rds) > 0) register_load_notice("load_fail_delivery", rds)
+        showNotification(
+          load_failure_notice(paste("Delivery not loaded:", dta_app_reason(res$error, isTRUE(res$budget_limited)))),
+          type = "error", duration = NULL, id = "load_fail_delivery"
+        )
       }
       return(invisible())
     }
@@ -3452,6 +3582,7 @@ server <- function(input, output, session) {
   # touched, and tell the user once.
   commit_delivery <- function(d) {
     rv$dta <- d$value
+    record_delivery_outcomes(d$plan)
     loaded <- d$plan[d$plan$status == "loaded", , drop = FALSE]
     up <- rv$uploads
     for (i in seq_len(nrow(loaded))) {
@@ -3493,7 +3624,20 @@ server <- function(input, output, session) {
         over = dta_slots_over_max(rv$dta, up)
       )
     }
-    showNotification(note$text, type = note$type, duration = if (identical(note$type, "message")) 5 else 10)
+    # A refusal stays until dismissed: its reason is the message, and it is also
+    # in the load-error log.
+    refused_here <- is.data.frame(d$plan) && any(d$plan$status == "refused" & !is.na(d$plan$dataset))
+    if (refused_here) {
+      register_load_notice(
+        "load_fail_delivery",
+        unique(d$plan$dataset[d$plan$status == "refused" & !is.na(d$plan$dataset)])
+      )
+      showNotification(load_failure_notice(note$text),
+        type = note$type, duration = NULL, id = "load_fail_delivery"
+      )
+    } else {
+      showNotification(note$text, type = note$type, duration = if (identical(note$type, "message")) 5 else 10)
+    }
   }
 
   # Open a modal listing the bundled example files (inst/extdata). The chosen
@@ -4253,6 +4397,7 @@ server <- function(input, output, session) {
       pref <- paste0(rv$active, "||")
       for (k in names(up)) if (startsWith(k, pref)) up[[k]] <- list()
       rv$uploads <- up
+      rv$load_errors <- dta_load_errors_clear(rv$load_errors, rv$active)
       dta_delivery_cleanup(owned$upload, rv$uploads, session$token)
       st <- rv$status
       st[[rv$active]] <- "nodata"
@@ -4458,6 +4603,7 @@ server <- function(input, output, session) {
       kept[[paste0(prefix, new)]] <- recs
     }
     rv$uploads <- kept
+    rv$load_errors <- dta_load_errors_remap(rv$load_errors, dsname, map)
 
     purge_file_ids(dsname)
   }
@@ -4524,6 +4670,7 @@ server <- function(input, output, session) {
     }
 
     purge_file_ids(old)
+    rv$load_errors <- dta_load_errors_rename(rv$load_errors, old, new)
 
     st <- rv$status
     if (old %in% names(st)) {
@@ -5243,13 +5390,14 @@ server <- function(input, output, session) {
   observeEvent(input$edit_cols, {
     req(editing())
     req(rv$active)
-    # ds_edit_menu() only renders this control for a "tabular" dataset -- a
-    # "file" dataset has no @specs for dta_column_ids() to read. That render
+    # ds_edit_menu() only renders this control for a "tabular" or "matrix"
+    # dataset (a matrix's row labels are column specs too) -- a "file" dataset
+    # has no @specs for dta_column_ids() to read. That render
     # gate is only the affordance, though; edit_cols can still be driven over
     # the websocket on a file dataset, so re-check the type here too. Resolve
     # it the same way the ds_edit_menu(s$type) call site does: from
     # rv$structure, not by re-deriving it from rv$dta.
-    req(identical(rv$structure[[rv$active]]$type, "tabular"))
+    req(isTRUE(rv$structure[[rv$active]]$type %in% c("tabular", "matrix")))
     rv$editor_dataset <- rv$active
     rv$col_view <- "list"
     rv$col_edit_id <- NULL
@@ -5259,8 +5407,9 @@ server <- function(input, output, session) {
     # whatever the last session of this modal typed, for whichever dataset.
     rv$col_search <- ""
     rv$col_token <- rv$col_token + 1
+    mx <- identical(rv$structure[[rv$active]]$type, "matrix")
     showModal(modalDialog(
-      title = paste("Edit columns \u2014", ds_title(rv$active)),
+      title = paste(if (mx) "Edit row labels" else "Edit columns", "\u2014", ds_title(rv$active)),
       size = "xl", easyClose = FALSE,
       uiOutput("col_modal_body"),
       footer = NULL
@@ -5271,16 +5420,21 @@ server <- function(input, output, session) {
     rv$col_token
     ed <- isolate(rv$editor_dataset)
     req(ed)
+    mx <- identical(isolate(rv$structure[[ed]]$type), "matrix")
     if (identical(isolate(rv$col_view), "list")) {
       tagList(
         div(
           class = "spec-toolbar",
-          actionButton("col_add", HTML("&#x2795; Add column"),
+          actionButton("col_add", HTML(if (mx) "&#x2795; Add row label" else "&#x2795; Add column"),
             class = "btn btn-sm btn-outline-primary"
           ),
           span(
             class = "spec-hint",
-            "Use the pencil to edit a column or the bin to remove it. Any change resets this dataset's validation."
+            if (mx) {
+              "Row labels are matched to the file's leading columns by position, so order matters. The row key is set under Matrix layout. Use the pencil to edit a row label or the bin to remove it. Any change resets this dataset's validation."
+            } else {
+              "Use the pencil to edit a column or the bin to remove it. Any change resets this dataset's validation."
+            }
           )
         ),
         reorder_table_ui("col_tbl"),
@@ -5320,9 +5474,9 @@ server <- function(input, output, session) {
                 paste0(
                   "Suggested: ", sug$ref, " — ",
                   if (identical(sug$reason, "declared")) {
-                    paste0("it lists column ", trimws(pf$id %||% ""), ".")
+                    paste0("it lists ", if (mx) "row label " else "column ", trimws(pf$id %||% ""), ".")
                   } else {
-                    "it holds every value this column already lists."
+                    paste0("it holds every value this ", if (mx) "row label" else "column", " already lists.")
                   }
                 ),
                 class = "msg-hint"
@@ -5331,8 +5485,8 @@ server <- function(input, output, session) {
             uiOutput("col_vocab_terms"),
             p(
               paste(
-                "Selected terms replace this column's allowed values.",
-                "Nothing is written until you save the column."
+                sprintf("Selected terms replace this %s's allowed values.", if (mx) "row label" else "column"),
+                sprintf("Nothing is written until you save the %s.", if (mx) "row label" else "column")
               ),
               class = "msg-hint"
             )
@@ -5341,7 +5495,7 @@ server <- function(input, output, session) {
         uiOutput("col_editor_msg"),
         div(
           style = "display:flex; justify-content:space-between; margin-top:8px;",
-          actionButton("col_vocab_cancel", HTML("&#x2190; Back to column"),
+          actionButton("col_vocab_cancel", HTML(paste("&#x2190; Back to", if (mx) "row label" else "column")),
             class = "btn btn-outline-secondary"
           ),
           if (!is.null(vocabs) && nrow(vocabs) > 0) {
@@ -5357,7 +5511,7 @@ server <- function(input, output, session) {
           class = "spec-form",
           layout_columns(
             col_widths = c(4, 8),
-            textInput("col_id", "Column ID", value = g("id"), width = "100%"),
+            textInput("col_id", if (mx) "Row label ID" else "Column ID", value = g("id"), width = "100%"),
             textInput("col_label", "Label", value = g("label"), width = "100%")
           ),
           layout_columns(
@@ -5415,7 +5569,7 @@ server <- function(input, output, session) {
           actionButton("col_back", HTML("&#x2190; Back to list"),
             class = "btn btn-outline-secondary"
           ),
-          actionButton("col_save", "Save column", class = "btn btn-primary")
+          actionButton("col_save", if (mx) "Save row label" else "Save column", class = "btn btn-primary")
         )
       )
     }
@@ -5467,7 +5621,8 @@ server <- function(input, output, session) {
       return(NULL)
     }
     if (isTRUE(m$ok)) {
-      div(class = "yaml-valid ok", HTML("&#x2714;"), " Column saved.")
+      mx <- identical(isolate(rv$structure[[isolate(rv$editor_dataset)]]$type), "matrix")
+      div(class = "yaml-valid ok", HTML("&#x2714;"), if (mx) " Row label saved." else " Column saved.")
     } else {
       div(class = "yaml-valid err", HTML("&#x2716;"), " ", m$error)
     }
@@ -5754,7 +5909,8 @@ server <- function(input, output, session) {
     invalidate_dataset(ed)
     rv$col_token <- rv$col_token + 1
     sync_yaml_text()
-    showNotification(sprintf("Removed column \u201c%s\u201d.", ids[[idx]]), type = "message")
+    what <- if (identical(isolate(rv$structure[[ed]]$type), "matrix")) "row label" else "column"
+    showNotification(sprintf("Removed %s \u201c%s\u201d.", what, ids[[idx]]), type = "message")
     recheck_dataset(ed)
   })
 
@@ -5810,11 +5966,20 @@ server <- function(input, output, session) {
     # rv$editor_dataset is only set by opening the column editor, but that
     # observer's own guard can be raced or bypassed the same way edit_cols
     # can -- refuse here too rather than trust the stashed name.
-    req(identical(rv$structure[[ed]]$type, "tabular"))
+    # (A matrix's row labels are column specs, so it passes too.)
+    req(isTRUE(rv$structure[[ed]]$type %in% c("tabular", "matrix")))
+    mx <- identical(rv$structure[[ed]]$type, "matrix")
     id <- trimws(input$col_id %||% "")
     if (!nzchar(id)) {
-      rv$col_msg <- list(ok = FALSE, error = "A column ID is required.")
+      rv$col_msg <- list(ok = FALSE, error = if (mx) "A row label ID is required." else "A column ID is required.")
       return()
+    }
+    old <- isolate(rv$col_edit_id)
+    if (mx) {
+      # Read BEFORE the save: afterwards the label exists and the corner moved.
+      adding <- is.null(old) && !(id %in% dta_column_ids(isolate(rv$dta), ed))
+      renaming <- !is.null(old) && nzchar(old) && !identical(old, id)
+      mode <- dta_matrix_corner_mode(isolate(rv$dta), ed)
     }
     vals <- trimws(strsplit(input$col_values %||% "", "\n")[[1]])
     vals <- vals[nzchar(vals)]
@@ -5845,7 +6010,19 @@ server <- function(input, output, session) {
     rv$col_view <- "list"
     rv$col_token <- rv$col_token + 1
     sync_yaml_text()
-    showNotification("Column saved.", type = "message")
+    if (mx && adding && identical(mode, "list")) {
+      showNotification(
+        "Row label saved. Its header text above the column is empty; set it under Matrix layout.",
+        type = "warning", duration = NULL
+      )
+    } else if (mx && renaming && identical(mode, "named")) {
+      showNotification(
+        sprintf("Row label renamed. The header must now read '%s' above it; a file already loaded will ask to be loaded again.", id),
+        type = "warning", duration = NULL
+      )
+    } else {
+      showNotification(if (mx) "Row label saved." else "Column saved.", type = "message")
+    }
     recheck_dataset(ed)
   })
 
@@ -6367,7 +6544,8 @@ server <- function(input, output, session) {
     # Same double-gating as edit_cols above: ds_edit_menu() hides this control
     # for a "file" dataset, but the observer must refuse it too, since an
     # input that is not on screen can still be driven over the websocket.
-    req(identical(rv$structure[[rv$active]]$type, "tabular"))
+    # A matrix's rules read its row labels, so it is let through.
+    req(isTRUE(rv$structure[[rv$active]]$type %in% c("tabular", "matrix")))
     rv$editor_dataset <- rv$active
     rv$rule_view <- "list"
     rv$rule_edit_index <- NULL
@@ -6409,6 +6587,15 @@ server <- function(input, output, session) {
           )
         ),
         reorder_table_ui("rule_tbl"),
+        if (identical(isolate(rv$structure[[ed]]$type), "matrix")) {
+          div(
+            class = "spec-hint", style = "display:block;margin-top:8px;",
+            sprintf(
+              "Also checked: the row key (%s) must be unique — rule .matrix:row_key, generated from Matrix layout.",
+              paste(dta_matrix_key_ids(isolate(rv$dta), ed), collapse = ", ")
+            )
+          )
+        },
         tags$hr(),
         div(style = "text-align:right;", modalButton("Close"))
       ))
@@ -6859,8 +7046,8 @@ server <- function(input, output, session) {
     ed <- isolate(rv$editor_dataset)
     req(ed)
     # Same defense-in-depth as col_save: don't trust the stashed
-    # rv$editor_dataset alone, re-check its type is "tabular".
-    req(identical(rv$structure[[ed]]$type, "tabular"))
+    # rv$editor_dataset alone, re-check its type is "tabular" or "matrix".
+    req(isTRUE(rv$structure[[ed]]$type %in% c("tabular", "matrix")))
     id <- trimws(input$rule_id %||% "")
     if (!nzchar(id)) {
       rv$rule_msg <- list(ok = FALSE, error = "A rule ID is required.")
@@ -7130,11 +7317,207 @@ server <- function(input, output, session) {
     showNotification("Metadata updated.", type = "message")
   })
 
+  # ========================= Edit matrix layout ===========================
+  # A matrix dataset's `matrix:` block (header, rows, cells). Same single-view
+  # modal as Details. The body renders from rv$mx_prefill only -- never from live
+  # inputs -- because Shiny's client re-inserts the CACHED previous body when the
+  # output binds again and reports its stale inputs before the fresh render
+  # arrives. So: suspendWhenHidden = FALSE below, and NO observer reacts to a
+  # mx_* input except mx_save.
+  observeEvent(input$edit_matrix, {
+    req(editing())
+    req(rv$active)
+    req(identical(rv$structure[[rv$active]]$type, "matrix"))
+    rv$editor_dataset <- rv$active
+    rv$mx_prefill <- dta_matrix_fields(rv$dta, rv$active)
+    rv$mx_msg <- NULL
+    rv$mx_token <- rv$mx_token + 1
+    showModal(modalDialog(
+      title = paste("Matrix layout —", ds_title(rv$active)),
+      size = "l", easyClose = FALSE,
+      uiOutput("mx_modal_body"),
+      footer = NULL
+    ))
+  })
+
+  output$mx_modal_body <- renderUI({
+    rv$mx_token
+    pf <- isolate(rv$mx_prefill)
+    req(pf)
+    labels <- pf$row_labels
+    # numericInput(value = NA) renders value="NA", which the browser warns about
+    # once per field; NULL renders an empty field that still reports NA.
+    blank_na <- function(v) if (length(v) == 0L || is.na(v)) NULL else v
+    tagList(
+      div(
+        class = "spec-form",
+        tags$h6("Header", style = "margin-top:4px;"),
+        radioButtons("mx_corner_mode", "Header text above the row labels",
+          choiceNames = list("The row-label IDs", "Empty", "Exact text per row label"),
+          choiceValues = c("named", "blank", "list"),
+          selected = pf$corner_mode
+        ),
+        conditionalPanel(
+          "input.mx_corner_mode == 'list'",
+          lapply(seq_along(labels), function(i) {
+            textInput(paste0("mx_corner_", i), paste("Above", labels[i]),
+              value = pf$corner_text[i], width = "100%"
+            )
+          }),
+          checkboxInput("mx_corner_none",
+            "The header has no field above the first row label (R write.table)",
+            value = pf$corner_none
+          )
+        ),
+        textInput("mx_header_label", "Label of the data columns",
+          value = pf$header_label, width = "100%"
+        ),
+        textAreaInput("mx_header_description", "Description",
+          value = pf$header_description, width = "100%", rows = 2
+        ),
+        textInput("mx_header_pattern", "Data labels must match the pattern",
+          value = pf$header_pattern, width = "100%"
+        ),
+        textAreaInput("mx_header_values", "…or be one of (one label per line)",
+          value = pf$header_values, width = "100%", rows = 3
+        ),
+        div(
+          class = "msg-hint", style = "margin:-8px 0 12px;",
+          "Give a pattern or a list, not both; leave both empty to accept any non-empty, unique label."
+        ),
+        textInput("mx_header_length", "Maximum label length",
+          value = pf$header_length, width = "100%"
+        ),
+        layout_columns(
+          col_widths = c(6, 6),
+          numericInput("mx_n_columns_min", "Data columns: at least",
+            value = blank_na(pf$n_columns_min), min = 1, step = 1, width = "100%"
+          ),
+          numericInput("mx_n_columns_max", "at most (empty = no limit)",
+            value = blank_na(pf$n_columns_max), min = 1, step = 1, width = "100%"
+          )
+        ),
+        tags$h6("Rows"),
+        # A matrix has one to a few row labels: checkboxes, not a selectize.
+        checkboxGroupInput("mx_row_key", "Row key (must be unique)",
+          choices = labels, selected = pf$row_key, inline = TRUE, width = "100%"
+        ),
+        layout_columns(
+          col_widths = c(6, 6),
+          numericInput("mx_n_rows_min", "Data rows: at least",
+            value = blank_na(pf$n_rows_min), min = 0, step = 1, width = "100%"
+          ),
+          numericInput("mx_n_rows_max", "at most (empty = no limit)",
+            value = blank_na(pf$n_rows_max), min = 0, step = 1, width = "100%"
+          )
+        ),
+        tags$h6("Cells"),
+        radioButtons("mx_cell_type", "Cell type",
+          choices = c("SAS Num", "SAS Int", "SAS Char"),
+          selected = pf$cell_type, inline = TRUE
+        ),
+        checkboxInput("mx_cell_nullable", "Cells may be missing", value = pf$cell_nullable),
+        conditionalPanel(
+          "input.mx_cell_type != 'SAS Char'",
+          layout_columns(
+            col_widths = c(6, 6),
+            numericInput("mx_range_min", "Lowest allowed value (empty = open)",
+              value = blank_na(pf$range_min), width = "100%"
+            ),
+            numericInput("mx_range_max", "Highest allowed value (empty = open)",
+              value = blank_na(pf$range_max), width = "100%"
+            )
+          )
+        ),
+        conditionalPanel(
+          "input.mx_cell_type == 'SAS Num'",
+          checkboxInput("mx_infinite", "Allow Inf and -Inf", value = pf$infinite)
+        ),
+        textAreaInput("mx_cell_values", "Allowed values (one per line)",
+          value = pf$cell_values, width = "100%", rows = 3
+        ),
+        textInput("mx_cell_pattern", "Pattern", value = pf$cell_pattern, width = "100%"),
+        textInput("mx_cell_length", "Length", value = pf$cell_length, width = "100%"),
+        textInput("mx_cell_format", "SAS format (e.g. 8.2)", value = pf$cell_format, width = "100%"),
+        textInput("mx_cell_label", "Label", value = pf$cell_label, width = "100%"),
+        textAreaInput("mx_cell_description", "Description",
+          value = pf$cell_description, width = "100%", rows = 2
+        ),
+        div(
+          class = "msg-hint",
+          "Changing the header or the row labels of a matrix whose file is loaded asks you to load the file again at the next check."
+        )
+      ),
+      uiOutput("mx_msg_ui"),
+      tags$hr(),
+      div(
+        style = "display:flex; justify-content:space-between; margin-top:8px;",
+        modalButton("Close"),
+        actionButton("mx_save", "Save matrix layout", class = "btn btn-primary")
+      )
+    )
+  })
+  outputOptions(output, "mx_modal_body", suspendWhenHidden = FALSE)
+
+  output$mx_msg_ui <- renderUI({
+    m <- rv$mx_msg
+    if (is.null(m) || isTRUE(m$ok)) {
+      return(NULL)
+    }
+    div(class = "yaml-valid err", HTML("&#x2716;"), " ", m$error)
+  })
+
+  observeEvent(input$mx_save, {
+    req(editing())
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    req(identical(rv$structure[[ed]]$type, "matrix"))
+    pf <- isolate(rv$mx_prefill)
+    req(pf)
+    # A NULL input is a field that is not on the page: keep the prefill. The
+    # row key is the exception -- a checkbox group reports NULL when emptied.
+    form <- list(row_labels = pf$row_labels)
+    for (nm in setdiff(names(pf), c("row_labels", "corner_text", "row_key"))) {
+      v <- input[[paste0("mx_", nm)]]
+      form[[nm]] <- if (is.null(v)) pf[[nm]] else v
+    }
+    # Only the CURRENT labels' text boxes: a leftover mx_corner_<k+1> from
+    # another dataset's modal is ignored.
+    form$corner_text <- vapply(seq_along(pf$row_labels), function(i) {
+      v <- input[[paste0("mx_corner_", i)]]
+      if (is.null(v)) pf$corner_text[i] else as.character(v)[1]
+    }, character(1))
+    form$row_key <- input$mx_row_key %||% character(0)
+    r <- dta_set_matrix(isolate(rv$dta), ed, form)
+    if (!isTRUE(r$ok)) {
+      rv$mx_msg <- list(ok = FALSE, error = r$error)
+      return()
+    }
+    rv$dta <- r$value
+    invalidate_dataset(ed)
+    rv$mx_msg <- NULL
+    sync_yaml_text()
+    removeModal()
+    if (length(r$dropped) > 0) {
+      showNotification(
+        paste0("Matrix layout saved. Not kept for this cell type: ", paste(r$dropped, collapse = ", "), "."),
+        type = "warning"
+      )
+    } else {
+      showNotification("Matrix layout saved.", type = "message")
+    }
+    recheck_dataset(ed)
+  })
+
   # --- messages + inspect -------------------------------------------------
   msgs_r <- reactive({
     req(rv$active)
     rv$status # depend on validation state
-    dta_dataset_messages(rv$dta, rv$active)
+    rv$load_errors # files that failed to load leave no table, so no message
+    dta_bind_message_rows(
+      dta_load_error_rows(rv$load_errors, rv$active),
+      dta_dataset_messages(rv$dta, rv$active)
+    )
   })
 
   # Floating, foldable dock that holds the validation messages for the ACTIVE
@@ -7517,6 +7900,19 @@ server <- function(input, output, session) {
       format = paste0("fit SAS format ", .first_nonempty(r[["columnspec_columnspec"]])),
       required = "the value must be present (not missing)",
       additionalProperties = "no such column to be present: the specs do not declare it",
+      # Matrix findings: the bound limit sits in columnspec_columnspec and the
+      # finding names no column.
+      corner = paste0("header text: ", {
+        v <- .first_nonempty(r[["columnspec_columnspec"]])
+        if (nzchar(v)) v else "(empty)"
+      }),
+      propertyNames = paste0("a label allowed by: ", .first_nonempty(r[["columnspec_columnspec"]])),
+      uniqueNames = "a label no other column has",
+      minProperties = paste0("at least ", .first_nonempty(r[["columnspec_columnspec"]]), " data columns"),
+      maxProperties = paste0("at most ", .first_nonempty(r[["columnspec_columnspec"]]), " data columns"),
+      minItems = paste0("at least ", .first_nonempty(r[["columnspec_columnspec"]]), " data rows"),
+      maxItems = paste0("at most ", .first_nonempty(r[["columnspec_columnspec"]]), " data rows"),
+      finite = "a finite number (not Inf or -Inf)",
       .first_nonempty(r[["columnspec_message"]], r[["message"]], "(see message)")
     )
   }
@@ -7577,6 +7973,16 @@ server <- function(input, output, session) {
       rtype <- if (have) rrow$type[1] else ""
       rdetail <- if (have) rrow$detail[1] else ""
       rdesc <- if (have) rrow$description[1] else ""
+      # A rule the spec does not list (the matrix's generated .matrix:row_key)
+      # is resolved by the package, which knows every rule it checks.
+      if (!have && nzchar(rid)) {
+        def <- tryCatch(dta_pkg_find_rule_def(rv$dta, dataset, rid), error = function(e) NULL)
+        if (!is.null(def)) {
+          rtype <- dta_rule_to_list(def)$type %||% ""
+          rdetail <- dta_rule_summary(def)
+          if (startsWith(rid, ".matrix:")) rdesc <- "Generated from the matrix layout."
+        }
+      }
       badge <- tags$span(class = "inspect-badge rule", "Rule failure")
       desc <- div(
         class = "inspect-desc",
@@ -7698,7 +8104,13 @@ server <- function(input, output, session) {
         class = "inspect-desc",
         div(
           class = "inspect-desc-main",
-          tags$strong(if (nzchar(col)) col else "(column)"),
+          tags$strong(if (nzchar(col)) {
+            col
+          } else if (kw %in% c("minProperties", "maxProperties", "minItems", "maxItems")) {
+            "(whole matrix)"
+          } else {
+            "(column)"
+          }),
           if (nzchar(kw)) tags$span(class = "inspect-desc-type", kw)
         ),
         if (nzchar(smsg)) div(class = "inspect-desc-detail", smsg)
@@ -7712,6 +8124,10 @@ server <- function(input, output, session) {
       # HTML report.
       aval <- if (identical(kw, "additionalProperties")) {
         "(an undeclared column)"
+      } else if (kw %in% c("minProperties", "maxProperties")) {
+        paste(.first_nonempty(r[["columnspec_data"]]), "data columns")
+      } else if (kw %in% c("minItems", "maxItems")) {
+        paste(.first_nonempty(r[["columnspec_data"]]), "data rows")
       } else {
         .first_nonempty(
           r[["columnspec_data"]],
@@ -7778,6 +8194,17 @@ server <- function(input, output, session) {
     ))
   }
 
+  # The load-failure row whose modal is open: what "Remove from the list" clears.
+  load_row_shown <- reactiveVal(NULL)
+  observeEvent(input$load_err_dismiss, {
+    row <- load_row_shown()
+    if (!is.null(row)) {
+      rv$load_errors <- dta_load_errors_clear(rv$load_errors, row$dataset, row$table)
+      load_row_shown(NULL)
+    }
+    removeModal()
+  })
+
   observeEvent(input$msgs_rows_selected, {
     sel <- input$msgs_rows_selected
     m <- msgs_r()
@@ -7785,6 +8212,22 @@ server <- function(input, output, session) {
       return()
     }
     id <- if ("id" %in% names(m)) m$id[sel] else sel
+    # A load failure has no inspect record (no table was bound): show its text.
+    src <- if ("source" %in% names(m)) as.character(m$source[sel]) else ""
+    if (identical(src, "load")) {
+      load_row_shown(list(dataset = rv$active, table = as.character(m$target[sel])))
+      showModal(modalDialog(
+        title = paste("Not loaded —", m$target[sel]),
+        load_failure_notice(as.character(m$message[sel])),
+        size = "m", easyClose = TRUE,
+        footer = tagList(
+          actionButton("load_err_dismiss", "Remove from the list"),
+          modalButton("Close")
+        )
+      ))
+      DT::selectRows(DT::dataTableProxy("msgs"), NULL)
+      return()
+    }
     show_inspect_modal(rv$active, id)
     # Clear the highlight so clicking the SAME row again re-selects (and so
     # re-opens the report) instead of toggling it off and being ignored.
@@ -8951,6 +9394,7 @@ server <- function(input, output, session) {
     rv$dta <- new_dta
     rv$structure <- build_structure(new_dta)
     rv$uploads <- new_uploads
+    rv$load_errors <- dta_load_errors_keep(rv$load_errors, new_names)
     # A re-parsed document can move any dataset's handlers, so the same
     # position-keyed state the Edit-files dialog resets has to be reset here:
     # stale per-file ids, and file inputs still displaying the name dropped on
@@ -9543,6 +9987,7 @@ server <- function(input, output, session) {
     rv$structure <- NULL
     rv$active <- NULL
     rv$uploads <- list()
+    rv$load_errors <- dta_load_errors_empty()
     rv$status <- list()
     rv$last_delivery <- NULL
     rv$pending_delivery <- NULL
@@ -9976,8 +10421,9 @@ server <- function(input, output, session) {
         # them appears and disappears. div() drops a NULL child, so nothing else
         # in this row has to know.
         #
-        # s$type ("tabular"/"file", set by build_structure()) is what decides
-        # whether ds_edit_menu() offers Columns/Rules at all -- a file dataset
+        # s$type ("tabular"/"matrix"/"file", set by build_structure()) is what
+        # decides what ds_edit_menu() offers: Columns/Rules for tabular, Row
+        # labels/Matrix layout/Rules for matrix -- a file dataset
         # has no @specs for either to edit. `s` is already this render's own
         # dataset (req(!is.null(s)) above), so this reads it rather than
         # re-deriving the type from rv$active/rv$dta a second time.
@@ -10269,6 +10715,7 @@ server <- function(input, output, session) {
       own("autosave", c(sf, attr(store, "dir")))
     }
     rv$dta <- restored
+    rv$load_errors <- dta_load_errors_empty() # a log is not saved; its files are gone
     rv$yaml_text <- saved$yaml_text
     # Rebuilt, not read back: what a slot shows (the effective container) follows
     # the restored document, which an older save may not have described.

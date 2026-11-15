@@ -928,7 +928,10 @@ write_validation_report(dta, "validation_report.html")
 YAML, upload a data file per dataset, run validation, browse the errors, edit
 the metadata and export the document — including the HTML validation report,
 via a "Report" download button alongside the CSV/TSV/XLSX exports. It needs
-the suggested packages **shiny**, **bslib** and **DT**.
+the suggested packages **shiny**, **bslib** and **DT**. Datasets of every type
+— tabular, matrix and file — can be added and edited there; a matrix dataset
+gets a Row labels editor and a Matrix layout editor for its header, dimensions
+and cell values.
 
 ```r
 run_dta_app()

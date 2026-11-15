@@ -523,7 +523,8 @@ dta_example_yaml_preferred_order <- c(
   "clinical_dta.yaml",
   "clinical_dta_multiple_files.yaml",
   "clinical_dta_with_file_dataset.yaml",
-  "gf_dataset.yaml"
+  "gf_dataset.yaml",
+  "matrix_dta.yaml"
 )
 
 # Applies that order to a set of basenames: the preferred names that are
@@ -582,7 +583,13 @@ dta_example_yaml_path <- function(filename) {
 # one in batches. Asking the user to choose put a storage-strategy question in
 # front of someone who came to validate a file, and the answer is one the size
 # of the file already determines.
-dta_load_file <- function(dta, dataset, file, handler_index, name = NULL) {
+#
+# The load runs with cli.width = Inf so a failure reads as sentences broken only
+# between cli bullets, not wrapped at 80 columns. `display_name` replaces the
+# (temporary) upload path in the failure text with the name the user delivered.
+dta_load_file <- function(dta, dataset, file, handler_index, name = NULL, display_name = NULL) {
+  op <- options(cli.width = Inf)
+  on.exit(options(op), add = TRUE)
   # The default key belongs to the DATASET TYPE, not to this helper. A tabular
   # dataset names a table after the file with its extension stripped; a file
   # dataset keys by the delivered name, extension kept, which is what
@@ -599,13 +606,24 @@ dta_load_file <- function(dta, dataset, file, handler_index, name = NULL) {
     error = function(e) NA_character_
   )
   nm <- name %||% dta_bound_item_name(ds_type, file)
-  dta_try(DTAtools::load_file(
+  r <- dta_try(DTAtools::load_file(
     dta,
     dataset = dataset,
     file = file,
     handler_index = handler_index,
     name = nm
   ))
+  if (!isTRUE(r$ok) && !is.null(display_name) && nzchar(display_name) && !is.null(r$error)) {
+    paths <- unique(c(
+      file,
+      normalizePath(file, winslash = "/", mustWork = FALSE),
+      normalizePath(file, winslash = "\\", mustWork = FALSE)
+    ))
+    for (p in paths[nzchar(paths)]) {
+      r$error <- gsub(p, display_name, r$error, fixed = TRUE)
+    }
+  }
+  r
 }
 
 # Run validation for all datasets or one named dataset. Returns dta_try()
@@ -1334,6 +1352,94 @@ dta_dataset_messages <- function(dta, dataset) {
     return(data.frame())
   }
   res$value
+}
+
+# ---- Load-error log -------------------------------------------------------
+# A file that failed to load leaves no table behind, so messages() cannot
+# report it. The app keeps one row per (dataset, table) here and shows it with
+# the dataset's messages. All helpers are pure.
+#
+# `slot` is the file entry a file was refused BY NAME, else NA. Such a file was
+# never a candidate for any table of that entry, so its row would otherwise
+# outlive the right file loading there: it is cleared by any load into the slot.
+
+dta_load_errors_empty <- function() {
+  data.frame(
+    dataset = character(0), table = character(0), file = character(0),
+    message = character(0), slot = integer(0), stringsAsFactors = FALSE
+  )
+}
+
+dta_load_errors_add <- function(le, dataset, table, file, message, slot = NA_integer_) {
+  le <- dta_load_errors_clear(le, dataset, table)
+  rbind(le, data.frame(
+    dataset = as.character(dataset), table = as.character(table),
+    file = as.character(file), message = as.character(message),
+    slot = as.integer(slot), stringsAsFactors = FALSE
+  ))
+}
+
+# Drop the rows of `dataset`: those of one `table` when given, and with `slot`
+# also the rows refused by name through that file entry.
+dta_load_errors_clear <- function(le, dataset, table = NULL, slot = NULL) {
+  hit <- le$dataset == dataset
+  if (!is.null(table) || !is.null(slot)) {
+    by_table <- if (is.null(table)) FALSE else le$table == table
+    by_slot <- if (is.null(slot)) FALSE else !is.na(le$slot) & le$slot == as.integer(slot)
+    hit <- hit & (by_table | by_slot)
+  }
+  le[!hit, , drop = FALSE]
+}
+
+# Follow a file entry that moved: `map` is old index -> new index
+# (dta_handler_index_map()). Rows of `dataset` whose slot is gone are dropped;
+# NA slots and other datasets are untouched.
+dta_load_errors_remap <- function(le, dataset, map) {
+  mine <- le$dataset == dataset & !is.na(le$slot)
+  new <- rep(NA_integer_, nrow(le))
+  new[mine] <- as.integer(unlist(map))[le$slot[mine]]
+  le$slot[mine] <- new[mine]
+  le[!(mine & is.na(new)), , drop = FALSE]
+}
+
+dta_load_errors_rename <- function(le, old, new) {
+  le$dataset[le$dataset == old] <- new
+  le
+}
+
+dta_load_errors_keep <- function(le, datasets) {
+  le[le$dataset %in% datasets, , drop = FALSE]
+}
+
+# The rows of `dataset` shaped like messages(), so they list with them.
+dta_load_error_rows <- function(le, dataset) {
+  r <- le[le$dataset == dataset, , drop = FALSE]
+  n <- nrow(r)
+  data.frame(
+    id = rep(NA_integer_, n), dataset = as.character(r$dataset),
+    target = as.character(r$table), source = rep("load", n),
+    row = rep(NA_integer_, n), column = rep(NA_character_, n),
+    rule_id = rep(NA_character_, n), message = as.character(r$message),
+    stringsAsFactors = FALSE
+  )
+}
+
+# Stack two message data.frames on the union of their columns (a first, then b);
+# a column one of them lacks is NA. Either may be empty or have no columns.
+dta_bind_message_rows <- function(a, b) {
+  a <- as.data.frame(a)
+  b <- as.data.frame(b)
+  cols <- union(names(a), names(b))
+  fill <- function(x) {
+    for (cn in setdiff(cols, names(x))) x[[cn]] <- rep(NA, nrow(x))
+    x[, cols, drop = FALSE]
+  }
+  if (length(cols) == 0L) {
+    return(data.frame())
+  }
+  out <- rbind(fill(a), fill(b))
+  rownames(out) <- NULL
+  out
 }
 
 # Metadata import errors, as message rows (data.frame; empty df if none).
@@ -2370,6 +2476,42 @@ dta_dataset_spec_key <- function(body) {
   get("dta_dataset_spec_key", envir = asNamespace("DTAtools"))(body)
 }
 
+# More unexported package helpers the matrix editor needs, reached the same way.
+dta_pkg_matrix_spec_from_list <- function(x) {
+  get("dta_matrix_spec_from_list", envir = asNamespace("DTAtools"))(x)
+}
+dta_pkg_find_rule_def <- function(x, dataset_name, rule_id) {
+  get("dta_find_rule_def", envir = asNamespace("DTAtools"))(x, dataset_name, rule_id)
+}
+
+# ---- Matrix datasets: small readers --------------------------------------
+
+dta_is_matrix_ds <- function(ds) inherits(ds, "DTAtools::DTADataSetMatrix")
+
+# The row key ids of a matrix dataset; character(0) for anything else.
+dta_matrix_key_ids <- function(dta, dataset) {
+  ds <- dta_get_dataset(dta, dataset)
+  if (!dta_is_matrix_ds(ds)) {
+    return(character(0))
+  }
+  as.character(ds@matrix@row_key)
+}
+
+# "named" / "blank" / "list", NA for a dataset that is not a matrix.
+dta_matrix_corner_mode <- function(dta, dataset) {
+  ds <- dta_get_dataset(dta, dataset)
+  if (!dta_is_matrix_ds(ds)) {
+    return(NA_character_)
+  }
+  ds@matrix@corner_mode
+}
+
+# A list corner left with ONE entry whose text is "named" or "blank" reads back
+# from YAML as that keyword, so its meaning changes after any save or restore.
+.dta_corner_keyword_trap <- function(corner) {
+  length(corner) == 1L && !is.na(corner) && corner %in% c("named", "blank")
+}
+
 # Supported column-structure backends (drives the Edit-columns backend dropdown).
 dta_supported_backends <- function() {
   b <- tryCatch(
@@ -3114,7 +3256,14 @@ dta_set_dataset_meta <- function(dta, dataset, id, name = NULL, description = NU
 # reasoning as the in-place re-key in dta_set_dataset_meta() above; there it
 # holds ONE index steady across a rename, here it holds every OTHER index
 # steady across the list's growth.
-dta_add_dataset <- function(dta, id, type = "tabular", name = NULL, description = NULL) {
+#
+# The matrix arguments (`row_label`, `corner`, `corner_text`, `cell_type`) are
+# used for type "matrix" only and ignored otherwise: a hidden conditional input
+# still reports its value, so a user who switched back to Tabular must not
+# get them.
+dta_add_dataset <- function(dta, id, type = "tabular", name = NULL, description = NULL,
+                            row_label = NULL, corner = NULL, corner_text = NULL,
+                            cell_type = NULL) {
   dta_try({
     nm <- trimws(as.character(id %||% "")[1])
     if (is.na(nm) || !nzchar(nm)) stop("A dataset ID is required.")
@@ -3125,17 +3274,56 @@ dta_add_dataset <- function(dta, id, type = "tabular", name = NULL, description 
     }
 
     type <- tolower(trimws(as.character(type %||% "")[1]))
-    if (!type %in% c("tabular", "file")) {
+    if (!type %in% dta_supported_types()) {
       stop(sprintf(
         "Dataset type must be one of: %s.",
-        paste(c("tabular", "file"), collapse = ", ")
+        paste(dta_supported_types(), collapse = ", ")
       ))
     }
 
     label <- dta_blank_to_null(name)
     desc <- dta_blank_to_null(description)
 
-    ds <- if (identical(type, "tabular")) {
+    ds <- if (identical(type, "matrix")) {
+      lbl <- trimws(as.character(row_label %||% "")[1])
+      if (is.na(lbl) || !nzchar(lbl)) stop("A row-label column ID is required.")
+      if (grepl("\\s", lbl)) stop("Row-label column ID cannot contain whitespace.")
+      cn <- as.character(corner %||% "")[1]
+      if (is.na(cn) || !cn %in% c("named", "blank", "none", "text")) {
+        stop("Choose the header text above the row labels.")
+      }
+      ct <- as.character(cell_type %||% "")[1]
+      if (is.na(ct) || !ct %in% c("SAS Num", "SAS Int", "SAS Char")) {
+        stop("Choose the cell type.")
+      }
+      corner_val <- switch(cn,
+        named = "named",
+        blank = "blank",
+        none = list(NULL),
+        text = {
+          txt <- trimws(as.character(corner_text %||% "")[1])
+          if (is.na(txt) || !nzchar(txt)) stop("Enter the header text, or choose Empty.")
+          if (txt %in% c("named", "blank")) {
+            stop(sprintf(
+              "The header text '%s' would be read as a keyword; choose \"The row-label ID\" or \"Empty\" instead.",
+              txt
+            ))
+          }
+          list(txt)
+        }
+      )
+      DTAtools::DTADataSetMatrix(
+        id = nm,
+        specs = DTAtools::DTAColumnSpecCollection(columns = stats::setNames(
+          list(DTAtools::DTAColumnSpec(id = lbl, type = "SAS Char", nullable = FALSE)), lbl
+        )),
+        matrix = list(
+          header = list(corner = corner_val),
+          cells = list(type = ct, nullable = FALSE)
+        ),
+        name = label, description = desc
+      )
+    } else if (identical(type, "tabular")) {
       DTAtools::DTADataSetTabular(
         id = nm,
         specs = DTAtools::DTAColumnSpecCollection(columns = list()),
@@ -3273,7 +3461,7 @@ dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
 
     renaming <- !is.null(old_id) && nzchar(old_id) && !identical(old_id, id)
     if (renaming && id %in% names(cols)) {
-      stop(sprintf("A column named '%s' already exists.", id))
+      stop(sprintf("A %s named '%s' already exists.", if (dta_is_matrix_ds(ds)) "row label" else "column", id))
     }
     existing <- cols[[if (renaming) old_id else id]]
 
@@ -3341,7 +3529,23 @@ dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
       cols[[id]] <- spec
       specs@columns <- cols
     }
-    ds@specs <- specs
+    if (dta_is_matrix_ds(ds)) {
+      # Row-label invariants: the key and the list corner follow the label.
+      m <- ds@matrix
+      adding <- !renaming && is.null(existing)
+      if (renaming && old_id %in% m@row_key) {
+        m@row_key[m@row_key == old_id] <- id
+      }
+      if (adding && m@corner_mode == "list") {
+        m@corner <- c(m@corner, "")
+      }
+      if (id %in% m@row_key && isTRUE(nullable)) {
+        stop(sprintf("Row key column '%s' cannot be nullable: a row needs an identity.", id))
+      }
+      ds <- S7::set_props(ds, specs = specs, matrix = m)
+    } else {
+      ds@specs <- specs
+    }
     dta@datasets[[dataset]] <- ds
     dta
   })
@@ -3361,9 +3565,40 @@ dta_remove_column <- function(dta, dataset, id) {
     ds <- DTAtools::datasets(dta, dataset)
     specs <- ds@specs
     cols <- specs@columns %||% list()
-    cols[[id]] <- NULL
-    specs@columns <- cols
-    ds@specs <- specs
+    if (dta_is_matrix_ds(ds)) {
+      m <- ds@matrix
+      ids <- names(cols)
+      if (id %in% m@row_key) {
+        stop(sprintf("'%s' is the row key; choose another key under Matrix layout first.", id))
+      }
+      if (length(cols) == 1L) stop("A matrix dataset needs at least one row label.")
+      if (m@corner_mode == "list") {
+        pos <- match(id, ids)
+        if (!is.na(pos)) {
+          if (pos == 1L && is.na(m@corner[1L])) {
+            stop(paste(
+              "The first row label has no header field above it (corner null), so it cannot be removed;",
+              "change the corner under Matrix layout first."
+            ))
+          }
+          newc <- m@corner[-pos]
+          if (.dta_corner_keyword_trap(newc)) {
+            stop(sprintf(
+              "The remaining header text '%s' would be read as a keyword; change the corner under Matrix layout first.",
+              newc
+            ))
+          }
+          m@corner <- newc
+        }
+      }
+      cols[[id]] <- NULL
+      specs@columns <- cols
+      ds <- S7::set_props(ds, specs = specs, matrix = m)
+    } else {
+      cols[[id]] <- NULL
+      specs@columns <- cols
+      ds@specs <- specs
+    }
     dta@datasets[[dataset]] <- ds
     dta
   })
@@ -3385,11 +3620,325 @@ dta_move_column <- function(dta, dataset, id, direction) {
       ord <- seq_len(n)
       ord[c(pos, target)] <- ord[c(target, pos)]
       specs@columns <- cols[ord]
-      ds@specs <- specs
+      if (dta_is_matrix_ds(ds)) {
+        m <- ds@matrix
+        if (m@corner_mode == "list") {
+          if (is.na(m@corner[pos]) || is.na(m@corner[target])) {
+            stop(paste(
+              "The first row label has no header field above it (corner null); it must stay first.",
+              "Change the corner under Matrix layout first."
+            ))
+          }
+          m@corner[c(pos, target)] <- m@corner[c(target, pos)]
+        }
+        ds <- S7::set_props(ds, specs = specs, matrix = m)
+      } else {
+        ds@specs <- specs
+      }
       dta@datasets[[dataset]] <- ds
     }
     dta
   })
+}
+
+# ---- Matrix layout form --------------------------------------------------
+
+# The Matrix layout form's values for one matrix dataset (NULL for any other
+# type). The names are the form's input names: the editor reads and writes
+# exactly these.
+dta_matrix_fields <- function(dta, dataset) {
+  ds <- dta_get_dataset(dta, dataset)
+  if (!dta_is_matrix_ds(ds)) {
+    return(NULL)
+  }
+  m <- ds@matrix
+  l <- as.list(m)
+  ids <- names(ds@specs@columns) %||% character(0)
+  k <- length(ids)
+  hd <- l[["header"]] %||% list()
+  rw <- l[["rows"]] %||% list()
+  cl <- l[["cells"]] %||% list()
+  txt <- function(x) {
+    x <- as.character(x %||% "")[1]
+    if (is.na(x)) "" else x
+  }
+  num <- function(x) if (is.null(x) || length(x) == 0L) NA_real_ else as.numeric(x)[1]
+  mode <- m@corner_mode
+  corner_text <- switch(mode,
+    list = ifelse(is.na(m@corner), "", m@corner),
+    named = ids,
+    rep("", k)
+  )
+  max_or_na <- function(v) if (is.infinite(v)) NA_real_ else as.numeric(v)
+  ctype <- txt(cl[["type"]])
+  ctype <- paste("SAS", sub("^SAS\\s+", "", ctype, ignore.case = TRUE))
+  cfmt <- txt(cl[["format"]])
+  list(
+    row_labels = ids,
+    corner_mode = mode,
+    corner_text = as.character(corner_text),
+    corner_none = identical(mode, "list") && is.na(m@corner[1L]),
+    header_label = txt(hd[["label"]]),
+    header_description = txt(hd[["description"]]),
+    header_pattern = txt(hd[["pattern"]]),
+    header_values = paste(unlist(hd[["values"]]), collapse = "\n"),
+    header_length = txt(hd[["length"]]),
+    n_columns_min = as.numeric(m@n_columns[[1L]]),
+    n_columns_max = max_or_na(m@n_columns[[2L]]),
+    row_key = as.character(m@row_key %||% ids[1L]),
+    n_rows_min = as.numeric(m@n_rows[[1L]]),
+    n_rows_max = max_or_na(m@n_rows[[2L]]),
+    cell_type = ctype,
+    cell_nullable = isTRUE(cl[["nullable"]]),
+    range_min = num(cl[["range"]][["min"]]),
+    range_max = num(cl[["range"]][["max"]]),
+    infinite = isTRUE(cl[["infinite"]]),
+    cell_values = paste(unlist(cl[["values"]]), collapse = "\n"),
+    cell_pattern = txt(cl[["pattern"]]),
+    cell_length = txt(cl[["length"]]),
+    cell_format = if (nzchar(cfmt) && grepl(" ", cfmt)) sub("^\\S+\\s+", "", cfmt) else cfmt,
+    cell_label = txt(cl[["label"]]),
+    cell_description = txt(cl[["description"]])
+  )
+}
+
+# Apply the Matrix layout form to a matrix dataset. Returns
+# list(ok, value = <dta>, error, dropped): `dropped` names the settings the new
+# cell type cannot carry ("Inf allowed", "range"), which were removed.
+#
+# The ORIGINAL settings are patched, field by field, for the fields the form
+# changed only: rebuilding the settings from the form would rewrite every
+# value the form cannot show faithfully (a scalar count, a number that
+# was written as text, a corner entry that is null).
+dta_set_matrix <- function(dta, dataset, form) {
+  op <- options(cli.width = Inf)
+  on.exit(options(op), add = TRUE)
+  dropped <- character(0)
+  r <- dta_try({
+    ds <- DTAtools::datasets(dta, dataset)
+    if (!dta_is_matrix_ds(ds)) stop("This dataset is not a matrix dataset.")
+    orig <- as.list(ds@matrix)
+    pf <- dta_matrix_fields(dta, dataset)
+    k <- length(pf$row_labels)
+
+    fm <- function(n) if (is.null(form[[n]])) pf[[n]] else form[[n]]
+    txt <- function(x) {
+      x <- as.character(x %||% "")[1]
+      if (is.na(x)) "" else trimws(x)
+    }
+    lines_of <- function(x) {
+      x <- as.character(x %||% "")[1]
+      if (is.na(x)) {
+        return(character(0))
+      }
+      v <- trimws(strsplit(x, "\n", fixed = TRUE)[[1L]])
+      v[nzchar(v)]
+    }
+    nnum <- function(x) if (is.null(x) || length(x) == 0L) NA_real_ else suppressWarnings(as.numeric(x)[1])
+    same_num <- function(a, b) {
+      a <- nnum(a)
+      b <- nnum(b)
+      # numericInput hands back 15 significant digits, so compare at that precision.
+      (is.na(a) && is.na(b)) || (!is.na(a) && !is.na(b) && signif(a, 15) == signif(b, 15))
+    }
+    # A count (data columns / rows) must be whole numbers, the maximum not below the minimum.
+    check_count <- function(lo, hi, floor, who) {
+      lo <- nnum(lo)
+      hi <- nnum(hi)
+      whole <- function(v) is.finite(v) && v == trunc(v)
+      if (!is.na(lo) && !(whole(lo) && lo >= floor)) {
+        stop(sprintf("%s: the minimum must be a whole number of at least %d.", who, floor))
+      }
+      if (!is.na(hi) && !(whole(hi) && hi >= (if (is.na(lo)) floor else lo))) {
+        stop(sprintf("%s: the maximum must be a whole number not below the minimum.", who))
+      }
+    }
+    chg <- function(n) {
+      a <- fm(n)
+      b <- pf[[n]]
+      if (n %in% c("header_values", "cell_values")) {
+        return(!identical(lines_of(a), lines_of(b)))
+      }
+      if (n == "row_key") {
+        return(!setequal(as.character(a), as.character(b)))
+      }
+      if (is.logical(b)) {
+        return(!identical(isTRUE(a), isTRUE(b)))
+      }
+      if (is.numeric(b)) {
+        return(!same_num(a, b))
+      }
+      !identical(txt(a), txt(b))
+    }
+    put <- function(sec, key, val) {
+      if (is.null(val)) {
+        orig[[sec]][[key]] <<- NULL
+      } else {
+        orig[[sec]][[key]] <<- val
+      }
+    }
+    whole_or <- function(v) if (is.finite(v) && v == trunc(v) && abs(v) < .Machine$integer.max) as.integer(v) else v
+    text_or_null <- function(s) if (nzchar(s)) s else NULL
+    length_val <- function(s, who) {
+      if (!nzchar(s)) {
+        return(NULL)
+      }
+      if (!grepl("^[0-9]+$", s) || as.numeric(s) < 1) {
+        stop(sprintf("%s length must be a whole number of at least 1.", who))
+      }
+      as.integer(s)
+    }
+    count_val <- function(lo, hi, default_min) {
+      lo <- nnum(lo)
+      hi <- nnum(hi)
+      if (is.na(lo)) lo <- default_min
+      if (is.na(hi)) hi <- Inf
+      if (!is.na(hi) && lo == hi) {
+        whole_or(lo)
+      } else {
+        out <- list(min = whole_or(lo))
+        if (is.finite(hi)) out$max <- whole_or(hi)
+        out
+      }
+    }
+
+    # Corner: mode, texts and the "no field" flag are one setting.
+    mode <- as.character(fm("corner_mode"))[1]
+    ct <- trimws(as.character(fm("corner_text")))
+    ct <- c(ct, rep("", max(0L, k - length(ct))))[seq_len(k)]
+    none <- isTRUE(fm("corner_none"))
+    if (identical(mode, "list")) {
+      pct <- pf$corner_text
+      if (pf$corner_none) pct[1L] <- ""
+      cmp <- ct
+      if (none) cmp[1L] <- ""
+      corner_changed <- !identical(pf$corner_mode, "list") || !identical(trimws(pct), cmp) ||
+        !identical(isTRUE(pf$corner_none), none)
+    } else {
+      corner_changed <- !identical(pf$corner_mode, mode)
+    }
+    if (corner_changed) {
+      val <- if (mode %in% c("named", "blank")) {
+        mode
+      } else {
+        if (k == 1L && !none && .dta_corner_keyword_trap(ct)) {
+          stop(sprintf(
+            "The header text '%s' would be read as a keyword; choose \"The row-label ID\" or \"Empty\" instead.",
+            ct
+          ))
+        }
+        v <- as.list(ct)
+        if (none) v[1L] <- list(NULL)
+        v
+      }
+      put("header", "corner", val)
+    }
+
+    if (chg("header_label")) put("header", "label", text_or_null(txt(fm("header_label"))))
+    if (chg("header_description")) put("header", "description", text_or_null(txt(fm("header_description"))))
+    if (chg("header_pattern")) put("header", "pattern", text_or_null(txt(fm("header_pattern"))))
+    if (chg("header_values")) {
+      v <- lines_of(fm("header_values"))
+      put("header", "values", if (length(v) > 0L) v else NULL)
+    }
+    if (chg("header_length")) put("header", "length", length_val(txt(fm("header_length")), "Label"))
+    if (chg("n_columns_min") || chg("n_columns_max")) {
+      check_count(fm("n_columns_min"), fm("n_columns_max"), 1L, "Data columns")
+      put("header", "count", count_val(fm("n_columns_min"), fm("n_columns_max"), 1))
+    }
+
+    if (chg("row_key")) {
+      rk <- as.character(fm("row_key"))
+      rk <- rk[!is.na(rk) & nzchar(rk)]
+      if (length(rk) == 0L) stop("Choose at least one row key column.")
+      for (kid in rk) {
+        if (isTRUE(ds@specs@columns[[kid]]@nullable)) {
+          stop(sprintf(
+            "Row label '%s' may be missing, so it cannot be part of the row key; make it non-nullable under Row labels first.",
+            kid
+          ))
+        }
+      }
+      put("rows", "key", rk)
+    }
+    if (chg("n_rows_min") || chg("n_rows_max")) {
+      check_count(fm("n_rows_min"), fm("n_rows_max"), 0L, "Data rows")
+      put("rows", "count", count_val(fm("n_rows_min"), fm("n_rows_max"), 1))
+    }
+
+    if (chg("cell_type")) {
+      ty <- trimws(as.character(fm("cell_type"))[1])
+      ty <- paste("SAS", sub("^SAS\\s+", "", ty, ignore.case = TRUE))
+      if (!ty %in% c("SAS Num", "SAS Int", "SAS Char")) stop("Choose the cell type.")
+      put("cells", "type", ty)
+    }
+    rt <- sub("^SAS\\s+", "", trimws(as.character(orig[["cells"]][["type"]])[1]), ignore.case = TRUE)
+    if (chg("cell_nullable")) put("cells", "nullable", isTRUE(fm("cell_nullable")))
+    if (chg("range_min") || chg("range_max")) {
+      lo <- nnum(fm("range_min"))
+      hi <- nnum(fm("range_max"))
+      if (!is.na(lo) && !is.na(hi) && lo > hi) {
+        stop("Cell range: the lowest allowed value must not exceed the highest.")
+      }
+      rng <- list()
+      if (!is.na(lo)) rng$min <- whole_or(lo)
+      if (!is.na(hi)) rng$max <- whole_or(hi)
+      put("cells", "range", if (length(rng) > 0L) rng else NULL)
+    }
+    if (chg("infinite")) put("cells", "infinite", isTRUE(fm("infinite")))
+    if (chg("cell_values")) {
+      v <- lines_of(fm("cell_values"))
+      if (length(v) > 0L && rt %in% c("Num", "Int")) {
+        nv <- suppressWarnings(as.numeric(v))
+        if (anyNA(nv)) stop("Allowed cell values must be numbers for SAS Num and SAS Int cells.")
+        v <- lapply(nv, whole_or)
+      }
+      put("cells", "values", if (length(v) > 0L) v else NULL)
+    } else if (chg("cell_type") && length(orig$cells[["values"]]) > 0L) {
+      # Untouched allowed values follow the new cell type.
+      v <- unlist(orig$cells[["values"]])
+      if (identical(rt, "Char")) {
+        put("cells", "values", as.list(as.character(v)))
+      } else if (rt %in% c("Num", "Int")) {
+        nv <- suppressWarnings(as.numeric(v))
+        if (anyNA(nv)) stop("Allowed cell values must be numbers for SAS Num and SAS Int cells.")
+        put("cells", "values", lapply(nv, whole_or))
+      }
+    }
+    if (chg("cell_pattern")) put("cells", "pattern", text_or_null(txt(fm("cell_pattern"))))
+    if (chg("cell_length")) put("cells", "length", length_val(txt(fm("cell_length")), "Cell"))
+    if (chg("cell_format")) {
+      f <- txt(fm("cell_format"))
+      put("cells", "format", if (!nzchar(f)) NULL else if (grepl(" ", f)) f else paste("SAS", f))
+    }
+    if (chg("cell_label")) put("cells", "label", text_or_null(txt(fm("cell_label"))))
+    if (chg("cell_description")) put("cells", "description", text_or_null(txt(fm("cell_description"))))
+
+    if (!is.null(orig$header[["pattern"]]) && length(orig$header[["values"]]) > 0L) {
+      stop("Give the data labels a pattern or a list of allowed labels, not both.")
+    }
+    if (!is.null(orig$cells[["pattern"]]) && length(orig$cells[["values"]]) > 0L) {
+      stop("Give the cells a pattern or a list of allowed values, not both.")
+    }
+
+    # What the RESULTING cell type cannot carry is removed, not refused.
+    if (!identical(rt, "Num") && !is.null(orig$cells[["infinite"]])) {
+      if (isTRUE(orig$cells[["infinite"]])) dropped <- c(dropped, "Inf allowed")
+      orig$cells[["infinite"]] <- NULL
+    }
+    if (identical(rt, "Char") && length(orig$cells[["range"]]) > 0L) {
+      dropped <- c(dropped, "range")
+    }
+    if (identical(rt, "Char")) orig$cells[["range"]] <- NULL
+
+    ds <- S7::set_props(ds, matrix = dta_pkg_matrix_spec_from_list(orig))
+    dta@datasets[[dataset]] <- ds
+    dta
+  })
+  list(
+    ok = isTRUE(r$ok), value = if (isTRUE(r$ok)) r$value else NULL,
+    error = r$error, dropped = if (isTRUE(r$ok)) dropped else character(0)
+  )
 }
 
 # ---- Rule editing --------------------------------------------------------
@@ -3480,6 +4029,10 @@ dta_set_rule <- function(dta, dataset, index = NULL, id, type, description = NUL
                          min = NULL, max = NULL,
                          group_by = NULL, conditions = NULL, constraints = NULL) {
   dta_try({
+    if (dta_is_matrix_ds(dta_get_dataset(dta, dataset)) &&
+      startsWith(trimws(as.character(id %||% "")[1]), ".matrix:")) {
+      stop("Rule IDs starting with '.matrix:' are reserved for the checks the matrix layout generates.")
+    }
     rule <- dta_build_rule(
       id = id, type = type, description = description,
       condition = condition, then = then, columns = columns,
@@ -3827,6 +4380,20 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
 # NA, or an entry the map has no row for, leaves the file unknown, which the
 # package resolves by name. A record out of step with the paths is dropped.
 dta_remap_file_handlers <- function(ds, map) {
+  if (dta_is_matrix_ds(ds)) {
+    # A matrix keeps the handler index of each bound table inside its raw head.
+    heads <- ds@heads
+    for (nm in names(heads)) {
+      idx <- suppressWarnings(as.integer(heads[[nm]][["handler"]]))[1]
+      heads[[nm]][["handler"]] <- if (!is.na(idx) && idx >= 1L && idx <= length(map)) {
+        as.integer(unname(map)[idx])
+      } else {
+        NA_integer_
+      }
+    }
+    ds@heads <- heads
+    return(ds)
+  }
   if (!identical(tryCatch(ds@type, error = function(e) NA_character_), "file")) {
     return(ds)
   }
@@ -4090,6 +4657,9 @@ dta_transfer_bound_data <- function(dta, dataset, old_ds, keep_validation = TRUE
     old_heads <- tryCatch(old_ds@heads, error = function(e) NULL)
     if (!is.null(old_heads) && "heads" %in% S7::prop_names(new_ds)) {
       new_ds@heads <- old_heads[intersect(names(old_heads), bound)]
+      if (dta_is_matrix_ds(new_ds)) {
+        new_ds <- dta_remap_file_handlers(new_ds, dta_match_handlers(old_ds, new_ds))
+      }
     }
     if (isTRUE(keep_validation)) {
       new_ds@validation_index <- tryCatch(old_ds@validation_index, error = function(e) list()) %||% list()
@@ -4402,6 +4972,7 @@ dta_load_delivery <- function(dta, paths, exdir, bytes_left, held = 0, route = N
   # the refusal names the administrator's limit instead.
   budget_limited <- held > 0 && bytes_left < getOption("DTAtools.container_max_bytes", 1e10)
   op <- options(
+    cli.width = Inf,
     DTAtools.container_max_bytes = min(getOption("DTAtools.container_max_bytes", 1e10), bytes_left),
     DTAtools.container_max_member_bytes = getOption("DTAtools.container_max_member_bytes", 2e9)
   )

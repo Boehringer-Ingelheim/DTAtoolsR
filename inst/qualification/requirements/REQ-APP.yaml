@@ -616,3 +616,90 @@ requirements:
     category: functional
     covers: [run_dta_app, check, messages]
     source: PLAN-matrix-dataset.md D1, 3.5; REQ-MATRIX-039
+
+  - id: REQ-APP-041
+    text: >
+      Adding a dataset of type matrix shall require a row-label column ID, the
+      header text above the row labels and a cell type, and shall refuse the
+      addition when any of them is missing. The dataset added shall be a matrix
+      whose single row-label column carries the given ID, is of type SAS Char,
+      is not nullable and is the row key, whose header corner and cell type are
+      those chosen, and which requires at least one data column and at least
+      one data row.
+    risk: high
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-shiny.md 2.1;
+      inst/shiny/dta_app/R/utils_dta.R (dta_add_dataset)
+
+  - id: REQ-APP-042
+    text: >
+      Editing the row-label columns of a matrix dataset shall keep the dataset
+      valid: renaming a row-key column shall rename it in the row key; adding
+      a row-label column to a matrix whose header corner lists one text per row
+      label shall extend that list with an empty text; removing the row-key
+      column shall be refused and shall leave the dataset unchanged.
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-shiny.md 2.2;
+      inst/shiny/dta_app/R/utils_dta.R (dta_set_column, dta_remove_column)
+
+  - id: REQ-APP-043
+    text: >
+      The matrix-layout editor shall save the header, row and cell settings
+      entered for a matrix dataset into its specification and shall re-validate
+      the dataset; saving it without changes shall leave the matrix settings
+      unchanged; an entry whose minimum exceeds its maximum shall be refused
+      and shall leave the dataset unchanged.
+    risk: high
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-shiny.md 2.4;
+      inst/shiny/dta_app/R/utils_dta.R (dta_matrix_fields, dta_set_matrix)
+
+  - id: REQ-APP-044
+    text: >
+      The rules of a matrix dataset shall be editable on its row-label
+      columns, and a rule whose ID starts with .matrix: shall be refused,
+      because that prefix is reserved for the checks the matrix layout
+      generates.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-shiny.md 2.3;
+      inst/shiny/dta_app/R/utils_dta.R (dta_set_rule)
+
+  - id: REQ-APP-045
+    text: >
+      Inspecting a finding that a matrix has fewer data rows than declared
+      shall state the declared minimum number of data rows and the actual
+      number of data rows.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-shiny.md 2.5;
+      inst/shiny/dta_app/app.R (render_inspect_body)
+
+  - id: REQ-APP-046
+    text: >
+      A file the application refuses to load into a dataset shall be listed in
+      that dataset's validation messages with the reason, until a file loads in
+      its place. Removing a file entry of a matrix dataset in the editor, or
+      reordering its file entries in raw YAML, shall not make a table already
+      loaded from a remaining entry fail as changed.
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-shiny.md 2.6, 2.7;
+      inst/shiny/dta_app/R/utils_dta.R (dta_load_errors_add,
+      dta_remap_file_handlers, dta_transfer_bound_data)
+    notes: >
+      A reason that vanishes after ten seconds is not evidence, and a false
+      "changed" failure blocks a conforming delivery.

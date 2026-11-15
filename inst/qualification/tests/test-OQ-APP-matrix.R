@@ -1,4 +1,4 @@
-# The application and a matrix dataset. REQ-APP-033 .. REQ-APP-040.
+# The application and a matrix dataset. REQ-APP-033 .. REQ-APP-046.
 #
 # A matrix dataset keeps its row-label columns under `row_labels:` and its
 # settings under `matrix:`, and it carries a recorded header for every loaded
@@ -337,5 +337,334 @@ test_that("OQ-APP-049 | a matrix dataset loads, validates, and its findings can 
       "and the inspected row shows the offending value",
       any(grepl("-118", unlist(inspected$value, use.names = FALSE), fixed = TRUE))
     )
+  })
+})
+
+# ---- Editing a matrix dataset in the app (REQ-APP-041 .. REQ-APP-046) -------
+
+# A document with the bundled matrix specification loaded and editing entered.
+mxa_editing <- function(session, id = strrep("p", 32)) {
+  session$setInputs(dta_client_id = id)
+  session$setInputs(dta_file = qapp_file_input("matrix_dta.yaml"))
+  qapp_enter_edit_mode(session)
+}
+
+# The inputs the row-label form carries, for one label.
+mxa_label_form <- function(id, nullable = FALSE, pattern = "") {
+  list(
+    col_id = id, col_label = "", col_backend = "SAS", col_type = "Char",
+    col_format = "", col_length = "", col_nullable = nullable, col_values = "",
+    col_pattern = pattern, col_desc = ""
+  )
+}
+
+# An upload as the browser reports it, for a file written by a test.
+mxa_upload <- function(path) {
+  data.frame(
+    name = basename(path), size = file.size(path), type = "",
+    datapath = path, stringsAsFactors = FALSE
+  )
+}
+
+test_that("OQ-APP-050 | adding a matrix dataset needs a row-label ID, a corner and a cell type and builds the declared matrix | REQ-APP-041", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+
+  shiny::testServer(app, {
+    mxa_editing(session)
+    n_before <- length(rv$dta@datasets)
+
+    # Each of the three missing in turn: the dataset is not added.
+    session$setInputs(add_ds_id = "mx_a", add_ds_type = "matrix", add_ds_mx_label = "PID", add_ds_mx_cells = "SAS Num")
+    session$setInputs(add_ds_save = 1)
+    qa_step("without a corner the dataset is not added", n_before, length(rv$dta@datasets))
+    qa_check("and the refusal is reported", isFALSE(rv$add_ds_msg$ok))
+
+    session$setInputs(add_ds_mx_corner = "named", add_ds_mx_cells = "")
+    session$setInputs(add_ds_save = 2)
+    qa_step("without a cell type the dataset is not added", n_before, length(rv$dta@datasets))
+
+    session$setInputs(add_ds_mx_cells = "SAS Num", add_ds_mx_label = "")
+    session$setInputs(add_ds_save = 3)
+    qa_step("without a row-label ID the dataset is not added", n_before, length(rv$dta@datasets))
+
+    # All three given.
+    session$setInputs(add_ds_mx_label = "PID")
+    session$setInputs(add_ds_save = 4)
+    qa_step("with all three the dataset is added", n_before + 1L, length(rv$dta@datasets))
+    ds <- rv$dta@datasets[["mx_a"]]
+    qa_check("and is a matrix dataset", inherits(ds, "DTAtools::DTADataSetMatrix"))
+    cols <- ds@specs@columns
+    qa_step("it has the one row-label column given", "PID", names(cols))
+    qa_step(
+      "which is SAS Char and not nullable",
+      list(type = "SAS Char", nullable = FALSE),
+      list(type = as.list(cols[["PID"]])$type, nullable = cols[["PID"]]@nullable)
+    )
+    qa_step("and is the row key", "PID", ds@matrix@row_key)
+    l <- as.list(ds@matrix)
+    qa_step("the corner is the one chosen", "named", ds@matrix@corner_mode)
+    qa_step("the cell type is the one chosen", "SAS Num", l$cells$type)
+    qa_step("at least one data column is required", 1, ds@matrix@n_columns[[1L]])
+    qa_step("and at least one data row", 1, ds@matrix@n_rows[[1L]])
+  })
+})
+
+test_that("OQ-APP-051 | row-label edits keep a matrix valid: rename follows into the key, add extends the corner, removing the key is refused | REQ-APP-042", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+
+  shiny::testServer(app, {
+    mxa_editing(session, strrep("q", 32))
+    session$setInputs(edit_cols = 1)
+    pat <- "^ENSG[0-9]{11}(\\.[0-9]+)?(_PAR_Y)?$"
+
+    # Rename the first row label (the row key).
+    session$setInputs(col_edit_click = 1)
+    do.call(session$setInputs, mxa_label_form("GENE_UID", pattern = pat))
+    session$setInputs(col_save = 1)
+    ds <- rv$dta@datasets[["gene_counts"]]
+    qa_step("the renamed label is in the specification", c("GENE_UID", "GENE_NAME"), names(ds@specs@columns))
+    qa_step("and the row key follows it", "GENE_UID", ds@matrix@row_key)
+
+    # Add a third row label: the corner list gets one more, empty, text.
+    k <- length(ds@specs@columns)
+    session$setInputs(col_add = 1)
+    do.call(session$setInputs, mxa_label_form("NOTE", nullable = TRUE))
+    session$setInputs(col_save = 2)
+    ds <- rv$dta@datasets[["gene_counts"]]
+    qa_step("the new label is added", k + 1L, length(ds@specs@columns))
+    corner <- ds@matrix@corner
+    qa_step("the corner list has one more entry", k + 1L, length(corner))
+    qa_step("and the last entry is empty text", "", corner[[length(corner)]])
+
+    # Remove the row key: refused, nothing changes.
+    before <- rv$dta
+    session$setInputs(col_del_click = 1)
+    qa_check("removing the row-key column leaves the document unchanged", identical(rv$dta, before))
+    qa_step(
+      "and the key column is still there",
+      TRUE, "GENE_UID" %in% names(rv$dta@datasets[["gene_counts"]]@specs@columns)
+    )
+  })
+})
+
+test_that("OQ-APP-052 | the matrix-layout editor saves into the specification and re-validates, an unchanged save changes nothing, minimum above maximum is refused | REQ-APP-043", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+
+  rows <- length(readLines(system.file("extdata", "matrix_gene_counts.tsv", package = "DTAtools"))) - 1L
+
+  shiny::testServer(app, {
+    mxa_load_and_check(session)
+    qa_step("the genes delivery passes before the edit", "pass", mxa_status(rv, "gene_counts"))
+    qapp_enter_edit_mode(session)
+    session$setInputs(edit_matrix = 1)
+    session$setInputs(mx_row_key = "GENE_ID")
+
+    # One more data row required than the file holds.
+    session$setInputs(mx_n_rows_min = rows + 1)
+    session$setInputs(mx_save = 1)
+    ds <- datasets(rv$dta, "gene_counts")
+    qa_step("the new row-count minimum is in the specification", rows + 1, ds@matrix@n_rows[[1L]])
+    qa_step("and in the YAML text", TRUE, grepl(sprintf("min: %d", rows + 1L), rv$yaml_text, fixed = TRUE))
+    qa_step("the dataset is re-validated against it, and fails", "fail", mxa_status(rv, "gene_counts"))
+
+    # Saving again with nothing changed.
+    session$setInputs(edit_matrix = 2)
+    # Every field as a browser returns it, taken from the bundled YAML by
+    # hand-written code: text as strings (empty ones as ""), a blank number
+    # as NA, checkboxes as logicals, the radio as its value, the key as a
+    # character vector. The row-count minimum is the one saved just above.
+    y <- yaml::read_yaml(system.file("extdata", "matrix_dta.yaml", package = "DTAtools"))$datasets[[1]]
+    labels <- vapply(y$row_labels, function(l) l$id, "")
+    corner <- vapply(y$matrix$header$corner, as.character, "")
+    do.call(session$setInputs, c(
+      list(
+        mx_corner_mode = "list", mx_corner_none = FALSE,
+        mx_header_label = y$matrix$header$label,
+        mx_header_description = "",
+        mx_header_pattern = y$matrix$header$pattern,
+        mx_header_values = "", mx_header_length = "",
+        mx_n_columns_min = y$matrix$header$count$min,
+        mx_n_columns_max = y$matrix$header$count$max,
+        mx_row_key = y$matrix$rows$key,
+        mx_n_rows_min = rows + 1, mx_n_rows_max = NA_real_,
+        mx_cell_type = y$matrix$cells$type,
+        mx_cell_nullable = FALSE,
+        mx_range_min = y$matrix$cells$range$min, mx_range_max = NA_real_,
+        mx_infinite = FALSE,
+        mx_cell_values = "", mx_cell_pattern = "", mx_cell_length = "",
+        mx_cell_format = "", mx_cell_label = "", mx_cell_description = ""
+      ),
+      stats::setNames(as.list(corner), paste0("mx_corner_", seq_along(labels)))
+    ))
+    before <- as.list(datasets(rv$dta, "gene_counts")@matrix)
+    session$setInputs(mx_save = 2)
+    qa_check(
+      "an unchanged save leaves the matrix settings as they were",
+      identical(before, as.list(datasets(rv$dta, "gene_counts")@matrix))
+    )
+
+    # A minimum above the maximum.
+    session$setInputs(edit_matrix = 3)
+    session$setInputs(mx_row_key = "GENE_ID", mx_n_rows_min = 10, mx_n_rows_max = 5)
+    held <- rv$dta
+    session$setInputs(mx_save = 3)
+    qa_step("a minimum above the maximum is refused", FALSE, isTRUE(rv$mx_msg$ok))
+    qa_check("and leaves the dataset unchanged", identical(rv$dta, held))
+  })
+})
+
+test_that("OQ-APP-053 | a rule on a matrix row label is saved and a rule ID starting .matrix: is refused | REQ-APP-044", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+
+  rule_ids <- function(dta) vapply(datasets(dta, "gene_counts")@specs@rules, function(r) r@id, character(1))
+
+  shiny::testServer(app, {
+    mxa_editing(session, strrep("r", 32))
+    session$setInputs(edit_rules = 1)
+    n_before <- length(rule_ids(rv$dta))
+
+    session$setInputs(rule_add = 1)
+    session$setInputs(rule_type = "col_unique", rule_id = "gene_name_unique", rule_desc = "", rule_cols = "GENE_NAME")
+    session$setInputs(rule_save = 1)
+    qa_step("the rule on a row-label column is added", n_before + 1L, length(rule_ids(rv$dta)))
+    qa_step("under the ID given", TRUE, "gene_name_unique" %in% rule_ids(rv$dta))
+
+    held <- rv$dta
+    session$setInputs(rule_add = 2)
+    session$setInputs(rule_type = "col_unique", rule_id = ".matrix:x", rule_desc = "", rule_cols = "GENE_NAME")
+    session$setInputs(rule_save = 2)
+    qa_step("a rule ID starting .matrix: is refused", FALSE, isTRUE(rv$rule_msg$ok))
+    qa_check("and the rules are unchanged", identical(rule_ids(rv$dta), rule_ids(held)))
+  })
+})
+
+test_that("OQ-APP-054 | inspecting a too-few-rows finding states the declared minimum and the actual number of data rows | REQ-APP-045 | tags: white-box", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+
+  dir <- qa_tempdir()
+  spec <- file.path(dir, "few_rows.yaml")
+  writeLines(c(
+    "datasets:",
+    "  - id: few",
+    "    type: matrix",
+    "    files: { filename: \"few.tsv\", type: tsv }",
+    "    row_labels:",
+    "      - { id: ID, type: SAS Char, nullable: No }",
+    "    matrix:",
+    "      header: { corner: [id] }",
+    "      rows: { count: { min: 5 } }",
+    "      cells: { type: SAS Int, nullable: No }"
+  ), spec)
+  data <- file.path(dir, "few.tsv")
+  writeLines(c("id\tS1\tS2", "a\t1\t2", "b\t3\t4"), data) # two data rows
+
+  shiny::testServer(app, {
+    session$setInputs(dta_client_id = strrep("s", 32))
+    session$setInputs(dta_file = mxa_upload(spec))
+    session$setInputs(up_1_1 = mxa_upload(data))
+    session$setInputs(check_all = 1)
+    qa_step("the delivery fails", "fail", mxa_status(rv, "few"))
+
+    found <- qapp_fn("dta_dataset_messages")(rv$dta, "few")
+    hit <- found[found$keyword %in% "minItems", , drop = FALSE]
+    qa_step("with one row-count finding", 1L, nrow(hit))
+
+    inspected <- qapp_fn("dta_inspect")(rv$dta, "few", hit$id[[1]])
+    qa_check("it can be inspected", isTRUE(inspected$ok))
+    body <- as.character(render_inspect_body(inspected$value, "few"))
+    qa_check("the panel states the declared minimum of 5 data rows", grepl("at least 5 data rows", body, fixed = TRUE))
+    qa_check("and the actual 2 data rows", grepl("2 data rows", body, fixed = TRUE))
+  })
+})
+
+test_that("OQ-APP-055 | a refused file is listed in the dataset's messages until a matching file loads, and removing a file entry keeps a lazy table valid | REQ-APP-046", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+  qa_requires("arrow")
+
+  wrong <- file.path(qa_tempdir(), "not_the_expected_name.tsv")
+  file.copy(system.file("extdata", "matrix_gene_counts.tsv", package = "DTAtools"), wrong)
+
+  shiny::testServer(app, {
+    session$setInputs(dta_client_id = strrep("t", 32))
+    session$setInputs(dta_file = qapp_file_input("matrix_dta.yaml"))
+    session$setInputs(up_1_1 = mxa_upload(wrong))
+    shown <- msgs_r()
+    shown <- shown[shown$source %in% "load", , drop = FALSE]
+    qa_step("the refused file is listed once, as a load message", 1L, nrow(shown))
+    qa_check("naming the file", grepl("not_the_expected_name.tsv", shown$message, fixed = TRUE))
+    qa_check("and giving the reason", grepl("does not match", shown$message, fixed = TRUE))
+
+    session$setInputs(up_1_1 = qapp_file_input("matrix_gene_counts.tsv"))
+    shown <- msgs_r()
+    qa_step("a matching file loading in its place removes it", 0L, sum(shown$source %in% "load"))
+  })
+
+  # Removing the first of two file entries, with the table loaded lazily
+  # through the second.
+  lines <- c(
+    "datasets:", "  - id: gc", "    type: matrix", "    files:",
+    "      - { filename: \"a.tsv\", type: tsv }",
+    "      - { filename: \"b.tsv\", type: tsv }",
+    "    row_labels:",
+    "      - { id: GENE_ID, type: SAS Char, nullable: No }",
+    "      - { id: GENE_NAME, type: SAS Char, nullable: Yes }",
+    "    matrix:", "      header:", "        corner: [gene_id, gene_name]",
+    "      rows: { key: GENE_ID }", "      cells: { type: SAS Num }"
+  )
+  dta <- mxa_read(lines)
+  dir <- qa_tempdir()
+  file.copy(system.file("extdata", "matrix_gene_counts.tsv", package = "DTAtools"), file.path(dir, "b.tsv"))
+  ds <- load_file(dta@datasets[["gc"]], file = file.path(dir, "b.tsv"), handler_index = 2, stream = "always")
+  dta@datasets[["gc"]] <- ds
+  before <- check(dta, quiet = TRUE, persist = FALSE)
+  qa_check("control: the lazily held table passes with both entries", isTRUE(validation_status(before@datasets[["gc"]])$ok))
+
+  removed <- qapp_fn("dta_remove_handler")(dta, "gc", 1)
+  qa_check("removing the first file entry succeeds", isTRUE(removed$ok))
+  after <- check(removed$value, quiet = TRUE, persist = FALSE)
+  d <- after@datasets[["gc"]]
+  qa_step(
+    "no finding says the file changed or must be loaded again", 0L,
+    sum(grepl("load it again", as.data.frame(messages(d))$message, fixed = TRUE))
+  )
+  qa_check("and the table passes", isTRUE(validation_status(d)$ok))
+
+  # Reordering the two file entries in raw YAML, through the application: the
+  # table was loaded lazily through the second entry (an upload in slot 2).
+  qa_requires("withr")
+  withr::local_options(DTAtools.stream_threshold = 1)
+  rdir <- qa_tempdir()
+  spec <- file.path(rdir, "gc.yaml")
+  writeLines(c("metadata:", "  title: Reorder", "  version: \"1.0\"", lines), spec)
+  file.copy(system.file("extdata", "matrix_gene_counts.tsv", package = "DTAtools"), file.path(rdir, "b.tsv"))
+
+  shiny::testServer(app, {
+    session$setInputs(dta_client_id = strrep("u", 32))
+    session$setInputs(dta_file = mxa_upload(spec))
+    session$setInputs(up_1_2 = mxa_upload(file.path(rdir, "b.tsv")))
+    session$setInputs(check_all = 1)
+    qa_check("the lazily loaded table passes before the reorder", isTRUE(validation_status(rv$dta@datasets[["gc"]])$ok))
+    qapp_unlock_editing(session)
+
+    y <- rv$yaml_text
+    swapped <- gsub("@@", "b.tsv", gsub("b.tsv", "a.tsv", gsub("a.tsv", "@@", y, fixed = TRUE), fixed = TRUE), fixed = TRUE)
+    qa_check("the two file entries were swapped in the text", !identical(y, swapped))
+    session$setInputs(raw_yaml_editor = swapped)
+    session$setInputs(apply_yaml = 1)
+    qa_check("the reordered text applies", isTRUE(rv$yaml_msg$ok))
+    qa_step("the table is still held", 1L, length(rv$dta@datasets[["gc"]]@tables))
+    session$setInputs(check_all = 2)
+    found <- qapp_fn("dta_dataset_messages")(rv$dta, "gc")
+    qa_step(
+      "no finding says the file changed or must be loaded again", 0L,
+      sum(grepl("load it again", found$message, fixed = TRUE))
+    )
+    qa_check("and the table passes", isTRUE(validation_status(rv$dta@datasets[["gc"]])$ok))
   })
 })

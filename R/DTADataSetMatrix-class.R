@@ -484,7 +484,11 @@ dta_matrix_gate <- function(head, x, path) {
     }
     hint <- switch(shape,
       fewer = "The header has one field fewer than the data rows. If it has no field above the row names (R {.fn write.table}), declare {.code corner: [null, ...]}.",
-      more = "The header has a field above the row labels that your corner does not declare (drop the {.code null}).",
+      more = if (cn < k) {
+        "The header has a field above the row labels that your corner does not declare (drop the {.code null})."
+      } else {
+        "The first data row has one field fewer than the header implies: that row is missing a field, or the header has a field above the row labels that your corner does not declare."
+      },
       ragged = "The first data row and the header have unrelated field counts: the file is ragged."
     )
     cli_abort(
