@@ -271,6 +271,75 @@ test_that("the Raw YAML (Ace) editor is born editable when edit mode starts on",
   })
 })
 
+test_that("the Raw YAML tab offers a Copy button while read-only", {
+  # Copying edits nothing, so unlike Apply/Revert (output$yaml_edit_actions,
+  # NULL when read-only) it must not be gated on edit mode. It is static markup
+  # in the tab, which is what this reads back.
+  clean_session_file()
+  shiny::testServer(app_server_dir(), {
+    leave_edit_mode(session)
+    load_fixture(session)
+
+    html <- paste(as.character(output$main$html), collapse = "\n")
+
+    expect_match(html, 'id="copy_yaml"', fixed = TRUE)
+    # The contrast that makes this test mean something: Apply/Revert are gone
+    # in the same state (they render through their own uiOutput).
+    expect_null(output$yaml_edit_actions)
+  })
+})
+
+test_that("the Raw YAML tab offers a Copy button next to Apply while editable", {
+  # The apply button lives in a uiOutput, so the editable state is checked
+  # through the same restore path as the born-editable Ace test above.
+  clean_session_file()
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_client_id = strrep("f", 32))
+    load_fixture(session)
+    unlock_editing(session)
+    session$setInputs(restore_session = 1)
+
+    html <- paste(as.character(output$main$html), collapse = "\n")
+
+    expect_match(html, 'id="copy_yaml"', fixed = TRUE)
+    # Editable for real: Apply is rendered, so Copy sits beside it.
+    actions <- paste(as.character(output$yaml_edit_actions$html), collapse = "\n")
+    expect_match(actions, 'id="apply_yaml"', fixed = TRUE)
+  })
+})
+
+test_that("the Copy button is wired client-side and reads the live editor", {
+  # The clipboard write needs a browser, which this suite does not have (see
+  # test-shinyapp-click-guard.R), so the structural facts the feature rests on
+  # are pinned instead. Each is a way it would silently stop working:
+  #  - not registered in the page head -> the button does nothing;
+  #  - an actionButton -> the click guard would hold it and it would need a
+  #    server observer that does not exist;
+  #  - copying rv$yaml_text instead of the editor -> unapplied edits are lost.
+  src <- app_source("app.R")
+  # Anchored on the ui_page() definition: a bare `tags$head(` also appears in
+  # comments earlier in the file.
+  head_block <- sub(
+    "(?s)^.*?\nui_page <- function.*?tags\\$head\\((.*?)\\n *\\),.*$",
+    "\\1", src,
+    perl = TRUE
+  )
+  expect_false(identical(head_block, src))
+  expect_match(head_block, "copy_yaml_js", fixed = TRUE)
+
+  js <- sub("(?s)^.*?\ncopy_yaml_js <- \"(.*?)\n\"\n.*$", "\\1", src, perl = TRUE)
+  expect_false(identical(js, src))
+  expect_match(js, "#copy_yaml", fixed = TRUE)
+  expect_match(js, "ace.edit(el).getValue()", fixed = TRUE)
+  # Ace not built yet leaves a bare <pre> with no .value (undefined): that must
+  # bail out, not put the string "undefined" on the clipboard.
+  expect_match(js, "typeof text !== 'string'", fixed = TRUE)
+  expect_match(js, "navigator.clipboard.writeText", fixed = TRUE)
+  expect_match(js, "execCommand('copy')", fixed = TRUE)
+
+  expect_no_match(src, 'actionButton("copy_yaml"', fixed = TRUE)
+})
+
 test_that("with edit mode off, a metadata field value is not written", {
   # The regression guard for the save_md()/save_tr()/save_affiliation() gates.
   #
