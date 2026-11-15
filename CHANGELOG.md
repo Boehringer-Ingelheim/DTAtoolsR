@@ -83,7 +83,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   (unique, non-missing, row count), the dimensions (exact, flexible or
   `min`/`max`) and every cell (type, range, missing, infinite; `NaN` is never
   a value). It works in memory and streamed, inside containers and
-  `load_delivery()`, in exported documents and in the app. Example data:
+  `load_delivery()`, in exported documents and in the app, where a matrix
+  dataset can be added (Add dataset -> Matrix asks for the first row-label
+  column, the header text above the row labels and the cell type), its row
+  labels edited like columns (renaming the row key, or adding, removing or
+  reordering row labels, keeps the row key and the listed header corner in
+  step), its header, dimensions and cell values edited under Matrix layout, and
+  its rules edited on the row-label columns. Example data:
   `inst/extdata/matrix_dta.yaml`.
 
 ### Changed
@@ -124,9 +130,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   the "Datasets" label pinned, so what follows it stays in reach.
 - Validation of very wide files is faster: columns are coerced one by one, and
   the reader is given a schema instead of inferring one.
+- **A file the app refuses to load says why, and keeps saying it.** The reason
+  (for a matrix, which header field is missing or which delimiter the file
+  seems to use) is shown with its line breaks, the notice stays until it is
+  closed, and the refusal is listed in that dataset's validation messages until
+  a file loads in its place. Before, the reason was run together into one line
+  and disappeared after ten seconds.
 
 ### Fixed
 
+- **The app's pickers no longer stop working after the validation messages
+  have been shown.** Once the messages table had rendered, a picker opened
+  afterwards (the container of a file entry, the columns of a uniqueness rule,
+  the people authorized for corrections) stayed a plain list, and the fields of
+  its dialog could stop responding with it. The table's filter
+  row loaded an older copy of the picker library that lacks a component every
+  picker needs; the app now loads its own copy with the page.
 - A quoted header longer than 1 MiB no longer aborts as a "quoted line break"
   when the file is read, for tabular files as well as matrices.
 - A numeric cell holding the text `NaN` (or `nan`, `-nan`) is now missing after

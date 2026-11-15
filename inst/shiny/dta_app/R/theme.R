@@ -913,6 +913,7 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
     }
     #shiny-notification-panel .shiny-notification-error { border-left-color: var(--bi-fail); }
     #shiny-notification-panel .shiny-notification-warning { border-left-color: var(--bi-warn); }
+    .notice-multiline { white-space: pre-line; }
 
     /* Wider inspect modal + a body that wraps/scrolls instead of overflowing. */
     .modal-xl { max-width: 92vw; }

@@ -36,6 +36,8 @@
 #       - { id: STUDYID, label: Study Identifier, type: SAS Char }
 #       - { id: GFNAM, label: Vendor Name, type: SAS Char }
 #     rules: []
+#   A matrix dataset uses `type: matrix` and `row_labels:` instead of
+#   `columns:` (see the supported paths further down).
 # -----------------------------------------------------------------------------
 
 # Message for a missing 'dataset:' section, with a hint when the file

@@ -191,6 +191,11 @@ test_that("the field-count gate names the case by condition class, before any da
   # declare: `[null]` given, but the file has the field.
   expect_error(load("\tS1\tS2\nr1\t1\t2\n", corner = list(NULL)), class = "dta_matrix_header_more")
   expect_error(load("\tS1\tS2\nr1\t1\n"), class = "dta_matrix_header_more")
+  # The hint names a `null` only when the corner declares one.
+  e <- expect_error(load("\tS1\tS2\nr1\t1\n"), class = "dta_matrix_header_more")
+  expect_false(grepl("null", paste(conditionMessage(e), collapse = " "), fixed = TRUE))
+  e <- expect_error(load("\tS1\tS2\nr1\t1\t2\n", corner = list(NULL)), class = "dta_matrix_header_more")
+  expect_match(paste(conditionMessage(e), collapse = " "), "null", fixed = TRUE)
   expect_error(load("\tS1\tS2\nr1\t1\t2\t3\t4\t5\n"), class = "dta_matrix_header_ragged")
   # Every gate error is also the family class, and the hint points the right way.
   e <- expect_error(load("S1\tS2\nr1\t1\t2\n"), class = "dta_matrix_header_gate")

@@ -2019,6 +2019,16 @@ very large file try `check(dta, fail_fast = TRUE)` first: it stops at the first
 batch that shows a problem, which is usually a wrong corner or header and not
 a million bad cells.
 
+### In the app
+
+Add dataset offers Matrix, which asks for the first row-label column, the header
+text above the row labels (the corner) and the cell type. The Edit menu of a
+matrix has Row labels (the row-label columns, edited like columns and
+identified by position), Matrix layout (header, dimensions and cell values;
+changing the header of a loaded file asks for it to be loaded again) and Rules.
+A file whose header does not fit is refused with the reason, which also appears
+in the dataset's validation messages.
+
 ### What is not supported
 
 - preamble lines before the header (featureCounts, GCT)
@@ -2029,7 +2039,7 @@ a million bad cells.
 - references between datasets, checks across files, limits on missingness and
   column order
 - SAS and XPT matrices, `Delim` handlers, and in-memory `tables =`
-- the template guide and the app's dataset editor
+- the template guide
 
 ---
 
