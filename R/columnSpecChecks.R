@@ -825,7 +825,7 @@ dta_columnspec_check_kinds <- function() {
       rep("header", 3), rep("dimensions", 4), rep("range", 2), "finite"
     ),
     keyword = c(
-      "corner", "propertyNames", "uniqueNames",
+      "rowLabelHeader", "propertyNames", "uniqueNames",
       "minProperties", "maxProperties", "minItems", "maxItems",
       "minimum", "maximum", "finite"
     ),

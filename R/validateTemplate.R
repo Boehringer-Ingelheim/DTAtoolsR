@@ -1176,7 +1176,9 @@
   plain_ds <- plain[["dataset"]]
   spec_key <- dta_dataset_spec_key(plain_ds)
   cols <- Filter(is.list, plain_ds[[spec_key]] %||% list())
-  cols <- lapply(cols, function(col) col[intersect(names(col), names(formals(DTAColumnSpec)))])
+  # A row label of a matrix also carries `header`.
+  col_keys <- c(names(formals(DTAColumnSpec)), if (identical(spec_key, "row_labels")) "header")
+  cols <- lapply(cols, function(col) col[intersect(names(col), col_keys)])
   # A matrix template is linted as the dataset it is, so its `matrix:` block is
   # judged too; a tabular one stays a bare columns + rules input.
   lint_input <- if (identical(spec_key, "row_labels")) {

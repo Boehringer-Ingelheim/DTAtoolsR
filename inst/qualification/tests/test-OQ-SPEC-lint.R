@@ -392,8 +392,14 @@ test_that("OQ-SPEC-058 | lint_dta() reports each problem of a matrix dataset und
 
   labels <- list(list(id = "ID", type = "SAS Char"))
   tabular <- list(id = "t", type = "tabular", files = list(filename = "t.csv", type = "csv"))
-  matrix <- function(header = list(corner = "blank"), cells = list(type = "SAS Int"), ...) {
-    mx_body(matrix = c(list(header = header, cells = cells), list(...)))
+  matrix <- function(columns = list(), cells = list(type = "SAS Int"), ...) {
+    mx_body(matrix = c(list(columns = columns, cells = cells), list(...)))
+  }
+  two_labels <- function(first, second) {
+    mx_body(row_labels = list(
+      list(id = "ID", header = first, type = "SAS Char", nullable = FALSE),
+      list(id = "DESC", header = second, type = "SAS Char", nullable = TRUE)
+    ))
   }
   cases <- list(
     list("columns on a matrix", mx_body(columns = labels), "matrix_columns_key"),
@@ -414,12 +420,18 @@ test_that("OQ-SPEC-058 | lint_dta() reports each problem of a matrix dataset und
       mx_body(files = list(filename = "m.tsv", type = "tsv", has_header = FALSE)), "matrix_file_type"
     ),
     list("no matrix block", mx_body(matrix = NULL), "matrix_field_missing"),
-    list("no cells block", mx_body(matrix = list(header = list(corner = "blank"))), "matrix_field_missing"),
+    list("no cells block", mx_body(matrix = list(columns = list(pattern = "^S"))), "matrix_field_missing"),
     list("an unknown key under matrix", matrix(rnage = 1), "matrix_field_unknown"),
     list("an unknown key under cells", matrix(cells = list(type = "SAS Int", rnage = 1)), "matrix_field_unknown"),
-    list("a data-column count of 0", matrix(header = list(corner = "blank", count = 0)), "matrix_count_invalid"),
-    list("a corner that is a number", matrix(header = list(corner = 7)), "matrix_corner_invalid"),
-    list("a corner list of two entries for one row label", matrix(header = list(corner = list("a", "b"))), "matrix_corner_invalid"),
+    list("a data-column count of 0", matrix(columns = list(count = 0)), "matrix_count_invalid"),
+    list("a header that is a number", two_labels(7, "d"), "row_label_header_invalid"),
+    list("a header that is a list", two_labels(list("a", "b"), "d"), "row_label_header_invalid"),
+    list("header: No on a row label that is not the first", two_labels("a", FALSE), "row_label_header_position"),
+    list(
+      "more data-column labels required than matrix.columns.values lists",
+      matrix(columns = list(values = list("S1", "S2"), count = list(min = 3))),
+      "matrix_columns_count_unsatisfiable"
+    ),
     list("a row key that is not a row label", matrix(rows = list(key = "NOPE")), "matrix_row_key_invalid"),
     list(
       "a key column declared nullable",

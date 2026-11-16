@@ -782,14 +782,15 @@ dataset:
   files: { filename: counts.tsv, type: tsv }
   row_labels:
     - id: GENE_ID
+      header: gene_id
       type: SAS Char
       nullable: No
   matrix:
-    header: { corner: [gene_id], pattern: '^S[0-9]{4}$' }
+    columns: { pattern: '^S[0-9]{4}$' }
     cells: { type: SAS Num, range: { min: 0 } }
 ```
 
-with, in a creation template, `patch: { modify_columns: [{ id: GENE_ID, pattern: '^ENSG' }], set: { matrix.cells.type: SAS Int } }`.
+with, in a creation template, `patch: { modify_columns: [{ id: GENE_ID, pattern: '^ENSG' }], set: { matrix.cells.type: SAS Int } }`. The header text above a row label is that row label's `header` field (`row_labels.GENE_ID.header`).
 
 The generic collection form is also accepted under `patch.columns:`. It supports the collection verbs `inherit`, `remove`, `add`, `modify`, and
 `order`:

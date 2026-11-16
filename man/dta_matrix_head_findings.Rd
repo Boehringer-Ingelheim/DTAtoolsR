@@ -17,7 +17,7 @@ columnspec, data) and \code{declared} (named integer: how many things each
 header keyword judged).
 }
 \description{
-Judges a header against the \code{matrix:} settings: the corner, every data
+Judges a header against the \code{matrix:} settings: the text above each row label, every data
 label, repeated labels and the number of data columns. The findings are in
 the shape of the column-spec error frame; ordered by position in the header.
 }

@@ -2601,27 +2601,27 @@ test_that("OQ-EXPORT-073 | a group condition used only as an IF is worded with t
 
 # ---- a matrix dataset in the document ------------------------------------------
 
-# A matrix with a null first corner entry, a bounded column count, a minimum
-# row count and a Num cell with an open-ended range, a second matrix with a
-# blank corner and exact counts, and a tabular dataset.
+# A matrix with header: No on its first row label, an at-least column count, a
+# minimum row count and a Num cell with an open-ended range, a second matrix
+# with an empty header text and exact counts, and a tabular dataset.
 ex_matrix_dta <- function() {
   matrix <- dta_dataset_from_list(list(
     id = "gene_counts", type = "matrix", files = list(filename = "g.tsv", type = "tsv"),
     row_labels = list(
-      list(id = "GENE_ID", type = "SAS Char", nullable = FALSE),
-      list(id = "GENE_NAME", type = "SAS Char", nullable = TRUE)
+      list(id = "GENE_ID", header = FALSE, type = "SAS Char", nullable = FALSE),
+      list(id = "GENE_NAME", header = "gene_name", type = "SAS Char", nullable = TRUE)
     ),
     matrix = list(
-      header = list(corner = list(NULL, "gene_name"), count = list(min = 1)),
+      columns = list(count = list(min = 1)),
       rows = list(key = "GENE_ID", count = list(min = 50000)),
       cells = list(type = "SAS Num", nullable = FALSE, range = list(min = 0), infinite = FALSE)
     )
   ))
   exact <- dta_dataset_from_list(list(
     id = "geno", type = "matrix", files = list(filename = "geno.tsv", type = "tsv"),
-    row_labels = list(list(id = "SNP", type = "SAS Char", nullable = FALSE)),
+    row_labels = list(list(id = "SNP", header = "", type = "SAS Char", nullable = FALSE)),
     matrix = list(
-      header = list(corner = "blank", count = 3),
+      columns = list(count = 3),
       rows = list(count = list(min = 0, max = 10)),
       cells = list(type = "SAS Int", nullable = TRUE)
     )
@@ -2644,17 +2644,17 @@ ex_layout_lines <- function(text, label) {
 
 # A one-matrix document whose layout is varied by the arguments, to compare what
 # the layout block says under different declarations.
-ex_layout_dta <- function(corner = list("", "gene_name"), header_extra = list(),
+ex_layout_dta <- function(first_header = "", columns_extra = list(),
                           rows = list(count = list(min = 1)), cells = list(type = "SAS Num", nullable = FALSE),
                           count = list(min = 1)) {
   dta_dataset_from_list(list(
     id = "lay", type = "matrix", files = list(filename = "l.tsv", type = "tsv"),
     row_labels = list(
-      list(id = "GENE_ID", type = "SAS Char", nullable = FALSE),
-      list(id = "GENE_NAME", type = "SAS Char", nullable = TRUE)
+      list(id = "GENE_ID", header = first_header, type = "SAS Char", nullable = FALSE),
+      list(id = "GENE_NAME", header = "gene_name", type = "SAS Char", nullable = TRUE)
     ),
     matrix = list(
-      header = c(list(corner = corner, count = count), header_extra),
+      columns = c(list(count = count), columns_extra),
       rows = c(list(key = "GENE_ID"), rows), cells = cells
     )
   ))
@@ -2677,14 +2677,15 @@ test_that("OQ-EXPORT-074 | write_dta md renders a matrix's row-label table and o
     TRUE, grepl("| GENE_ID | SAS Char | No |\n| GENE_NAME | SAS Char | Yes |", text, fixed = TRUE)
   )
 
-  # First matrix: corner [null, gene_name], key GENE_ID, rows at least 50000,
+  # First matrix: header: No then gene_name, key GENE_ID, rows at least 50000,
   # Num cell, not nullable, range min 0 with the upper side open, infinite no.
   first <- function(label) ex_layout_lines(text, label)[[1]]
-  qa_step("the corner names the declared header text", TRUE, grepl("gene_name", first("Header corner"), fixed = TRUE))
-  qa_step("the row count states its finite bound and no other number", "50000", gsub("[^0-9]+", " ", first("Data rows")) |> trimws())
+  qa_step("the header line names the declared header text", TRUE, grepl("gene_name", first("Header line"), fixed = TRUE))
+  qa_step("the layout states the file layout, with the row-label columns in file order", TRUE, grepl("GENE_ID, GENE_NAME", first("File layout"), fixed = TRUE))
+  qa_step("the row count is worded as a lower bound", "| Data rows | at least 50000 |", first("Data rows"))
   qa_step("the row key is named", TRUE, grepl("GENE_ID", first("Row key"), fixed = TRUE))
   qa_step("the cell type is stated", TRUE, grepl("SAS Num", first("Cell type"), fixed = TRUE))
-  qa_step("the range states its finite bound and no other number", "0", gsub("[^0-9]+", " ", first("Cell range")) |> trimws())
+  qa_step("the range is worded as a lower bound", "| Cell range | at least 0 |", first("Cell range"))
 
   # Second matrix: no range and no infinite setting are declared.
   qa_step(
@@ -2692,9 +2693,10 @@ test_that("OQ-EXPORT-074 | write_dta md renders a matrix's row-label table and o
     c(1L, 1L), c(length(ex_layout_lines(text, "Cell range")), length(ex_layout_lines(text, "Infinite values")))
   )
   second_cols <- ex_layout_lines(text, "Data columns")[[2]]
-  qa_step("an exact count states its single bound", "3", trimws(gsub("[^0-9]+", " ", second_cols)))
+  qa_step("an exact count is worded as exact", "| Data columns | exactly 3 |", second_cols)
   second_rows <- ex_layout_lines(text, "Data rows")[[2]]
-  qa_step("an upper-bounded row count states its bound", "10", trimws(gsub("[^0-9]+", " ", second_rows)))
+  qa_step("an upper-bounded row count is worded as an upper bound", "| Data rows | at most 10 |", second_rows)
+  qa_step("no row of the layout is named Header corner", 0L, length(ex_layout_lines(text, "Header corner")))
 
   plain <- ex_md_text(et_dta(), dir)
   qa_step(
@@ -2704,18 +2706,18 @@ test_that("OQ-EXPORT-074 | write_dta md renders a matrix's row-label table and o
   )
 })
 
-test_that("OQ-EXPORT-076 | the layout distinguishes a position with no field from a blank one, a two-sided bound from a one-sided one, and nullable from not | REQ-EXPORT-046", {
+test_that("OQ-EXPORT-076 | the layout distinguishes a header line with no field from an empty one, a two-sided bound from a one-sided one, and nullable from not | REQ-EXPORT-046", {
   value <- function(ds, label) ex_layout_value(ds, label)[[1]]
 
-  none <- value(ex_layout_dta(corner = list(NULL, "gene_name")), "Header corner")
-  blank <- value(ex_layout_dta(corner = list("", "gene_name")), "Header corner")
-  qa_step("both corners state the declared text", c(TRUE, TRUE), c(grepl("gene_name", none, fixed = TRUE), grepl("gene_name", blank, fixed = TRUE)))
-  qa_step("no field and a blank are stated differently", TRUE, !identical(none, blank))
+  none <- value(ex_layout_dta(first_header = FALSE), "Header line")
+  blank <- value(ex_layout_dta(first_header = ""), "Header line")
+  qa_step("both header lines state the declared text", c(TRUE, TRUE), c(grepl("gene_name", none, fixed = TRUE), grepl("gene_name", blank, fixed = TRUE)))
+  qa_step("no field and an empty text are stated differently", TRUE, !identical(none, blank))
 
   two <- value(ex_layout_dta(count = list(min = 4, max = 9)), "Data columns")
-  qa_step("a two-sided count states both bounds", c(TRUE, TRUE), c(grepl("4", two, fixed = TRUE), grepl("9", two, fixed = TRUE)))
+  qa_step("a two-sided count is worded N to M", "| Data columns | 4 to 9 |", two)
   low <- value(ex_layout_dta(count = list(min = 4)), "Data columns")
-  qa_step("a lower bound alone states it and no other number", "4", trimws(gsub("[^0-9]+", " ", low)))
+  qa_step("a lower bound alone is worded at least", "| Data columns | at least 4 |", low)
   qa_step("and differs from the two-sided count", TRUE, !identical(low, two))
 
   yes <- value(ex_layout_dta(cells = list(type = "SAS Num", nullable = TRUE)), "Missing cells")
@@ -2723,21 +2725,21 @@ test_that("OQ-EXPORT-076 | the layout distinguishes a position with no field fro
   qa_step("missing cells allowed and not allowed are stated differently", TRUE, !identical(yes, no))
 
   upper <- value(ex_layout_dta(cells = list(type = "SAS Num", nullable = FALSE, range = list(max = 7))), "Cell range")
-  qa_step("an open lower side states the finite bound and no other number", "7", trimws(gsub("[^0-9]+", " ", upper)))
+  qa_step("an open lower side is worded at most", "| Cell range | at most 7 |", upper)
   closed <- value(ex_layout_dta(cells = list(type = "SAS Num", nullable = FALSE, range = list(min = 2, max = 7))), "Cell range")
-  qa_step("and differs from the closed range, which states both bounds", c(TRUE, TRUE, TRUE), c(!identical(upper, closed), grepl("2", closed, fixed = TRUE), grepl("7", closed, fixed = TRUE)))
+  qa_step("and differs from the closed range, which is worded N to M with both ends included", "| Cell range | 2 to 7 (both included) |", closed)
 
   inf_no <- value(ex_layout_dta(cells = list(type = "SAS Num", nullable = FALSE, infinite = FALSE)), "Infinite values")
   inf_yes <- value(ex_layout_dta(cells = list(type = "SAS Num", nullable = FALSE, infinite = TRUE)), "Infinite values")
   qa_step("infinite values allowed and not allowed are stated differently", TRUE, !identical(inf_no, inf_yes))
 
   described <- ex_layout_dta(
-    header_extra = list(description = "Sample identifiers as sequenced"),
+    columns_extra = list(description = "Sample identifiers as sequenced"),
     cells = list(type = "SAS Num", nullable = FALSE, description = "Normalised read count")
   )
   text <- ex_md_text(DTA(datasets = list(described)), qa_tempdir())
   qa_step(
-    "the header and cell descriptions appear verbatim",
+    "the data-column label and cell descriptions appear verbatim",
     c(TRUE, TRUE),
     c(grepl("Sample identifiers as sequenced", text, fixed = TRUE), grepl("Normalised read count", text, fixed = TRUE))
   )
@@ -2753,15 +2755,15 @@ test_that("OQ-EXPORT-075 | write_dta docx carries the row-label heading, the lay
   qa_step("the layout heading", TRUE, grepl("Matrix layout", text, fixed = TRUE))
 
   tables <- qa_docx_tables(out)
-  layout <- Filter(function(t) "Header corner" %in% t$col1, tables)
+  layout <- Filter(function(t) "Header line" %in% t$col1, tables)
   qa_step("one layout table per matrix dataset", 2L, length(layout))
   first <- layout[[1]]
   qa_step(
-    "the first layout table states the corner text and the row bound",
-    c(TRUE, "50000"),
+    "the first layout table states the header line and the row bound",
+    c(TRUE, "at least 50000"),
     c(
-      grepl("gene_name", first$col2[first$col1 == "Header corner"], fixed = TRUE),
-      trimws(gsub("[^0-9]+", " ", first$col2[first$col1 == "Data rows"]))
+      grepl("gene_name", first$col2[first$col1 == "Header line"], fixed = TRUE),
+      first$col2[first$col1 == "Data rows"]
     )
   )
 })

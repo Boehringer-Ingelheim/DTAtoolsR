@@ -940,7 +940,7 @@ test_that("OQ-APP-041 | the brand bar shows the header tag escaped beside the ti
   }
 })
 
-test_that("OQ-APP-056 | a file-input value that is not an upload from Shiny's own upload folder is neither read nor loaded, and a staged upload is | REQ-APP-047", {
+test_that("OQ-APP-060 | a file-input value that is not an upload from Shiny's own upload folder is neither read nor loaded, and a staged upload is | REQ-APP-050", {
   app <- qapp_skip_unless_app_installed()
   qapp_clean_session_files()
 

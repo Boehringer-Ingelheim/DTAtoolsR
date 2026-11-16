@@ -119,7 +119,7 @@ qapp_file_input <- function(filename) {
 # value (a data frame: name, size, type, datapath). The app acts on a file
 # input only when every datapath is an existing file, not a directory, at
 # <tempdir()>/<24 lowercase hex>/<index><.ext>, the layout of Shiny's own upload
-# context (REQ-APP-047), so a fixture path handed over directly is a value the
+# context (REQ-APP-050), so a fixture path handed over directly is a value the
 # application correctly refuses.
 #
 # WHY THIS WRITES UNDER tempdir() AND NOT qa_tempdir(): qa_tempdir() is a

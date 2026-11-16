@@ -23,6 +23,13 @@ The functions that read or write such an object (\code{load_file()},
 \code{check()}, \code{load_delivery()}, \code{container_assignments()})
 do this by themselves; call \code{upgrade_dta()} when you want to inspect or
 modify the object's properties directly.
+
+One kind of object cannot be upgraded and is refused, by
+\code{upgrade_dta()} and by those functions alike, with a condition of class
+\code{dta_matrix_format_outdated}: a matrix dataset saved while its header
+texts were still declared under \code{matrix.header.corner}. They now belong
+to the row labels (\code{header}), and reading the object on would replace
+them with the row-label ids. Read its specification from YAML again.
 }
 \examples{
 dta <- create_example_DTA()

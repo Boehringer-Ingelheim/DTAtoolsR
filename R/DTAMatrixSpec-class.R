@@ -1,17 +1,16 @@
 #' @title DTAMatrixSpec Class
 #' @description
-#' The settings of a matrix dataset: what the header must look like, how many
-#' data columns and rows there may be, which row-label column is the key, and
-#' what a cell may hold. Internal; written in a specification as the
-#' \code{matrix:} block and read by \code{dta_matrix_spec_from_list()}.
-#' @param header A \code{\link{DTAColumnSpec}} (id \code{"header"}, type
-#'   \code{SAS Char}, not nullable) every data-column label must satisfy.
-#' @param corner_mode \code{"named"} (the header text above the row labels is
-#'   the row-label ids), \code{"blank"} (all empty) or \code{"list"} (the
-#'   entries of \code{corner}).
-#' @param corner Character. The expected corner fields for \code{"list"};
-#'   \code{NA} (a YAML \code{null}) is allowed as the first entry only and means
-#'   the header has no field there. Empty otherwise.
+#' The settings of a matrix dataset: what the labels of the data columns must
+#' look like, how many data columns and rows there may be, which row-label
+#' column is the key, and what a cell may hold. Internal; written in a
+#' specification as the \code{matrix:} block (\code{columns}, \code{rows},
+#' \code{cells}) and read by \code{dta_matrix_spec_from_list()}. The header text
+#' above a row-label column belongs to that column (\code{header} of a
+#' \code{row_labels} entry), not to this object.
+#' @param header A \code{\link{DTAColumnSpec}} (id \code{"matrix.columns"}, type
+#'   \code{SAS Char}, not nullable) every data-column label must satisfy: the
+#'   \code{label}, \code{description}, \code{pattern}, \code{values} and
+#'   \code{length} of \code{matrix.columns}.
 #' @param n_columns Numeric of length 2: the minimum (at least 1) and maximum
 #'   number of data columns; the maximum may be \code{Inf}.
 #' @param row_key Character or \code{NULL}. The row-label id(s) that identify a
@@ -26,40 +25,19 @@ DTAMatrixSpec <- S7::new_class(
   "DTAMatrixSpec",
   properties = list(
     header = DTAColumnSpec,
-    corner_mode = S7::class_character,
-    corner = S7::class_character,
     n_columns = S7::class_numeric,
     row_key = class_character_or_null,
     n_rows = S7::class_numeric,
     cells = DTAColumnSpecCell
   ),
   validator = function(self) {
-    if (!identical(self@header@id, "header")) {
-      cli_abort("The matrix header spec must have the id {.val header}.", class = "dta_matrix_header_invalid")
+    if (!identical(self@header@id, "matrix.columns")) {
+      cli_abort("The spec of the data-column labels must have the id {.val matrix.columns}.", class = "dta_matrix_header_invalid")
     }
     if (!identical(dta_cell_type(self@header), "Char") || !identical(self@header@nullable, FALSE)) {
       cli_abort(
         "The matrix header spec must be a non-nullable {.val SAS Char} column.",
         class = "dta_matrix_header_invalid"
-      )
-    }
-    if (length(self@corner_mode) != 1L || !(self@corner_mode %in% c("named", "blank", "list"))) {
-      cli_abort(
-        "{.field corner_mode} must be one of {.val named}, {.val blank} or {.val list}.",
-        class = "dta_matrix_corner_invalid"
-      )
-    }
-    if (self@corner_mode == "list") {
-      if (length(self@corner) == 0L || anyNA(self@corner[-1L])) {
-        cli_abort(
-          "{.field corner} needs at least one entry, and only the first may be {.code null}.",
-          class = "dta_matrix_corner_invalid"
-        )
-      }
-    } else if (length(self@corner) != 0L) {
-      cli_abort(
-        "{.field corner} is only used with {.val list}.",
-        class = "dta_matrix_corner_invalid"
       )
     }
     lowest <- c(n_columns = 1, n_rows = 0)
@@ -117,45 +95,6 @@ dta_matrix_block <- function(x, path, allowed, required = character(0)) {
     }
   }
   x
-}
-
-# yaml::read_yaml() returns a one-element sequence as a scalar, so
-# `corner: [named]` cannot be told from `corner: named`. A corner whose text
-# really is "named" or "blank" with a single row label must therefore use the
-# `named` keyword with that id.
-dta_matrix_corner <- function(x) {
-  bad <- function() {
-    cli_abort(
-      c(
-        "{.field matrix.header.corner} must be {.val named}, {.val blank} or a list of header texts.",
-        "i" = "Quote every text: YAML reads {.code [1]} as a number and {.code [yes]} as TRUE.",
-        "i" = "{.code null} is allowed as the first entry only."
-      ),
-      class = "dta_matrix_corner_invalid"
-    )
-  }
-  # A one-entry R list is the same corner as the YAML scalar.
-  if (is.list(x) && length(x) == 1L && is.character(x[[1L]]) && length(x[[1L]]) == 1L &&
-    !is.na(x[[1L]]) && x[[1L]] %in% c("named", "blank")) {
-    x <- x[[1L]]
-  }
-  if (is.character(x) && length(x) == 1L && !is.na(x) && x %in% c("named", "blank")) {
-    return(list(mode = x, corner = character(0)))
-  }
-  entries <- if (is.list(x)) x else as.list(x)
-  if (length(entries) == 0L) {
-    bad()
-  }
-  out <- vapply(seq_along(entries), function(i) {
-    e <- entries[[i]]
-    if (is.null(e)) {
-      if (i != 1L) bad()
-      return(NA_character_)
-    }
-    if (!is.character(e) || length(e) != 1L || is.na(e)) bad()
-    e
-  }, character(1))
-  list(mode = "list", corner = out)
 }
 
 dta_matrix_count <- function(x, path, default_min, lowest) {
@@ -229,11 +168,10 @@ dta_matrix_bound <- function(x, path) {
 #' @return A `DTAMatrixSpec`.
 #' @keywords internal
 dta_matrix_spec_from_list <- function(x) {
-  x <- dta_matrix_block(x, "matrix", c("header", "rows", "cells"), c("header", "cells"))
+  x <- dta_matrix_block(x, "matrix", c("columns", "rows", "cells"), "cells")
   hd <- dta_matrix_block(
-    x$header, "matrix.header",
-    c("corner", "pattern", "values", "length", "label", "description", "count"),
-    "corner"
+    x$columns %||% list(), "matrix.columns",
+    c("label", "description", "pattern", "values", "length", "count")
   )
   rows <- dta_matrix_block(x$rows %||% list(), "matrix.rows", c("key", "count"))
   cl <- dta_matrix_block(
@@ -245,8 +183,6 @@ dta_matrix_spec_from_list <- function(x) {
     "type"
   )
 
-  corner <- dta_matrix_corner(hd$corner)
-
   # The RAW list, before DTAColumnSpec() flattens it: by then 007 is 7 and Y TRUE.
   if (!is.null(hd$values)) {
     texts <- if (is.list(hd$values)) hd$values else as.list(hd$values)
@@ -254,15 +190,15 @@ dta_matrix_spec_from_list <- function(x) {
     if (length(texts) == 0L || !all(vapply(texts, function(v) is.character(v) && length(v) == 1L, logical(1)))) {
       cli_abort(
         c(
-          "{.field matrix.header.values} must be quoted text.",
+          "{.field matrix.columns.values} must be quoted text.",
           "i" = "Quote the labels: YAML reads {.code 007} as 7 and {.code Y} as TRUE."
         ),
-        class = "dta_matrix_header_values_text"
+        class = "dta_matrix_columns_values_text"
       )
     }
   }
   header <- DTAColumnSpec(
-    id = "header", type = "SAS Char", nullable = FALSE,
+    id = "matrix.columns", type = "SAS Char", nullable = FALSE,
     label = hd$label, description = hd$description,
     pattern = hd$pattern, values = hd$values, length = hd$length
   )
@@ -324,9 +260,7 @@ dta_matrix_spec_from_list <- function(x) {
 
   DTAMatrixSpec(
     header = header,
-    corner_mode = corner$mode,
-    corner = corner$corner,
-    n_columns = dta_matrix_count(hd$count %||% list(), "matrix.header.count", 1, 1),
+    n_columns = dta_matrix_count(hd$count %||% list(), "matrix.columns.count", 1, 1),
     row_key = rk,
     n_rows = dta_matrix_count(rows$count %||% list(), "matrix.rows.count", 1, 0),
     cells = cells
@@ -355,19 +289,28 @@ dta_matrix_count_list <- function(n) {
   }
 }
 
+# A count in words: "exactly 96", "at least 1", "at most 384", "1 to 384",
+# "any number". Shared by print() and the exported document.
+dta_matrix_count_words <- function(n) {
+  num <- function(v) format(v, big.mark = "", scientific = FALSE, trim = TRUE)
+  lo <- n[[1L]]
+  hi <- n[[2L]]
+  if (lo == hi) {
+    paste("exactly", num(lo))
+  } else if (is.infinite(hi)) {
+    if (lo == 0) "any number" else paste("at least", num(lo))
+  } else if (lo == 0) {
+    paste("at most", num(hi))
+  } else {
+    paste(num(lo), "to", num(hi))
+  }
+}
+
 dta_drop_null <- function(x) x[!vapply(x, is.null, logical(1))]
 
 method(as.list, DTAMatrixSpec) <- function(x, ...) {
-  corner <- if (x@corner_mode != "list") {
-    x@corner_mode
-  } else if (anyNA(x@corner)) {
-    lapply(x@corner, function(e) if (is.na(e)) NULL else e)
-  } else {
-    x@corner
-  }
   h <- x@header
-  header <- list(
-    corner = corner,
+  columns <- list(
     label = h@label,
     description = h@description,
     pattern = h@pattern,
@@ -379,23 +322,17 @@ method(as.list, DTAMatrixSpec) <- function(x, ...) {
   cells$id <- NULL
   if (is.list(cells$range)) cells$range <- lapply(cells$range, dta_matrix_as_whole)
   list(
-    header = dta_drop_null(header),
+    columns = dta_drop_null(columns),
     rows = dta_drop_null(list(key = x@row_key, count = dta_matrix_count_list(x@n_rows))),
     cells = dta_drop_null(cells)
   )
 }
 
 method(print, DTAMatrixSpec) <- function(x, ...) {
-  corner <- if (x@corner_mode == "list") {
-    paste(ifelse(is.na(x@corner), "null", x@corner), collapse = ", ")
-  } else {
-    x@corner_mode
-  }
   key <- if (is.null(x@row_key)) "first row label" else paste(x@row_key, collapse = ", ")
   cli::cli_text("<{.emph DTAMatrixSpec}>")
-  cli::cli_alert("corner : {corner}")
-  cli::cli_alert("columns: {x@n_columns[[1]]} to {x@n_columns[[2]]}")
-  cli::cli_alert("rows   : {x@n_rows[[1]]} to {x@n_rows[[2]]}; key {key}")
+  cli::cli_alert("columns: {dta_matrix_count_words(x@n_columns)}")
+  cli::cli_alert("rows   : {dta_matrix_count_words(x@n_rows)}; key {key}")
   cli::cli_alert("cells  : {dta_cell_type(x@cells)}")
   invisible(x)
 }

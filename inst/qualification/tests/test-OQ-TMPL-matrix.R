@@ -24,11 +24,11 @@ tmx_body <- function(row_labels = NULL) {
     id = "counts", type = "matrix",
     files = list(filename = "c.tsv", type = "tsv"),
     row_labels = row_labels %||% list(
-      list(id = "GENE_ID", type = "SAS Char", nullable = FALSE),
-      list(id = "GENE_NAME", type = "SAS Char", nullable = TRUE)
+      list(id = "GENE_ID", header = "gene_id", type = "SAS Char", nullable = FALSE),
+      list(id = "GENE_NAME", header = "gene_name", type = "SAS Char", nullable = TRUE)
     ),
     matrix = list(
-      header = list(corner = c("gene_id", "gene_name"), pattern = "^S[0-9]+$"),
+      columns = list(pattern = "^S[0-9]+$"),
       cells = list(type = "SAS Num")
     )
   )
@@ -47,7 +47,7 @@ tmx_dataset_template <- function(row_label_lines, matrix_lines = NULL, files = "
     "  row_labels:", row_label_lines,
     matrix_lines %||% c(
       "  matrix:",
-      "    header: { corner: [gene_id, gene_name], pattern: '^S[0-9]+$' }",
+      "    columns: { pattern: '^S[0-9]+$' }",
       "    cells: { type: SAS Num }"
     )
   )
@@ -214,50 +214,56 @@ test_that("OQ-TMPL-118 | values_from on a row label expands to the vocabulary's 
 })
 
 # A DTA read from YAML lines, for the diff and history cases.
-tmx_dta <- function(row_label_lines, corner = "[gene_id, gene_name]") {
+tmx_dta <- function(row_label_lines) {
   path <- file.path(qa_tempdir(), paste0("spec", sample.int(1e6, 1L), ".yaml"))
   writeLines(c(
     "metadata:", "  title: Counts", "  version: \"1.0\"", "datasets:", "  - id: counts", "    type: matrix",
     "    files: { filename: c.tsv, type: tsv }",
     "    row_labels:", row_label_lines,
     "    matrix:",
-    paste0("      header: { corner: ", corner, " }"),
     "      cells: { type: SAS Num }"
   ), path)
   suppressMessages(read_dta_from_yaml(path))
 }
 
 rl_pair <- c(
-  "      - { id: GENE_ID, type: SAS Char, nullable: No }",
-  "      - { id: GENE_NAME, type: SAS Char, nullable: No }"
+  "      - { id: GENE_ID, header: gene_id, type: SAS Char, nullable: No }",
+  "      - { id: GENE_NAME, header: gene_name, type: SAS Char, nullable: No }"
 )
 
-test_that("OQ-TMPL-119 | the template diff keys row labels by id and treats the corner as one value | REQ-TMPL-051 | tags: white-box", {
+test_that("OQ-TMPL-119 | the template diff keys row labels by id, and a row label's header is one of its fields | REQ-TMPL-051 | tags: white-box", {
   qapp_skip_unless_app_installed()
   diff <- qapp_fn("dta_diff")
   before <- tmx_dta(rl_pair)
 
   # One row label's field changed, and one row label added.
   after <- tmx_dta(c(
-    "      - { id: GENE_ID, type: SAS Char, nullable: No }",
-    "      - { id: GENE_NAME, type: SAS Char, nullable: Yes }",
-    "      - { id: BIOTYPE, type: SAS Char, nullable: Yes }"
-  ), corner = "[gene_id, gene_name, biotype]")
+    "      - { id: GENE_ID, header: gene_id, type: SAS Char, nullable: No }",
+    "      - { id: GENE_NAME, header: gene_name, type: SAS Char, nullable: Yes }",
+    "      - { id: BIOTYPE, header: biotype, type: SAS Char, nullable: Yes }"
+  ))
   rows <- diff(before, after)$datasets
   changed <- rows[rows$change == "changed", "key"]
   qa_step(
     "a changed field of one row label is one change, keyed under row_labels by the id",
-    c("counts.matrix.header.corner", "counts.row_labels.GENE_NAME.nullable"), sort(changed, method = "radix")
+    "counts.row_labels.GENE_NAME.nullable", changed
   )
   added <- rows$key[rows$change == "added"]
   qa_check("the added row label's fields are keyed by its id", length(added) > 0L && all(startsWith(added, "counts.row_labels.BIOTYPE.")))
   qa_check("a row label that did not change is not listed", !any(grepl("GENE_ID", rows$key, fixed = TRUE)))
   qa_check("no key sits under columns for a matrix dataset", !any(grepl("^counts[.]columns[.]", rows$key)))
 
-  # The corner is one value: a corner whose two entries both differ is still one row.
-  corner_only <- diff(before, tmx_dta(rl_pair, corner = "[~, description]"))$datasets
-  qa_step("changing both corner entries is one change", "counts.matrix.header.corner", corner_only$key)
-  qa_step("and it is a change, not an addition and a removal", "changed", corner_only$change)
+  # The header of a row label is one field of it: a different text, no header
+  # key and no field at all are each one change of that row label's header.
+  for (case in list(
+    list("a different text", "      - { id: GENE_ID, header: description, type: SAS Char, nullable: No }"),
+    list("an empty text", "      - { id: GENE_ID, header: '', type: SAS Char, nullable: No }"),
+    list("no field above the column", "      - { id: GENE_ID, header: No, type: SAS Char, nullable: No }")
+  )) {
+    header_only <- diff(before, tmx_dta(c(case[[2]], rl_pair[[2]])))$datasets
+    qa_step(sprintf("%s is one row, keyed by the row label and header", case[[1]]), "counts.row_labels.GENE_ID.header", header_only$key)
+    qa_step(sprintf("%s is a change, not an addition and a removal", case[[1]]), "changed", header_only$change)
+  }
 
   qa_step("two identical documents have no difference", 0L, nrow(diff(before, tmx_dta(rl_pair))$datasets))
 })
@@ -269,16 +275,16 @@ test_that("OQ-TMPL-120 | the template history calls a matrix dataset's row label
   before <- build(tmx_dta(rl_pair))
 
   changed <- compare(before, build(tmx_dta(c(
-    "      - { id: GENE_ID, type: SAS Char, nullable: No }",
-    "      - { id: GENE_NAME, type: SAS Char, nullable: Yes }"
+    "      - { id: GENE_ID, header: gene_id, type: SAS Char, nullable: No }",
+    "      - { id: GENE_NAME, header: gene_name, type: SAS Char, nullable: Yes }"
   ))))
   qa_step("one field of one row label changed: one line", 1L, nrow(changed))
   qa_check("it names a row label and its id, not a column", grepl("row label 'GENE_NAME'", changed$what, fixed = TRUE) && !grepl("column", changed$what, fixed = TRUE))
   qa_step("and reports a change", "changed", changed$change)
 
   added <- compare(before, build(tmx_dta(c(
-    rl_pair, "      - { id: BIOTYPE, type: SAS Char, nullable: Yes }"
-  ), corner = "[gene_id, gene_name, biotype]")))
+    rl_pair, "      - { id: BIOTYPE, header: biotype, type: SAS Char, nullable: Yes }"
+  ))))
   whole <- added[grepl("BIOTYPE", added$what, fixed = TRUE), , drop = FALSE]
   qa_step("a row label added is one line, as an added row label", 1L, nrow(whole))
   qa_check("worded as a row label", grepl("row label 'BIOTYPE'", whole$what, fixed = TRUE))
@@ -311,19 +317,20 @@ test_that("OQ-TMPL-121 | validate_template() judges a matrix dataset template's 
   qa_check("naming that row label and not the other", grepl("GENE_ID", hit$message, fixed = TRUE) && !grepl("GENE_NAME", hit$message, fixed = TRUE))
 
   unknown_key <- tmx_validate(tmx_dataset_template(two_row_labels, c(
-    "  matrix:", "    header: { corner: [gene_id, gene_name], bogus: 1 }", "    cells: { type: SAS Num }"
+    "  matrix:", "    columns: { bogus: 1 }", "    cells: { type: SAS Num }"
   )))
   qa_step("a key the matrix block does not allow is matrix_field_unknown, error", "error", unknown_key$severity[unknown_key$code == "matrix_field_unknown"])
 
   missing_cells <- tmx_validate(tmx_dataset_template(two_row_labels, c(
-    "  matrix:", "    header: { corner: [gene_id, gene_name] }"
+    "  matrix:", "    columns: { pattern: '^S' }"
   )))
   qa_step("a matrix block with no cells is matrix_field_missing, error", "error", missing_cells$severity[missing_cells$code == "matrix_field_missing"])
 
-  bad_corner <- tmx_validate(tmx_dataset_template(two_row_labels, c(
-    "  matrix:", "    header: { corner: [gene_id] }", "    cells: { type: SAS Num }"
+  bad_header <- tmx_validate(tmx_dataset_template(c(
+    "    - {id: GENE_ID, header: gene_id, type: SAS Char, nullable: No}",
+    "    - {id: GENE_NAME, header: No, type: SAS Char, nullable: Yes}"
   )))
-  qa_step("a corner with one entry for two row labels is matrix_corner_invalid, error", "error", bad_corner$severity[bad_corner$code == "matrix_corner_invalid"])
+  qa_step("header: No on a row label that is not the first is row_label_header_position, error", "error", bad_header$severity[bad_header$code == "row_label_header_position"])
 
   no_block <- tmx_validate(c(
     "kind: dta_dataset_template", "id: mx", "version: \"1.0\"",
@@ -353,7 +360,7 @@ test_that("OQ-TMPL-122 | validate_template() reports a columns key and a non-CSV
     id = "counts", type = "matrix", files = list(filename = "c.xpt", type = "xpt"),
     columns = list(list(id = "A", type = "SAS Char")),
     row_labels = list(list(id = "GENE_ID", type = "SAS Char", nullable = FALSE), list(id = "GENE_NAME", type = "SAS Char", nullable = TRUE)),
-    matrix = list(header = list(corner = c("gene_id", "gene_name")), cells = list(type = "SAS Num"))
+    matrix = list(cells = list(type = "SAS Num"))
   )
   linted <- lint_dta(list(datasets = list(body)))
   qa_step("lint_dta() on the same dataset reports the same two codes at the same severity", c("error", "error"), linted$severity[match(expected, linted$code)])

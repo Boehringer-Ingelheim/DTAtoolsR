@@ -72,6 +72,7 @@ Collate:
     'DTAColumnSpec-class.R'
     'DTAColumnSpecCell-class.R'
     'DTAColumnSpecCollection-class.R'
+    'DTAColumnSpecRowLabel-class.R'
     'DTAColumnSpecStructure-class.R'
     'DTAColumnSpecStructureSAS-class.R'
     'DTAContainer-class.R'

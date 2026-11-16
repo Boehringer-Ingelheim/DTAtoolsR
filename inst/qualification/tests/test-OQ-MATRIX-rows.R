@@ -16,11 +16,10 @@ test_that("OQ-MATRIX-016 | row-label columns receive the tabular checks, matched
   ds <- dta_dataset_from_list(list(
     id = "m", type = "matrix", files = list(filename = "m.tsv", type = "tsv"),
     row_labels = list(
-      list(id = "ID", type = "SAS Char", length = 3, nullable = FALSE, pattern = "^r[0-9]$"),
-      list(id = "DESC", type = "SAS Char", length = 1, nullable = FALSE)
+      list(id = "ID", header = "", type = "SAS Char", length = 3, nullable = FALSE, pattern = "^r[0-9]$"),
+      list(id = "DESC", header = "", type = "SAS Char", length = 1, nullable = FALSE)
     ),
     matrix = list(
-      header = list(corner = "blank"),
       cells = list(type = "SAS Int", nullable = FALSE)
     )
   ))
@@ -78,7 +77,7 @@ test_that("OQ-MATRIX-017 | a repeated row key is one rule error, rule id .matrix
 })
 
 test_that("OQ-MATRIX-018 | a composite row key is unique as a combination | REQ-MATRIX-020", {
-  ds <- mx_ds(k = 2L, corner = "named", rows = list(key = list("ID", "DESC")), required_labels = TRUE)
+  ds <- mx_ds(k = 2L, row_header = list(), rows = list(key = list("ID", "DESC")), required_labels = TRUE)
   # (a, x) occurs twice; (a, y) and (b, x) are distinct although each id repeats.
   repeated <- mx_path("ID\tDESC\tS1\na\tx\t1\na\ty\t2\nb\tx\t3\na\tx\t4\n")
   mx_each(ds, repeated, function(d, stream) {
@@ -100,8 +99,8 @@ test_that("OQ-MATRIX-019 | a nullable row key is refused and a missing key cell 
   spec <- function(nullable) {
     list(
       id = "m", type = "matrix", files = list(filename = "m.tsv", type = "tsv"),
-      row_labels = list(list(id = "ID", type = "SAS Char", nullable = nullable)),
-      matrix = list(header = list(corner = "blank"), cells = list(type = "SAS Int", nullable = FALSE))
+      row_labels = list(list(id = "ID", header = "", type = "SAS Char", nullable = nullable)),
+      matrix = list(cells = list(type = "SAS Int", nullable = FALSE))
     )
   }
   qa_step(
@@ -140,6 +139,21 @@ test_that("OQ-MATRIX-020 | the number of data rows outside rows.count is minItem
       qa_step(sprintf("%s (%s)", case[[1]], stream), case[[4]], mx_found(d))
     })
   }
+
+  # The wording of the two findings, from the requirement sentence.
+  said <- function(d) as.data.frame(messages(d))$message
+  mx_each(mx_ds(rows = list(count = list(min = 3))), two_rows, function(d, stream) {
+    qa_step(
+      sprintf("the minimum is worded with the observed and the declared number (%s)", stream),
+      "The file has 2 data row(s); at least 3 required.", said(d)
+    )
+  })
+  mx_each(mx_ds(rows = list(count = list(max = 1))), two_rows, function(d, stream) {
+    qa_step(
+      sprintf("the maximum is worded with the observed and the declared number (%s)", stream),
+      "The file has 2 data row(s); at most 1 allowed.", said(d)
+    )
+  })
 })
 
 test_that("OQ-MATRIX-021 | a scan stopped early reports the row-count check as failed, passed or not_checked by the rows seen, and never raises minItems | REQ-MATRIX-023", {
@@ -147,7 +161,7 @@ test_that("OQ-MATRIX-021 | a scan stopped early reports the row-count check as f
   # problem and fail_fast stops after it. Four data rows follow.
   text <- "\tbad\tS2\nr1\t1\t2\nr2\t1\t2\nr3\t1\t2\nr4\t1\t2\n"
   run <- function(rows, batch_rows) {
-    ds <- mx_ds(header = list(pattern = "^S[0-9]$"), rows = rows)
+    ds <- mx_ds(columns = list(pattern = "^S[0-9]$"), rows = rows)
     d <- mx_checked(ds, mx_path(text), "always", fail_fast = TRUE, batch_rows = batch_rows)
     ck <- mx_checks(d)
     list(
@@ -192,8 +206,8 @@ test_that("OQ-MATRIX-022 | a count is exact as a scalar, a minimum or a maximum 
     list("4", 4, one("minProperties")), list("{min: 4}", list(min = 4), one("minProperties")),
     list("2", 2, one("maxProperties")), list("{max: 2}", list(max = 2), one("maxProperties"))
   )) {
-    mx_each(mx_ds(header = list(count = case[[2]])), path, function(d, stream) {
-      qa_step(sprintf("header.count %s (%s)", case[[1]], stream), case[[3]], mx_found(d))
+    mx_each(mx_ds(columns = list(count = case[[2]])), path, function(d, stream) {
+      qa_step(sprintf("matrix.columns.count %s (%s)", case[[1]], stream), case[[3]], mx_found(d))
     })
   }
   # rows.count against 2 data rows
@@ -210,21 +224,21 @@ test_that("OQ-MATRIX-022 | a count is exact as a scalar, a minimum or a maximum 
 })
 
 test_that("OQ-MATRIX-023 | a count that is fractional, negative, reversed or zero data columns is refused when the dataset is built | REQ-MATRIX-025", {
-  build <- function(header = list(), rows = NULL) {
-    m <- list(header = c(list(corner = "blank"), header), cells = list(type = "SAS Int"))
+  build <- function(columns = list(), rows = NULL) {
+    m <- list(columns = columns, cells = list(type = "SAS Int"))
     if (!is.null(rows)) m$rows <- rows
     dta_dataset_from_list(list(
       id = "m", type = "matrix", files = list(filename = "m.tsv", type = "tsv"),
-      row_labels = list(list(id = "ID", type = "SAS Char", nullable = FALSE)),
+      row_labels = list(list(id = "ID", header = "", type = "SAS Char", nullable = FALSE)),
       matrix = m
     ))
   }
   refused <- function(expr) mx_is(mx_error(expr), "dta_matrix_count_invalid")
 
-  qa_step("header.count 1.5", TRUE, refused(build(header = list(count = 1.5))))
-  qa_step("header.count 0 (no data column is never valid)", TRUE, refused(build(header = list(count = 0))))
-  qa_step("header.count with min above max", TRUE, refused(build(header = list(count = list(min = 3, max = 2)))))
-  qa_step("header.count negative", TRUE, refused(build(header = list(count = -2))))
+  qa_step("matrix.columns.count 1.5", TRUE, refused(build(columns = list(count = 1.5))))
+  qa_step("matrix.columns.count 0 (no data column is never valid)", TRUE, refused(build(columns = list(count = 0))))
+  qa_step("matrix.columns.count with min above max", TRUE, refused(build(columns = list(count = list(min = 3, max = 2)))))
+  qa_step("matrix.columns.count negative", TRUE, refused(build(columns = list(count = -2))))
   qa_step("rows.count -1", TRUE, refused(build(rows = list(count = -1))))
   qa_step("rows.count 2.5", TRUE, refused(build(rows = list(count = 2.5))))
   qa_step("rows.count with min above max", TRUE, refused(build(rows = list(count = list(min = 5, max = 4)))))

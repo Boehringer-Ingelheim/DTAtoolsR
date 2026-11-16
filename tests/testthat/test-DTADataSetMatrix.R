@@ -1,6 +1,6 @@
 # DTADataSetMatrix: loading, the header contract, dimensions, cells, the row key
-# and the failure shapes. Expected values come from the plan's rules (the corner
-# table, the findings table), never from output; every semantic case runs on the
+# and the failure shapes. Expected values come from the plan's rules (the header
+# rules, the findings table), never from output; every semantic case runs on the
 # in-memory path (stream = "never") and the lazy one (stream = "always").
 
 mxd_fixture <- function(name) test_path("fixtures", "matrix", name)
@@ -13,16 +13,22 @@ mxd_file <- function(text, name = "m.tsv", env = parent.frame()) {
 }
 
 # A one-row-label (or k-row-label) matrix dataset, written as the list YAML gives.
-mxd_ds <- function(corner = "blank", k = 1L, header = list(), cells = NULL, rows = NULL,
+# `headers` has one entry per row label: NULL (key not written: the header text
+# is the id), "" (an empty field), a text, or FALSE (YAML `header: No`, no field
+# in the header line). Left out, every row label gets "". `columns` is the
+# `matrix.columns` block.
+mxd_ds <- function(headers = NULL, k = 1L, columns = list(), cells = NULL, rows = NULL,
                    ext = "tsv", rules = NULL, files_extra = list(), all_required = FALSE) {
   ids <- c("ID", "DESC", "EXTRA")
+  headers <- headers %||% rep(list(""), k)
+  length(headers) <- k
   labels <- lapply(seq_len(k), function(i) {
-    list(id = ids[[i]], type = "SAS Char", nullable = if (all_required) FALSE else i > 1L)
+    l <- list(id = ids[[i]], type = "SAS Char", nullable = if (all_required) FALSE else i > 1L)
+    if (!is.null(headers[[i]])) l$header <- headers[[i]]
+    l
   })
-  m <- list(
-    header = c(list(corner = corner), header),
-    cells = cells %||% list(type = "SAS Int", nullable = FALSE)
-  )
+  m <- list(cells = cells %||% list(type = "SAS Int", nullable = FALSE))
+  if (length(columns) > 0L) m$columns <- columns
   if (!is.null(rows)) m$rows <- rows
   spec <- list(
     id = "m", type = "matrix",
@@ -54,22 +60,23 @@ mxd_both <- function(ds, file, code) {
 
 # ---- the plan's three examples ---------------------------------------------------
 
-test_that("the genes x samples example (named corner, two row labels, fractional counts) validates", {
+test_that("the genes x samples example (two headed row labels, fractional counts) validates", {
   ds <- dta_dataset_from_list(yaml::yaml.load('
 id: gene_counts
 type: matrix
 files: { filename: "gene_counts.tsv", type: tsv }
 row_labels:
   - id: GENE_ID
+    header: gene_id
     type: SAS Char
     nullable: No
     pattern: "^ENSG[0-9]{11}(\\\\.[0-9]+)?(_PAR_Y)?$"
   - id: GENE_NAME
+    header: gene_name
     type: SAS Char
     nullable: Yes
 matrix:
-  header:
-    corner: [gene_id, gene_name]
+  columns:
     label: Sample ID
     pattern: "^S[0-9]{4}$"
     count: { min: 1, max: 384 }
@@ -94,14 +101,14 @@ matrix:
   })
 })
 
-test_that("the samples x miRNAs example (write.csv, blank corner) validates", {
+test_that("the samples x miRNAs example (write.csv, empty header field) validates", {
   ds <- dta_dataset_from_list(yaml::yaml.load('
 id: mirna
 type: matrix
 files: { filename: "mature_counts.csv", type: csv }
-row_labels: [ { id: SAMPLE, type: SAS Char, nullable: No } ]
+row_labels: [ { id: SAMPLE, header: "", type: SAS Char, nullable: No } ]
 matrix:
-  header: { corner: blank, pattern: "^hsa-(miR|let)-" }
+  columns: { pattern: "^hsa-(miR|let)-" }
   cells: { type: SAS Int, nullable: No, range: { min: 0 } }
 '))
   mxd_both(ds, mxd_fixture("mature_counts.csv"), function(d, stream) {
@@ -114,9 +121,9 @@ test_that("the genotype example (missing token on the file, values 0/1/2) valida
 id: geno
 type: matrix
 files: { filename: "geno.tsv", type: tsv, missing_values: "./." }
-row_labels: [ { id: SNP, type: SAS Char, nullable: No } ]
+row_labels: [ { id: SNP, header: snp, type: SAS Char, nullable: No } ]
 matrix:
-  header: { corner: [snp], pattern: "^S[0-9]+$" }
+  columns: { pattern: "^S[0-9]+$" }
   cells: { type: SAS Int, nullable: Yes, values: [0, 1, 2] }
 '))
   mxd_both(ds, mxd_fixture("geno.tsv"), function(d, stream) {
@@ -131,85 +138,215 @@ matrix:
   })
 })
 
-# ---- the corner, writer by writer ------------------------------------------------
+# ---- the header fields above the row labels, writer by writer --------------------
 
-test_that("each writer's corner validates, and a wrong one is a corner finding", {
+test_that("each writer's header validates with its spelling, and a wrong text is a rowLabelHeader finding", {
   cases <- list(
-    # name, file text, ext, corner, k
-    list("write.csv row names", "\"\",S1,S2\n\"r1\",1,2\n", "csv", "blank", 1L),
-    list("pandas unnamed index", ",S1,S2\nr1,1,2\n", "csv", "blank", 1L),
-    list("write.table row names (no field)", "S1\tS2\nr1\t1\t2\n", "tsv", list(NULL), 1L),
-    list("write.table with a description", "desc\tS1\tS2\nr1\tg\t1\t2\n", "tsv", list(NULL, "desc"), 2L),
+    # name, file text, ext, headers (one per row label), k
+    list("R write.csv row names", "\"\",S1,S2\n\"r1\",1,2\n", "csv", list(""), 1L),
+    list("pandas unnamed index", ",S1,S2\nr1,1,2\n", "csv", list(""), 1L),
+    list("R write.table row names (no field)", "S1\tS2\nr1\t1\t2\n", "tsv", list(FALSE), 1L),
+    list("R write.table with a description column", "desc\tS1\tS2\nr1\tg\t1\t2\n", "tsv", list(FALSE, "desc"), 2L),
     list("pandas unnamed index + description", ",desc,S1\nr1,g,1\n", "csv", list("", "desc"), 2L),
     list("pandas named index", "protein_id,S1,S2\nr1,1,2\n", "csv", list("protein_id"), 1L),
-    list("header text = ids", "ID\tDESC\tS1\nr1\tg\t1\n", "tsv", "named", 2L),
+    list("header text = ids (no header key)", "ID\tDESC\tS1\nr1\tg\t1\n", "tsv", list(NULL, NULL), 2L),
     list("text with spaces", "Sample ID,S1\nr1,1\n", "csv", list("Sample ID"), 1L)
   )
   for (cs in cases) {
-    ds <- mxd_ds(corner = cs[[4]], k = cs[[5]], ext = cs[[3]])
+    ds <- mxd_ds(headers = cs[[4]], k = cs[[5]], ext = cs[[3]])
     path <- mxd_file(cs[[2]], paste0("m.", cs[[3]]))
     mxd_both(ds, path, function(d, stream) {
       expect_true(validation_status(d)$ok, info = paste(cs[[1]], stream))
     })
   }
 
-  # Wrong text above the first row label: one corner finding at the row-label id.
-  ds <- mxd_ds(corner = "blank")
+  # Wrong text above the first row label: one finding at the row-label id, in
+  # the new message wording.
+  ds <- mxd_ds(headers = list(""))
   path <- mxd_file("wrong\tS1\nr1\t1\n")
   mxd_both(ds, path, function(d, stream) {
     f <- mxd_findings(d)
-    expect_identical(f$keyword, "corner", info = stream)
+    expect_identical(f$keyword, "rowLabelHeader", info = stream)
     expect_identical(f$column, "ID", info = stream)
     expect_true(is.na(f$row), info = stream)
-    expect_match(f$message, "wrong", info = stream)
+    expect_identical(
+      f$message, "Header field 1, above row label ID, is \"wrong\"; expected \"\".",
+      info = stream
+    )
   })
 
-  # With a leading null the finding names the row-label id the field belongs to.
-  ds <- mxd_ds(corner = list(NULL, "desc"), k = 2L)
+  # With no field above the first row label the finding names the row label the
+  # field belongs to.
+  ds <- mxd_ds(headers = list(FALSE, "desc"), k = 2L)
   path <- mxd_file("other\tS1\nr1\tg\t1\n")
   mxd_both(ds, path, function(d, stream) {
     f <- mxd_findings(d)
-    expect_identical(f$keyword, "corner", info = stream)
+    expect_identical(f$keyword, "rowLabelHeader", info = stream)
     expect_identical(f$column, "DESC", info = stream)
   })
+})
+
+test_that("a row label without header expects its id", {
+  ds <- mxd_ds(headers = list(NULL, NULL), k = 2L)
+  mxd_both(ds, mxd_file("ID\tDESC\tS1\nr1\tg\t1\n"), function(d, stream) {
+    expect_true(validation_status(d)$ok, info = stream)
+  })
+  mxd_both(ds, mxd_file("\t\tS1\nr1\tg\t1\n"), function(d, stream) {
+    f <- mxd_findings(d)
+    expect_identical(f$keyword, c("rowLabelHeader", "rowLabelHeader"), info = stream)
+    expect_identical(f$column, c("DESC", "ID"), info = stream)
+  })
+})
+
+test_that("header: \"\" is an empty field, kept apart from a missing header (the id)", {
+  empty <- mxd_ds(headers = list(""))
+  named <- mxd_ds(headers = list(NULL))
+  expect_false(identical(empty@specs@columns[[1]]@header, named@specs@columns[[1]]@header))
+  expect_identical(empty@specs@columns[[1]]@header, "")
+  expect_null(named@specs@columns[[1]]@header)
+  expect_true(validation_status(mxd_checked(empty, mxd_file("\tS1\nr1\t1\n"), "never"))$ok)
+  expect_false(validation_status(mxd_checked(named, mxd_file("\tS1\nr1\t1\n"), "never"))$ok)
+  expect_true(validation_status(mxd_checked(named, mxd_file("ID\tS1\nr1\t1\n"), "never"))$ok)
+})
+
+test_that("header: No is the first row label's only", {
+  # YAML reads No as FALSE
+  rl <- yaml::yaml.load("- {id: A, header: No, type: SAS Char, nullable: No}")
+  expect_identical(rl[[1]]$header, FALSE)
+  one <- mxd_ds(headers = list(FALSE), k = 1L)
+  expect_identical(one@specs@columns[[1]]@header, FALSE)
+  # on a later row label: the dataset refuses it
+  expect_error(mxd_ds(headers = list(NULL, FALSE), k = 2L), class = "dta_matrix_invalid_header")
+  expect_error(mxd_ds(headers = list("", FALSE), k = 2L), class = "dta_matrix_invalid_header")
+  expect_error(mxd_ds(headers = list(FALSE, FALSE), k = 2L), class = "dta_matrix_invalid_header")
+})
+
+test_that("a header that is not a single text or No is refused with its own class", {
+  ids <- function(h) {
+    dta_row_label_specs(list(list(id = "A", header = h, type = "SAS Char", nullable = FALSE)))
+  }
+  expect_error(ids(TRUE), class = "dta_row_label_header_invalid")
+  expect_error(ids(c("a", "b")), class = "dta_row_label_header_invalid")
+  expect_error(ids(NA_character_), class = "dta_row_label_header_invalid")
+  expect_error(ids(1), class = "dta_row_label_header_invalid")
+  expect_no_error(ids("x"))
+  expect_no_error(ids(""))
+  expect_no_error(ids(FALSE))
+  expect_error(
+    dta_dataset_from_list(list(
+      id = "m", type = "matrix", files = list(filename = "m.tsv", type = "tsv"),
+      row_labels = list(list(id = "A", header = TRUE, type = "SAS Char", nullable = FALSE)),
+      matrix = list(cells = list(type = "SAS Int"))
+    )),
+    class = "dta_row_label_header_invalid"
+  )
+})
+
+test_that("a row label's header round-trips through as.list(), next to its id", {
+  ds <- mxd_ds(headers = list("", "desc"), k = 2L)
+  cols <- lapply(ds@specs@columns, as.list)
+  expect_identical(names(cols[[1]])[1:2], c("id", "header"))
+  expect_identical(cols[[1]]$header, "")
+  expect_identical(cols[[2]]$header, "desc")
+  # not written when the header is the id
+  expect_false("header" %in% names(as.list(mxd_ds(headers = list(NULL))@specs@columns[[1]])))
+  # No survives as FALSE
+  expect_identical(as.list(mxd_ds(headers = list(FALSE))@specs@columns[[1]])$header, FALSE)
+  # the data columns' block is `columns`, and carries no header text
+  expect_named(as.list(ds@matrix), c("columns", "rows", "cells"))
+  # and the row labels read back as the same ones, through the list a YAML
+  # file holds
+  for (h in list(list(""), list(FALSE), list(NULL), list("x"), list(FALSE, "d"), list(NULL, ""))) {
+    d <- mxd_ds(headers = h, k = length(h))
+    back <- dta_row_label_specs(unname(lapply(d@specs@columns, as.list)))
+    expect_identical(
+      lapply(back@columns, function(c) c@header),
+      lapply(d@specs@columns, function(c) c@header),
+      info = format(h)
+    )
+  }
+})
+
+test_that("a plain DTAColumnSpec is a row label whose header is its id", {
+  ds <- DTADataSetMatrix(
+    id = "m",
+    specs = DTAColumnSpecCollection(columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "SAS Char", nullable = FALSE)
+    )),
+    matrix = list(cells = list(type = "SAS Int", nullable = FALSE)),
+    files = list(DTAFileTSV(filename = "m.tsv"))
+  )
+  expect_true(validation_status(mxd_checked(ds, mxd_file("ID\tS1\nr1\t1\n"), "never"))$ok)
+  expect_false(validation_status(mxd_checked(ds, mxd_file("\tS1\nr1\t1\n"), "never"))$ok)
+  # the same with the header said in R
+  blank <- ds
+  blank@specs@columns[["ID"]] <- DTAColumnSpecRowLabel(blank@specs@columns[["ID"]], header = "")
+  expect_true(validation_status(mxd_checked(blank, mxd_file("\tS1\nr1\t1\n"), "never"))$ok)
+})
+
+test_that("the factory takes row labels with a header, and matrix.columns is optional", {
+  ds <- DTADataSetFactory(
+    type = "matrix", id = "m", files = list(type = "csv", filename = "m.csv"),
+    row_labels = list(list(id = "GENE", header = "", type = "SAS Char", nullable = FALSE)),
+    matrix = list(cells = list(type = "SAS Int", nullable = FALSE))
+  )
+  expect_s3_class(ds, "DTAtools::DTADataSetMatrix")
+  expect_identical(ds@specs@columns[["GENE"]]@header, "")
+  expect_true(validation_status(mxd_checked(ds, mxd_file(",S1\nr1,1\n", "m.csv"), "never"))$ok)
+})
+
+test_that("matrix: {header: ...} is an unknown field of the matrix block", {
+  spec <- function(matrix) {
+    dta_dataset_from_list(list(
+      id = "m", type = "matrix", files = list(filename = "m.tsv", type = "tsv"),
+      row_labels = list(list(id = "ID", type = "SAS Char", nullable = FALSE)),
+      matrix = matrix
+    ))
+  }
+  cells <- list(type = "SAS Int")
+  expect_error(spec(list(header = list(pattern = "^S"), cells = cells)), class = "dta_matrix_field_unknown")
+  expect_error(spec(list(columns = list(corner = "blank"), cells = cells)), class = "dta_matrix_field_unknown")
+  expect_s3_class(spec(list(cells = cells)), "DTAtools::DTADataSetMatrix")
 })
 
 # ---- the head gate (T7) ----------------------------------------------------------
 
 test_that("the field-count gate names the case by condition class, before any data is read", {
-  load <- function(text, corner = "blank", k = 1L) {
-    load_file(mxd_ds(corner = corner, k = k), file = mxd_file(text), stream = "never")
+  load <- function(text, headers = list(""), k = 1L) {
+    load_file(mxd_ds(headers = headers, k = k), file = mxd_file(text), stream = "never")
   }
-  # Header "", S1, S2 (3 fields), blank corner: a data row should have 3.
-  # A data row of 4 means the HEADER is one field short: R write.table writes no
-  # field above the row names.
+  msg <- function(e) paste(conditionMessage(e), collapse = " ")
+  # Header "", S1, S2 (3 fields), an empty field above the row label: a data row
+  # should have 3. A data row of 4 means the HEADER is one field short: R
+  # write.table writes no field above the row names.
   expect_error(load("\tS1\tS2\nr1\t1\t2\t3\n"), class = "dta_matrix_header_fewer")
-  # ... and the same file is fine once the corner declares the missing field.
-  expect_no_error(load("S1\tS2\nr1\t1\t2\n", corner = list(NULL)))
+  # ... and the same file is fine once the row label declares the missing field.
+  expect_no_error(load("S1\tS2\nr1\t1\t2\n", headers = list(FALSE)))
   expect_error(load("S1\tS2\nr1\t1\t2\n"), class = "dta_matrix_header_fewer")
-  # A data row of 2 means the header has a corner field the spec does not
-  # declare: `[null]` given, but the file has the field.
-  expect_error(load("\tS1\tS2\nr1\t1\t2\n", corner = list(NULL)), class = "dta_matrix_header_more")
+  # A data row of 2 means the header has a field the spec does not declare:
+  # `header: No` given, but the file has the field.
+  expect_error(load("\tS1\tS2\nr1\t1\t2\n", headers = list(FALSE)), class = "dta_matrix_header_more")
   expect_error(load("\tS1\tS2\nr1\t1\n"), class = "dta_matrix_header_more")
-  # The hint names a `null` only when the corner declares one.
+  # The hint speaks of `header: No` when the row label declares it, and the
+  # other hint does not.
   e <- expect_error(load("\tS1\tS2\nr1\t1\n"), class = "dta_matrix_header_more")
-  expect_false(grepl("null", paste(conditionMessage(e), collapse = " "), fixed = TRUE))
-  e <- expect_error(load("\tS1\tS2\nr1\t1\t2\n", corner = list(NULL)), class = "dta_matrix_header_more")
-  expect_match(paste(conditionMessage(e), collapse = " "), "null", fixed = TRUE)
+  expect_false(grepl("header: No", msg(e), fixed = TRUE))
+  e <- expect_error(load("\tS1\tS2\nr1\t1\t2\n", headers = list(FALSE)), class = "dta_matrix_header_more")
+  expect_match(msg(e), "header: No", fixed = TRUE)
+  expect_match(msg(e), "give\\s+the\\s+field's\\s+text")
   expect_error(load("\tS1\tS2\nr1\t1\t2\t3\t4\t5\n"), class = "dta_matrix_header_ragged")
   # Every gate error is also the family class, and the hint points the right way.
   e <- expect_error(load("S1\tS2\nr1\t1\t2\n"), class = "dta_matrix_header_gate")
-  expect_match(paste(conditionMessage(e), collapse = " "), "null", fixed = TRUE)
-  e <- expect_error(load("\tS1\tS2\nr1\t1\t2\n", corner = list(NULL)), class = "dta_matrix_header_gate")
-  expect_match(paste(conditionMessage(e), collapse = " "), "drop", fixed = TRUE)
-  # A header with fewer fields than the corner needs (k = 2, blank corner).
-  expect_error(load("S1\nr1\n", k = 2L), class = "dta_matrix_header_short")
-  expect_error(load("S1\nr1\n", k = 2L), class = "dta_matrix_header_gate")
+  expect_match(msg(e), "header: No", fixed = TRUE)
+  expect_false(grepl("corner", msg(e), ignore.case = TRUE))
+  # A header with fewer fields than the row labels need (k = 2, empty fields).
+  e <- expect_error(load("S1\nr1\n", headers = list("", ""), k = 2L), class = "dta_matrix_header_short")
+  expect_error(load("S1\nr1\n", headers = list("", ""), k = 2L), class = "dta_matrix_header_gate")
+  expect_match(msg(e), "row labels alone need 2", fixed = TRUE)
   expect_error(load("#preamble\nS1\tS2\n"), class = "dta_matrix_preamble")
   expect_error(load("a,b,c\nr1,1,2\n"), class = "dta_matrix_delimiter")
   expect_error(load(""), class = "dta_matrix_header_empty")
 })
-
 
 # ---- labels (T4) -----------------------------------------------------------------
 
@@ -256,7 +393,7 @@ test_that("an empty label is a propertyNames finding and its cells carry <column
 })
 
 test_that("a label that fails the header pattern is a propertyNames finding at the label", {
-  ds <- mxd_ds(header = list(pattern = "^S[0-9]+$"))
+  ds <- mxd_ds(columns = list(pattern = "^S[0-9]+$"))
   path <- mxd_file("\tS1\tbad\nr1\t1\t2\n")
   mxd_both(ds, path, function(d, stream) {
     f <- mxd_findings(d)
@@ -290,21 +427,21 @@ test_that("labels with braces and spaces validate (the clones skip the id valida
 test_that("data-column bounds are minProperties / maxProperties findings without a column", {
   path <- mxd_file("\tS1\tS2\tS3\nr1\t1\t2\t3\n")
 
-  low <- mxd_ds(header = list(count = list(min = 5)))
+  low <- mxd_ds(columns = list(count = list(min = 5)))
   mxd_both(low, path, function(d, stream) {
     f <- mxd_findings(d)
     expect_identical(f$keyword, "minProperties", info = stream)
     expect_true(is.na(f$column), info = stream)
   })
 
-  high <- mxd_ds(header = list(count = list(max = 2)))
+  high <- mxd_ds(columns = list(count = list(max = 2)))
   mxd_both(high, path, function(d, stream) {
     f <- mxd_findings(d)
     expect_identical(f$keyword, "maxProperties", info = stream)
     expect_true(is.na(f$column), info = stream)
   })
 
-  exact <- mxd_ds(header = list(count = 3))
+  exact <- mxd_ds(columns = list(count = 3))
   mxd_both(exact, path, function(d, stream) {
     expect_true(validation_status(d)$ok, info = stream)
   })
@@ -397,7 +534,7 @@ test_that("a repeated row key is a .matrix:row_key rule error that explain_messa
 })
 
 test_that("a composite row key is tuple-unique", {
-  ds <- mxd_ds(k = 2L, corner = "named", rows = list(key = list("ID", "DESC")), all_required = TRUE)
+  ds <- mxd_ds(k = 2L, headers = list(NULL, NULL), rows = list(key = list("ID", "DESC")), all_required = TRUE)
   # (a, x) repeats; (a, y) and (b, x) are distinct although each id repeats.
   path <- mxd_file("ID\tDESC\tS1\na\tx\t1\na\ty\t2\nb\tx\t3\na\tx\t4\n")
   mxd_both(ds, path, function(d, stream) {
@@ -469,7 +606,6 @@ test_that("a changed cell spec revalidates and a changed header spec is not skip
   expect_true(validation_status(d)$ok)
 
   d@matrix <- dta_matrix_spec_from_list(list(
-    header = list(corner = "blank"),
     cells = list(type = "SAS Int", nullable = FALSE, range = list(min = 10))
   ))
   d <- check(d, quiet = TRUE, persist = FALSE)
@@ -526,8 +662,8 @@ test_that("load_delivery() route = binds an ambiguous file to a matrix", {
   mx <- function(id, pattern) {
     dta_dataset_from_list(list(
       id = id, type = "matrix", files = list(filename = pattern, type = "tsv", pattern = TRUE),
-      row_labels = list(list(id = "ID", type = "SAS Char", nullable = FALSE)),
-      matrix = list(header = list(corner = "blank"), cells = list(type = "SAS Int", nullable = FALSE))
+      row_labels = list(list(id = "ID", header = "", type = "SAS Char", nullable = FALSE)),
+      matrix = list(cells = list(type = "SAS Int", nullable = FALSE))
     ))
   }
   dta <- DTA(datasets = list(mx("a", "^a.*[.]tsv$"), mx("b", "^.*e[.]tsv$")))
@@ -545,7 +681,7 @@ test_that("load_delivery() route = binds an ambiguous file to a matrix", {
 
 test_that("the factory and the constructor refuse the wrong keys by class", {
   rl <- list(list(id = "ID", type = "SAS Char", nullable = FALSE))
-  m <- list(header = list(corner = "blank"), cells = list(type = "SAS Int"))
+  m <- list(cells = list(type = "SAS Int"))
   f <- list(type = "tsv", filename = "m.tsv")
 
   expect_error(
@@ -575,7 +711,7 @@ test_that("the factory and the constructor refuse the wrong keys by class", {
 test_that("the validator refuses an inconsistent matrix by class", {
   col <- function(id, ...) DTAColumnSpec(id = id, type = "SAS Char", ...)
   specs <- function(...) DTAColumnSpecCollection(columns = list(...))
-  m <- list(header = list(corner = "blank"), cells = list(type = "SAS Int"))
+  m <- list(cells = list(type = "SAS Int"))
   tsv <- list(DTAFileTSV(filename = "m.tsv"))
 
   expect_error(
@@ -585,7 +721,7 @@ test_that("the validator refuses an inconsistent matrix by class", {
   expect_error(
     DTADataSetMatrix(
       id = "a", specs = specs(ID = col("ID", nullable = FALSE)),
-      matrix = list(header = list(corner = "blank"), rows = list(key = "NOPE"), cells = list(type = "SAS Int"))
+      matrix = list(rows = list(key = "NOPE"), cells = list(type = "SAS Int"))
     ),
     class = "dta_matrix_invalid_row_key"
   )
@@ -593,12 +729,31 @@ test_that("the validator refuses an inconsistent matrix by class", {
     DTADataSetMatrix(id = "a", specs = specs(ID = col("ID", nullable = TRUE)), matrix = m),
     class = "dta_matrix_invalid_key_nullable"
   )
+  # `header: No` on a row label other than the first
   expect_error(
     DTADataSetMatrix(
-      id = "a", specs = specs(ID = col("ID", nullable = FALSE)),
-      matrix = list(header = list(corner = list("a", "b")), cells = list(type = "SAS Int"))
+      id = "a",
+      specs = specs(
+        ID = col("ID", nullable = FALSE),
+        B = DTAColumnSpecRowLabel(col("B", nullable = TRUE), header = FALSE)
+      ),
+      matrix = m
     ),
-    class = "dta_matrix_invalid_corner"
+    class = "dta_matrix_invalid_header"
+  )
+  # ... but on the first one it is fine
+  expect_s3_class(
+    DTADataSetMatrix(
+      id = "a",
+      specs = specs(ID = DTAColumnSpecRowLabel(col("ID", nullable = FALSE), header = FALSE)),
+      matrix = m
+    ),
+    "DTAtools::DTADataSetMatrix"
+  )
+  # a header that is not a single text or FALSE
+  expect_error(
+    DTAColumnSpecRowLabel(col("ID", nullable = FALSE), header = TRUE),
+    class = "dta_row_label_header_invalid"
   )
   expect_error(
     DTADataSetMatrix(
@@ -625,18 +780,21 @@ test_that("the validator refuses an inconsistent matrix by class", {
 })
 
 test_that("the row key defaults to the first row label and the spec round-trips", {
-  ds <- mxd_ds(k = 2L, corner = "named")
+  ds <- mxd_ds(k = 2L, headers = list(NULL, NULL))
   expect_identical(ds@matrix@row_key, "ID")
   expect_identical(ds@type, "matrix")
   expect_identical(ds@heads, list())
-  expect_identical(as.list(ds@matrix)$header$corner, "named")
+  spec <- as.list(ds@matrix)
+  expect_identical(names(spec), c("columns", "rows", "cells"))
+  expect_identical(dta_matrix_spec_from_list(spec), ds@matrix)
 })
 
 # ---- the helpers, directly -------------------------------------------------------
 
 test_that("reading names follow the plan: ids, then usable labels, else <column p>", {
-  ds <- mxd_ds(corner = list(NULL, "d"), k = 2L)
-  # k = 2, one corner field (d): data labels start at header field 2.
+  ds <- mxd_ds(headers = list(FALSE, "d"), k = 2L)
+  # k = 2, one header field above the row labels (d): data labels start at
+  # header field 2.
   expect_identical(
     dta_matrix_reading_names(c("d", "S1", "S2"), ds),
     c("ID", "DESC", "S1", "S2")
@@ -649,17 +807,17 @@ test_that("reading names follow the plan: ids, then usable labels, else <column 
 })
 
 test_that("header findings are ordered by position and declare their denominators", {
-  ds <- mxd_ds(corner = "named", k = 2L, header = list(pattern = "^S[0-9]$", count = list(max = 2)))
+  ds <- mxd_ds(headers = list(NULL, NULL), k = 2L, columns = list(pattern = "^S[0-9]$", count = list(max = 2)))
   hf <- dta_matrix_head_findings(c("x", "DESC", "S1", "Q", "S1"), ds)
   expect_identical(
     hf$findings$keyword,
-    c("corner", "uniqueNames", "propertyNames", "maxProperties")
+    c("rowLabelHeader", "uniqueNames", "propertyNames", "maxProperties")
   )
   expect_identical(hf$findings$column, c("ID", "S1", "Q", NA))
   expect_identical(
     hf$declared,
     c(
-      corner = 2L, propertyNames = 3L, uniqueNames = 3L, minProperties = 1L,
+      rowLabelHeader = 2L, propertyNames = 3L, uniqueNames = 3L, minProperties = 1L,
       maxProperties = 1L, minItems = 1L, maxItems = 0L
     )
   )
@@ -679,19 +837,38 @@ test_that("effective specs hold the labels, one clone per data column and the ke
 # ---- print -----------------------------------------------------------------------
 
 test_that("a matrix prints, short-prints and autoprints, loaded or not", {
-  ds <- mxd_ds(corner = "named", k = 2L)
+  ds <- mxd_ds(headers = list(NULL, NULL), k = 2L)
   loaded <- load_file(mxd_ds(), file = mxd_file("\tS1\nr1\t1\n"), stream = "never")
   for (d in list(ds, loaded)) {
     out <- NULL
     expect_no_error(out <- capture.output(print(d), type = "message"))
     expect_true(any(grepl("Matrix:", out, fixed = TRUE)))
-    expect_true(any(grepl("corner:", out, fixed = TRUE)))
+    expect_false(any(grepl("corner", out, fixed = TRUE)))
+    expect_true(any(grepl("then one label per data column", out, fixed = TRUE)))
+    expect_true(any(grepl("row key:", out, fixed = TRUE)))
     expect_true(any(grepl("<DTADataSetMatrix>", out, fixed = TRUE)))
     expect_false(any(grepl("DTADataSetTabular", out, fixed = TRUE)))
     expect_no_error(capture.output(print_short_info(d), type = "message"))
     expect_no_error(capture.output(d))
     expect_false(suppressMessages(withVisible(print(d)))$visible)
   }
+})
+
+test_that("a matrix prints its row labels, header line, counts and cells in words", {
+  ds <- mxd_ds(headers = list(NULL, NULL), k = 2L, columns = list(count = list(min = 1, max = 384)))
+  out <- capture.output(print(ds), type = "message")
+  for (line in c(
+    "row labels (2): ID, DESC",
+    "header line: ID, DESC, then one label per data column",
+    "data columns: 1 to 384",
+    "rows: at least 1; row key: ID",
+    "cells: Int"
+  )) {
+    expect_true(any(grepl(line, out, fixed = TRUE)), info = line)
+  }
+  # an empty field and a missing one are told apart
+  out <- capture.output(print(mxd_ds(headers = list(FALSE, "desc"), k = 2L)), type = "message")
+  expect_true(any(grepl("header line: desc, then one label per data column (no field above ID)", out, fixed = TRUE)))
 })
 
 test_that("printing a tabular dataset is unchanged by the shared print body", {
@@ -745,7 +922,7 @@ test_that("an older-shaped matrix is upgraded, fails its check legibly and loads
 # ---- the header findings at scale ------------------------------------------------
 
 test_that("header findings for a large failing header are cheap and ordered", {
-  ds <- mxd_ds(header = list(pattern = "^S[0-9]+$"))
+  ds <- mxd_ds(columns = list(pattern = "^S[0-9]+$"))
   n <- 20000L
   bad <- c("", sprintf("g%05d", seq_len(n)))
   hf <- dta_matrix_head_findings(bad, ds)
@@ -760,7 +937,7 @@ test_that("header findings for a large failing header are cheap and ordered", {
 })
 
 test_that("counts in the bound findings are written out, not in scientific notation", {
-  ds <- mxd_ds(header = list(count = list(min = 1000000)))
+  ds <- mxd_ds(columns = list(count = list(min = 1000000)))
   hf <- dta_matrix_head_findings(c("", "S1"), ds)
   f <- hf$findings[hf$findings$keyword == "minProperties", ]
   expect_identical(f$columnspec, "1000000")

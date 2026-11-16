@@ -257,7 +257,7 @@ app harness in `tests/helper-app.R` (`qapp_*`).
   directory to the test folder inside it. One sanctioned exception: a file-input
   value for the app must be staged by `qapp_upload_value()` in an upload folder
   directly under R's `tempdir()`, because that is the only place the app accepts
-  an upload from (REQ-APP-047); that folder dies with the R session.
+  an upload from (REQ-APP-050); that folder dies with the R session.
 - **No `expect_snapshot*`** (M8, parse-based, so a mention in a string is fine
   but a call is not).
 - **No existence-only assertions.** Reading a file back beats

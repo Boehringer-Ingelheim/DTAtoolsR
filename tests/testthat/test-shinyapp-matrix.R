@@ -1,8 +1,8 @@
 # The Shiny app and a matrix dataset: save/round trip, signature, bound data
 # (heads) on transfer and unload, and the accessor for the package helper.
 
-# The plan's genes x samples example, with a null-first corner (the header has
-# no field above the first row label).
+# The plan's genes x samples example, with `header: No` on the first row label
+# (the header line has no field above it).
 mx_app_yaml <- c(
   "datasets:",
   "  - id: gene_counts",
@@ -10,14 +10,15 @@ mx_app_yaml <- c(
   "    files: { filename: \"gene_counts.tsv\", type: tsv }",
   "    row_labels:",
   "      - id: GENE_ID",
+  "        header: No",
   "        type: SAS Char",
   "        nullable: No",
   "      - id: GENE_NAME",
+  "        header: gene_name",
   "        type: SAS Char",
   "        nullable: Yes",
   "    matrix:",
-  "      header:",
-  "        corner: [~, gene_name]",
+  "      columns:",
   "        pattern: \"^S[0-9]{4}$\"",
   "        count: { min: 1, max: 384 }",
   "      rows:",
@@ -36,11 +37,15 @@ mx_app_dta <- function(lines = mx_app_yaml) {
   suppressMessages(read_dta_from_yaml(path))
 }
 
-# A dataset with the bundled fixture bound (a corner of two fields, so the
-# null-first corner of the example is swapped for the fixture's own).
+# The example with a header text above both row labels, as the bundled fixture
+# file has (`header: No` of the example is swapped for `header: gene_id`).
+mx_app_fields_yaml <- function() {
+  sub("header: No", "header: gene_id", mx_app_yaml, fixed = TRUE)
+}
+
+# A dataset with the bundled fixture bound.
 mx_app_bound <- function() {
-  lines <- sub("corner: [~, gene_name]", "corner: [gene_id, gene_name]", mx_app_yaml, fixed = TRUE)
-  dta <- mx_app_dta(lines)
+  dta <- mx_app_dta(mx_app_fields_yaml())
   ds <- dta@datasets[["gene_counts"]]
   ds <- load_file(ds, file = test_path("fixtures", "matrix", "gene_counts.tsv"), stream = "never")
   dta@datasets[["gene_counts"]] <- ds
@@ -58,20 +63,24 @@ test_that("matrix is a supported type", {
   expect_true("matrix" %in% app_fn("dta_supported_types")())
 })
 
-test_that("T1: a matrix survives the app's save with row_labels, matrix and a null corner entry", {
+test_that("T1: a matrix survives the app's save with row_labels, matrix and `header: No`", {
   dta <- mx_app_dta()
   ds <- dta@datasets[["gene_counts"]]
+  hdr <- app_fn("dta_row_label_header")
+  header_of <- function(d) unname(lapply(d@specs@columns, hdr))
 
   lst <- app_fn("dta_dataset_to_list")(ds)
   expect_null(lst$columns)
   expect_identical(vapply(lst$row_labels, function(x) x$id, ""), c("GENE_ID", "GENE_NAME"))
-  expect_s3_class(lst$matrix$header$corner, "dta_verbatim")
-  expect_identical(unclass(lst$matrix$header$corner), as.list(ds@matrix)$header$corner)
+  # `header` sits right after `id`; "No" is the logical FALSE, not a missing entry.
+  expect_identical(names(lst$row_labels[[1]])[1:2], c("id", "header"))
+  expect_identical(lst$row_labels[[1]]$header, FALSE)
+  expect_identical(lst$row_labels[[2]]$header, "gene_name")
+  expect_identical(lst$matrix, as.list(ds@matrix))
+  expect_identical(names(lst$matrix), c("columns", "rows", "cells"))
 
   txt <- app_fn("dta_to_yaml_text")(dta)
   expect_true(txt$ok)
-  # The null entry is written as the YAML null, not dropped.
-  expect_match(gsub("[[:space:]]+", " ", txt$value), "corner: - ~ - gene_name", fixed = TRUE)
 
   again <- mx_app_dta(strsplit(txt$value, "\n")[[1]])
   ds2 <- again@datasets[["gene_counts"]]
@@ -80,7 +89,9 @@ test_that("T1: a matrix survives the app's save with row_labels, matrix and a nu
     vapply(ds2@specs@columns, function(x) x@id, ""),
     vapply(ds@specs@columns, function(x) x@id, "")
   )
-  # ... and a second save is a fixed point (the guard survives both compact passes).
+  # `header: No` is still "no field" after save -> read, and a second save is a
+  # fixed point: an unchanged save gives identical YAML.
+  expect_identical(header_of(ds2), list(FALSE, "gene_name"))
   expect_identical(app_fn("dta_to_yaml_text")(again)$value, txt$value)
 
   # Rename the dataset, save, read it back: the matrix block and the row labels
@@ -107,13 +118,38 @@ test_that("a tabular dataset is written unchanged: columns, no matrix key", {
   expect_null(lst$matrix)
 })
 
-test_that(".dta_compact leaves a dta_verbatim list alone and still drops other NULLs", {
+test_that("every header form of a row label round-trips through save -> read as written", {
+  hdr <- app_fn("dta_row_label_header")
+  # A header text that used to be a keyword is now only a text.
+  cases <- list(
+    id = list(line = NULL, expect = NULL),
+    empty = list(line = "header: \"\"", expect = ""),
+    text = list(line = "header: gene_id", expect = "gene_id"),
+    named = list(line = "header: named", expect = "named"),
+    blank = list(line = "header: blank", expect = "blank"),
+    none = list(line = "header: No", expect = FALSE)
+  )
+  for (nm in names(cases)) {
+    y <- mx_app_yaml
+    i <- grep("header: No", y, fixed = TRUE)
+    y <- append(y[-i], if (!is.null(cases[[nm]]$line)) paste0("        ", cases[[nm]]$line), after = i - 1L)
+    dta <- mx_app_dta(y)
+    expect_identical(hdr(dta@datasets$gene_counts@specs@columns[[1]]), cases[[nm]]$expect, info = nm)
+    txt <- app_fn("dta_to_yaml_text")(dta)
+    expect_true(txt$ok, info = nm)
+    back <- mx_app_dta(strsplit(txt$value, "\n", fixed = TRUE)[[1]])
+    expect_identical(hdr(back@datasets$gene_counts@specs@columns[[1]]), cases[[nm]]$expect, info = nm)
+    expect_identical(as.list(back@datasets$gene_counts@matrix), as.list(dta@datasets$gene_counts@matrix), info = nm)
+    expect_identical(app_fn("dta_to_yaml_text")(back)$value, txt$value, info = nm)
+  }
+})
+
+test_that(".dta_compact drops NULLs and empty lists everywhere, a header FALSE and \"\" survive", {
   compact <- app_fn(".dta_compact")
-  v <- structure(list(NULL, "x"), class = "dta_verbatim")
-  out <- compact(list(a = v, b = list(c = NULL, d = 1)))
-  expect_length(out$a, 2L)
-  expect_null(out$a[[1]])
+  out <- compact(list(b = list(c = NULL, d = 1), h = list(id = "A", header = FALSE), e = list(header = "")))
   expect_identical(out$b, list(d = 1))
+  expect_identical(out$h$header, FALSE)
+  expect_identical(out$e$header, "")
 })
 
 test_that("T15: the specs signature changes when the matrix block changes", {
@@ -132,9 +168,9 @@ mx_app_two_tables <- function(env = parent.frame()) {
     "      - { filename: \"a.tsv\", type: tsv }",
     "      - { filename: \"b.tsv\", type: tsv }",
     "    row_labels:",
-    "      - { id: GENE_ID, type: SAS Char, nullable: No }",
-    "      - { id: GENE_NAME, type: SAS Char, nullable: Yes }",
-    "    matrix:", "      header:", "        corner: [gene_id, gene_name]",
+    "      - { id: GENE_ID, header: gene_id, type: SAS Char, nullable: No }",
+    "      - { id: GENE_NAME, header: gene_name, type: SAS Char, nullable: Yes }",
+    "    matrix:",
     "      rows: { key: GENE_ID }", "      cells: { type: SAS Num }"
   )
   dta <- mx_app_dta(lines)
@@ -191,7 +227,7 @@ test_that("a matrix dataset in a loaded DTA validates, with a verdict and a mess
   lines <- readLines(test_path("fixtures", "matrix", "gene_counts.tsv"))
   lines[2] <- sub("\t10.5\t", "\t-10.5\t", lines[2], fixed = TRUE)
   writeLines(lines, file.path(bad, "gene_counts.tsv"))
-  dta2 <- mx_app_dta(sub("corner: [~, gene_name]", "corner: [gene_id, gene_name]", mx_app_yaml, fixed = TRUE))
+  dta2 <- mx_app_dta(mx_app_fields_yaml())
   ds <- load_file(dta2@datasets[["gene_counts"]], file = file.path(bad, "gene_counts.tsv"), stream = "never")
   dta2@datasets[["gene_counts"]] <- ds
   res2 <- check(dta2, quiet = TRUE, persist = FALSE)
@@ -263,6 +299,8 @@ test_that("a raw-YAML edit from matrix to tabular drops that dataset's data and 
     i <- regexpr("- id: mature_counts", y, fixed = TRUE)
     tail_txt <- substring(y, i)
     tail_txt <- sub("type: matrix", "type: tabular", tail_txt, fixed = TRUE)
+    # A tabular column has no header text: drop the row label's.
+    tail_txt <- sub("\n *header:[^\n]*", "", tail_txt)
     tail_txt <- sub("row_labels:", "columns:", tail_txt, fixed = TRUE)
     tail_txt <- sub("\n  matrix:.*$", "\n", tail_txt)
     session$setInputs(raw_yaml_editor = paste0(substring(y, 1, i - 1), tail_txt))
@@ -282,7 +320,7 @@ test_that("a raw-YAML edit from matrix to tabular drops that dataset's data and 
   })
 })
 
-test_that("a raw-YAML corner edit with a loaded table reports 'load it again', not a crash", {
+test_that("a raw-YAML header edit with a loaded table reports 'load it again', not a crash", {
   mxs_skip()
   shiny::testServer(.shiny_app_dir(), {
     session$setInputs(dta_file = mxs_input(mxs_ext("matrix_dta.yaml")))
@@ -292,7 +330,8 @@ test_that("a raw-YAML corner edit with a loaded table reports 'load it again', n
 
     unlock_editing(session)
     y <- rv$yaml_text
-    edited <- sub("corner:\n      - gene_id\n      - gene_name", "corner:\n      - ~\n      - gene_name", y, fixed = TRUE)
+    # The first row label's header text becomes "no field above it".
+    edited <- sub("header: gene_id", "header: No", y, fixed = TRUE)
     expect_false(identical(y, edited))
     session$setInputs(raw_yaml_editor = edited)
     session$setInputs(apply_yaml = 1)
@@ -325,10 +364,17 @@ test_that("the inspect panel words a minimum finding as 'at least 0'", {
 
 # A synthetic matrix dataset "m" with row labels `labels` (the first is
 # non-nullable), a files entry and the given `matrix:` lines (already indented
-# by four spaces under "matrix:").
-mxc_dta <- function(matrix_lines, labels = c("A", "B"), key = "A", env = parent.frame()) {
+# by four spaces under "matrix:"). `headers` holds the YAML text of each row
+# label's `header:` value (NA = not written, so the header is the ID).
+mxc_dta <- function(matrix_lines, labels = c("A", "B"), key = "A", headers = NULL,
+                    env = parent.frame()) {
+  headers <- c(headers, rep(NA_character_, length(labels)))[seq_along(labels)]
   lbl <- vapply(seq_along(labels), function(i) {
-    sprintf("      - { id: %s, type: SAS Char, nullable: %s }", labels[i], if (labels[i] %in% key) "No" else "Yes")
+    sprintf(
+      "      - { id: %s, %stype: SAS Char, nullable: %s }", labels[i],
+      if (is.na(headers[i])) "" else sprintf("header: %s, ", headers[i]),
+      if (labels[i] %in% key) "No" else "Yes"
+    )
   }, "")
   lines <- c(
     "datasets:", "  - id: m", "    type: matrix",
@@ -342,22 +388,22 @@ mxc_dta <- function(matrix_lines, labels = c("A", "B"), key = "A", env = parent.
 
 mxc_int <- function(env = parent.frame()) {
   mxc_dta(c(
-    "header:", "  corner: [~, x]", "  values: [\"007\", \"S1\"]", "  count: 2",
+    "columns:", "  values: [\"007\", \"S1\"]", "  count: 2",
     "rows: { key: [A, B], count: 0 }",
     "cells: { type: SAS Int, nullable: No, values: [0, 1, 2], length: 4 }"
-  ), key = c("A", "B"), env = env)
+  ), key = c("A", "B"), headers = c("No", "x"), env = env)
 }
 mxc_num <- function(env = parent.frame()) {
   mxc_dta(c(
-    "header: { corner: [a, b] }", "rows: { key: A }",
+    "rows: { key: A }",
     "cells: { type: SAS Num, nullable: No, infinite: true, format: \"SAS 8.2\" }"
-  ), env = env)
+  ), headers = c("a", "b"), env = env)
 }
 mxc_char <- function(env = parent.frame()) {
   mxc_dta(c(
-    "header: { corner: blank, count: 96 }", "rows: { key: A, count: 0 }",
+    "columns: { count: 96 }", "rows: { key: A, count: 0 }",
     "cells: { type: SAS Char, nullable: No, length: 3 }"
-  ), env = env)
+  ), headers = c("\"\"", "\"\""), env = env)
 }
 mxc_bundled <- function() read_dta_from_yaml(app_fixture_path("matrix_dta.yaml"))
 mxc_mx <- function(dta, id = "m") as.list(dta@datasets[[id]]@matrix)
@@ -365,39 +411,45 @@ mxc_ids <- function(dta, id = "m") names(dta@datasets[[id]]@specs@columns)
 
 # ---- dta_add_dataset: matrix ------------------------------------------------
 
-test_that("Add dataset: each corner form is stored and round-trips through the YAML", {
+test_that("Add dataset: each header mode is stored on the row label and round-trips through the YAML", {
   add <- app_fn("dta_add_dataset")
+  hdr <- app_fn("dta_row_label_header")
   base <- app_fixture_dta()
   cases <- list(
-    named = list(corner = "named", expect = "named"),
-    blank = list(corner = "blank", expect = "blank"),
-    none = list(corner = "none", expect = list(NULL)),
-    text = list(corner = "text", corner_text = "gene_id", expect = "gene_id")
+    id = list(mode = "id", expect = NULL),
+    empty = list(mode = "empty", expect = ""),
+    text = list(mode = "text", text = "gene_id", expect = "gene_id"),
+    none = list(mode = "none", expect = FALSE),
+    # A text that used to be a keyword is only a text now.
+    named = list(mode = "text", text = "named", expect = "named"),
+    blank = list(mode = "text", text = "blank", expect = "blank")
   )
   for (nm in names(cases)) {
     cs <- cases[[nm]]
     r <- add(base, "mx",
-      type = "matrix", row_label = "GENE_ID", corner = cs$corner,
-      corner_text = cs$corner_text, cell_type = "SAS Int"
+      type = "matrix", row_label = "GENE_ID", header_mode = cs$mode,
+      header_text = cs$text, cell_type = "SAS Int"
     )
     expect_true(r$ok, info = paste(nm, r$error))
     ds <- r$value@datasets[["mx"]]
     expect_true(inherits(ds, "DTAtools::DTADataSetMatrix"), info = nm)
-    expect_identical(as.list(ds@matrix)$header$corner, cs$expect, info = nm)
+    expect_identical(hdr(ds@specs@columns[["GENE_ID"]]), cs$expect, info = nm)
     # The row label is the one SAS Char, non-nullable column, and the key.
     col <- app_fn("dta_column_to_list")(ds@specs@columns[["GENE_ID"]])
     expect_identical(names(ds@specs@columns), "GENE_ID")
     expect_match(col$type, "Char")
     expect_false(col$nullable)
     expect_identical(as.character(ds@matrix@row_key), "GENE_ID")
-    # Cells: the declared type, nullable written explicitly as FALSE.
+    # No data-column rule is set: only the default count stands.
+    expect_null(as.list(ds@matrix)$columns$pattern)
     cells <- as.list(ds@matrix)$cells
     expect_identical(cells$type, "SAS Int")
     expect_false(cells$nullable)
-    # The corner survives the app's save (null entry kept) and a re-read.
+    # The header survives the app's save and a re-read.
     txt <- app_fn("dta_to_yaml_text")(r$value)
     expect_true(txt$ok, info = nm)
     again <- mx_app_dta(strsplit(txt$value, "\n", fixed = TRUE)[[1]])
+    expect_identical(hdr(again@datasets[["mx"]]@specs@columns[["GENE_ID"]]), cs$expect, info = nm)
     expect_identical(as.list(again@datasets[["mx"]]@matrix), as.list(ds@matrix), info = nm)
   }
 })
@@ -405,32 +457,31 @@ test_that("Add dataset: each corner form is stored and round-trips through the Y
 test_that("Add dataset: a matrix is refused until it is fully described", {
   add <- app_fn("dta_add_dataset")
   base <- app_fixture_dta()
-  full <- list(row_label = "G", corner = "blank", cell_type = "SAS Num")
+  full <- list(row_label = "G", header_mode = "empty", cell_type = "SAS Num")
   call <- function(...) {
     a <- utils::modifyList(full, list(...))
     do.call(add, c(list(base, "mx", type = "matrix"), a))
   }
   expect_true(call()$ok)
-  expect_false(call(corner = NULL)$ok)
-  expect_match(call(corner = NULL)$error, "Choose the header text", fixed = TRUE)
+  expect_false(call(header_mode = NULL)$ok)
+  expect_match(call(header_mode = NULL)$error, "Choose the header text", fixed = TRUE)
   expect_false(call(cell_type = NULL)$ok)
   expect_match(call(cell_type = NULL)$error, "Choose the cell type", fixed = TRUE)
   expect_false(call(row_label = "")$ok)
   expect_match(call(row_label = "  ")$error, "row-label column ID is required", fixed = TRUE)
-  empty <- call(corner = "text", corner_text = "")
+  empty <- call(header_mode = "text", header_text = "")
   expect_false(empty$ok)
   expect_match(empty$error, "choose Empty", fixed = TRUE)
-  # The text "named" would be read back as the keyword, so it is refused.
-  kw <- call(corner = "text", corner_text = "named")
-  expect_false(kw$ok)
-  expect_match(kw$error, "read as a keyword", fixed = TRUE)
+  blank <- call(header_mode = "text", header_text = "   ")
+  expect_false(blank$ok)
+  expect_match(blank$error, "Enter the header text", fixed = TRUE)
   # ... and a refused add leaves the DTA as it was.
   expect_false("mx" %in% names(base@datasets))
 })
 
 test_that("Add dataset: the matrix arguments are ignored for any other type", {
   r <- app_fn("dta_add_dataset")(app_fixture_dta(), "tb", type = "tabular",
-    row_label = "X", corner = "named", cell_type = "SAS Num")
+    row_label = "X", header_mode = "id", cell_type = "SAS Num")
   expect_true(r$ok, info = r$error)
   ds <- r$value@datasets[["tb"]]
   expect_identical(ds@type, "tabular")
@@ -461,21 +512,61 @@ test_that("renaming a row label renames the row key in place, keeping a composit
   expect_identical(as.list(g$value@datasets$gene_counts@matrix)$rows$key, "GENE_KEY")
 })
 
-test_that("adding a row label appends an empty header entry to a listed corner only", {
+test_that("each row label keeps its own header when labels are added, removed or reordered", {
   set_col <- app_fn("dta_set_column")
+  hdr <- app_fn("dta_row_label_header")
+  hdrs <- function(dta, id = "m") unname(lapply(dta@datasets[[id]]@specs@columns, hdr))
+
+  # Add: the new label's header is its ID (nothing written), the others stay.
   g <- set_col(mxc_bundled(), "gene_counts", id = "GENE_DESC", type = "Char", nullable = TRUE)
   expect_true(g$ok, info = g$error)
-  m <- g$value@datasets$gene_counts@matrix
-  expect_identical(as.character(m@corner), c("gene_id", "gene_name", ""))
   expect_identical(mxc_ids(g$value, "gene_counts"), c("GENE_ID", "GENE_NAME", "GENE_DESC"))
-  # A named corner follows the ids by definition.
-  d <- mxc_dta(c("header: { corner: named }", "rows: { key: A }", "cells: { type: SAS Num }"))
-  n <- set_col(d, "m", id = "C", type = "Char", nullable = TRUE)
-  expect_true(n$ok, info = n$error)
-  expect_identical(as.list(n$value@datasets$m@matrix)$header$corner, "named")
+  expect_identical(hdrs(g$value, "gene_counts"), list("gene_id", "gene_name", NULL))
+  # ... and in the saved YAML: header lines for the first two only.
+  saved <- app_fn("dta_dataset_to_list")(g$value@datasets$gene_counts)$row_labels
+  expect_identical(lapply(saved, function(x) x$header), list("gene_id", "gene_name", NULL))
+  # Adding with an explicit mode writes it.
+  e <- set_col(mxc_bundled(), "gene_counts",
+    id = "GENE_DESC", type = "Char", nullable = TRUE,
+    header_mode = "empty"
+  )
+  expect_true(e$ok, info = e$error)
+  expect_identical(hdrs(e$value, "gene_counts"), list("gene_id", "gene_name", ""))
+
+  # Remove: the remaining labels keep theirs.
+  d <- mxc_dta(c("rows: { key: A }", "cells: { type: SAS Num }"),
+    labels = c("A", "B", "C"), headers = c("No", "b", "\"\"")
+  )
+  expect_identical(hdrs(d), list(FALSE, "b", ""))
+  rm_col <- app_fn("dta_remove_column")
+  r <- rm_col(d, "m", "B")
+  expect_true(r$ok, info = r$error)
+  expect_identical(hdrs(r$value), list(FALSE, ""))
+  r2 <- rm_col(d, "m", "C")
+  expect_true(r2$ok, info = r2$error)
+  expect_identical(hdrs(r2$value), list(FALSE, "b"))
+
+  # Reorder: each header travels with its row label; the key does not change.
+  mv <- app_fn("dta_move_column")
+  d3 <- mxc_dta(c("rows: { key: A }", "cells: { type: SAS Num }"),
+    labels = c("A", "B", "C"), headers = c("a", "b", "c")
+  )
+  up <- mv(d3, "m", "B", "up")
+  expect_true(up$ok, info = up$error)
+  expect_identical(mxc_ids(up$value), c("B", "A", "C"))
+  expect_identical(hdrs(up$value), list("b", "a", "c"))
+  expect_identical(as.character(up$value@datasets$m@matrix@row_key), "A")
+  down <- mv(d3, "m", "B", "down")
+  expect_true(down$ok, info = down$error)
+  expect_identical(mxc_ids(down$value), c("A", "C", "B"))
+  expect_identical(hdrs(down$value), list("a", "c", "b"))
+  # The saved YAML follows (order of ids and their header lines).
+  y <- app_fn("dta_dataset_to_list")(down$value@datasets$m)$row_labels
+  expect_identical(vapply(y, function(x) x$id, ""), c("A", "C", "B"))
+  expect_identical(vapply(y, function(x) x$header, ""), c("a", "c", "b"))
 })
 
-test_that("removing the row key is refused and changes nothing; a non-key label drops its corner entry", {
+test_that("removing the row key is refused and changes nothing; a non-key label goes with its own header", {
   rm_col <- app_fn("dta_remove_column")
   dta <- mxc_bundled()
   before <- as.list(dta@datasets$gene_counts@matrix)
@@ -490,61 +581,170 @@ test_that("removing the row key is refused and changes nothing; a non-key label 
   ok <- rm_col(dta, "gene_counts", "GENE_NAME")
   expect_true(ok$ok, info = ok$error)
   expect_identical(mxc_ids(ok$value, "gene_counts"), "GENE_ID")
-  expect_identical(as.character(ok$value@datasets$gene_counts@matrix@corner), "gene_id")
+  expect_identical(
+    app_fn("dta_row_label_header")(ok$value@datasets$gene_counts@specs@columns[["GENE_ID"]]),
+    "gene_id"
+  )
 
   # The last row label cannot go either (it would be the key anyway).
   one <- rm_col(ok$value, "gene_counts", "GENE_ID")
   expect_false(one$ok)
 })
 
-test_that("removing position 1 with a null corner entry is refused", {
-  d <- mxc_dta(c("header: { corner: [~, b] }", "rows: { key: B }", "cells: { type: SAS Num }"), key = "B")
-  r <- app_fn("dta_remove_column")(d, "m", "A")
-  expect_false(r$ok)
-  expect_match(r$error, "no header field above it", fixed = TRUE)
-  expect_identical(mxc_ids(d), c("A", "B"))
-})
-
-test_that("the keyword trap: a corner left as the single text 'blank' is refused on remove", {
-  d <- mxc_dta(c("header: { corner: [\"blank\", x] }", "rows: { key: A }", "cells: { type: SAS Num }"))
-  expect_identical(as.character(d@datasets$m@matrix@corner), c("blank", "x"))
-  r <- app_fn("dta_remove_column")(d, "m", "B")
-  expect_false(r$ok)
-  expect_match(r$error, "read as a keyword", fixed = TRUE)
-})
-
-test_that("moving a row label swaps its corner entry; a move never changes the key", {
+test_that("the first row label with no field above it must stay first and is the only one that can have none", {
   mv <- app_fn("dta_move_column")
-  d <- mxc_dta(c("header: { corner: [a, b, c] }", "rows: { key: A }", "cells: { type: SAS Num }"),
-    labels = c("A", "B", "C")
-  )
-  r <- mv(d, "m", "B", "up")
-  expect_true(r$ok, info = r$error)
-  expect_identical(mxc_ids(r$value), c("B", "A", "C"))
-  expect_identical(as.character(r$value@datasets$m@matrix@corner), c("b", "a", "c"))
-  expect_identical(as.character(r$value@datasets$m@matrix@row_key), "A")
-  r2 <- mv(d, "m", "B", "down")
-  expect_true(r2$ok, info = r2$error)
-  expect_identical(as.character(r2$value@datasets$m@matrix@corner), c("a", "c", "b"))
-  expect_identical(as.character(r2$value@datasets$m@matrix@row_key), "A")
-})
-
-test_that("a move involving the null corner entry is refused, [null, a, b] moving b up is legal", {
-  mv <- app_fn("dta_move_column")
-  d <- mxc_dta(c("header: { corner: [~, b] }", "rows: { key: A }", "cells: { type: SAS Num }"))
+  d <- mxc_dta(c("rows: { key: A }", "cells: { type: SAS Num }"), headers = c("No", "b"))
   up <- mv(d, "m", "B", "up")
   expect_false(up$ok)
   expect_match(up$error, "must stay first", fixed = TRUE)
   down <- mv(d, "m", "A", "down")
   expect_false(down$ok)
+  expect_match(down$error, "must stay first", fixed = TRUE)
+  expect_identical(mxc_ids(d), c("A", "B"))
 
-  d3 <- mxc_dta(c("header: { corner: [~, a, b] }", "rows: { key: A }", "cells: { type: SAS Num }"),
-    labels = c("A", "B", "C")
+  # Further down, a move is a plain reorder.
+  d3 <- mxc_dta(c("rows: { key: A }", "cells: { type: SAS Num }"),
+    labels = c("A", "B", "C"), headers = c("No", "b", "c")
   )
   r <- mv(d3, "m", "C", "up")
   expect_true(r$ok, info = r$error)
   expect_identical(mxc_ids(r$value), c("A", "C", "B"))
-  expect_identical(as.character(r$value@datasets$m@matrix@corner), c(NA, "b", "a"))
+  expect_identical(
+    unname(lapply(r$value@datasets$m@specs@columns, app_fn("dta_row_label_header"))),
+    list(FALSE, "c", "b")
+  )
+
+  # "No field" on a label that is not first is refused; Empty is the way.
+  set_col <- app_fn("dta_set_column")
+  bad <- set_col(d, "m", id = "B", type = "Char", nullable = TRUE, header_mode = "none")
+  expect_false(bad$ok)
+  expect_match(bad$error, "Only the first row label can have no field", fixed = TRUE)
+  newbad <- set_col(d, "m", id = "Z", type = "Char", nullable = TRUE, header_mode = "none")
+  expect_false(newbad$ok)
+  expect_match(newbad$error, "Only the first row label", fixed = TRUE)
+  fine <- set_col(d, "m", id = "B", type = "Char", nullable = TRUE, header_mode = "empty")
+  expect_true(fine$ok, info = fine$error)
+  expect_identical(app_fn("dta_row_label_header")(fine$value@datasets$m@specs@columns[["B"]]), "")
+  # ... and the first one can be given "no field" (and can lose it again).
+  plain <- mxc_dta(c("rows: { key: A }", "cells: { type: SAS Num }"))
+  first <- set_col(plain, "m", id = "A", type = "Char", nullable = FALSE, header_mode = "none")
+  expect_true(first$ok, info = first$error)
+  expect_identical(app_fn("dta_row_label_header")(first$value@datasets$m@specs@columns[["A"]]), FALSE)
+  undone <- set_col(first$value, "m", id = "A", type = "Char", nullable = FALSE, header_mode = "id")
+  expect_true(undone$ok, info = undone$error)
+  expect_null(app_fn("dta_row_label_header")(undone$value@datasets$m@specs@columns[["A"]]))
+})
+
+test_that("dta_column_fields reports the header mode of each of the four forms", {
+  d <- mxc_dta(c("rows: { key: A }", "cells: { type: SAS Num }"),
+    labels = c("A", "B", "C", "D"), headers = c("No", "\"\"", "x", NA)
+  )
+  f <- function(id) app_fn("dta_column_fields")(d, "m", id)
+  expect_identical(f("A")$header_mode, "none")
+  expect_identical(f("B")$header_mode, "empty")
+  expect_identical(f("C")$header_mode, "text")
+  expect_identical(f("C")$header_text, "x")
+  expect_identical(f("D")$header_mode, "id")
+  expect_identical(f("D")$header_text, "")
+  # A tabular column reads as "same as the ID".
+  tab <- app_fixture_dta()
+  tid <- app_fn("dta_column_ids")(tab, names(tab@datasets)[1])[1]
+  expect_identical(app_fn("dta_column_fields")(tab, names(tab@datasets)[1], tid)$header_mode, "id")
+})
+
+test_that("the sketch and the overview show the effective header text of each of the four forms", {
+  d <- mxc_dta(c("rows: { key: A }", "cells: { type: SAS Num }"),
+    labels = c("A", "B", "C", "D"), headers = c("No", "\"\"", "x", NA)
+  )
+  sk <- app_fn("dta_matrix_sketch")(d, "m")
+  expect_length(sk, 2L)
+  # Header line: each header text above its column -- nothing where the header
+  # line has no field (named in the note), "" for an empty field; second line:
+  # the row labels' IDs.
+  expect_match(sk[1], "^ +\"\" +x +D ", perl = TRUE)
+  expect_match(sk[1], "no field above A", fixed = TRUE)
+  expect_match(sk[2], "^A +B +C +D ", perl = TRUE)
+  # One header form at a time.
+  one <- function(h) {
+    app_fn("dta_matrix_sketch")(
+      mxc_dta(c("rows: { key: A }", "cells: { type: SAS Num }"), labels = "A", headers = h), "m"
+    )
+  }
+  expect_match(one("\"\"")[1], "^\"\" ")
+  expect_false(grepl("no field", one("\"\"")[1], fixed = TRUE))
+  expect_match(one("gene_id")[1], "^gene_id ")
+  expect_match(one(NA)[1], "^A ")
+  expect_match(one("No")[1], "^ +label ")
+  expect_match(one("No")[1], "no field above A", fixed = TRUE)
+
+  ov <- app_fn("dta_columns_overview")(d, "m")
+  expect_identical(names(ov)[1:2], c("id", "header"))
+  expect_identical(ov$header, c("(no field)", "(empty)", "x", "D"))
+  # Tabular: unchanged (no header column) and no sketch.
+  tab <- app_fixture_dta()
+  tn <- names(tab@datasets)[1]
+  expect_false("header" %in% names(app_fn("dta_columns_overview")(tab, tn)))
+  expect_identical(app_fn("dta_matrix_sketch")(tab, tn), character(0))
+  expect_null(app_fn("matrix_sketch_ui")(tab, tn))
+  expect_match(render_html(app_fn("matrix_sketch_ui")(d, "m")), "matrix-sketch", fixed = TRUE)
+})
+
+test_that("the Row labels list and the Matrix layout modal of a matrix carry the sketch; a tabular list does not", {
+  mxs_skip()
+  shiny::testServer(.shiny_app_dir(), {
+    session$setInputs(dta_file = mxs_input(mxs_ext("matrix_dta.yaml")))
+    unlock_editing(session)
+    session$setInputs(edit_cols = 1)
+    expect_match(ui_text(output$col_modal_body), "matrix-sketch", fixed = TRUE)
+    session$setInputs(edit_matrix = 1)
+    expect_match(ui_text(output$mx_modal_body), "matrix-sketch", fixed = TRUE)
+  })
+  shiny::testServer(.shiny_app_dir(), {
+    session$setInputs(dta_file = mxs_input(mxs_ext("clinical_dta.yaml")))
+    unlock_editing(session)
+    session$setInputs(edit_cols = 1)
+    expect_false(grepl("matrix-sketch", ui_text(output$col_modal_body), fixed = TRUE))
+  })
+})
+
+test_that("a rename without a header mode keeps the header; a mode edits it; a keyword text is just text", {
+  set_col <- app_fn("dta_set_column")
+  hdr <- app_fn("dta_row_label_header")
+  # NULL mode (a caller without the field) keeps it, also across a rename.
+  g <- set_col(mxc_bundled(), "gene_counts",
+    id = "GENE_KEY", old_id = "GENE_ID", type = "Char", nullable = FALSE
+  )
+  expect_true(g$ok, info = g$error)
+  expect_identical(hdr(g$value@datasets$gene_counts@specs@columns[["GENE_KEY"]]), "gene_id")
+  e <- mxc_dta(c("rows: { key: A }", "cells: { type: SAS Num }"), headers = c("No", "\"\""))
+  r1 <- set_col(e, "m", id = "C", old_id = "A", type = "Char", nullable = FALSE)
+  expect_true(r1$ok, info = r1$error)
+  expect_identical(hdr(r1$value@datasets$m@specs@columns[["C"]]), FALSE)
+  r2 <- set_col(e, "m", id = "D", old_id = "B", type = "Char", nullable = TRUE)
+  expect_true(r2$ok, info = r2$error)
+  expect_identical(hdr(r2$value@datasets$m@specs@columns[["D"]]), "")
+
+  # An explicit mode edits it.
+  t <- set_col(e, "m",
+    id = "B", old_id = "B", type = "Char", nullable = TRUE,
+    header_mode = "text", header_text = "named"
+  )
+  expect_true(t$ok, info = t$error)
+  expect_identical(hdr(t$value@datasets$m@specs@columns[["B"]]), "named")
+  # ... a blank text is refused, not stored.
+  blank <- set_col(e, "m",
+    id = "B", old_id = "B", type = "Char", nullable = TRUE,
+    header_mode = "text", header_text = ""
+  )
+  expect_false(blank$ok)
+  expect_match(blank$error, "choose Empty", fixed = TRUE)
+
+  # The text 'named' or 'blank' round-trips through save -> read as that text.
+  txt <- app_fn("dta_to_yaml_text")(t$value)
+  expect_true(txt$ok)
+  back <- mx_app_dta(strsplit(txt$value, "\n", fixed = TRUE)[[1]])
+  expect_identical(hdr(back@datasets$m@specs@columns[["B"]]), "named")
+  expect_identical(hdr(back@datasets$m@specs@columns[["A"]]), FALSE)
 })
 
 test_that("a key row label cannot be made nullable", {
@@ -614,13 +814,13 @@ test_that("an unchanged Matrix layout save leaves the settings identical", {
   }
   # The synthetic Int fixture really carries the awkward shapes the save must keep.
   l <- mxc_mx(mxc_int())
-  expect_identical(unlist(l$header$values), c("007", "S1"))
+  expect_identical(unlist(l$columns$values), c("007", "S1"))
   expect_identical(as.character(l$rows$key), c("A", "B"))
   expect_identical(as.numeric(unlist(l$cells$values)), c(0, 1, 2))
 })
 
 test_that("a cell nullable that was never set stays unset on an unchanged save", {
-  d <- mxc_dta(c("header: { corner: blank }", "rows: { key: A }", "cells: { type: SAS Num }"))
+  d <- mxc_dta(c("rows: { key: A }", "cells: { type: SAS Num }"))
   expect_null(mxc_mx(d)$cells$nullable)
   r <- mxc_save(d, "m")
   expect_true(r$ok, info = r$error)
@@ -632,15 +832,15 @@ test_that("Matrix layout edits land", {
   dta <- mxc_bundled()
   gc <- function(r) as.list(r$value@datasets$gene_counts@matrix)
 
-  r <- mxc_save(dta, "gene_counts", list(header_pattern = "^T[0-9]+$"))
+  r <- mxc_save(dta, "gene_counts", list(columns_pattern = "^T[0-9]+$"))
   expect_true(r$ok, info = r$error)
-  expect_identical(gc(r)$header$pattern, "^T[0-9]+$")
+  expect_identical(gc(r)$columns$pattern, "^T[0-9]+$")
 
   # min == max is written as the scalar count.
   r <- mxc_save(dta, "gene_counts", list(n_columns_min = 5, n_columns_max = 5))
   expect_true(r$ok, info = r$error)
-  expect_false(is.list(gc(r)$header$count))
-  expect_equal(gc(r)$header$count, 5)
+  expect_false(is.list(gc(r)$columns$count))
+  expect_equal(gc(r)$columns$count, 5)
 
   # A blank maximum removes the bound.
   r <- mxc_save(dta, "gene_counts", list(n_columns_max = NA_real_))
@@ -663,20 +863,35 @@ test_that("Matrix layout edits land", {
   expect_true(r$ok, info = r$error)
   expect_identical(as.character(mxc_mx(r$value)$rows$key), "B")
 
-  # List corner with the "no field" flag makes the first entry null.
-  r <- mxc_save(dta, "gene_counts", list(corner_none = TRUE))
+  # The column-label rule edits land under `columns`.
+  r <- mxc_save(dta, "gene_counts", list(columns_label = "Sample", columns_length = "12"))
   expect_true(r$ok, info = r$error)
-  expect_identical(as.character(r$value@datasets$gene_counts@matrix@corner), c(NA, "gene_name"))
-  r <- mxc_save(dta, "gene_counts", list(corner_mode = "blank"))
+  expect_identical(gc(r)$columns$label, "Sample")
+  expect_equal(gc(r)$columns$length, 12)
+})
+
+test_that("the Matrix layout form no longer carries the header text of the row labels", {
+  f <- app_fn("dta_matrix_fields")(mxc_bundled(), "gene_counts")
+  expect_false(any(grepl("^(corner|header_)", names(f))))
+  expect_true(all(c(
+    "columns_label", "columns_description", "columns_pattern", "columns_values",
+    "columns_length", "n_columns_min", "n_columns_max"
+  ) %in% names(f)))
+  # An unchanged save leaves every row label's header as it was.
+  r <- mxc_save(mxc_bundled(), "gene_counts")
   expect_true(r$ok, info = r$error)
-  expect_identical(gc(r)$header$corner, "blank")
+  hdr <- app_fn("dta_row_label_header")
+  expect_identical(
+    unname(lapply(r$value@datasets$gene_counts@specs@columns, hdr)),
+    list("gene_id", "gene_name")
+  )
 })
 
 test_that("Matrix layout edits the form cannot carry are refused and change nothing", {
   dta <- mxc_bundled()
   before <- as.list(dta@datasets$gene_counts@matrix)
   refused <- list(
-    "pattern and values" = list(header_values = "S1\nS2"),
+    "pattern and values" = list(columns_values = "S1\nS2"),
     "min above max" = list(n_rows_min = 10, n_rows_max = 3),
     "fractional count" = list(n_rows_min = 1.5),
     "zero columns" = list(n_columns_min = 0),
@@ -712,7 +927,7 @@ test_that("a cell type change drops what the new type cannot carry and reports o
   expect_null(cells$infinite)
   expect_equal(cells$range$min, 0)
   # Num -> Int with Inf allowed is reported.
-  num_inf <- mxc_dta(c("header: { corner: blank }", "rows: { key: A }", "cells: { type: SAS Num, nullable: No, infinite: true }"))
+  num_inf <- mxc_dta(c("rows: { key: A }", "cells: { type: SAS Num, nullable: No, infinite: true }"))
   inf <- mxc_save(num_inf, "m", list(cell_type = "SAS Int"))
   expect_true(inf$ok, info = inf$error)
   expect_identical(inf$dropped, "Inf allowed")
@@ -800,9 +1015,9 @@ test_that("a refused load names the delivered file, hides the staging path and b
     "datasets:", "  - id: gc", "    type: matrix",
     "    files: { filename: \"x.tsv\", type: tsv }",
     "    row_labels:",
-    "      - { id: GENE_ID, type: SAS Char, nullable: No }",
-    "      - { id: GENE_NAME, type: SAS Char, nullable: Yes }",
-    "    matrix:", "      header: { corner: [gene_id, gene_name] }",
+    "      - { id: GENE_ID, header: gene_id, type: SAS Char, nullable: No }",
+    "      - { id: GENE_NAME, header: gene_name, type: SAS Char, nullable: Yes }",
+    "    matrix:",
     "      rows: { key: GENE_ID }", "      cells: { type: SAS Num }"
   )
   yf <- file.path(d, "s.yaml")
@@ -919,15 +1134,15 @@ test_that("the Add dialog offers Matrix with its three fields and preselects non
     session$setInputs(add_dataset_open = 1)
     html <- ui_text(output$add_ds_body)
     expect_true(grepl("value=\"matrix\"", html, fixed = TRUE))
-    for (id in c("add_ds_mx_label", "add_ds_mx_corner", "add_ds_mx_cells")) {
+    for (id in c("add_ds_mx_label", "add_ds_mx_header", "add_ds_mx_cells")) {
       expect_true(grepl(id, html, fixed = TRUE), info = id)
     }
-    for (grp in c("add_ds_mx_corner", "add_ds_mx_cells")) {
+    for (grp in c("add_ds_mx_header", "add_ds_mx_cells")) {
       tags <- mxc_inputs_named(html, grp)
       expect_gte(length(tags), 3L)
       expect_false(any(grepl("checked", tags)), info = grp)
     }
-    expect_false(any(grepl("checked", mxc_inputs_named(html, "add_ds_mx_corner_text"))))
+    expect_false(any(grepl("checked", mxc_inputs_named(html, "add_ds_mx_header_text"))))
     label_tag <- regmatches(html, regexpr("<input[^>]*id=\"add_ds_mx_label\"[^>]*>", html))
     expect_true(grepl("value=\"\"", label_tag, fixed = TRUE))
     # The type radio keeps its own default: Tabular.
@@ -944,7 +1159,7 @@ test_that("adding a matrix through the dialog needs every field, then lands a ma
     unlock_editing(session)
     session$setInputs(add_dataset_open = 1)
     before <- rv$dta
-    # No corner chosen: refused, nothing changes, and the reason is on screen.
+    # No header text chosen: refused, nothing changes, and the reason is on screen.
     session$setInputs(
       add_ds_id = "new_mx", add_ds_type = "matrix", add_ds_mx_label = "G",
       add_ds_mx_cells = "SAS Int", add_ds_save = 1
@@ -953,11 +1168,11 @@ test_that("adding a matrix through the dialog needs every field, then lands a ma
     expect_false("new_mx" %in% names(rv$dta@datasets))
     expect_match(ui_text(output$add_ds_msg), "Choose the header text", fixed = TRUE)
 
-    session$setInputs(add_ds_mx_corner = "blank", add_ds_save = 2)
+    session$setInputs(add_ds_mx_header = "empty", add_ds_save = 2)
     expect_true("new_mx" %in% names(rv$dta@datasets))
     expect_true(inherits(rv$dta@datasets$new_mx, "DTAtools::DTADataSetMatrix"))
     expect_identical(rv$structure[["new_mx"]]$type, "matrix")
-    expect_identical(as.list(rv$dta@datasets$new_mx@matrix)$header$corner, "blank")
+    expect_identical(app_fn("dta_row_label_header")(rv$dta@datasets$new_mx@specs@columns[["G"]]), "")
     expect_identical(as.list(rv$dta@datasets$new_mx@matrix)$cells$type, "SAS Int")
   })
 })
@@ -971,7 +1186,7 @@ test_that("a tabular dataset added after switching away from Matrix gets no matr
     # The hidden matrix inputs still report values after the user switched back.
     session$setInputs(
       add_ds_id = "plain", add_ds_type = "tabular", add_ds_mx_label = "G",
-      add_ds_mx_corner = "named", add_ds_mx_cells = "SAS Num", add_ds_save = 1
+      add_ds_mx_header = "id", add_ds_mx_cells = "SAS Num", add_ds_save = 1
     )
     expect_identical(rv$dta@datasets$plain@type, "tabular")
     expect_false(inherits(rv$dta@datasets$plain, "DTAtools::DTADataSetMatrix"))
@@ -996,11 +1211,106 @@ test_that("the row-label editor of a matrix says 'row label', renames the key an
     session$setInputs(col_save = 1)
     expect_null(rv$col_msg)
     expect_identical(names(rv$dta@datasets$gene_counts@specs@columns), c("GENE_KEY", "GENE_NAME"))
+    # The form carried no header field, so the label keeps its header text.
+    expect_identical(app_fn("dta_row_label_header")(rv$dta@datasets$gene_counts@specs@columns[["GENE_KEY"]]), "gene_id")
     expect_match(rv$yaml_text, "key:\\s+GENE_KEY")
     expect_false(grepl("key:\\s+GENE_ID", rv$yaml_text))
 
     session$setInputs(edit_rules = 1)
     expect_match(ui_text(output$rule_modal_body), ".matrix:row_key", fixed = TRUE)
+  })
+})
+
+test_that("the row-label form shows the saved header mode as checked; a tabular column form has no such input", {
+  mxs_skip()
+  value_of <- function(tags) sub(".*value=\"([a-z]+)\".*", "\\1", tags)
+  checked_mode <- function(html) {
+    tags <- mxc_inputs_named(html, "col_header_mode")
+    value_of(tags[grepl("checked", tags)])
+  }
+  shiny::testServer(.shiny_app_dir(), {
+    mxc_load_bundled(session)
+    expect_identical(rv$active, "gene_counts")
+    session$setInputs(edit_cols = 1)
+    session$setInputs(col_edit_click = 1)
+    html <- ui_text(output$col_modal_body)
+    expect_identical(sort(value_of(mxc_inputs_named(html, "col_header_mode"))), c("empty", "id", "none", "text"))
+    # GENE_ID has the header text gene_id: "Other text" is checked, with the text.
+    expect_identical(checked_mode(html), "text")
+    expect_match(html, "value=\"gene_id\"", fixed = TRUE)
+
+    # A new row label defaults to "Same as the ID".
+    session$setInputs(col_add = 1)
+    expect_identical(checked_mode(ui_text(output$col_modal_body)), "id")
+  })
+  # mature_counts' row label has an empty header text: "Empty" is checked.
+  shiny::testServer(.shiny_app_dir(), {
+    mxc_load_bundled(session)
+    rv$active <- "mature_counts"
+    session$flushReact()
+    session$setInputs(edit_cols = 1)
+    session$setInputs(col_edit_click = 1)
+    expect_identical(checked_mode(ui_text(output$col_modal_body)), "empty")
+  })
+  # A tabular dataset's column form has no header input at all.
+  shiny::testServer(.shiny_app_dir(), {
+    session$setInputs(dta_file = mxs_input(mxs_ext("clinical_dta.yaml")))
+    unlock_editing(session)
+    session$setInputs(edit_cols = 1)
+    session$setInputs(col_edit_click = 1)
+    html <- ui_text(output$col_modal_body)
+    expect_true(grepl("col_id", html, fixed = TRUE))
+    expect_false(grepl("col_header_mode", html, fixed = TRUE))
+    expect_false(grepl("col_header_text", html, fixed = TRUE))
+  })
+})
+
+test_that("saving the row-label form with a header mode stores it; 'no field' is refused on a later label", {
+  mxs_skip()
+  fill <- function(session, id, ...) {
+    session$setInputs(
+      col_id = id, col_label = "", col_backend = "SAS", col_type = "Char",
+      col_format = "", col_length = "", col_nullable = FALSE, col_values = "",
+      col_pattern = "", col_desc = "", ...
+    )
+  }
+  shiny::testServer(.shiny_app_dir(), {
+    mxc_load_bundled(session)
+    hdr <- app_fn("dta_row_label_header")
+    cols <- function() rv$dta@datasets$gene_counts@specs@columns
+    session$setInputs(edit_cols = 1)
+
+    # First label: "No field" saves, and the YAML says so.
+    session$setInputs(col_edit_click = 1)
+    fill(session, "GENE_ID", col_header_mode = "none", col_header_text = "")
+    session$setInputs(col_save = 1)
+    expect_null(rv$col_msg)
+    expect_identical(hdr(cols()[["GENE_ID"]]), FALSE)
+    expect_match(rv$yaml_text, "header:\\s+(no|No|false)\\b")
+
+    # Second label: "No field" is refused with a sentence, nothing changes.
+    y <- rv$yaml_text
+    session$setInputs(col_edit_click = 2)
+    fill(session, "GENE_NAME", col_header_mode = "none", col_header_text = "")
+    session$setInputs(col_save = 2)
+    expect_match(ui_text(output$col_editor_msg), "Only the first row label", fixed = TRUE)
+    expect_identical(hdr(cols()[["GENE_NAME"]]), "gene_name")
+    expect_identical(rv$yaml_text, y)
+
+    # Other text -- also a former keyword -- is stored as that text.
+    session$setInputs(col_edit_click = 2)
+    fill(session, "GENE_NAME", col_header_mode = "text", col_header_text = "blank")
+    session$setInputs(col_save = 3)
+    expect_null(rv$col_msg)
+    expect_identical(hdr(cols()[["GENE_NAME"]]), "blank")
+    session$setInputs(col_edit_click = 2)
+    fill(session, "GENE_NAME", col_header_mode = "empty", col_header_text = "")
+    session$setInputs(col_save = 4)
+    expect_identical(hdr(cols()[["GENE_NAME"]]), "")
+    session$setInputs(col_edit_click = 2)
+    fill(session, "GENE_NAME", col_header_mode = "id", col_header_text = "")
+    session$setInputs(col_save = 5)
+    expect_null(hdr(cols()[["GENE_NAME"]]))
   })
 })
 
@@ -1229,7 +1539,7 @@ test_that("a load-failure notice is registered and goes once its problem is gone
 
 test_that("a package refusal from the Matrix layout has no line break inside a sentence", {
   d <- mxc_bundled()
-  r <- mxc_save(d, "gene_counts", list(header_pattern = "("))
+  r <- mxc_save(d, "gene_counts", list(columns_pattern = "("))
   expect_false(r$ok)
   expect_match(r$error, "not a valid regular expression", fixed = TRUE)
   expect_false(grepl("\n(?![*ix!>v] )", r$error, perl = TRUE))
@@ -1280,7 +1590,7 @@ test_that("a row label that may be missing cannot join the row key", {
 
 test_that("a number the form hands back rounded to 15 digits is not a change", {
   d <- mxc_dta(c(
-    "header: { corner: blank }", "rows: { key: A }",
+    "rows: { key: A }",
     "cells: { type: SAS Num, nullable: No, range: { min: 0.12345678901234567 } }"
   ))
   f <- app_fn("dta_matrix_fields")(d, "m")
@@ -1292,7 +1602,7 @@ test_that("a number the form hands back rounded to 15 digits is not a change", {
 
 test_that("a cell type change carries the unedited allowed values along", {
   int <- mxc_dta(c(
-    "header: { corner: blank }", "rows: { key: A }",
+    "rows: { key: A }",
     "cells: { type: SAS Int, nullable: No, values: [1, 2, 1000] }"
   ))
   r <- mxc_save(int, "m", list(cell_type = "SAS Char"))
@@ -1301,7 +1611,7 @@ test_that("a cell type change carries the unedited allowed values along", {
   expect_true(is.character(unlist(mxc_mx(r$value)$cells$values)))
 
   chr <- mxc_dta(c(
-    "header: { corner: blank }", "rows: { key: A }",
+    "rows: { key: A }",
     "cells: { type: SAS Char, nullable: No, values: [\"0\", \"1.5\"] }"
   ))
   r <- mxc_save(chr, "m", list(cell_type = "SAS Num"))
@@ -1310,7 +1620,7 @@ test_that("a cell type change carries the unedited allowed values along", {
   expect_equal(as.numeric(unlist(mxc_mx(r$value)$cells$values)), c(0, 1.5))
 
   word <- mxc_dta(c(
-    "header: { corner: blank }", "rows: { key: A }",
+    "rows: { key: A }",
     "cells: { type: SAS Char, nullable: No, values: [\"a\"] }"
   ))
   r <- mxc_save(word, "m", list(cell_type = "SAS Num"))
@@ -1322,7 +1632,7 @@ test_that("a cell type change carries the unedited allowed values along", {
 # ---- wording ----------------------------------------------------------------------
 
 test_that("renaming a row label onto an existing one says 'row label'; a column keeps 'column'", {
-  d <- mxc_dta(c("header: { corner: blank }", "rows: { key: A }", "cells: { type: SAS Num }"))
+  d <- mxc_dta(c("rows: { key: A }", "cells: { type: SAS Num }"))
   r <- app_fn("dta_set_column")(d, "m", id = "B", type = "Char", old_id = "A")
   expect_false(r$ok)
   expect_identical(r$error, "A row label named 'B' already exists.")
@@ -1362,4 +1672,38 @@ test_that("a whole-matrix finding is headed '(whole matrix)', not '(column)'", {
     expect_match(html, "(whole matrix)", fixed = TRUE)
     expect_false(grepl("(column)", html, fixed = TRUE))
   })
+})
+
+test_that("an edit of the row labels asks for a reload exactly when a loaded table goes stale", {
+  needs <- app_fn("dta_matrix_needs_reload")
+  ok <- function(r) {
+    expect_true(isTRUE(r$ok), info = r$error)
+    r$value
+  }
+  bound <- mx_app_bound()
+  set <- function(dta, id, ...) {
+    ok(app_fn("dta_set_column")(dta, "gene_counts", id = id, backend = "SAS", type = "Char", ...))
+  }
+
+  # What changes the names a table is read under, or the header line's layout.
+  renamed <- set(bound, "GENE_UID", nullable = FALSE, old_id = "GENE_ID")
+  added <- set(bound, "NOTE", nullable = TRUE)
+  moved <- ok(app_fn("dta_move_column")(bound, "gene_counts", "GENE_NAME", "up"))
+  removed <- ok(app_fn("dta_remove_column")(bound, "gene_counts", "GENE_NAME"))
+  no_field <- set(bound, "GENE_ID", nullable = FALSE, header_mode = "none")
+  for (after in list(renamed, added, moved, removed, no_field)) {
+    expect_true(needs(bound, after, "gene_counts"))
+  }
+
+  # What does not: another header text, a pattern, nothing at all.
+  other_text <- set(bound, "GENE_ID", nullable = FALSE, header_mode = "text", header_text = "Gene")
+  expect_false(needs(bound, other_text, "gene_counts"))
+  expect_false(needs(bound, set(bound, "GENE_NAME", nullable = TRUE, pattern = "^[A-Z]"), "gene_counts"))
+  expect_false(needs(bound, bound, "gene_counts"))
+
+  # With no table loaded there is nothing to load again; nor for another type.
+  unbound <- mx_app_dta(mx_app_fields_yaml())
+  expect_false(needs(unbound, set(unbound, "GENE_UID", nullable = FALSE, old_id = "GENE_ID"), "gene_counts"))
+  tab <- app_fixture_dta_with_data()
+  expect_false(needs(tab, tab, names(tab@datasets)[1]))
 })

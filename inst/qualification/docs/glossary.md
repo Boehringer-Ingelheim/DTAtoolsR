@@ -32,6 +32,22 @@ length, codelist or pattern), the **rule** axis (a cross-column or grouped rule
 is violated), and the **import** axis (a value cannot be represented in the
 type its column declares). A delivery is valid only if all three are clean.
 
+**Cell**. The value of a matrix at one row and one data column: one measurement, judged by the type, range and missing-value
+rule of `matrix.cells`.
+
+**Column label** (of a data column). The text the header line holds above a
+data column of a matrix. Judged by `matrix.columns` (pattern, values, length,
+count); never listed one by one in the specification.
+
+**Data column**. Any column of a matrix file after the row label columns. A
+matrix has as many as its header line has labels after the row labels.
+
+**Header text** (of a row label). The text the header line holds above a row
+label column: the key `header` of its `row_labels` entry. Absent, it is the
+row label's id; a text, `""` included, is that text, compared after surrounding
+spaces and double quotes are removed on both sides; `No` says the
+header line has no field above the column (first row label only).
+
 **Deviation**. A defect: the software does something other than what its
 requirement says. Declared in `deviations.yaml` before a run, bound to a test
 that asserts it still occurs, and reported at every run. Distinguished from a
@@ -56,6 +72,13 @@ every test traced to a requirement that exists, every requirement exercised,
 every exported function claimed by a requirement, no snapshot expectations, and
 every declared test case actually executed. Recorded as `M1` upward, and a
 failure fails the run.
+
+**Row key**. The row label column(s) that identify a row of a matrix and must be
+unique; by default the first row label.
+
+**Row label column**. A leading column of a matrix file that identifies or
+describes a row (a gene id, a sample id). Declared under `row_labels`, matched
+to the file's leading columns by position.
 
 **Requirement**. One testable statement about the software, with a risk rating,
 a category and the exported symbols it constrains. Identified as

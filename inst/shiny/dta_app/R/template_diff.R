@@ -89,7 +89,7 @@
   if (is.null(x)) {
     return(out)
   }
-  if (!is.list(x) || inherits(x, "dta_verbatim")) {
+  if (!is.list(x)) {
     if (is.null(prefix) || !nzchar(prefix)) {
       # A bare non-list value with no path to hang it on cannot occur from a
       # real call (every caller here starts from a named top-level list or a

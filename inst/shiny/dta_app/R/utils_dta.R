@@ -2627,19 +2627,15 @@ dta_matrix_key_ids <- function(dta, dataset) {
   as.character(ds@matrix@row_key)
 }
 
-# "named" / "blank" / "list", NA for a dataset that is not a matrix.
-dta_matrix_corner_mode <- function(dta, dataset) {
-  ds <- dta_get_dataset(dta, dataset)
-  if (!dta_is_matrix_ds(ds)) {
-    return(NA_character_)
-  }
-  ds@matrix@corner_mode
+# What the header line holds above a row-label column: NULL (its ID), a text
+# ("" = an empty field) or FALSE (no field). The package's own reader.
+dta_row_label_header <- function(col) {
+  get("dta_row_label_header", envir = asNamespace("DTAtools"))(col)
 }
 
-# A list corner left with ONE entry whose text is "named" or "blank" reads back
-# from YAML as that keyword, so its meaning changes after any save or restore.
-.dta_corner_keyword_trap <- function(corner) {
-  length(corner) == 1L && !is.na(corner) && corner %in% c("named", "blank")
+# A column spec as a row label with that header.
+dta_pkg_row_label <- function(spec, header = NULL) {
+  get("DTAColumnSpecRowLabel", envir = asNamespace("DTAtools"))(spec, header = header)
 }
 
 # Supported column-structure backends (drives the Edit-columns backend dropdown).
@@ -2685,11 +2681,6 @@ dta_condition_operators <- function() {
 
 # Drop NULL and zero-length elements recursively so emitted YAML has no blanks.
 .dta_compact <- function(x) {
-  # A list classed "dta_verbatim" is emitted as it is (a matrix corner holds a
-  # meaningful NULL: "no header field here").
-  if (inherits(x, "dta_verbatim")) {
-    return(x)
-  }
   if (is.list(x)) {
     x <- lapply(x, .dta_compact)
     keep <- vapply(x, function(v) !(is.null(v) || length(v) == 0), logical(1))
@@ -3047,6 +3038,10 @@ dta_column_to_list <- function(col) {
   st <- tryCatch(col@structure, error = function(e) NULL)
   out <- list()
   out$id <- g("id")
+  # A row label of a matrix: the header line's text above it ("" = an empty
+  # field, FALSE = no field), written only when it is not the ID.
+  hdr <- tryCatch(dta_row_label_header(col), error = function(e) NULL)
+  if (!is.null(hdr)) out$header <- hdr
   lbl <- g("label")
   if (!is.null(lbl) && nzchar(lbl)) out$label <- lbl
   if (!is.null(st)) {
@@ -3177,14 +3172,7 @@ dta_dataset_to_list <- function(ds, dta = NULL, apply_default = TRUE) {
   }
   if (identical(out$type, "matrix")) {
     mx <- tryCatch(as.list(ds@matrix), error = function(e) NULL)
-    if (!is.null(mx)) {
-      # A NULL corner entry (first only) is a header with no field there.
-      corner <- mx$header$corner
-      if (is.list(corner) && any(vapply(corner, is.null, logical(1)))) {
-        class(mx$header$corner) <- "dta_verbatim"
-      }
-      out$matrix <- mx
-    }
+    if (!is.null(mx)) out$matrix <- mx
   }
   rules <- tryCatch(ds@specs@rules, error = function(e) NULL)
   if (!is.null(rules) && length(rules) > 0) {
@@ -3387,12 +3375,12 @@ dta_set_dataset_meta <- function(dta, dataset, id, name = NULL, description = NU
 # holds ONE index steady across a rename, here it holds every OTHER index
 # steady across the list's growth.
 #
-# The matrix arguments (`row_label`, `corner`, `corner_text`, `cell_type`) are
+# The matrix arguments (`row_label`, `header_mode`, `header_text`, `cell_type`) are
 # used for type "matrix" only and ignored otherwise: a hidden conditional input
 # still reports its value, so a user who switched back to Tabular must not
 # get them.
 dta_add_dataset <- function(dta, id, type = "tabular", name = NULL, description = NULL,
-                            row_label = NULL, corner = NULL, corner_text = NULL,
+                            row_label = NULL, header_mode = NULL, header_text = NULL,
                             cell_type = NULL) {
   dta_try({
     nm <- trimws(as.character(id %||% "")[1])
@@ -3418,39 +3406,19 @@ dta_add_dataset <- function(dta, id, type = "tabular", name = NULL, description 
       lbl <- trimws(as.character(row_label %||% "")[1])
       if (is.na(lbl) || !nzchar(lbl)) stop("A row-label column ID is required.")
       if (grepl("\\s", lbl)) stop("Row-label column ID cannot contain whitespace.")
-      cn <- as.character(corner %||% "")[1]
-      if (is.na(cn) || !cn %in% c("named", "blank", "none", "text")) {
-        stop("Choose the header text above the row labels.")
-      }
+      hdr <- dta_row_label_header_value(header_mode, header_text)
       ct <- as.character(cell_type %||% "")[1]
       if (is.na(ct) || !ct %in% c("SAS Num", "SAS Int", "SAS Char")) {
         stop("Choose the cell type.")
       }
-      corner_val <- switch(cn,
-        named = "named",
-        blank = "blank",
-        none = list(NULL),
-        text = {
-          txt <- trimws(as.character(corner_text %||% "")[1])
-          if (is.na(txt) || !nzchar(txt)) stop("Enter the header text, or choose Empty.")
-          if (txt %in% c("named", "blank")) {
-            stop(sprintf(
-              "The header text '%s' would be read as a keyword; choose \"The row-label ID\" or \"Empty\" instead.",
-              txt
-            ))
-          }
-          list(txt)
-        }
-      )
       DTAtools::DTADataSetMatrix(
         id = nm,
         specs = DTAtools::DTAColumnSpecCollection(columns = stats::setNames(
-          list(DTAtools::DTAColumnSpec(id = lbl, type = "SAS Char", nullable = FALSE)), lbl
+          list(dta_pkg_row_label(
+            DTAtools::DTAColumnSpec(id = lbl, type = "SAS Char", nullable = FALSE), hdr
+          )), lbl
         )),
-        matrix = list(
-          header = list(corner = corner_val),
-          cells = list(type = ct, nullable = FALSE)
-        ),
+        matrix = list(cells = list(type = ct, nullable = FALSE)),
         name = label, description = desc
       )
     } else if (identical(type, "tabular")) {
@@ -3507,6 +3475,19 @@ dta_columns_overview <- function(dta, dataset) {
   if (length(cols) == 0) {
     return(data.frame())
   }
+  ov <- dta_columns_overview_rows(cols)
+  if (dta_is_matrix_ds(ds)) {
+    # A row label also shows what the header line must hold above it.
+    header <- vapply(cols, function(c) {
+      h <- dta_row_label_header(c)
+      if (identical(h, FALSE)) "(no field)" else if (is.null(h)) c@id else if (nzchar(trimws(h))) h else "(empty)"
+    }, character(1))
+    ov <- cbind(ov["id"], header = unname(header), ov[setdiff(names(ov), "id")], stringsAsFactors = FALSE)
+  }
+  ov
+}
+
+dta_columns_overview_rows <- function(cols) {
   do.call(rbind, lapply(cols, function(c) {
     l <- dta_column_to_list(c)
     constraint <- if (!is.null(l$values)) {
@@ -3559,7 +3540,52 @@ dta_column_fields <- function(dta, dataset, id) {
     values = if (!is.null(l$values)) paste(unlist(l$values), collapse = "\n") else "",
     pattern = l$pattern %||% "",
     examples = if (!is.null(l$examples)) paste(unlist(l$examples), collapse = "\n") else "",
-    description = l$description %||% ""
+    description = l$description %||% "",
+    header_mode = dta_row_label_header_mode(col),
+    header_text = {
+      h <- dta_row_label_header(col)
+      if (is.character(h)) h else ""
+    }
+  )
+}
+
+# ---- Header text of a row label (matrix datasets) -------------------------
+# What the header line holds above a row-label column, as the form's two
+# fields: a mode ("id": the row label's ID; "empty": an empty field; "text":
+# `header_text`; "none": no field at all, first row label only) and the text.
+
+dta_row_label_header_modes <- function() c("id", "empty", "text", "none")
+
+dta_row_label_header_mode <- function(col) {
+  h <- dta_row_label_header(col)
+  if (is.null(h)) {
+    "id"
+  } else if (identical(h, FALSE)) {
+    "none"
+  } else if (nzchar(trimws(h))) {
+    "text"
+  } else {
+    "empty"
+  }
+}
+
+# The `header` value of a row label for a mode and text: NULL, "", a text or
+# FALSE. Stops with a plain sentence on a missing choice or an empty text.
+dta_row_label_header_value <- function(mode, text = NULL) {
+  mode <- as.character(mode %||% "")[1]
+  if (is.na(mode) || !mode %in% dta_row_label_header_modes()) {
+    stop("Choose the header text above the row label.")
+  }
+  switch(mode,
+    id = NULL,
+    empty = "",
+    none = FALSE,
+    text = {
+      # Kept as typed; the comparison with the file ignores surrounding spaces.
+      txt <- as.character(text %||% "")[1]
+      if (is.na(txt) || !nzchar(trimws(txt))) stop("Enter the header text, or choose Empty.")
+      txt
+    }
   )
 }
 
@@ -3579,7 +3605,8 @@ dta_column_fields <- function(dta, dataset, id) {
 dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
                            type = NULL, format = NULL, length = NULL,
                            nullable = NULL, values = NULL, pattern = NULL,
-                           description = NULL, old_id = NULL, examples = NULL) {
+                           description = NULL, old_id = NULL, examples = NULL,
+                           header_mode = NULL, header_text = NULL) {
   dta_try({
     id <- trimws(as.character(id)[1] %||% "")
     if (!nzchar(id)) stop("A column id is required.")
@@ -3631,6 +3658,22 @@ dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
       examples = ex,
       colclass = if (!is.null(existing)) existing@colclass else NULL
     )
+    if (dta_is_matrix_ds(ds)) {
+      # A row label also says what the header line holds above it. `header_mode`
+      # NULL (a caller without the field) keeps what the label had.
+      hdr <- if (is.null(header_mode)) {
+        if (!is.null(existing)) dta_row_label_header(existing) else NULL
+      } else {
+        dta_row_label_header_value(header_mode, header_text)
+      }
+      if (identical(hdr, FALSE)) {
+        at <- if (!is.null(existing)) match(if (renaming) old_id else id, names(cols)) else length(cols) + 1L
+        if (at != 1L) {
+          stop("Only the first row label can have no field above it in the header line; choose Empty for an empty field.")
+        }
+      }
+      spec <- dta_pkg_row_label(spec, hdr)
+    }
     if (renaming) {
       # A rename carries the column's name into the dataset's rules in the same
       # save. The new column is added next to the old one first, so every
@@ -3660,14 +3703,10 @@ dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
       specs@columns <- cols
     }
     if (dta_is_matrix_ds(ds)) {
-      # Row-label invariants: the key and the list corner follow the label.
+      # Row-label invariant: the row key follows a renamed label.
       m <- ds@matrix
-      adding <- !renaming && is.null(existing)
       if (renaming && old_id %in% m@row_key) {
         m@row_key[m@row_key == old_id] <- id
-      }
-      if (adding && m@corner_mode == "list") {
-        m@corner <- c(m@corner, "")
       }
       if (id %in% m@row_key && isTRUE(nullable)) {
         stop(sprintf("Row key column '%s' cannot be nullable: a row needs an identity.", id))
@@ -3696,39 +3735,14 @@ dta_remove_column <- function(dta, dataset, id) {
     specs <- ds@specs
     cols <- specs@columns %||% list()
     if (dta_is_matrix_ds(ds)) {
-      m <- ds@matrix
-      ids <- names(cols)
-      if (id %in% m@row_key) {
+      if (id %in% ds@matrix@row_key) {
         stop(sprintf("'%s' is the row key; choose another key under Matrix layout first.", id))
       }
       if (length(cols) == 1L) stop("A matrix dataset needs at least one row label.")
-      if (m@corner_mode == "list") {
-        pos <- match(id, ids)
-        if (!is.na(pos)) {
-          if (pos == 1L && is.na(m@corner[1L])) {
-            stop(paste(
-              "The first row label has no header field above it (corner null), so it cannot be removed;",
-              "change the corner under Matrix layout first."
-            ))
-          }
-          newc <- m@corner[-pos]
-          if (.dta_corner_keyword_trap(newc)) {
-            stop(sprintf(
-              "The remaining header text '%s' would be read as a keyword; change the corner under Matrix layout first.",
-              newc
-            ))
-          }
-          m@corner <- newc
-        }
-      }
-      cols[[id]] <- NULL
-      specs@columns <- cols
-      ds <- S7::set_props(ds, specs = specs, matrix = m)
-    } else {
-      cols[[id]] <- NULL
-      specs@columns <- cols
-      ds@specs <- specs
     }
+    cols[[id]] <- NULL
+    specs@columns <- cols
+    ds@specs <- specs
     dta@datasets[[dataset]] <- ds
     dta
   })
@@ -3750,28 +3764,64 @@ dta_move_column <- function(dta, dataset, id, direction) {
       ord <- seq_len(n)
       ord[c(pos, target)] <- ord[c(target, pos)]
       specs@columns <- cols[ord]
-      if (dta_is_matrix_ds(ds)) {
-        m <- ds@matrix
-        if (m@corner_mode == "list") {
-          if (is.na(m@corner[pos]) || is.na(m@corner[target])) {
-            stop(paste(
-              "The first row label has no header field above it (corner null); it must stay first.",
-              "Change the corner under Matrix layout first."
-            ))
-          }
-          m@corner[c(pos, target)] <- m@corner[c(target, pos)]
-        }
-        ds <- S7::set_props(ds, specs = specs, matrix = m)
-      } else {
-        ds@specs <- specs
+      if (dta_is_matrix_ds(ds) && identical(dta_row_label_header(cols[[1L]]), FALSE) && 1L %in% c(pos, target)) {
+        stop(paste(
+          "The first row label has no field above it in the header line, so it must stay first.",
+          "Change its header text first."
+        ))
       }
+      ds@specs <- specs
       dta@datasets[[dataset]] <- ds
     }
     dta
   })
 }
 
+# TRUE when an edit of the row labels makes the loaded tables of a matrix
+# dataset stale: a table is read under the row-label IDs, in order, and the
+# header line's layout (whether it has a field above the first row label), so a
+# rename, an added, removed or moved row label, or "No field" switched on or
+# off asks for the file to be loaded again. FALSE with no table loaded.
+dta_matrix_needs_reload <- function(before, after, dataset) {
+  ds <- dta_get_dataset(after, dataset)
+  if (!dta_is_matrix_ds(ds) || length(ds@tables) == 0L) {
+    return(FALSE)
+  }
+  layout <- function(dta) {
+    cols <- dta_get_dataset(dta, dataset)@specs@columns
+    list(names(cols), length(cols) > 0L && identical(dta_row_label_header(cols[[1L]]), FALSE))
+  }
+  !identical(layout(before), layout(after))
+}
+
 # ---- Matrix layout form --------------------------------------------------
+
+# A two-line sketch of the file a matrix dataset describes -- its header line
+# and one data row, the row-label columns first -- as fixed-width text. Each
+# header text stands above its column: an empty field is drawn as "", and a
+# field the header line does not have (`header: No`) is left blank and named
+# in the note, because drawing anything there would show a field.
+# character(0) for any other dataset.
+dta_matrix_sketch <- function(dta, dataset) {
+  ds <- dta_get_dataset(dta, dataset)
+  if (!dta_is_matrix_ds(ds)) {
+    return(character(0))
+  }
+  cols <- ds@specs@columns
+  ids <- names(cols)
+  none <- vapply(cols, function(c) identical(dta_row_label_header(c), FALSE), logical(1))
+  head <- vapply(cols, function(c) {
+    h <- dta_row_label_header(c)
+    if (identical(h, FALSE)) "" else if (is.null(h)) c@id else if (nzchar(trimws(h))) h else "\"\""
+  }, character(1))
+  w <- pmax(nchar(ids), nchar(head))
+  pad <- function(x, width) paste0(x, strrep(" ", width - nchar(x)))
+  note <- if (any(none)) sprintf("header line (no field above %s)", ids[none][[1L]]) else "header line"
+  c(
+    paste(c(pad(head, w), "label  ", "label  ", "\u2026", paste("  \u2190", note)), collapse = "  "),
+    paste(c(pad(ids, w), "cell   ", "cell   ", "\u2026", "  \u2190 one line per row"), collapse = "  ")
+  )
+}
 
 # The Matrix layout form's values for one matrix dataset (NULL for any other
 # type). The names are the form's input names: the editor reads and writes
@@ -3784,8 +3834,7 @@ dta_matrix_fields <- function(dta, dataset) {
   m <- ds@matrix
   l <- as.list(m)
   ids <- names(ds@specs@columns) %||% character(0)
-  k <- length(ids)
-  hd <- l[["header"]] %||% list()
+  hd <- l[["columns"]] %||% list()
   rw <- l[["rows"]] %||% list()
   cl <- l[["cells"]] %||% list()
   txt <- function(x) {
@@ -3793,26 +3842,17 @@ dta_matrix_fields <- function(dta, dataset) {
     if (is.na(x)) "" else x
   }
   num <- function(x) if (is.null(x) || length(x) == 0L) NA_real_ else as.numeric(x)[1]
-  mode <- m@corner_mode
-  corner_text <- switch(mode,
-    list = ifelse(is.na(m@corner), "", m@corner),
-    named = ids,
-    rep("", k)
-  )
   max_or_na <- function(v) if (is.infinite(v)) NA_real_ else as.numeric(v)
   ctype <- txt(cl[["type"]])
   ctype <- paste("SAS", sub("^SAS\\s+", "", ctype, ignore.case = TRUE))
   cfmt <- txt(cl[["format"]])
   list(
     row_labels = ids,
-    corner_mode = mode,
-    corner_text = as.character(corner_text),
-    corner_none = identical(mode, "list") && is.na(m@corner[1L]),
-    header_label = txt(hd[["label"]]),
-    header_description = txt(hd[["description"]]),
-    header_pattern = txt(hd[["pattern"]]),
-    header_values = paste(unlist(hd[["values"]]), collapse = "\n"),
-    header_length = txt(hd[["length"]]),
+    columns_label = txt(hd[["label"]]),
+    columns_description = txt(hd[["description"]]),
+    columns_pattern = txt(hd[["pattern"]]),
+    columns_values = paste(unlist(hd[["values"]]), collapse = "\n"),
+    columns_length = txt(hd[["length"]]),
     n_columns_min = as.numeric(m@n_columns[[1L]]),
     n_columns_max = max_or_na(m@n_columns[[2L]]),
     row_key = as.character(m@row_key %||% ids[1L]),
@@ -3839,7 +3879,7 @@ dta_matrix_fields <- function(dta, dataset) {
 # The ORIGINAL settings are patched, field by field, for the fields the form
 # changed only: rebuilding the settings from the form would rewrite every
 # value the form cannot show faithfully (a scalar count, a number that
-# was written as text, a corner entry that is null).
+# was written as text).
 dta_set_matrix <- function(dta, dataset, form) {
   op <- options(cli.width = Inf)
   on.exit(options(op), add = TRUE)
@@ -3849,7 +3889,6 @@ dta_set_matrix <- function(dta, dataset, form) {
     if (!dta_is_matrix_ds(ds)) stop("This dataset is not a matrix dataset.")
     orig <- as.list(ds@matrix)
     pf <- dta_matrix_fields(dta, dataset)
-    k <- length(pf$row_labels)
 
     fm <- function(n) if (is.null(form[[n]])) pf[[n]] else form[[n]]
     txt <- function(x) {
@@ -3886,7 +3925,7 @@ dta_set_matrix <- function(dta, dataset, form) {
     chg <- function(n) {
       a <- fm(n)
       b <- pf[[n]]
-      if (n %in% c("header_values", "cell_values")) {
+      if (n %in% c("columns_values", "cell_values")) {
         return(!identical(lines_of(a), lines_of(b)))
       }
       if (n == "row_key") {
@@ -3932,49 +3971,17 @@ dta_set_matrix <- function(dta, dataset, form) {
       }
     }
 
-    # Corner: mode, texts and the "no field" flag are one setting.
-    mode <- as.character(fm("corner_mode"))[1]
-    ct <- trimws(as.character(fm("corner_text")))
-    ct <- c(ct, rep("", max(0L, k - length(ct))))[seq_len(k)]
-    none <- isTRUE(fm("corner_none"))
-    if (identical(mode, "list")) {
-      pct <- pf$corner_text
-      if (pf$corner_none) pct[1L] <- ""
-      cmp <- ct
-      if (none) cmp[1L] <- ""
-      corner_changed <- !identical(pf$corner_mode, "list") || !identical(trimws(pct), cmp) ||
-        !identical(isTRUE(pf$corner_none), none)
-    } else {
-      corner_changed <- !identical(pf$corner_mode, mode)
+    if (chg("columns_label")) put("columns", "label", text_or_null(txt(fm("columns_label"))))
+    if (chg("columns_description")) put("columns", "description", text_or_null(txt(fm("columns_description"))))
+    if (chg("columns_pattern")) put("columns", "pattern", text_or_null(txt(fm("columns_pattern"))))
+    if (chg("columns_values")) {
+      v <- lines_of(fm("columns_values"))
+      put("columns", "values", if (length(v) > 0L) v else NULL)
     }
-    if (corner_changed) {
-      val <- if (mode %in% c("named", "blank")) {
-        mode
-      } else {
-        if (k == 1L && !none && .dta_corner_keyword_trap(ct)) {
-          stop(sprintf(
-            "The header text '%s' would be read as a keyword; choose \"The row-label ID\" or \"Empty\" instead.",
-            ct
-          ))
-        }
-        v <- as.list(ct)
-        if (none) v[1L] <- list(NULL)
-        v
-      }
-      put("header", "corner", val)
-    }
-
-    if (chg("header_label")) put("header", "label", text_or_null(txt(fm("header_label"))))
-    if (chg("header_description")) put("header", "description", text_or_null(txt(fm("header_description"))))
-    if (chg("header_pattern")) put("header", "pattern", text_or_null(txt(fm("header_pattern"))))
-    if (chg("header_values")) {
-      v <- lines_of(fm("header_values"))
-      put("header", "values", if (length(v) > 0L) v else NULL)
-    }
-    if (chg("header_length")) put("header", "length", length_val(txt(fm("header_length")), "Label"))
+    if (chg("columns_length")) put("columns", "length", length_val(txt(fm("columns_length")), "Label"))
     if (chg("n_columns_min") || chg("n_columns_max")) {
       check_count(fm("n_columns_min"), fm("n_columns_max"), 1L, "Data columns")
-      put("header", "count", count_val(fm("n_columns_min"), fm("n_columns_max"), 1))
+      put("columns", "count", count_val(fm("n_columns_min"), fm("n_columns_max"), 1))
     }
 
     if (chg("row_key")) {
@@ -4044,7 +4051,7 @@ dta_set_matrix <- function(dta, dataset, form) {
     if (chg("cell_label")) put("cells", "label", text_or_null(txt(fm("cell_label"))))
     if (chg("cell_description")) put("cells", "description", text_or_null(txt(fm("cell_description"))))
 
-    if (!is.null(orig$header[["pattern"]]) && length(orig$header[["values"]]) > 0L) {
+    if (!is.null(orig$columns[["pattern"]]) && length(orig$columns[["values"]]) > 0L) {
       stop("Give the data labels a pattern or a list of allowed labels, not both.")
     }
     if (!is.null(orig$cells[["pattern"]]) && length(orig$cells[["values"]]) > 0L) {
