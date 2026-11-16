@@ -3,17 +3,17 @@
 # contract. Expected strings are this renderer's documented wording (written
 # from the contract, not copied from observed output).
 
-exm_matrix <- function(corner = list(NULL, "gene_name"), cells = NULL) {
+exm_matrix <- function(cells = NULL) {
   dta_dataset_from_list(list(
     id = "gene_counts", type = "matrix",
     files = list(filename = "g.tsv", type = "tsv"),
     row_labels = list(
-      list(id = "GENE_ID", type = "SAS Char", nullable = FALSE),
-      list(id = "GENE_NAME", type = "SAS Char", nullable = TRUE)
+      list(id = "GENE_ID", header = FALSE, type = "SAS Char", nullable = FALSE),
+      list(id = "GENE_NAME", header = "gene_name", type = "SAS Char", nullable = TRUE)
     ),
     matrix = list(
-      header = list(
-        corner = corner, label = "Sample ID", pattern = "^S[0-9]{4}$",
+      columns = list(
+        label = "Sample ID", pattern = "^S[0-9]{4}$",
         count = list(min = 1, max = 384)
       ),
       rows = list(key = "GENE_ID", count = list(min = 50000)),
@@ -30,34 +30,46 @@ exm_value <- function(rows, key) rows$value[rows$key == key]
 
 test_that("the layout rows state the matrix contract in plain English", {
   rows <- .matrix_layout_rows(exm_matrix())
-  expect_equal(exm_value(rows, "Header corner"), "(no field), gene_name")
+  expect_equal(
+    exm_value(rows, "File layout"),
+    "A header line, then one line per row. Each line starts with the row label columns GENE_ID, GENE_NAME; every further column is a data column."
+  )
+  expect_equal(
+    exm_value(rows, "Header line"),
+    "gene_name, then one label per data column (no field above GENE_ID)"
+  )
+  expect_false("Header corner" %in% rows$key)
   expect_equal(exm_value(rows, "Column label"), "Sample ID")
   expect_equal(
     exm_value(rows, "Column label rule"),
     "matches ^S[0-9]{4}$; labels must be unique and must not repeat a row-label id"
   )
-  expect_equal(exm_value(rows, "Data columns"), "1\u2013384")
+  expect_equal(exm_value(rows, "Data columns"), "1 to 384")
   expect_equal(exm_value(rows, "Row key"), "GENE_ID (unique, no missing values)")
   expect_equal(exm_value(rows, "Data rows"), "at least 50000")
   expect_equal(exm_value(rows, "Cell type"), "SAS Num")
   expect_equal(exm_value(rows, "Missing cells"), "not allowed")
-  expect_equal(exm_value(rows, "Cell range"), "[0, no upper bound]")
+  expect_equal(exm_value(rows, "Cell range"), "at least 0")
   expect_equal(exm_value(rows, "Infinite values"), "not allowed")
   expect_false(any(c("Cell values", "Cell pattern", "Cell label") %in% rows$key))
 })
 
-test_that("layout rows cover blank corners, exact counts, values and Int cells", {
+test_that("layout rows cover empty header fields, exact counts, values and Int cells", {
   ds <- dta_dataset_from_list(list(
     id = "g", type = "matrix", files = list(filename = "g.tsv", type = "tsv"),
-    row_labels = list(list(id = "SNP", type = "SAS Char", nullable = FALSE)),
+    row_labels = list(list(id = "SNP", header = "", type = "SAS Char", nullable = FALSE)),
     matrix = list(
-      header = list(corner = "blank", count = 3L),
+      columns = list(count = 3L),
       rows = list(count = list(min = 0, max = 10)),
       cells = list(type = "SAS Int", nullable = TRUE, values = list(0, 1, 2))
     )
   ))
   rows <- .matrix_layout_rows(ds)
-  expect_equal(exm_value(rows, "Header corner"), "blank")
+  expect_equal(exm_value(rows, "File layout"), paste0(
+    "A header line, then one line per row. Each line starts with the row label column SNP; ",
+    "every further column is a data column."
+  ))
+  expect_equal(exm_value(rows, "Header line"), "(empty), then one label per data column")
   expect_equal(exm_value(rows, "Data columns"), "exactly 3")
   expect_equal(exm_value(rows, "Data rows"), "at most 10")
   expect_equal(exm_value(rows, "Missing cells"), "allowed")
@@ -74,9 +86,12 @@ test_that("write_dta(format = 'md') titles the matrix table and adds the layout 
 
   expect_match(md, "Row label columns", fixed = TRUE)
   expect_match(md, "Matrix layout", fixed = TRUE)
-  expect_match(md, "(no field), gene", fixed = TRUE)
+  expect_match(md, "File layout", fixed = TRUE)
+  expect_match(md, "Header line", fixed = TRUE)
+  expect_false(grepl("Header corner", md, fixed = TRUE))
+  expect_match(.md_unescape(md), "no field above GENE_ID", fixed = TRUE)
   expect_match(md, "at least 50000", fixed = TRUE)
-  expect_match(md, "no upper bound", fixed = TRUE)
+  expect_match(md, "at least 0", fixed = TRUE)
   expect_match(md, "Infinite values", fixed = TRUE)
   # The tabular dataset keeps its title, and only one dataset gets a layout.
   expect_match(md, "Column Specifications", fixed = TRUE)
@@ -93,9 +108,10 @@ test_that("write_dta(format = 'docx') carries the same texts", {
   expect_true("Row label columns" %in% text)
   expect_true("Matrix layout" %in% text)
   expect_true("Column Specifications" %in% text)
-  expect_true("(no field), gene_name" %in% text)
+  expect_true("gene_name, then one label per data column (no field above GENE_ID)" %in% text)
   expect_true("at least 50000" %in% text)
-  expect_true("[0, no upper bound]" %in% text)
+  expect_true("at least 0" %in% text)
+  expect_false("Header corner" %in% text)
   expect_true("Infinite values" %in% text)
 })
 
@@ -132,14 +148,17 @@ test_that("the template blocks title the matrix table and add the layout", {
   expect_true(all(c("Row label columns", "Column Specifications", "Matrix layout") %in% text))
 })
 
-exm_rows <- function(corner = "blank", header = list(), cells = list(type = "SAS Num"), key = NULL,
+exm_rows <- function(headers = list("", ""), columns = list(), cells = list(type = "SAS Num"), key = NULL,
                      n_labels = 2L, rows_count = NULL) {
   labels <- list(
     list(id = "GENE_ID", type = "SAS Char", nullable = FALSE),
     list(id = "GENE_NAME", type = "SAS Char", nullable = FALSE)
   )[seq_len(n_labels)]
+  for (i in seq_along(labels)) {
+    if (!is.null(headers[[i]])) labels[[i]]$header <- headers[[i]]
+  }
   m <- list(
-    header = c(list(corner = corner, count = 2L), header),
+    columns = utils::modifyList(list(count = 2L), columns),
     cells = cells
   )
   if (!is.null(key)) m$rows <- list(key = key)
@@ -155,15 +174,46 @@ test_that("an unwritten `infinite` on a Num cell reads as not allowed (D9)", {
   expect_equal(exm_value(rows, "Infinite values"), "not allowed")
 })
 
-test_that("corner forms are spelled out", {
+test_that("the header line is spelled out for every form of `header`", {
+  line <- function(headers, n_labels = 2L) {
+    exm_value(.matrix_layout_rows(exm_rows(headers = headers, n_labels = n_labels)), "Header line")
+  }
+  expect_equal(line(list(NULL, NULL)), "GENE_ID, GENE_NAME, then one label per data column")
+  expect_equal(line(list("", "x")), "(empty), x, then one label per data column")
   expect_equal(
-    exm_value(.matrix_layout_rows(exm_rows(corner = "named")), "Header corner"),
-    "named: GENE_ID, GENE_NAME"
+    line(list(FALSE, "x")),
+    "x, then one label per data column (no field above GENE_ID)"
   )
   expect_equal(
-    exm_value(.matrix_layout_rows(exm_rows(corner = list("", "x"))), "Header corner"),
-    "(blank), x"
+    line(list(FALSE), n_labels = 1L),
+    "one label per data column (no field above GENE_ID)"
   )
+  expect_equal(line(list("gene id", NULL)), "gene id, GENE_NAME, then one label per data column")
+  expect_equal(
+    exm_value(.matrix_layout_rows(exm_rows(n_labels = 1L)), "File layout"),
+    paste0(
+      "A header line, then one line per row. Each line starts with the row label column GENE_ID; ",
+      "every further column is a data column."
+    )
+  )
+})
+
+test_that("counts and the cell range are written in words", {
+  rows <- function(columns = list(), rows_count = NULL, cells = list(type = "SAS Num")) {
+    .matrix_layout_rows(exm_rows(columns = columns, rows_count = rows_count, cells = cells))
+  }
+  expect_equal(exm_value(rows(list(count = list(min = 1, max = 384))), "Data columns"), "1 to 384")
+  expect_equal(exm_value(rows(list(count = list(min = 3))), "Data columns"), "at least 3")
+  expect_equal(exm_value(rows(list(count = list(max = 5))), "Data columns"), "1 to 5")
+  expect_equal(exm_value(rows(list(count = 96)), "Data columns"), "exactly 96")
+  expect_equal(exm_value(rows(rows_count = list(max = 5)), "Data rows"), "1 to 5")
+  expect_equal(exm_value(rows(rows_count = list(min = 0, max = 5)), "Data rows"), "at most 5")
+  expect_equal(exm_value(rows(rows_count = list(min = 0)), "Data rows"), "any number")
+  rng <- function(r) exm_value(rows(cells = list(type = "SAS Num", range = r)), "Cell range")
+  expect_equal(rng(list(min = 0)), "at least 0")
+  expect_equal(rng(list(max = 5)), "at most 5")
+  expect_equal(rng(list(min = 0, max = 1)), "0 to 1 (both included)")
+  expect_false("Cell range" %in% rows()$key)
 })
 
 test_that("keys state their constraint and unbounded rows read 'any number'", {
@@ -176,7 +226,7 @@ test_that("keys state their constraint and unbounded rows read 'any number'", {
 
 test_that("header and cell descriptions get their own rows, only when set", {
   rows <- .matrix_layout_rows(exm_rows(
-    header = list(label = "Sample", description = "One column per sample"),
+    columns = list(label = "Sample", description = "One column per sample"),
     cells = list(type = "SAS Num", label = "Count", description = "Raw read counts")
   ))
   expect_equal(exm_value(rows, "Column label description"), "One column per sample")
@@ -192,11 +242,11 @@ test_that("numbers read back exactly and big or small ones stay short", {
       "Cell range"
     )
   }
-  expect_equal(rng(0.5), "[0.5, no upper bound]")
-  expect_equal(rng(50000), "[50000, no upper bound]")
-  expect_equal(rng(1e-7), "[1e-07, no upper bound]")
-  expect_equal(rng(1e300), "[1e+300, no upper bound]")
-  shown <- sub("^\\[(.*), no upper bound\\]$", "\\1", rng(0.30000000000000004))
+  expect_equal(rng(0.5), "at least 0.5")
+  expect_equal(rng(50000), "at least 50000")
+  expect_equal(rng(1e-7), "at least 1e-07")
+  expect_equal(rng(1e300), "at least 1e+300")
+  shown <- sub("^at least ", "", rng(0.30000000000000004))
   expect_identical(as.numeric(shown), 0.30000000000000004)
 })
 

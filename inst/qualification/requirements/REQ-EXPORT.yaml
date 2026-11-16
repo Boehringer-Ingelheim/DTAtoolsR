@@ -838,14 +838,18 @@ requirements:
       write_dta() shall render, for a dataset of type matrix, a table of its
       row-label columns under the heading "Row label columns" in place of the
       column-specifications heading, and, once for that dataset, a block under
-      the heading "Matrix layout" stating the matrix contract: the expected
-      header text above each row-label column, distinguishing a position with
-      no field from a blank one; for the data columns and for the data rows,
-      each finite bound and which side it is, and which side, if any, is
-      unbounded; the row-key columns; the cell type; whether missing cells are
-      allowed; and, only when declared, the cell range (an open side
-      identified as such), whether infinite values are allowed, and the
-      header and cell descriptions. A document with no matrix dataset shall
+      the heading "Matrix layout" stating the matrix contract, in rows named
+      File layout (the row-label columns in file order, then that every
+      further column is a data column) and Header line (the expected header
+      text above each row-label column, distinguishing a position with no
+      field from an empty one, and stating that one label per data column
+      follows); for the data columns and for the data rows, the number allowed
+      as exactly N, at least N, at most N, N to M or any number; the row-key
+      columns; the cell type; whether missing cells are allowed; and, only
+      when declared, the cell range (written at least N, at most M, or N to M
+      with both ends included), whether infinite values are allowed, and the
+      data-column label and cell descriptions. The block shall carry no row
+      named Header corner. A document with no matrix dataset shall
       contain neither heading.
     risk: medium
     category: functional

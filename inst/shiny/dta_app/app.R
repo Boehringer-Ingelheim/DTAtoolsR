@@ -2991,39 +2991,41 @@ server <- function(input, output, session) {
       ),
       div(
         class = "msg-hint",
-        HTML("A <b>Tabular</b> dataset is validated column by column against a specification you define. A <b>Matrix</b> dataset is a table whose data columns are not listed, such as gene counts: you describe the row-label columns, the header and what every cell may hold. A <b>Files</b> dataset only checks that the expected files arrive. The type is fixed once the dataset is created — to change it, add a new dataset and remove this one.")
+        HTML("A <b>Tabular</b> dataset is validated column by column against a specification you define. A <b>Matrix</b> dataset is a table whose data columns are not listed, such as gene counts with one column per sample: you describe the leading row-label columns, what the labels of the data columns look like and what every cell may hold. A <b>Files</b> dataset only checks that the expected files arrive. The type is fixed once the dataset is created — to change it, add a new dataset and remove this one.")
       ),
       conditionalPanel(
         "input.add_ds_type == 'matrix'",
-        textInput("add_ds_mx_label", "First row-label column ID",
+        textInput("add_ds_mx_label", "ID of the first column (the row label)",
           value = "", width = "100%", placeholder = "e.g. GENE_ID"
         ),
         div(
           class = "msg-hint", style = "margin:-8px 0 12px;",
-          "Identifies each row: the row key. Add row descriptions afterwards under Row labels."
+          "The file's first column identifies each row: it becomes the row key. Add further leading columns, such as a gene name, afterwards under Row labels."
         ),
-        radioButtons("add_ds_mx_corner", "Header text above the row labels",
+        radioButtons("add_ds_mx_header", "Header text above that column",
           choiceNames = list(
-            "The row-label ID", "Empty (R write.csv, pandas)",
-            "No field: the header starts with the first data label (R write.table)",
-            "Other text"
+            "Same as the ID",
+            "An empty field (R write.csv, pandas index without a name)",
+            "Other text",
+            "No field at all (R write.table with row names)"
           ),
-          choiceValues = c("named", "blank", "none", "text"),
-          selected = character(0)
+          choiceValues = dta_row_label_header_modes(),
+          selected = character(0), width = "100%"
         ),
         conditionalPanel(
-          "input.add_ds_mx_corner == 'text'",
-          textInput("add_ds_mx_corner_text", NULL,
+          "input.add_ds_mx_header == 'text'",
+          textInput("add_ds_mx_header_text", NULL,
             value = "", width = "100%", placeholder = "e.g. gene_id"
           )
         ),
         radioButtons("add_ds_mx_cells", "Cell type",
-          choices = c("SAS Num", "SAS Int", "SAS Char"),
-          selected = character(0), inline = TRUE
+          choiceNames = list("SAS Num (decimal numbers)", "SAS Int (whole numbers)", "SAS Char (text)"),
+          choiceValues = c("SAS Num", "SAS Int", "SAS Char"),
+          selected = character(0), width = "100%"
         ),
         div(
           class = "msg-hint",
-          "Describe the data columns afterwards under Matrix layout, and add the file entry (csv or tsv) under Files."
+          "Describe the data columns, the size of the matrix and the cell values afterwards under Matrix layout, and add the file entry (csv or tsv) under Files."
         )
       ),
       uiOutput("add_ds_msg")
@@ -3050,8 +3052,8 @@ server <- function(input, output, session) {
       name = input$add_ds_name,
       description = input$add_ds_description,
       row_label = if (is_mx) input$add_ds_mx_label,
-      corner = if (is_mx) input$add_ds_mx_corner,
-      corner_text = if (is_mx) input$add_ds_mx_corner_text,
+      header_mode = if (is_mx) input$add_ds_mx_header,
+      header_text = if (is_mx) input$add_ds_mx_header_text,
       cell_type = if (is_mx) input$add_ds_mx_cells
     )
     if (!isTRUE(r$ok)) {
@@ -5489,12 +5491,13 @@ server <- function(input, output, session) {
           span(
             class = "spec-hint",
             if (mx) {
-              "Row labels are matched to the file's leading columns by position, so order matters. The row key is set under Matrix layout. Use the pencil to edit a row label or the bin to remove it. Any change resets this dataset's validation."
+              "Row labels are the file's leading columns, matched by position, so order matters: the first row label is the file's first column. Each one also says what the header line holds above it. The row key is set under Matrix layout. Use the pencil to edit a row label or the bin to remove it. Any change resets this dataset's validation; adding, removing, renaming or reordering row labels also asks for an already loaded file to be loaded again."
             } else {
               "Use the pencil to edit a column or the bin to remove it. Any change resets this dataset's validation."
             }
           )
         ),
+        if (mx) matrix_sketch_ui(isolate(rv$dta), isolate(rv$editor_dataset)),
         reorder_table_ui("col_tbl"),
         tags$hr(),
         div(style = "text-align:right;", modalButton("Close"))
@@ -5572,6 +5575,30 @@ server <- function(input, output, session) {
             textInput("col_id", if (mx) "Row label ID" else "Column ID", value = g("id"), width = "100%"),
             textInput("col_label", "Label", value = g("label"), width = "100%")
           ),
+          if (mx) {
+            tagList(
+              radioButtons("col_header_mode", "Header text above this column",
+                choiceNames = list(
+                  "Same as the ID",
+                  "An empty field (R write.csv, pandas index without a name)",
+                  "Other text",
+                  "No field at all (R write.table with row names); first row label only"
+                ),
+                choiceValues = dta_row_label_header_modes(),
+                selected = g("header_mode", "id"), width = "100%"
+              ),
+              conditionalPanel(
+                "input.col_header_mode == 'text'",
+                textInput("col_header_text", NULL,
+                  value = g("header_text"), width = "100%", placeholder = "e.g. gene_id"
+                )
+              ),
+              div(
+                class = "msg-hint", style = "margin:-8px 0 12px;",
+                "What the file's header line holds in this column. The file is refused or reported when it holds something else."
+              )
+            )
+          },
           layout_columns(
             col_widths = c(3, 3, 3, 3),
             selectInput("col_backend", "Backend",
@@ -5718,7 +5745,10 @@ server <- function(input, output, session) {
       values = input$col_values %||% "",
       pattern = input$col_pattern %||% "",
       examples = input$col_examples %||% "",
-      description = input$col_desc %||% ""
+      description = input$col_desc %||% "",
+      # Row labels of a matrix only; absent from the page otherwise.
+      header_mode = input$col_header_mode %||% "id",
+      header_text = input$col_header_text %||% ""
     )
   }
 
@@ -5949,6 +5979,20 @@ server <- function(input, output, session) {
     rv$col_token <- rv$col_token + 1
   })
 
+  # After an edit of a matrix's row labels that makes its loaded tables stale
+  # (dta_matrix_needs_reload()), say so in a notice that stays, and that a
+  # repeat replaces. Returns whether it was shown.
+  notify_matrix_reload <- function(before, after, dataset, what) {
+    if (!dta_matrix_needs_reload(before, after, dataset)) {
+      return(FALSE)
+    }
+    showNotification(
+      paste(what, "The file already loaded for this dataset no longer fits these row labels: load it again."),
+      type = "warning", duration = NULL, id = "mx_reload_notice"
+    )
+    TRUE
+  }
+
   observeEvent(input$col_del_click, {
     req(editing())
     idx <- as.integer(input$col_del_click)
@@ -5963,12 +6007,16 @@ server <- function(input, output, session) {
       showNotification(r$error, type = "error")
       return()
     }
+    before <- isolate(rv$dta)
     rv$dta <- r$value
     invalidate_dataset(ed)
     rv$col_token <- rv$col_token + 1
     sync_yaml_text()
     what <- if (identical(isolate(rv$structure[[ed]]$type), "matrix")) "row label" else "column"
-    showNotification(sprintf("Removed %s \u201c%s\u201d.", what, ids[[idx]]), type = "message")
+    removed <- sprintf("Removed %s \u201c%s\u201d.", what, ids[[idx]])
+    if (!notify_matrix_reload(before, r$value, ed, removed)) {
+      showNotification(removed, type = "message")
+    }
     recheck_dataset(ed)
   })
 
@@ -5990,6 +6038,7 @@ server <- function(input, output, session) {
       showNotification(r$error, type = "error")
       return()
     }
+    notify_matrix_reload(isolate(rv$dta), r$value, ed, "Row labels reordered.")
     rv$dta <- r$value
     invalidate_dataset(ed)
     rv$col_token <- rv$col_token + 1
@@ -6011,6 +6060,7 @@ server <- function(input, output, session) {
       showNotification(r$error, type = "error")
       return()
     }
+    notify_matrix_reload(isolate(rv$dta), r$value, ed, "Row labels reordered.")
     rv$dta <- r$value
     invalidate_dataset(ed)
     rv$col_token <- rv$col_token + 1
@@ -6032,13 +6082,7 @@ server <- function(input, output, session) {
       rv$col_msg <- list(ok = FALSE, error = if (mx) "A row label ID is required." else "A column ID is required.")
       return()
     }
-    old <- isolate(rv$col_edit_id)
-    if (mx) {
-      # Read BEFORE the save: afterwards the label exists and the corner moved.
-      adding <- is.null(old) && !(id %in% dta_column_ids(isolate(rv$dta), ed))
-      renaming <- !is.null(old) && nzchar(old) && !identical(old, id)
-      mode <- dta_matrix_corner_mode(isolate(rv$dta), ed)
-    }
+    before <- isolate(rv$dta)
     vals <- trimws(strsplit(input$col_values %||% "", "\n")[[1]])
     vals <- vals[nzchar(vals)]
     r <- dta_set_column(
@@ -6056,7 +6100,10 @@ server <- function(input, output, session) {
         NULL
       } else {
         strsplit(input$col_examples, "\n", fixed = TRUE)[[1]]
-      }
+      },
+      # NULL (not a matrix, or the field is not on the page) keeps the header.
+      header_mode = if (mx) input$col_header_mode,
+      header_text = if (mx) input$col_header_text
     )
     if (!isTRUE(r$ok)) {
       rv$col_msg <- list(ok = FALSE, error = r$error)
@@ -6068,17 +6115,7 @@ server <- function(input, output, session) {
     rv$col_view <- "list"
     rv$col_token <- rv$col_token + 1
     sync_yaml_text()
-    if (mx && adding && identical(mode, "list")) {
-      showNotification(
-        "Row label saved. Its header text above the column is empty; set it under Matrix layout.",
-        type = "warning", duration = NULL
-      )
-    } else if (mx && renaming && identical(mode, "named")) {
-      showNotification(
-        sprintf("Row label renamed. The header must now read '%s' above it; a file already loaded will ask to be loaded again.", id),
-        type = "warning", duration = NULL
-      )
-    } else {
+    if (!notify_matrix_reload(before, r$value, ed, "Row label saved.")) {
       showNotification(if (mx) "Row label saved." else "Column saved.", type = "message")
     }
     recheck_dataset(ed)
@@ -7409,46 +7446,37 @@ server <- function(input, output, session) {
     tagList(
       div(
         class = "spec-form",
-        tags$h6("Header", style = "margin-top:4px;"),
-        radioButtons("mx_corner_mode", "Header text above the row labels",
-          choiceNames = list("The row-label IDs", "Empty", "Exact text per row label"),
-          choiceValues = c("named", "blank", "list"),
-          selected = pf$corner_mode
-        ),
-        conditionalPanel(
-          "input.mx_corner_mode == 'list'",
-          lapply(seq_along(labels), function(i) {
-            textInput(paste0("mx_corner_", i), paste("Above", labels[i]),
-              value = pf$corner_text[i], width = "100%"
-            )
-          }),
-          checkboxInput("mx_corner_none",
-            "The header has no field above the first row label (R write.table)",
-            value = pf$corner_none
+        matrix_sketch_ui(isolate(rv$dta), isolate(rv$editor_dataset)),
+        div(
+          class = "msg-hint", style = "margin:0 0 12px;",
+          sprintf(
+            "Every line of the file starts with the row-label column%s %s (edited under Row labels). Every further column is a data column; the header line holds its label.",
+            if (length(labels) == 1L) "" else "s", paste(labels, collapse = ", ")
           )
         ),
-        textInput("mx_header_label", "Label of the data columns",
-          value = pf$header_label, width = "100%"
+        tags$h6("Data columns", style = "margin-top:4px;"),
+        textInput("mx_columns_label", "What a data column is (shown in the exported document)",
+          value = pf$columns_label, width = "100%", placeholder = "e.g. Sample ID"
         ),
-        textAreaInput("mx_header_description", "Description",
-          value = pf$header_description, width = "100%", rows = 2
+        textAreaInput("mx_columns_description", "Description",
+          value = pf$columns_description, width = "100%", rows = 2
         ),
-        textInput("mx_header_pattern", "Data labels must match the pattern",
-          value = pf$header_pattern, width = "100%"
+        textInput("mx_columns_pattern", "Every column label must match the pattern (regex)",
+          value = pf$columns_pattern, width = "100%", placeholder = "e.g. ^S[0-9]{4}$"
         ),
-        textAreaInput("mx_header_values", "…or be one of (one label per line)",
-          value = pf$header_values, width = "100%", rows = 3
+        textAreaInput("mx_columns_values", "…or be one of (one label per line)",
+          value = pf$columns_values, width = "100%", rows = 3
         ),
         div(
           class = "msg-hint", style = "margin:-8px 0 12px;",
-          "Give a pattern or a list, not both; leave both empty to accept any non-empty, unique label."
+          "Give a pattern or a list, not both; leave both empty to accept any label. A label must always be present and unique."
         ),
-        textInput("mx_header_length", "Maximum label length",
-          value = pf$header_length, width = "100%"
+        textInput("mx_columns_length", "Maximum label length",
+          value = pf$columns_length, width = "100%"
         ),
         layout_columns(
           col_widths = c(6, 6),
-          numericInput("mx_n_columns_min", "Data columns: at least",
+          numericInput("mx_n_columns_min", "Number of data columns: at least",
             value = blank_na(pf$n_columns_min), min = 1, step = 1, width = "100%"
           ),
           numericInput("mx_n_columns_max", "at most (empty = no limit)",
@@ -7457,12 +7485,12 @@ server <- function(input, output, session) {
         ),
         tags$h6("Rows"),
         # A matrix has one to a few row labels: checkboxes, not a selectize.
-        checkboxGroupInput("mx_row_key", "Row key (must be unique)",
+        checkboxGroupInput("mx_row_key", "Row key: the row label(s) that identify a row (must be unique)",
           choices = labels, selected = pf$row_key, inline = TRUE, width = "100%"
         ),
         layout_columns(
           col_widths = c(6, 6),
-          numericInput("mx_n_rows_min", "Data rows: at least",
+          numericInput("mx_n_rows_min", "Number of data rows: at least",
             value = blank_na(pf$n_rows_min), min = 0, step = 1, width = "100%"
           ),
           numericInput("mx_n_rows_max", "at most (empty = no limit)",
@@ -7470,11 +7498,20 @@ server <- function(input, output, session) {
           )
         ),
         tags$h6("Cells"),
-        radioButtons("mx_cell_type", "Cell type",
-          choices = c("SAS Num", "SAS Int", "SAS Char"),
-          selected = pf$cell_type, inline = TRUE
+        textInput("mx_cell_label", "What a cell holds (shown in the exported document)",
+          value = pf$cell_label, width = "100%", placeholder = "e.g. Normalised count"
         ),
-        checkboxInput("mx_cell_nullable", "Cells may be missing", value = pf$cell_nullable),
+        textAreaInput("mx_cell_description", "Description",
+          value = pf$cell_description, width = "100%", rows = 2
+        ),
+        radioButtons("mx_cell_type", "Cell type",
+          choiceNames = list("SAS Num (decimal numbers)", "SAS Int (whole numbers)", "SAS Char (text)"),
+          choiceValues = c("SAS Num", "SAS Int", "SAS Char"),
+          selected = pf$cell_type, inline = TRUE, width = "100%"
+        ),
+        checkboxInput("mx_cell_nullable", "A cell may be missing (empty, NA, or a missing-value token of the file entry)",
+          value = pf$cell_nullable, width = "100%"
+        ),
         conditionalPanel(
           "input.mx_cell_type != 'SAS Char'",
           layout_columns(
@@ -7491,19 +7528,16 @@ server <- function(input, output, session) {
           "input.mx_cell_type == 'SAS Num'",
           checkboxInput("mx_infinite", "Allow Inf and -Inf", value = pf$infinite)
         ),
-        textAreaInput("mx_cell_values", "Allowed values (one per line)",
+        textAreaInput("mx_cell_values", "Allowed values (one per line; empty = any value of the type)",
           value = pf$cell_values, width = "100%", rows = 3
         ),
-        textInput("mx_cell_pattern", "Pattern", value = pf$cell_pattern, width = "100%"),
-        textInput("mx_cell_length", "Length", value = pf$cell_length, width = "100%"),
-        textInput("mx_cell_format", "SAS format (e.g. 8.2)", value = pf$cell_format, width = "100%"),
-        textInput("mx_cell_label", "Label", value = pf$cell_label, width = "100%"),
-        textAreaInput("mx_cell_description", "Description",
-          value = pf$cell_description, width = "100%", rows = 2
+        textInput("mx_cell_pattern", "Every cell must match the pattern (regex)",
+          value = pf$cell_pattern, width = "100%"
         ),
-        div(
-          class = "msg-hint",
-          "Changing the header or the row labels of a matrix whose file is loaded asks you to load the file again at the next check."
+        layout_columns(
+          col_widths = c(6, 6),
+          textInput("mx_cell_length", "Maximum length (characters)", value = pf$cell_length, width = "100%"),
+          textInput("mx_cell_format", "SAS format (e.g. 8.2)", value = pf$cell_format, width = "100%")
         )
       ),
       uiOutput("mx_msg_ui"),
@@ -7535,16 +7569,10 @@ server <- function(input, output, session) {
     # A NULL input is a field that is not on the page: keep the prefill. The
     # row key is the exception -- a checkbox group reports NULL when emptied.
     form <- list(row_labels = pf$row_labels)
-    for (nm in setdiff(names(pf), c("row_labels", "corner_text", "row_key"))) {
+    for (nm in setdiff(names(pf), c("row_labels", "row_key"))) {
       v <- input[[paste0("mx_", nm)]]
       form[[nm]] <- if (is.null(v)) pf[[nm]] else v
     }
-    # Only the CURRENT labels' text boxes: a leftover mx_corner_<k+1> from
-    # another dataset's modal is ignored.
-    form$corner_text <- vapply(seq_along(pf$row_labels), function(i) {
-      v <- input[[paste0("mx_corner_", i)]]
-      if (is.null(v)) pf$corner_text[i] else as.character(v)[1]
-    }, character(1))
     form$row_key <- input$mx_row_key %||% character(0)
     r <- dta_set_matrix(isolate(rv$dta), ed, form)
     if (!isTRUE(r$ok)) {
@@ -7960,7 +7988,7 @@ server <- function(input, output, session) {
       additionalProperties = "no such column to be present: the specs do not declare it",
       # Matrix findings: the bound limit sits in columnspec_columnspec and the
       # finding names no column.
-      corner = paste0("header text: ", {
+      rowLabelHeader = paste0("header text: ", {
         v <- .first_nonempty(r[["columnspec_columnspec"]])
         if (nzchar(v)) v else "(empty)"
       }),
@@ -10750,12 +10778,23 @@ server <- function(input, output, session) {
     # A document saved by an older version has the classes it was saved with:
     # re-stamp them with the current ones. When that fails, rebuild the document
     # from its YAML text and carry the bound data over.
-    upgraded <- tryCatch(DTAtools::upgrade_dta(restored), error = function(e) NULL)
+    upgrade_error <- NULL
+    upgraded <- tryCatch(DTAtools::upgrade_dta(restored), error = function(e) {
+      upgrade_error <<- e
+      NULL
+    })
     from_yaml <- is.null(upgraded)
     if (from_yaml) {
       upgraded <- rebuild_from_yaml(restored, saved$yaml_text)
       if (is.null(upgraded)) {
-        showNotification("Could not restore the previous session.", type = "error")
+        showNotification(
+          if (inherits(upgrade_error, "dta_matrix_format_outdated")) {
+            "Could not restore the previous session: it holds a matrix dataset saved in an earlier format. Open its YAML and write the header text of each row label as its 'header'."
+          } else {
+            "Could not restore the previous session."
+          },
+          type = "error", duration = if (inherits(upgrade_error, "dta_matrix_format_outdated")) NULL else 5
+        )
         return()
       }
     }

@@ -13,8 +13,10 @@ title: Matrix datasets (type matrix)
 # wrong way is a value never checked.
 #
 # Notation. k is the number of row-label columns, c the number of header fields
-# above them (k, or k - 1 when the first corner entry is null), h the number of
-# header fields and m = h - c the number of data columns. "The reading name" of
+# above them (k, or k - 1 when the first row label declares header: No), h the
+# number of header fields and m = h - c the number of data columns. The header
+# text of a row label is the key header of its row_labels entry: absent, the
+# row label's id; a text, that text (an empty one included); No, no field. "The reading name" of
 # a data column is its label when the label is non-empty and unique among all
 # column names, and "<column p>" otherwise, p being its 1-based position among
 # the fields of a data row.
@@ -77,25 +79,28 @@ requirements:
   - id: REQ-MATRIX-005
     text: >
       When the first data row has exactly one field more than h + (k - c), the
-      abort shall have class dta_matrix_header_fewer (the header lacks the
-      field above the row names, as R write.table writes it) and its message
-      shall name the corner setting and the null entry that declares such a
-      header.
+      abort shall have class dta_matrix_header_fewer. When the first row label
+      does not declare header: No, the message shall name header: No on the
+      first row label as the declaration of a header that lacks the field above
+      the row names, as R write.table writes it; when the first row label
+      already declares header: No, the message shall say instead that the first
+      data row has a field too many.
     risk: high
     category: integrity
     covers: [load_file]
-    source: "PLAN-matrix-dataset.md 3.1 rule 3"
+    source: "PLAN-matrix-dataset.md 3.1 rule 3; PLAN-matrix-format-review.md 6"
 
   - id: REQ-MATRIX-006
     text: >
       When the first data row has exactly one field fewer than h + (k - c),
-      the abort shall have class dta_matrix_header_more (the header has a
-      field above the row labels that the corner does not declare) and its
-      message shall name the corner setting.
+      the abort shall have class dta_matrix_header_more. When the first row
+      label declares header: No, the message shall say that the header has a
+      field above that row label and shall name its header setting; otherwise
+      the message shall say that the first data row is missing a field.
     risk: high
     category: integrity
     covers: [load_file]
-    source: "PLAN-matrix-dataset.md 3.1 rule 3"
+    source: "PLAN-matrix-dataset.md 3.1 rule 3; PLAN-matrix-format-review.md 6"
 
   - id: REQ-MATRIX-007
     text: >
@@ -126,42 +131,50 @@ requirements:
     covers: [load_file]
     source: "PLAN-matrix-dataset.md 3.1 rule 3"
 
-  # ---- corner, labels, names -----------------------------------------------------
+  # ---- row label headers, labels, names ------------------------------------------
 
   - id: REQ-MATRIX-010
     text: >
-      The corner shall be declared as named (the header text above the row
-      labels is the row-label ids), blank (every such field is empty) or a list
-      of k header texts, whose first entry may be null to say the header has no
-      field above the first row label. A file whose corner agrees with the
-      declaration shall produce no corner finding, for each of: R write.csv
-      with row names (corner blank, header starting with an empty quoted
-      field); pandas to_csv with an unnamed index (blank); R write.table with
-      row names (list with null, header without that field); write.table with
-      an added description column (null, then the description's header text);
-      pandas with an unnamed index and a description column (empty text, then
-      the description's text); pandas with a named index (the index name);
-      header texts equal to the row-label ids (named); and a header text
-      containing a space.
+      The header text above a row-label column shall be the key header of its
+      row_labels entry: absent, the entry's id; a text, that text, an empty one
+      included; No, no field above that column (the first row label only). A
+      file whose header agrees with the declaration shall produce no
+      rowLabelHeader finding, for each of these writers: R write.csv with row
+      names (header: ""; the header starting with an empty quoted field);
+      pandas to_csv with an unnamed index (header: ""); R write.table with row
+      names (header: No on the first row label; the header without that field);
+      write.table with an added description column (header: No on the first row
+      label, the description's header text on the second); pandas with an
+      unnamed index and a description column (header: "" on the first, the
+      description's text on the second); pandas with a named index (an id equal
+      to the index name, or header: set to it); header texts equal to the
+      row-label ids (no header key); and a header text containing a space. A
+      header text and the header field it is compared with shall both be
+      compared after surrounding spaces and double quotes are removed, so that
+      a header text of spaces only shall mean an empty field.
     risk: high
     category: functional
     covers: [load_file, check, messages]
-    source: "PLAN-matrix-dataset.md 2.1 corner-by-writer table, 3.1 rule 4"
+    source: "PLAN-matrix-format-review.md 2 (header, corner-by-writer table); PLAN-matrix-dataset.md 3.1 rule 4"
 
   - id: REQ-MATRIX-011
     text: >
-      Each of the c corner fields that differs from its declared text shall be
-      reported as one column-specification finding with keyword corner, no
-      row, and the column set to the id of the row label the field belongs to.
+      Each of the c header fields above the row labels that differs from the
+      declared header text of its row label shall be reported as one
+      column-specification finding with keyword rowLabelHeader, no row, and
+      the column set to the id of the row label the field belongs to, with the
+      message naming the field's position, the row label, the text found and
+      the text expected, in the form: Header field 1, above row label GENE_ID,
+      is "Gene"; expected "gene_id".
     risk: high
     category: functional
     covers: [check, messages]
-    source: "PLAN-matrix-dataset.md 3.1 rule 4, 3.5"
+    source: "PLAN-matrix-format-review.md 2, 3; PLAN-matrix-dataset.md 3.1 rule 4, 3.5"
 
   - id: REQ-MATRIX-012
     text: >
-      Every non-empty data label shall satisfy the header's pattern, values
-      and length where declared; a label that does not shall be reported as a
+      Every non-empty data label shall satisfy the pattern, values and length
+      of matrix.columns where declared; a label that does not shall be reported as a
       column-specification finding with keyword propertyNames, no row, and the
       column set to the label.
     risk: high
@@ -186,7 +199,11 @@ requirements:
       equals a row-label id, shall be reported as one column-specification
       finding with keyword uniqueNames per repeated label, no row, naming the
       positions and reading names of its columns; the cells of those columns
-      shall still be validated, under their reading names "<column p>".
+      shall still be validated, under their reading names "<column p>". The
+      message for a label repeated among the data labels shall say how many
+      times it appears; the message for a label that equals a row-label id
+      shall say that it is also the ID of a row label and shall not say that it
+      appears more than once.
     risk: high
     category: functional
     covers: [check, messages, tables]
@@ -206,7 +223,7 @@ requirements:
 
   - id: REQ-MATRIX-016
     text: >
-      The number of data columns m shall lie within header.count: a smaller m
+      The number of data columns m shall lie within matrix.columns.count: a smaller m
       shall be reported with keyword minProperties and a larger one with
       keyword maxProperties, each as a column-specification finding with no
       row and no column. A scalar count shall mean exactly that many data
@@ -218,7 +235,7 @@ requirements:
 
   - id: REQ-MATRIX-017
     text: >
-      When header.values lists N labels and header.count is N, the header shall
+      When matrix.columns.values lists N labels and matrix.columns.count is N, the header shall
       carry exactly those N labels in any order: a header with fewer labels,
       one with a label that is not listed and one with a listed label repeated
       shall each be reported, and the listed labels in another order shall not
@@ -226,7 +243,7 @@ requirements:
     risk: medium
     category: functional
     covers: [check, messages]
-    source: "PLAN-matrix-dataset.md 2.2 header.pattern/values/length"
+    source: "PLAN-matrix-format-review.md 2 (matrix.columns); PLAN-matrix-dataset.md 2.2 header.pattern/values/length"
 
   # ---- rows ------------------------------------------------------------------------
 
@@ -279,9 +296,11 @@ requirements:
       The number of data rows r shall lie within rows.count, whose default
       minimum is 1: a smaller r shall be reported with keyword minItems and a
       larger one with keyword maxItems, each as a column-specification finding
-      with no row and no column. A file with a header and no data row shall
-      therefore fail by default and shall pass when rows.count.min is written
-      as 0.
+      with no row and no column, with the message "The file has N data row(s);
+      at least M required." respectively "The file has N data row(s); at most M
+      allowed.", N being the observed and M the declared number. A file with a
+      header and no data row shall therefore fail by default and shall pass
+      when rows.count.min is written as 0.
     risk: high
     category: functional
     covers: [check, messages]
@@ -303,7 +322,7 @@ requirements:
 
   - id: REQ-MATRIX-024
     text: >
-      A count (header.count, rows.count) written as a scalar shall mean exactly
+      A count (matrix.columns.count, matrix.rows.count) written as a scalar shall mean exactly
       that number; written as a mapping, min alone shall mean at least, max
       alone at most, with the other bound at its default (1 for data columns
       and for rows, unbounded above); absent shall mean the default.
@@ -315,7 +334,7 @@ requirements:
   - id: REQ-MATRIX-025
     text: >
       A count that is not a whole number, is negative, has min above max, or is
-      below 1 for header.count shall be refused when the dataset is built, with
+      below 1 for matrix.columns.count shall be refused when the dataset is built, with
       a condition of class dta_matrix_count_invalid.
     risk: medium
     category: functional
@@ -510,7 +529,7 @@ requirements:
 
   - id: REQ-MATRIX-042
     text: >
-      The findings shall sit on these axes: corner, propertyNames, uniqueNames,
+      The findings shall sit on these axes: rowLabelHeader, propertyNames, uniqueNames,
       minProperties, maxProperties, minItems, maxItems, minimum, maximum,
       finite, type and a values, pattern or length violation on the
       column-specification axis; not_convertible, not_whole and out_of_range on
@@ -611,33 +630,33 @@ requirements:
 
   - id: REQ-MATRIX-050
     text: >
-      A key that is not allowed under matrix, matrix.header, matrix.rows,
+      A key that is not allowed under matrix, matrix.columns, matrix.rows,
       matrix.cells or matrix.cells.range shall be refused with a condition of
-      class dta_matrix_field_unknown, and a missing matrix, matrix.header,
-      matrix.header.corner, matrix.cells or matrix.cells.type shall be refused
-      with class dta_matrix_field_missing.
+      class dta_matrix_field_unknown, and a missing matrix, matrix.cells or
+      matrix.cells.type shall be refused with class dta_matrix_field_missing.
+      The block matrix.columns shall be optional: a matrix with matrix.cells
+      alone shall be accepted, its data-column labels being any non-empty,
+      unique text and its number of data columns at least one.
     risk: high
     category: functional
     covers: [dta_dataset_from_list]
-    source: "PLAN-matrix-dataset.md 2.2 closing paragraph"
+    source: "PLAN-matrix-format-review.md 2 (matrix.columns); PLAN-matrix-dataset.md 2.2 closing paragraph"
 
   - id: REQ-MATRIX-051
     text: >
-      The labels in matrix.header.values shall be text: a list holding a number
-      or a logical, which YAML makes of an unquoted 007 or Y, shall be refused
-      with a condition of class dta_matrix_header_values_text.
+      The labels in matrix.columns.values shall be text: a list holding a
+      number or a logical, which YAML makes of an unquoted 007 or Y, shall be
+      refused with a condition of class dta_matrix_columns_values_text.
     risk: medium
     category: functional
     covers: [dta_dataset_from_list]
-    source: "PLAN-matrix-dataset.md 2.2 header.pattern/values/length"
+    source: "PLAN-matrix-format-review.md 2 (matrix.columns); PLAN-matrix-dataset.md 2.2 header.pattern/values/length"
 
   - id: REQ-MATRIX-052
     text: >
       A matrix dataset shall be refused when it has no row-label column
-      (condition class dta_matrix_invalid_row_labels), when matrix.rows.key
-      names an id that is not a row-label id (dta_matrix_invalid_row_key), or
-      when a corner list does not hold one entry per row-label column
-      (dta_matrix_invalid_corner).
+      (condition class dta_matrix_invalid_row_labels) or when matrix.rows.key
+      names an id that is not a row-label id (dta_matrix_invalid_row_key).
     risk: high
     category: functional
     covers: [dta_dataset_from_list]
@@ -681,10 +700,48 @@ requirements:
   - id: REQ-MATRIX-056
     text: >
       explain_messages() on a matrix finding that has no data row (a header
-      label, the corner, a column count or the row count) shall state in its
+      label, a row label's header text, a column count or the row count) shall state in its
       actual field the offending header text or the observed count, and shall
       not describe the finding as a missing or absent value.
     risk: medium
     category: functional
     covers: [explain_messages, messages]
     source: "PLAN-matrix-dataset.md 3.5"
+
+  - id: REQ-MATRIX-057
+    text: >
+      A row label shall declare header: No only when it is the first row
+      label: on any other row label the dataset shall be refused with a
+      condition of class dta_matrix_invalid_header, and lint_dta() shall
+      report it as row_label_header_position. A header that is neither one
+      text nor No (a number, Yes, several texts) shall be refused with a condition of
+      class dta_row_label_header_invalid, and lint_dta() shall report it as
+      row_label_header_invalid.
+    risk: high
+    category: functional
+    covers: [dta_dataset_from_list, DTADataSetFactory, lint_dta]
+    source: "PLAN-matrix-format-review.md 2, 3; R/DTAColumnSpecRowLabel-class.R"
+
+  - id: REQ-MATRIX-058
+    text: >
+      A header text shall be an ordinary text whatever it says: the texts named
+      and blank shall be expected as exactly those texts above their row label.
+    risk: medium
+    category: functional
+    covers: [dta_dataset_from_list, check]
+    source: "PLAN-matrix-format-review.md 1 (F1), 2"
+
+  - id: REQ-MATRIX-059
+    text: >
+      A matrix dataset saved by a version in which the header texts above the
+      row labels were declared on the matrix settings (the settings of such an
+      object carry corner_mode) shall not be read on: upgrade_dta(), check(),
+      load_file() and lint_dta(), given that dataset or a DTA holding it
+      beside current datasets, shall abort with a condition of class
+      dta_matrix_format_outdated, because its header texts cannot be carried
+      over to the row labels. A current matrix dataset and a DTA of current
+      datasets shall not be refused.
+    risk: high
+    category: integrity
+    covers: [upgrade_dta, check, load_file, lint_dta]
+    source: "PLAN-matrix-format-review.md 6; R/containerAssignments.R (dta_is_old_matrix, dta_upgrade)"

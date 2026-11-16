@@ -22,17 +22,29 @@ mx_path <- function(text, name = "m.tsv", env = parent.frame()) {
 # A matrix dataset as the YAML reader would produce it from the list a
 # specification gives. `k` row-label columns (ID, DESC, EXTRA); every label
 # after the first may be missing unless `required_labels`.
-mx_ds <- function(corner = "blank", k = 1L, header = list(), cells = NULL,
+#
+# `row_header` is the header of the row labels: a single text, given to every
+# row label (the default "" is what R write.csv writes above the row names), or
+# a list with one element per row label, where NULL leaves the `header` key out
+# (the row label's id is then the expected text), FALSE is `header: No` (no
+# field above the column) and a text is that text. A list shorter than `k`
+# leaves the remaining row labels without a `header` key. `columns` is the
+# `matrix.columns` block.
+mx_ds <- function(row_header = "", k = 1L, columns = NULL, cells = NULL,
                   rows = NULL, ext = "tsv", rules = NULL, files_extra = list(),
                   required_labels = FALSE, id = "m") {
   ids <- c("ID", "DESC", "EXTRA")
+  header_of <- function(i) {
+    if (is.list(row_header)) if (i <= length(row_header)) row_header[[i]] else NULL else row_header[[1L]]
+  }
   labels <- lapply(seq_len(k), function(i) {
-    list(id = ids[[i]], type = "SAS Char", nullable = if (required_labels) FALSE else i > 1L)
+    lab <- list(id = ids[[i]], type = "SAS Char", nullable = if (required_labels) FALSE else i > 1L)
+    h <- header_of(i)
+    if (!is.null(h)) lab$header <- h
+    lab
   })
-  m <- list(
-    header = c(list(corner = corner), header),
-    cells = cells %||% list(type = "SAS Int", nullable = FALSE)
-  )
+  m <- list(cells = cells %||% list(type = "SAS Int", nullable = FALSE))
+  if (!is.null(columns)) m$columns <- columns
   if (!is.null(rows)) m$rows <- rows
   spec <- list(
     id = id, type = "matrix",
@@ -133,8 +145,8 @@ mh_clean <- function(d) isTRUE(validation_status(d)$ok) && nrow(messages(d)) == 
 mx_body <- function(...) {
   body <- list(
     id = "m", type = "matrix", files = list(filename = "m.tsv", type = "tsv"),
-    row_labels = list(list(id = "ID", type = "SAS Char", nullable = FALSE)),
-    matrix = list(header = list(corner = "blank"), cells = list(type = "SAS Int", nullable = FALSE))
+    row_labels = list(list(id = "ID", header = "", type = "SAS Char", nullable = FALSE)),
+    matrix = list(cells = list(type = "SAS Int", nullable = FALSE))
   )
   over <- list(...)
   for (nm in names(over)) body[nm] <- list(over[[nm]])

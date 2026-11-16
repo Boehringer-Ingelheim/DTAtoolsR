@@ -76,21 +76,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Matrix datasets (`type: matrix`, `DTADataSetMatrix`).** For omics-style
   matrices (gene counts, miRNA counts, genotypes) where the data columns are
   samples and are far too many, or too variable, to list one by one. A matrix
-  dataset describes the row-label columns once under `row_labels:` and the
-  data columns once under `matrix:`. It validates the header (the corner text
-  above the row labels, each data label against a pattern or a closed list,
-  duplicates, the number of data columns), the row labels and the row key
-  (unique, non-missing, row count), the dimensions (exact, flexible or
-  `min`/`max`) and every cell (type, range, missing, infinite; `NaN` is never
-  a value). It works in memory and streamed, inside containers and
-  `load_delivery()`, in exported documents and in the app, where a matrix
-  dataset can be added (Add dataset -> Matrix asks for the first row-label
-  column, the header text above the row labels and the cell type), its row
-  labels edited like columns (renaming the row key, or adding, removing or
-  reordering row labels, keeps the row key and the listed header corner in
-  step), its header, dimensions and cell values edited under Matrix layout, and
-  its rules edited on the row-label columns. Example data:
-  `inst/extdata/matrix_dta.yaml`.
+  dataset lists its leading row label columns under `row_labels:` and describes
+  the data columns once under `matrix:`, in three blocks: `columns` (what every
+  column label must look like, and how many data columns there may be), `rows`
+  (the row key and the number of rows) and `cells` (type, range, missing,
+  infinite; `NaN` is never a value). A row label is an ordinary column
+  specification with one more key, `header`: the text the header line holds
+  above the column. Left out it is the row label's `id`, as for a tabular
+  column; `""` is an empty field (R `write.csv()`, a pandas index without a
+  name) and `No` says the header line has no field there at all (R
+  `write.table()` with row names; first row label only). A count is a whole
+  number or `min`/`max`. It works in memory and streamed, inside containers and
+  `load_delivery()`, in exported documents (a "Matrix layout" table that states
+  the file layout and the header line in words) and in the app, where a matrix
+  dataset can be added (Add dataset -> Matrix asks for the ID of the first
+  column, the header text above it and the cell type), its row labels edited
+  like columns, each with its header text, its data columns, size and cell
+  values edited under Matrix layout, and its rules edited on the row label
+  columns. The format is documented key by key in `DTA_YAML_GUIDE.md` section 6
+  and in the README. Example data: `inst/extdata/matrix_dta.yaml`.
 
 ### Changed
 

@@ -1080,9 +1080,9 @@ requirements:
       and shall key none under columns for it. A changed field of one row label
       shall be one changed row; a row label present on one side only shall
       appear as added or removed rows keyed by its id; a row label that did not
-      change shall not appear. The matrix corner shall be one value keyed
-      <dataset>.matrix.header.corner: a corner whose entries differ in any
-      number shall give exactly one changed row, and identical corners none.
+      change shall not appear. A change to the header of a row label (absent,
+      a text, No) shall be one changed row keyed
+      <dataset>.row_labels.<id>.header, and an unchanged header none.
     risk: medium
     category: integrity
     covers: [run_dta_app]
@@ -1112,8 +1112,8 @@ requirements:
       naming that row label alone; and the matrix block shall be linted with
       the codes lint_dta() uses, so that a key the block does not allow is
       matrix_field_unknown, a missing cells block or no matrix block is
-      matrix_field_missing, a corner whose length is not the number of row
-      labels is matrix_corner_invalid, and a rule naming a data column rather
+      matrix_field_missing, a header: No on a row label that is not the first
+      is row_label_header_position, and a rule naming a data column rather
       than a row label is rule_column_undeclared, each at severity "error".
     risk: high
     category: functional

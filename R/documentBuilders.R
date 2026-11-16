@@ -921,7 +921,7 @@ RULE_READING_GUIDE_TITLE <- "How to read the rules"
 # English, unescaped). A row whose value is absent is omitted.
 .matrix_layout_rows <- function(dataset) {
   m <- as.list(dataset@matrix)
-  h <- m$header
+  h <- m$columns
   cl <- m$cells
   # Shortest decimal text that reads back as the same double; scientific
   # notation is left to format() so 1e300 stays short.
@@ -930,28 +930,7 @@ RULE_READING_GUIDE_TITLE <- "How to read the rules"
     if (is.finite(v) && as.numeric(s) != v) s <- format(v, digits = 17, trim = TRUE)
     s
   }
-  count <- function(n) {
-    lo <- n[[1L]]
-    hi <- n[[2L]]
-    if (lo == hi) {
-      paste("exactly", num(lo))
-    } else if (is.infinite(hi)) {
-      paste("at least", num(lo))
-    } else if (lo == 0) {
-      paste("at most", num(hi))
-    } else {
-      paste0(num(lo), "\u2013", num(hi))
-    }
-  }
-  corner <- h$corner
-  corner <- if (is.character(corner) && length(corner) == 1L && corner %in% c("named", "blank")) {
-    if (corner == "named") paste0("named: ", paste(dta_matrix_label_ids(dataset), collapse = ", ")) else "blank"
-  } else {
-    paste(
-      vapply(corner, function(e) if (is.null(e)) "(no field)" else if (nzchar(e)) e else "(blank)", character(1)),
-      collapse = ", "
-    )
-  }
+  ids <- dta_matrix_label_ids(dataset)
   label_rule <- if (!is.null(h$pattern)) {
     paste("matches", h$pattern)
   } else if (!is.null(h$values)) {
@@ -972,20 +951,26 @@ RULE_READING_GUIDE_TITLE <- "How to read the rules"
     )
   }
   rng <- cl$range
-  range_txt <- if (!is.null(rng)) {
-    paste0(
-      "[", if (is.null(rng$min)) "no lower bound" else num(rng$min), ", ",
-      if (is.null(rng$max)) "no upper bound" else num(rng$max), "]"
-    )
+  range_txt <- if (!is.null(rng$min) && !is.null(rng$max)) {
+    paste(num(rng$min), "to", num(rng$max), "(both included)")
+  } else if (!is.null(rng$min)) {
+    paste("at least", num(rng$min))
+  } else if (!is.null(rng$max)) {
+    paste("at most", num(rng$max))
   }
   rows <- list(
-    "Header corner" = corner,
+    "File layout" = paste0(
+      "A header line, then one line per row. Each line starts with the row label column",
+      if (length(ids) > 1L) "s " else " ", paste(ids, collapse = ", "),
+      "; every further column is a data column."
+    ),
+    "Header line" = dta_matrix_header_words(dataset),
     "Column label" = h$label,
     "Column label description" = h$description,
     "Column label rule" = label_rule,
-    "Data columns" = count(dataset@matrix@n_columns),
+    "Data columns" = dta_matrix_count_words(dataset@matrix@n_columns),
     "Row key" = key_txt,
-    "Data rows" = if (all(as.numeric(dataset@matrix@n_rows) == c(0, Inf))) "any number" else count(dataset@matrix@n_rows),
+    "Data rows" = dta_matrix_count_words(dataset@matrix@n_rows),
     "Cell label" = cl$label,
     "Cell description" = cl$description,
     "Cell type" = cl$type,

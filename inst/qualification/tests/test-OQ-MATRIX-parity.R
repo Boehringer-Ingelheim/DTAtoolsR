@@ -31,7 +31,7 @@ mp_file <- function() {
 
 mp_ds <- function() {
   mx_ds(
-    header = list(pattern = "^S[0-9]{2}$"),
+    columns = list(pattern = "^S[0-9]{2}$"),
     cells = list(type = "SAS Int", nullable = FALSE, range = list(min = 0, max = 50))
   )
 }
@@ -101,8 +101,8 @@ test_that("OQ-MATRIX-053 | load_delivery() binds a matrix delivered loose or in 
   bad <- load_delivery(dta(), cont_zip(list("m.tsv" = "wrong\tS1\tS2\nr1\t1\t2\n"), "bad.zip"))
   res <- check(bad, quiet = TRUE, persist = FALSE)
   qa_step(
-    "a wrong corner inside the zip is the corner finding",
-    mx_expect("columnspec", NA, "ID", "corner"),
+    "a wrong header text inside the zip is the rowLabelHeader finding",
+    mx_expect("columnspec", NA, "ID", "rowLabelHeader"),
     mx_found(datasets(res, "m"))
   )
 })

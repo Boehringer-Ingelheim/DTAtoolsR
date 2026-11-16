@@ -914,6 +914,9 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
     #shiny-notification-panel .shiny-notification-error { border-left-color: var(--bi-fail); }
     #shiny-notification-panel .shiny-notification-warning { border-left-color: var(--bi-warn); }
     .notice-multiline { white-space: pre-line; }
+    .matrix-sketch { font-family: var(--bs-font-monospace); font-size: .8125rem; line-height: 1.6;
+      margin: 0 0 12px; padding: 8px 12px; overflow-x: auto; white-space: pre;
+      background: var(--bs-tertiary-bg, #f4f6f5); border: 1px solid var(--bs-border-color); border-radius: 6px; }
 
     /* Wider inspect modal + a body that wraps/scrolls instead of overflowing. */
     .modal-xl { max-width: 92vw; }

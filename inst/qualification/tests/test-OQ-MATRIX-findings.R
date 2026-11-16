@@ -11,11 +11,11 @@
 
 test_that("OQ-MATRIX-040 | every kind of finding is on the axis the requirement gives it, and the axis counts agree | REQ-MATRIX-042", {
   ds <- mx_ds(
-    header = list(pattern = "^S[0-9]$", count = list(max = 3)),
+    columns = list(pattern = "^S[0-9]$", count = list(max = 3)),
     rows = list(count = list(max = 1)),
     cells = list(type = "SAS Num", nullable = FALSE, range = list(min = 0, max = 10))
   )
-  # Corner "x" where blank is declared; S1 twice; "bad" against the pattern;
+  # Header text "x" where an empty one is declared; S1 twice; "bad" against the pattern;
   # four data columns against a maximum of three; two rows against a maximum
   # of one. Row 1: <column 3> is Inf, "bad" holds abc, S4 is -1. Row 2: "bad"
   # is missing, S4 is 11, and the key r1 repeats.
@@ -26,7 +26,7 @@ test_that("OQ-MATRIX-040 | every kind of finding is on the axis the requirement 
     c(NA, NA, NA, NA, NA, 1, 1, 1, 2, 2),
     c("ID", "S1", "bad", NA, NA, "<column 3>", "bad", "S4", "bad", "S4"),
     c(
-      "corner", "uniqueNames", "propertyNames", "maxProperties", "maxItems",
+      "rowLabelHeader", "uniqueNames", "propertyNames", "maxProperties", "maxItems",
       "finite", "type", "minimum", "type", "maximum"
     )
   )
@@ -61,7 +61,7 @@ test_that("OQ-MATRIX-040 | every kind of finding is on the axis the requirement 
 
 test_that("OQ-MATRIX-041 | structural findings are retained ahead of cell findings and the counts are exact at every cap | REQ-MATRIX-043", {
   ds <- mx_ds(
-    header = list(pattern = "^S[0-9]$"), rows = list(count = list(min = 10)),
+    columns = list(pattern = "^S[0-9]$"), rows = list(count = list(min = 10)),
     cells = list(type = "SAS Int", nullable = FALSE, range = list(min = 0))
   )
   # Five findings: the label "bad" (header), 2 rows against a minimum of 10
@@ -113,7 +113,7 @@ test_that("OQ-MATRIX-041 | structural findings are retained ahead of cell findin
 })
 
 test_that("OQ-MATRIX-054 | explain_messages() describes a header finding by the offending text, not as a missing value | REQ-MATRIX-056", {
-  ds <- mx_ds(header = list(pattern = "^S[0-9]$"))
+  ds <- mx_ds(columns = list(pattern = "^S[0-9]$"))
   path <- mx_path("	S1	bad
 r1	1	2
 ")
@@ -167,8 +167,8 @@ test_that("OQ-MATRIX-043 | a table whose recorded header no longer gives its col
   # is called ROW: as if the row label had been renamed after loading.
   renamed <- dta_dataset_from_list(list(
     id = "m", type = "matrix", files = list(filename = "m.tsv", type = "tsv"),
-    row_labels = list(list(id = "ROW", type = "SAS Char", nullable = FALSE)),
-    matrix = list(header = list(corner = "blank"), cells = list(type = "SAS Int", nullable = FALSE))
+    row_labels = list(list(id = "ROW", header = "", type = "SAS Char", nullable = FALSE)),
+    matrix = list(cells = list(type = "SAS Int", nullable = FALSE))
   ))
   renamed@tables <- loaded@tables
   renamed@heads <- loaded@heads

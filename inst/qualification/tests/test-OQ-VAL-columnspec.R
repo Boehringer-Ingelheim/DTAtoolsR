@@ -866,7 +866,7 @@ test_that("OQ-VAL-044 | BESTw. constrains nothing, and the format check reports 
 
 test_that("OQ-VAL-052 | a matrix reports the header, dimensions, range and finite checks too, and presence and extra as not applicable | REQ-VAL-013", {
   ds <- mx_ds(
-    header = list(pattern = "^S[0-9]+$"),
+    columns = list(pattern = "^S[0-9]+$"),
     rows = list(count = list(min = 5)),
     cells = list(type = "SAS Num", nullable = FALSE, range = list(min = 0, max = 10), infinite = FALSE)
   )
@@ -890,7 +890,7 @@ test_that("OQ-VAL-052 | a matrix reports the header, dimensions, range and finit
     )
     qa_step(
       sprintf("the row-count check failed (%s)", stream),
-      c("failed", "passed"), c(status("minItems"), status("corner"))
+      c("failed", "passed"), c(status("minItems"), status("rowLabelHeader"))
     )
     qa_step(
       sprintf("the range check failed on the minimum and held on the maximum (%s)", stream),

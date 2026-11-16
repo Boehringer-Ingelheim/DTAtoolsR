@@ -5,9 +5,8 @@ mxl_matrix <- function(...) {
   base <- list(
     id = "m", type = "matrix",
     files = list(filename = "m.tsv", type = "tsv"),
-    row_labels = list(list(id = "ID", type = "SAS Char", nullable = FALSE)),
+    row_labels = list(list(id = "ID", header = "", type = "SAS Char", nullable = FALSE)),
     matrix = list(
-      header = list(corner = "blank"),
       cells = list(type = "SAS Int", nullable = FALSE)
     )
   )
@@ -72,67 +71,108 @@ test_that("a matrix file that is not csv/tsv or has no header is matrix_file_typ
 test_that("a missing or malformed matrix block is reported by the class of the problem", {
   expect_identical(mxl_codes(mxl_matrix(matrix = NULL)), "matrix_field_missing")
   expect_identical(
-    mxl_codes(mxl_matrix(matrix = list(header = list(corner = "blank"), cells = list(type = "SAS Int"), rnage = 1))),
+    mxl_codes(mxl_matrix(matrix = list(cells = list(type = "SAS Int"), rnage = 1))),
     "matrix_field_unknown"
   )
   expect_identical(
-    mxl_codes(mxl_matrix(matrix = list(header = list(corner = "blank"), cells = list(type = "SAS Int", rnage = 1)))),
+    mxl_codes(mxl_matrix(matrix = list(cells = list(type = "SAS Int", rnage = 1)))),
     "matrix_field_unknown"
   )
   expect_identical(
-    mxl_codes(mxl_matrix(matrix = list(header = list(corner = "blank")))),
+    mxl_codes(mxl_matrix(matrix = list(rows = list(count = 3)))),
     "matrix_field_missing"
   )
   expect_identical(
-    mxl_codes(mxl_matrix(matrix = list(header = list(), cells = list(type = "SAS Int")))),
+    mxl_codes(mxl_matrix(matrix = list(columns = list(pattern = "^S")))),
     "matrix_field_missing"
   )
+  # matrix.columns is optional: cells alone are a complete block
+  expect_identical(nrow(lint_dta(mxl_matrix(matrix = list(cells = list(type = "SAS Int"))))), 0L)
+  # the retired blocks and keys are unknown fields
   expect_identical(
-    mxl_codes(mxl_matrix(matrix = list(header = list(corner = "blank", count = 0), cells = list(type = "SAS Int")))),
+    mxl_codes(mxl_matrix(matrix = list(header = list(corner = "blank"), cells = list(type = "SAS Int")))),
+    "matrix_field_unknown"
+  )
+  expect_identical(
+    mxl_codes(mxl_matrix(matrix = list(columns = list(corner = "blank"), cells = list(type = "SAS Int")))),
+    "matrix_field_unknown"
+  )
+  expect_identical(
+    mxl_codes(mxl_matrix(matrix = list(columns = list(count = 0), cells = list(type = "SAS Int")))),
     "matrix_count_invalid"
   )
   expect_identical(
     mxl_codes(mxl_matrix(matrix = list(
-      header = list(corner = "blank"), cells = list(type = "SAS Char", range = list(min = 1))
+      cells = list(type = "SAS Char", range = list(min = 1))
     ))),
     "cell_range_type"
   )
   expect_identical(
     mxl_codes(mxl_matrix(matrix = list(
-      header = list(corner = "blank"), cells = list(type = "SAS Int", range = list(min = 5, max = 1))
+      cells = list(type = "SAS Int", range = list(min = 5, max = 1))
     ))),
     "cell_range_invalid"
   )
   expect_identical(
     mxl_codes(mxl_matrix(matrix = list(
-      header = list(corner = "blank"), cells = list(type = "SAS Int", infinite = TRUE)
+      cells = list(type = "SAS Int", infinite = TRUE)
     ))),
     "cell_finite_type"
   )
   expect_identical(
     mxl_codes(mxl_matrix(matrix = list(
-      header = list(corner = "blank"), cells = list(type = "SAS Num", range = list(min = "1e3"))
+      cells = list(type = "SAS Num", range = list(min = "1e3"))
     ))),
     "matrix_number_text"
   )
   expect_identical(
-    mxl_codes(mxl_matrix(matrix = list(header = list(corner = 7), cells = list(type = "SAS Int")))),
-    "matrix_corner_invalid"
+    mxl_codes(mxl_matrix(matrix = list(columns = list(values = list(7L)), cells = list(type = "SAS Int")))),
+    "matrix_columns_values_text"
   )
+})
+
+test_that("the header of a row label is judged: text and No are fine, anything else is not", {
+  rl <- function(...) list(list(id = "ID", type = "SAS Char", nullable = FALSE, ...))
+  rl2 <- function(h) {
+    list(
+      list(id = "ID", type = "SAS Char", nullable = FALSE),
+      list(id = "DESC", type = "SAS Char", nullable = TRUE, header = h)
+    )
+  }
+  for (ok in list("", "gene_id", "Sample ID", FALSE)) {
+    expect_identical(nrow(lint_dta(mxl_matrix(row_labels = rl(header = ok)))), 0L, info = format(ok))
+  }
+  # no header key: the id is the header
+  expect_identical(nrow(lint_dta(mxl_matrix(row_labels = rl()))), 0L)
+  # YAML traps: header: 1, header: Y (TRUE), a list
+  for (bad in list(1L, 2.5, TRUE, list("a", "b"), c("a", "b"))) {
+    out <- lint_dta(mxl_matrix(row_labels = rl(header = bad)))
+    expect_identical(out$code[out$severity == "error"], "row_label_header_invalid", info = format(bad))
+    expect_identical(out$id[out$code == "row_label_header_invalid"], "ID", info = format(bad))
+    expect_identical(out$object[out$code == "row_label_header_invalid"], "column", info = format(bad))
+  }
+  # No belongs to the first row label only
+  out <- lint_dta(mxl_matrix(row_labels = rl2(FALSE)))
+  expect_identical(out$code[out$severity == "error"], "row_label_header_position")
+  expect_identical(out$id[out$code == "row_label_header_position"], "DESC")
+  expect_identical(nrow(lint_dta(mxl_matrix(row_labels = rl2("")))), 0L)
+  # `header` is not reported as an unknown column key
+  expect_false(any(grepl("header", lint_dta(mxl_matrix(row_labels = rl(header = "x")))$message)))
+})
+
+test_that("the retired corner codes are gone", {
+  expect_false(any(grepl("corner", c(
+    mxl_codes(mxl_matrix(matrix = list(columns = list(corner = "blank"), cells = list(type = "SAS Int")))),
+    mxl_codes(mxl_matrix(matrix = list(header = list(corner = list("a", "b")), cells = list(type = "SAS Int"))))
+  ))))
 })
 
 test_that("cross-checks against the row labels are lint errors, not load-time aborts", {
   expect_identical(
     mxl_codes(mxl_matrix(matrix = list(
-      header = list(corner = "blank"), rows = list(key = "NOPE"), cells = list(type = "SAS Int")
+      rows = list(key = "NOPE"), cells = list(type = "SAS Int")
     ))),
     "matrix_row_key_invalid"
-  )
-  expect_identical(
-    mxl_codes(mxl_matrix(matrix = list(
-      header = list(corner = list("a", "b")), cells = list(type = "SAS Int")
-    ))),
-    "matrix_corner_invalid"
   )
   expect_identical(
     mxl_codes(mxl_matrix(row_labels = list(list(id = "ID", type = "SAS Char", nullable = TRUE)))),
@@ -169,24 +209,30 @@ test_that("a child template's dataset without a type is judged by the keys prese
   expect_identical(dta_dataset_spec_key(list(type = "tabular", row_labels = list(1))), "columns")
 })
 
-test_that("a missing corner has its own code, distinct from a missing block", {
+test_that("a matrix.columns count that cannot be met by its values is its own code", {
   expect_identical(
-    mxl_codes(mxl_matrix(matrix = list(header = list(label = "x"), cells = list(type = "SAS Int")))),
-    "matrix_corner_missing"
+    mxl_codes(mxl_matrix(matrix = list(
+      columns = list(values = list("a", "b"), count = 5), cells = list(type = "SAS Int")
+    ))),
+    "matrix_columns_count_unsatisfiable"
   )
-  expect_identical(mxl_codes(mxl_matrix(matrix = NULL)), "matrix_field_missing")
+  expect_identical(
+    mxl_codes(mxl_matrix(matrix = list(
+      columns = list(values = list("a", "b"), count = 2), cells = list(type = "SAS Int")
+    ))),
+    character(0)
+  )
 })
 
 test_that("the cross-checks run even when the block does not build, and every problem is reported", {
   # A bad cell range (build aborts) plus a bad row key, a nullable key column,
-  # a corner of the wrong length and a reserved rule id: all five.
+  # a `header: No` on the second row label and a reserved rule id: all five.
   d <- mxl_matrix(
     row_labels = list(
       list(id = "ID", type = "SAS Char", nullable = TRUE),
-      list(id = "DESC", type = "SAS Char", nullable = TRUE)
+      list(id = "DESC", header = FALSE, type = "SAS Char", nullable = TRUE)
     ),
     matrix = list(
-      header = list(corner = list("a", "b", "c")),
       rows = list(key = "NOPE"),
       cells = list(type = "SAS Char", range = list(min = 1))
     ),
@@ -194,19 +240,19 @@ test_that("the cross-checks run even when the block does not build, and every pr
   )
   expect_identical(
     mxl_codes(d),
-    c("cell_range_type", "matrix_corner_invalid", "matrix_row_key_invalid", "matrix_rule_id_reserved")
+    c("cell_range_type", "matrix_row_key_invalid", "matrix_rule_id_reserved", "row_label_header_position")
   )
 
   # The default key (first row label) is still checked for nullability.
   d2 <- mxl_matrix(
     row_labels = list(list(id = "ID", type = "SAS Char", nullable = TRUE)),
-    matrix = list(header = list(corner = "blank"), cells = list(type = "SAS Char", range = list(min = 1)))
+    matrix = list(cells = list(type = "SAS Char", range = list(min = 1)))
   )
   expect_identical(mxl_codes(d2), c("cell_range_type", "matrix_key_nullable"))
 
   # A key that is not plain text is the build's finding alone: nothing to cross-check.
   d3 <- mxl_matrix(matrix = list(
-    header = list(corner = "blank"), rows = list(key = list(NULL)), cells = list(type = "SAS Int")
+    rows = list(key = list(NULL)), cells = list(type = "SAS Int")
   ))
   expect_identical(mxl_codes(d3), "matrix_key_invalid")
 })

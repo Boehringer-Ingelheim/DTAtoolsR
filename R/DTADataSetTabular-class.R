@@ -763,7 +763,7 @@ create_example_DTADataSetTabular <- function(index = 1) {
 method(print, DTADataSetTabular) <- function(x, ...) dta_print_tabular(x)
 
 # The body of print() for a tabular dataset; the matrix method prints it first.
-dta_print_tabular <- function(x, class_label = "DTADataSetTabular") {
+dta_print_tabular <- function(x, class_label = "DTADataSetTabular", columns_word = "columns") {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph {class_label}}> : {.field {x@id}}")
 
@@ -771,7 +771,7 @@ dta_print_tabular <- function(x, class_label = "DTADataSetTabular") {
 
   if (!is.null(x@specs)) {
     cli_alert_info("Specs:")
-    cli_alert("columns ({length(x@specs@columns)}): {column_preview(x@specs)}")
+    cli_alert("{columns_word} ({length(x@specs@columns)}): {column_preview(x@specs)}")
     cli_alert("rules ({length(x@specs@rules)}): {rule_preview(x@specs)}")
   } else {
     cli_alert_info("Specs: none")

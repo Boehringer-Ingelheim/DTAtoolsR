@@ -92,8 +92,9 @@ say how many rows it holds (LIM-017, LIM-018).
 whose header labels the data columns, whose leading columns identify the rows
 and whose remaining cells hold one measurement (counts, expression, genotype
 calls). Its data columns are described by a rule, not listed. Area MATRIX
-checks the header (corner, labels, duplicates, the number of columns), the row
-labels and the row key, the number of rows, and every cell token by token:
+checks the header line (the header text above each row label, the column
+labels, duplicates, the number of data columns), the row labels and the row
+key, the number of rows, and every cell token by token:
 which raw texts are values, which are missing and which are errors, on which
 axis each is reported. The cell contract is written in the requirements as a
 table of tokens, so every expected value comes from a sentence. Every semantic

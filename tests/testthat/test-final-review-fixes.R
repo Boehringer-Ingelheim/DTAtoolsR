@@ -13,14 +13,14 @@ fr_tabular <- function(nullable) {
   )
 }
 
-fr_matrix <- function(nullable, header = list(corner = "blank"), cells = list()) {
+fr_matrix <- function(nullable, columns = list(), cells = list()) {
   DTADataSetMatrix(
     id = "m",
     specs = DTAColumnSpecCollection(columns = list(
-      ID = DTAColumnSpec(id = "ID", type = "SAS Char", nullable = FALSE)
+      ID = DTAColumnSpecRowLabel(DTAColumnSpec(id = "ID", type = "SAS Char", nullable = FALSE), header = "")
     )),
     matrix = list(
-      header = header,
+      columns = columns,
       cells = c(list(type = "SAS Num", nullable = nullable), cells)
     ),
     files = list(DTAFileTSV(filename = "m.tsv"))
@@ -82,7 +82,7 @@ test_that("an unconvertible NaN token is missing in the typed column, on every p
 test_that("a label finding and a duplicate-free inspect(): a missing field selects missing rows", {
   mat <- fr_write(c("\tS1\tbad", "r1\t-1\t2", "r2\t3\t4"), "m.tsv")
   ds <- fr_matrix(FALSE,
-    header = list(corner = "blank", pattern = "^S[0-9]$"),
+    columns = list(pattern = "^S[0-9]$"),
     cells = list(type = "SAS Int", range = list(min = 0))
   )
   x <- check(DTA(datasets = list(ds)) |> load_delivery(mat, stream = "never"), quiet = TRUE, persist = FALSE)
@@ -153,19 +153,18 @@ test_that("a matrix prints under its own class name; a tabular dataset is unchan
 
 test_that("matrix counts and bounds are written as integers and round trip identically", {
   m <- dta_matrix_spec_from_list(list(
-    header = list(corner = "blank", count = list(min = 1, max = 4)),
+    columns = list(count = list(min = 1, max = 4)),
     rows = list(count = 7),
     cells = list(type = "SAS Int", range = list(min = 0, max = 10))
   ))
   l <- as.list(m)
-  expect_identical(l$header$count, list(min = 1L, max = 4L))
+  expect_identical(l$columns$count, list(min = 1L, max = 4L))
   expect_identical(l$rows$count, 7L)
   expect_identical(l$cells$range, list(min = 0L, max = 10L))
   expect_no_match(yaml::as.yaml(l), "\\d\\.0\\b")
   expect_identical(dta_matrix_spec_from_list(l), m)
 
   frac <- dta_matrix_spec_from_list(list(
-    header = list(corner = "blank"),
     cells = list(type = "SAS Num", range = list(min = 0.5))
   ))
   expect_identical(as.list(frac)$cells$range, list(min = 0.5))
@@ -176,8 +175,8 @@ fr_lint_matrix <- function(...) {
   base <- list(
     id = "m", type = "matrix",
     files = list(filename = "m.tsv", type = "tsv"),
-    row_labels = list(list(id = "ID", type = "SAS Char", nullable = FALSE)),
-    matrix = list(header = list(corner = "blank"), cells = list(type = "SAS Int", nullable = FALSE))
+    row_labels = list(list(id = "ID", header = "", type = "SAS Char", nullable = FALSE)),
+    matrix = list(cells = list(type = "SAS Int", nullable = FALSE))
   )
   over <- list(...)
   for (nm in names(over)) base[nm] <- list(over[[nm]])
@@ -187,13 +186,13 @@ fr_codes <- function(d) lint_dta(d)$code
 
 test_that("header values that can never reach the minimum count are a lint error", {
   d <- fr_lint_matrix(matrix = list(
-    header = list(corner = "blank", values = c("A", "B"), count = list(min = 3)),
+    columns = list(values = c("A", "B"), count = list(min = 3)),
     cells = list(type = "SAS Int", nullable = FALSE)
   ))
-  expect_true("matrix_header_count_unsatisfiable" %in% fr_codes(d))
+  expect_true("matrix_columns_count_unsatisfiable" %in% fr_codes(d))
   ok <- fr_lint_matrix(matrix = list(
-    header = list(corner = "blank", values = c("A", "B"), count = list(min = 2)),
+    columns = list(values = c("A", "B"), count = list(min = 2)),
     cells = list(type = "SAS Int", nullable = FALSE)
   ))
-  expect_false("matrix_header_count_unsatisfiable" %in% fr_codes(ok))
+  expect_false("matrix_columns_count_unsatisfiable" %in% fr_codes(ok))
 })

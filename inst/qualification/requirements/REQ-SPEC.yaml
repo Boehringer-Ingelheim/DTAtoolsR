@@ -436,7 +436,10 @@ requirements:
       (matrix on a dataset of another type), matrix_row_labels_missing,
       matrix_file_type (a file entry that is not a CSV or TSV with a header),
       matrix_field_missing, matrix_field_unknown, matrix_count_invalid,
-      matrix_corner_invalid (also for a corner list of the wrong length),
+      matrix_columns_count_unsatisfiable (matrix.columns.values lists fewer
+      labels than matrix.columns.count requires at least),
+      row_label_header_position (header: No on a row label that is not the first),
+      row_label_header_invalid (a header that is neither one text nor No),
       matrix_row_key_invalid, matrix_key_nullable, matrix_number_text,
       matrix_rule_id_reserved, cell_range_type, cell_range_invalid and
       cell_finite_type. A rule naming a data column rather than a row label

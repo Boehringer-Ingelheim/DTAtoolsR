@@ -7,11 +7,11 @@ mxt_body <- function(row_labels = NULL) {
     id = "counts", type = "matrix",
     files = list(filename = "c.tsv", type = "tsv"),
     row_labels = row_labels %||% list(
-      list(id = "GENE_ID", type = "SAS Char", nullable = FALSE),
-      list(id = "GENE_NAME", type = "SAS Char", nullable = TRUE)
+      list(id = "GENE_ID", header = "gene_id", type = "SAS Char", nullable = FALSE),
+      list(id = "GENE_NAME", header = "gene_name", type = "SAS Char", nullable = TRUE)
     ),
     matrix = list(
-      header = list(corner = c("gene_id", "gene_name"), pattern = "^S[0-9]+$"),
+      columns = list(pattern = "^S[0-9]+$"),
       cells = list(type = "SAS Num")
     )
   )
@@ -28,7 +28,7 @@ mxt_template_dir <- function(row_label_lines, matrix_lines = NULL, env = parent.
       "  row_labels:", row_label_lines,
       matrix_lines %||% c(
         "  matrix:",
-        "    header: { corner: [gene_id], pattern: '^S[0-9]+$' }",
+        "    columns: { pattern: '^S[0-9]+$' }",
         "    cells: { type: SAS Num }"
       )
     ),
@@ -71,7 +71,7 @@ test_that("validate_template() reports a row-label problem and names the row lab
 test_that("validate_template() lints the matrix: block of a template too", {
   dir <- mxt_template_dir(
     "    - {id: GENE_ID, type: SAS Char, nullable: No}",
-    c("  matrix:", "    header: { corner: [gene_id], bogus: 1 }", "    cells: { type: SAS Num }")
+    c("  matrix:", "    columns: { bogus: 1 }", "    cells: { type: SAS Num }")
   )
   res <- validate_template(dir)
   expect_true("matrix_field_unknown" %in% res$code)
@@ -175,10 +175,10 @@ test_that("the diff keys row labels by id under row_labels", {
     "datasets:", "  - id: counts", "    type: matrix",
     "    files: { filename: c.tsv, type: tsv }",
     "    row_labels:",
-    "      - { id: GENE_ID, type: SAS Char, nullable: No }",
-    "      - { id: GENE_NAME, type: SAS Char }",
+    "      - { id: GENE_ID, header: gene_id, type: SAS Char, nullable: No }",
+    "      - { id: GENE_NAME, header: '', type: SAS Char }",
     "    matrix:",
-    "      header: { corner: [gene_id, gene_name] }",
+    "      columns: { pattern: '^S' }",
     "      cells: { type: SAS Num }"
   ), path)
   dta <- suppressMessages(read_dta_from_yaml(path))
@@ -187,6 +187,11 @@ test_that("the diff keys row labels by id under row_labels", {
   expect_true("counts.row_labels.GENE_NAME.type" %in% names(leaves))
   expect_false(any(grepl("^counts[.]columns[.]", names(leaves))))
   expect_true("counts.matrix.cells.type" %in% names(leaves))
+  expect_true("counts.matrix.columns.pattern" %in% names(leaves))
+  # the header text of a row label is a leaf of its own, "" kept apart from none
+  expect_identical(leaves[["counts.row_labels.GENE_ID.header"]], "gene_id")
+  expect_identical(leaves[["counts.row_labels.GENE_NAME.header"]], "")
+  expect_false(any(grepl("corner", names(leaves))))
 })
 
 test_that("history labels a row-label leaf as a row label", {
@@ -225,15 +230,33 @@ test_that("an unknown id in a matrix patch is a row label error, a tabular one a
   expect_error(patch(tab, list(remove_columns = "NOPE")), regexp = "Unknown column id 'NOPE'", class = "rlang_error")
 })
 
-test_that("the diff treats a corner as one leaf: changing one entry is one row", {
+test_that("the diff sees a change of a row label's header as one row", {
   flat <- app_fn(".dta_leaf_flatten")
-  a <- list(matrix = list(header = list(corner = structure(list(NULL, "gene_name"), class = "dta_verbatim"))))
-  b <- list(matrix = list(header = list(corner = structure(list("gene_id", "gene_name"), class = "dta_verbatim"))))
+  a <- list(row_labels = list(GENE_ID = list(header = FALSE)))
+  b <- list(row_labels = list(GENE_ID = list(header = "gene_id")))
   fa <- flat(a)
   fb <- flat(b)
-  expect_named(fa, "matrix.header.corner")
-  expect_named(fb, "matrix.header.corner")
+  expect_named(fa, "row_labels.GENE_ID.header")
+  expect_named(fb, "row_labels.GENE_ID.header")
   expect_false(identical(fa, fb))
+})
+
+test_that("validate_template() accepts header on a row label and judges it", {
+  ok <- function(h) {
+    validate_template(mxt_template_dir(sprintf("    - {id: GENE_ID, header: %s, type: SAS Char, nullable: No}", h)))
+  }
+  for (h in c("gene_id", "''", "No")) {
+    expect_equal(nrow(ok(h)), 0L, info = h)
+  }
+  # YAML reads `header: Y` as TRUE and `header: 1` as a number
+  for (h in c("Y", "1")) {
+    expect_true("row_label_header_invalid" %in% ok(h)$code, info = h)
+  }
+  two <- validate_template(mxt_template_dir(c(
+    "    - {id: GENE_ID, type: SAS Char, nullable: No}",
+    "    - {id: GENE_NAME, header: No, type: SAS Char}"
+  )))
+  expect_true("row_label_header_position" %in% two$code)
 })
 
 test_that("validate_template() lints a matrix template's `columns:` key and non-CSV file type like lint_dta()", {
@@ -247,7 +270,7 @@ test_that("validate_template() lints a matrix template's `columns:` key and non-
       "  columns:", "    - {id: A, type: SAS Char}",
       "  row_labels:", "    - {id: GENE_ID, type: SAS Char, nullable: No}",
       "  matrix:",
-      "    header: { corner: [gene_id], pattern: '^S[0-9]+$' }",
+      "    columns: { pattern: '^S[0-9]+$' }",
       "    cells: { type: SAS Num }"
     ),
     file.path(dir, "templates", "mx.dta-dataset-template.yaml")
@@ -257,7 +280,7 @@ test_that("validate_template() lints a matrix template's `columns:` key and non-
     id = "counts", type = "matrix", files = list(filename = "c.xpt", type = "xpt"),
     columns = list(list(id = "A", type = "SAS Char")),
     row_labels = list(list(id = "GENE_ID", type = "SAS Char", nullable = FALSE)),
-    matrix = list(header = list(corner = "gene_id", pattern = "^S[0-9]+$"), cells = list(type = "SAS Num"))
+    matrix = list(columns = list(pattern = "^S[0-9]+$"), cells = list(type = "SAS Num"))
   )
   wanted <- c("matrix_columns_key", "matrix_file_type")
   expect_true(all(wanted %in% lint_dta(list(datasets = list(body)))$code))

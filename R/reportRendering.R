@@ -858,9 +858,13 @@
     minimum = paste0("The value is below the declared minimum (", spec_text, ")."),
     maximum = paste0("The value is above the declared maximum (", spec_text, ")."),
     finite = "The value must be finite (not Inf or -Inf).",
-    corner = "The header text above the row labels differs from the declared corner.",
-    propertyNames = "The column label does not satisfy the declared header specification.",
-    uniqueNames = "The column label is repeated; labels must be unique.",
+    rowLabelHeader = paste0(
+      "The header line must hold ",
+      if (nzchar(spec_text)) paste0("\"", spec_text, "\"") else "an empty field",
+      " above this row-label column. If the file is right, change the row label's header in the specification."
+    ),
+    propertyNames = "Every data-column label must satisfy the rule declared under matrix.columns.",
+    uniqueNames = "Every data-column label must be unique and must not repeat a row-label id.",
     minProperties = paste0("The matrix has fewer data columns than the declared minimum (", spec_text, ")."),
     maxProperties = paste0("The matrix has more data columns than the declared maximum (", spec_text, ")."),
     minItems = paste0("The matrix has fewer data rows than the declared minimum (", spec_text, ")."),
@@ -885,6 +889,10 @@
     # column that is emphatically present. Name what was actually found.
     if (identical(kw, "additionalProperties")) {
       return("(an undeclared column)")
+    }
+    # A header field of a matrix that is present and empty, or not there.
+    if (identical(kw, "rowLabelHeader")) {
+      return("(an empty field, or no field)")
     }
     return("(missing / not present)")
   }

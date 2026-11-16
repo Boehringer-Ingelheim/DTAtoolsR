@@ -45,7 +45,7 @@ once installed).
 - Cross-column rule validation (`col_condition`, `col_range`,
   `col_unique`, `group_condition`)
 - Matrix validation (`type: matrix`, `DTADataSetMatrix`) for omics count and
-  genotype matrices: header, row labels, dimensions and every cell
+  genotype matrices: row labels, column labels, dimensions and every cell
 - File-presence validation (`DTADataSetFile`) for non-tabular deliverables
 - Detailed, queryable validation results (`results()`, `messages()`,
   `inspect()`, `explain_messages()`)
@@ -209,7 +209,7 @@ DTA                              ← top-level agreement container
     │       └── <table_name>     ← populated via load_file() or constructor
     │
     ├── DTADataSetMatrix         ← omics matrix (DTADataSetTabular subclass):
-    |                                row_labels + header/rows/cells, no
+    |                                row_labels + columns/rows/cells, no
     |                                per-column specs
     │
     └── DTADataSetFile           ← non-tabular: file presence/readability check
@@ -711,6 +711,84 @@ refused as it is offered, rather than at validation time. To validate the
 dataset instead (see [SAS datasets](#sas-datasets-sas7bdat)). To validate a
 `.xpt`, use `type: xpt`.
 
+### Validate an omics matrix (`type: matrix`)
+
+A count or expression matrix has one or a few leading **row label columns**
+and then hundreds or thousands of **data columns** that all mean the same
+thing — one per sample, say. Their names change with every delivery, so they
+cannot be listed as `columns:`. A `type: matrix` dataset describes them by
+rule instead:
+
+```yaml
+datasets:
+  - id: gene_counts
+    type: matrix
+    files: { filename: "matrix_gene_counts.tsv", type: tsv }
+    row_labels:                 # the leading columns, in file order
+      - id: GENE_ID
+        header: gene_id         # the header line's text above this column
+        type: SAS Char
+        nullable: No
+      - id: GENE_NAME
+        header: gene_name
+        type: SAS Char
+        nullable: Yes
+    matrix:
+      columns:                  # every column after the row labels
+        label: Sample ID
+        pattern: "^S[0-9]{4}$"  # what every column label must look like
+        count: { min: 1, max: 384 }
+      rows:
+        key: GENE_ID            # unique, never missing
+        count: { min: 1 }
+      cells:
+        type: SAS Num
+        nullable: No
+        range: { min: 0 }
+        infinite: No
+```
+
+| Block | Says | Keys |
+| --- | --- | --- |
+| `row_labels` | The leading columns, matched by position. Ordinary column specs, plus `header`. | every [column key](#yaml-column-format), `header` |
+| `matrix.columns` | What the labels of the data columns look like, and how many there may be. Optional. | `label`, `description`, `pattern`, `values`, `length`, `count` |
+| `matrix.rows` | Which row label identifies a row, and how many rows there may be. Optional. | `key` (default: the first row label), `count` |
+| `matrix.cells` | What every cell may hold. Required. | `type` (`SAS Num`, `SAS Int`, `SAS Char`), `nullable`, `range: {min, max}`, `infinite`, `values`, `pattern`, `length`, `format`, `label`, `description` |
+
+`header` is what the file's header line holds above a row label column. Left
+out, it is the row label's `id`, as for a tabular column. Otherwise:
+
+| File written by | Write on the row label |
+| --- | --- |
+| R `write.csv(x)`, or pandas `to_csv()` with an index that has no name: an empty field | `header: ""` |
+| R `write.table(x)` with row names: no field at all, the header is one field shorter than the rows | `header: No` (first row label only) |
+| a writer that names the column differently from your `id` | `header: gene_id` |
+
+A `count` is a whole number for exactly that many, or `{min, max}` with either
+side optional; the defaults require at least one data column and one row. A
+column label must always be present and unique.
+
+```r
+dta <- read_dta_from_yaml(system.file("extdata", "matrix_dta.yaml", package = "DTAtools"))
+dta <- load_file(
+  dta,
+  dataset = "gene_counts",
+  file = system.file("extdata", "matrix_gene_counts.tsv", package = "DTAtools")
+)
+dta <- check(dta)
+messages(dta)
+```
+
+`check()` reports a wrong header text, a column label that breaks the rule or
+is repeated, too many or too few data columns or rows, a repeated row key, and
+every cell that is missing, out of range, infinite or not of the declared
+type — with its row and the label of its column. A file that cannot be a matrix
+of the declared shape (a first data row with more or fewer fields than the
+header implies, a `#` preamble, another separator) is refused by `load_file()`
+with the reason. The full key reference, the table of how each raw cell is
+read and the list of what is not supported are in
+[`DTA_YAML_GUIDE.md`](DTA_YAML_GUIDE.md) section 6 and in the vignette.
+
 ### Building a full `DTA` object, mixing dataset types
 
 A single `DTA` object can hold **any mix** of `DTADataSetTabular` and
@@ -930,7 +1008,7 @@ the metadata and export the document — including the HTML validation report,
 via a "Report" download button alongside the CSV/TSV/XLSX exports. It needs
 the suggested packages **shiny**, **bslib** and **DT**. Datasets of every type
 — tabular, matrix and file — can be added and edited there; a matrix dataset
-gets a Row labels editor and a Matrix layout editor for its header, dimensions
+gets a Row labels editor and a Matrix layout editor for its data columns, size
 and cell values.
 
 ```r
@@ -1376,7 +1454,7 @@ row-level validation.
 | `DTAMetaData`             | Agreement metadata (title, version, contacts, transmission) |
 | `DTADataSet`              | Abstract base class for all dataset types                   |
 | `DTADataSetTabular`       | Dataset with column specs, rules, and data tables            |
-| `DTADataSetMatrix`        | Omics matrix: row labels + header, row and cell checks       |
+| `DTADataSetMatrix`        | Omics matrix: row labels + column-label, row and cell checks |
 | `DTADataSetFile`          | Dataset that checks file presence and readability only       |
 | `DTAColumnSpecCollection` | Named list of column specs + optional list of rules           |
 | `DTAColumnSpec`           | Single column definition (type, nullable, values, pattern)   |

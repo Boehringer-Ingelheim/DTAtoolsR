@@ -505,13 +505,14 @@ test_that("OQ-SPEC-056 | a DTA with an entry that is not a DTADataSet is refused
 test_that("OQ-SPEC-057 | the dataset classes include DTADataSetMatrix, a tabular dataset of type matrix, and the factory builds the one its type names | REQ-SPEC-010", {
   files <- list(type = "tsv", filename = "m.tsv")
   labels <- list(list(id = "ID", type = "SAS Char", nullable = FALSE))
-  matrix <- list(header = list(corner = "blank"), cells = list(type = "SAS Int", nullable = FALSE))
+  row_labels <- list(list(id = "ID", header = "", type = "SAS Char", nullable = FALSE))
+  matrix <- list(cells = list(type = "SAS Int", nullable = FALSE))
 
   built <- list(
     matrix = DTADataSetFactory(
       "matrix",
       id = "m", name = "Counts", description = "A matrix.",
-      files = files, row_labels = labels, matrix = matrix
+      files = files, row_labels = row_labels, matrix = matrix
     ),
     tabular = DTADataSetFactory("tabular", id = "t", files = files, columns = labels),
     file = DTADataSetFactory("file", id = "f", files = list(type = "any", filename = "f.pdf"))
