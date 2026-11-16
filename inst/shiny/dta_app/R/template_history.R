@@ -206,6 +206,15 @@ template_history_label <- function(area, key) {
   paste(parts, collapse = " > ")
 }
 
+# The zero-change frame template_history_compare() and its variants branch
+# both promise, so a comparison that finds nothing is never NULL.
+.template_history_empty_changes <- function() {
+  data.frame(
+    area = character(0), what = character(0), change = character(0),
+    from = character(0), to = character(0), stringsAsFactors = FALSE
+  )
+}
+
 # Compare two builds. Returns a data frame with one row per change:
 # area, what (human-readable), change (added/removed/changed), from, to.
 template_history_compare <- function(a, b) {
@@ -250,10 +259,7 @@ template_history_compare <- function(a, b) {
     }
   }
   if (length(rows) == 0) {
-    return(data.frame(
-      area = character(0), what = character(0), change = character(0),
-      from = character(0), to = character(0), stringsAsFactors = FALSE
-    ))
+    return(.template_history_empty_changes())
   }
   out <- do.call(rbind, rows)
   out <- out[order(match(out$area, names(la)), out$what, method = "radix"), , drop = FALSE]
@@ -291,6 +297,11 @@ template_history_compare_variants <- function(a, b) {
       }
       rows[[length(rows) + 1L]] <- changes
     }
+  }
+  # No choice on either side: do.call(rbind, list()) is NULL, which order()
+  # rejects. template_core.R requires >= 1 choice, so this is defensive only.
+  if (length(rows) == 0) {
+    return(.template_history_empty_changes())
   }
   out <- do.call(rbind, rows)
   out <- out[order(match(out$area, c("Template", "Metadata", "Datasets")), out$what,

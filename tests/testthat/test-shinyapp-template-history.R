@@ -487,6 +487,19 @@ test_that("ordinary history builds retain their original result and comparison s
   expect_equal(nrow(ch), 0)
 })
 
+# A variants build always has >= 1 choice (template_core.R rejects none), so
+# this pins the defensive guard: two builds with no choices compare as the
+# empty change frame instead of failing in order() on a NULL.
+test_that("comparing two variant builds with no choices returns the empty change frame", {
+  expect_identical(
+    app_fn("template_history_compare")(list(variants = list()), list(variants = list())),
+    data.frame(
+      area = character(0), what = character(0), change = character(0),
+      from = character(0), to = character(0), stringsAsFactors = FALSE
+    )
+  )
+})
+
 # ---- prior_versions: history from before the library ------------------------
 
 # Append a `prior_versions:` block to a file written by write_ct().
