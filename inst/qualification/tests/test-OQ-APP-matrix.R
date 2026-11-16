@@ -22,18 +22,21 @@ mxa_read <- function(lines, env = parent.frame()) {
   suppressMessages(read_dta_from_yaml(path))
 }
 
-# One matrix dataset whose corner has no field above the first row label.
-mxa_null_corner_lines <- c(
+# One matrix dataset whose first row label has no field in the header line
+# (header: No), whose second has the ordinary text named, whose third has an
+# empty text and whose fourth declares no header.
+mxa_header_lines <- c(
   "datasets:",
   "  - id: gene_counts",
   "    type: matrix",
   "    files: { filename: \"gene_counts.tsv\", type: tsv }",
   "    row_labels:",
-  "      - { id: GENE_ID, type: SAS Char, nullable: No }",
-  "      - { id: GENE_NAME, type: SAS Char, nullable: Yes }",
+  "      - { id: GENE_ID, header: No, type: SAS Char, nullable: No }",
+  "      - { id: GENE_NAME, header: named, type: SAS Char, nullable: Yes }",
+  "      - { id: NOTE, header: '', type: SAS Char, nullable: Yes }",
+  "      - { id: BIOTYPE, type: SAS Char, nullable: Yes }",
   "    matrix:",
-  "      header:",
-  "        corner: [~, gene_name]",
+  "      columns:",
   "        pattern: \"^S[0-9]{4}$\"",
   "      rows:",
   "        key: GENE_ID",
@@ -65,9 +68,9 @@ mxa_load_and_check <- function(session, genes = qapp_file_input("matrix_gene_cou
   session$setInputs(check_all = 1)
 }
 
-test_that("OQ-APP-042 | saving a matrix dataset writes row_labels and matrix, and a null-first corner survives save, reload and save | REQ-APP-033", {
+test_that("OQ-APP-042 | saving a matrix dataset writes row_labels and matrix, and the header of each row label (No, a text, an empty text, none) survives save, reload and save | REQ-APP-033", {
   qapp_skip_unless_app_installed()
-  dta <- mxa_read(mxa_null_corner_lines)
+  dta <- mxa_read(mxa_header_lines)
   save_text <- qapp_fn("dta_to_yaml_text")
 
   first <- save_text(dta)
@@ -83,24 +86,23 @@ test_that("OQ-APP-042 | saving a matrix dataset writes row_labels and matrix, an
   )
   qa_step(
     "the row labels are written in the order they were declared",
-    c("GENE_ID", "GENE_NAME"), vapply(saved$row_labels, function(x) x$id, "")
+    c("GENE_ID", "GENE_NAME", "NOTE", "BIOTYPE"), vapply(saved$row_labels, function(x) x$id, "")
   )
-  corner <- saved$matrix$header$corner
-  qa_step("the corner still has two entries", 2L, length(corner))
-  qa_check("the first corner entry is written as the YAML null, not dropped", is.null(corner[[1]]))
-  qa_step("and the second entry is the declared text", "gene_name", corner[[2]])
+  qa_check("header: No is written as the plain boolean false", identical(saved$row_labels[[1]]$header, FALSE))
+  qa_step("the text named is written as that text", "named", saved$row_labels[[2]]$header)
+  qa_step("an empty text is written as an empty text, not dropped", "", saved$row_labels[[3]]$header)
+  qa_check("a row label with no header declares none", is.null(saved$row_labels[[4]]$header))
 
   again <- mxa_read(strsplit(first$value, "\n", fixed = TRUE)[[1]])
   ds <- again@datasets[["gene_counts"]]
   qa_step(
     "reading the saved text back yields the same row labels",
-    c("GENE_ID", "GENE_NAME"), names(ds@specs@columns)
+    c("GENE_ID", "GENE_NAME", "NOTE", "BIOTYPE"), names(ds@specs@columns)
   )
-  back_corner <- as.list(ds@matrix)$header$corner
-  qa_step(
-    "and a corner whose first entry is null and whose second is gene_name",
-    c(TRUE, "gene_name"), c(is.null(back_corner[[1]]), back_corner[[2]])
-  )
+  back <- lapply(ds@specs@columns, function(col) as.list(col)$header)
+  qa_check("and the same header on each: No, named, an empty text, none", identical(
+    unname(back), list(FALSE, "named", "", NULL)
+  ))
   qa_step("saving the reloaded document gives the identical text", first$value, save_text(again)$value)
 })
 
@@ -188,6 +190,8 @@ test_that("OQ-APP-045 | applying raw YAML that changes one dataset's type drops 
     tail_txt <- substring(y, i)
     tail_txt <- sub("type: matrix", "type: tabular", tail_txt, fixed = TRUE)
     tail_txt <- sub("row_labels:", "columns:", tail_txt, fixed = TRUE)
+    # A tabular column has no header key: drop the row label's (an empty text).
+    tail_txt <- sub("\n\\s+header: (''|\"\")", "", tail_txt)
     tail_txt <- sub("\n  matrix:.*$", "\n", tail_txt)
     session$setInputs(raw_yaml_editor = paste0(substring(y, 1, i - 1), tail_txt))
     session$setInputs(apply_yaml = 1)
@@ -210,7 +214,7 @@ test_that("OQ-APP-045 | applying raw YAML that changes one dataset's type drops 
   })
 })
 
-test_that("OQ-APP-046 | applying raw YAML that changes the corner of a loaded matrix reports the table as needing a reload, not a crash | REQ-APP-037", {
+test_that("OQ-APP-046 | applying raw YAML that gives the first row label no header field in a loaded matrix reports the table as needing a reload, not a crash | REQ-APP-037", {
   app <- qapp_skip_unless_app_installed()
   qapp_clean_session_files()
 
@@ -219,14 +223,15 @@ test_that("OQ-APP-046 | applying raw YAML that changes the corner of a loaded ma
     session$setInputs(dta_file = qapp_file_input("matrix_dta.yaml"))
     session$setInputs(up_1_1 = qapp_file_input("matrix_gene_counts.tsv"))
     session$setInputs(check_all = 1)
-    qa_step("the delivery passes with the corner as shipped", "pass", mxa_status(rv, "gene_counts"))
+    qa_step("the delivery passes with the header as shipped", "pass", mxa_status(rv, "gene_counts"))
     qapp_unlock_editing(session)
 
-    # The first corner entry becomes null: the row-label count under the header
-    # changes, so the names the recorded header yields no longer match the table.
+    # The first row label loses its field in the header line: the number of
+    # fields above the data columns changes, so the names the recorded header
+    # yields no longer match the table.
     y <- rv$yaml_text
-    edited <- sub("corner:\n      - gene_id\n      - gene_name", "corner:\n      - ~\n      - gene_name", y, fixed = TRUE)
-    qa_check("the corner was edited in the text", !identical(y, edited))
+    edited <- sub("header: gene_id", "header: No", y, fixed = TRUE)
+    qa_check("the header was edited in the text", !identical(y, edited))
     session$setInputs(raw_yaml_editor = edited)
     session$setInputs(apply_yaml = 1)
     qa_check("the edited text applies", isTRUE(rv$yaml_msg$ok))
@@ -256,9 +261,9 @@ test_that("OQ-APP-047 | unloading a matrix table drops its recorded header and k
     "      - { filename: \"a.tsv\", type: tsv }",
     "      - { filename: \"b.tsv\", type: tsv }",
     "    row_labels:",
-    "      - { id: GENE_ID, type: SAS Char, nullable: No }",
-    "      - { id: GENE_NAME, type: SAS Char, nullable: Yes }",
-    "    matrix:", "      header:", "        corner: [gene_id, gene_name]",
+    "      - { id: GENE_ID, header: gene_id, type: SAS Char, nullable: No }",
+    "      - { id: GENE_NAME, header: gene_name, type: SAS Char, nullable: Yes }",
+    "    matrix:",
     "      rows: { key: GENE_ID }", "      cells: { type: SAS Num }"
   )
   dta <- mxa_read(lines)
@@ -350,8 +355,9 @@ mxa_editing <- function(session, id = strrep("p", 32)) {
 }
 
 # The inputs the row-label form carries, for one label.
-mxa_label_form <- function(id, nullable = FALSE, pattern = "") {
+mxa_label_form <- function(id, nullable = FALSE, pattern = "", header_mode = "id", header_text = "") {
   list(
+    col_header_mode = header_mode, col_header_text = header_text,
     col_id = id, col_label = "", col_backend = "SAS", col_type = "Char",
     col_format = "", col_length = "", col_nullable = nullable, col_values = "",
     col_pattern = pattern, col_desc = ""
@@ -366,7 +372,7 @@ mxa_upload <- function(path) {
   )
 }
 
-test_that("OQ-APP-050 | adding a matrix dataset needs a row-label ID, a corner and a cell type and builds the declared matrix | REQ-APP-041", {
+test_that("OQ-APP-050 | adding a matrix dataset needs a row-label ID, a header choice and a cell type and builds the declared matrix | REQ-APP-041", {
   app <- qapp_skip_unless_app_installed()
   qapp_clean_session_files()
 
@@ -374,13 +380,17 @@ test_that("OQ-APP-050 | adding a matrix dataset needs a row-label ID, a corner a
     mxa_editing(session)
     n_before <- length(rv$dta@datasets)
 
-    # Each of the three missing in turn: the dataset is not added.
+    # Each of the three missing in turn (and another text left blank): the dataset is not added.
     session$setInputs(add_ds_id = "mx_a", add_ds_type = "matrix", add_ds_mx_label = "PID", add_ds_mx_cells = "SAS Num")
     session$setInputs(add_ds_save = 1)
-    qa_step("without a corner the dataset is not added", n_before, length(rv$dta@datasets))
+    qa_step("without a header choice the dataset is not added", n_before, length(rv$dta@datasets))
     qa_check("and the refusal is reported", isFALSE(rv$add_ds_msg$ok))
 
-    session$setInputs(add_ds_mx_corner = "named", add_ds_mx_cells = "")
+    session$setInputs(add_ds_mx_header = "text", add_ds_mx_header_text = "  ", add_ds_mx_cells = "SAS Num")
+    session$setInputs(add_ds_save = 11)
+    qa_step("another text chosen and left blank: not added", n_before, length(rv$dta@datasets))
+
+    session$setInputs(add_ds_mx_header = "empty", add_ds_mx_cells = "")
     session$setInputs(add_ds_save = 2)
     qa_step("without a cell type the dataset is not added", n_before, length(rv$dta@datasets))
 
@@ -388,7 +398,7 @@ test_that("OQ-APP-050 | adding a matrix dataset needs a row-label ID, a corner a
     session$setInputs(add_ds_save = 3)
     qa_step("without a row-label ID the dataset is not added", n_before, length(rv$dta@datasets))
 
-    # All three given.
+    # All three given: an empty field above the row label.
     session$setInputs(add_ds_mx_label = "PID")
     session$setInputs(add_ds_save = 4)
     qa_step("with all three the dataset is added", n_before + 1L, length(rv$dta@datasets))
@@ -403,14 +413,31 @@ test_that("OQ-APP-050 | adding a matrix dataset needs a row-label ID, a corner a
     )
     qa_step("and is the row key", "PID", ds@matrix@row_key)
     l <- as.list(ds@matrix)
-    qa_step("the corner is the one chosen", "named", ds@matrix@corner_mode)
+    qa_step("the header is the one chosen, an empty field", "", as.list(cols[["PID"]])$header)
     qa_step("the cell type is the one chosen", "SAS Num", l$cells$type)
     qa_step("at least one data column is required", 1, ds@matrix@n_columns[[1L]])
     qa_step("and at least one data row", 1, ds@matrix@n_rows[[1L]])
+
+    # The other three choices, each on a dataset of its own.
+    chosen <- list(
+      id = list(NULL, ""), text = list("pid", "pid"), none = list(FALSE, "")
+    )
+    for (mode in names(chosen)) {
+      session$setInputs(
+        add_ds_id = paste0("mx_", mode), add_ds_mx_label = "PID", add_ds_mx_header = mode,
+        add_ds_mx_header_text = chosen[[mode]][[2]], add_ds_mx_cells = "SAS Num"
+      )
+      session$setInputs(add_ds_save = 20 + match(mode, names(chosen)))
+      added <- rv$dta@datasets[[paste0("mx_", mode)]]
+      qa_check(
+        sprintf("the choice %s declares the header of the requirement sentence", mode),
+        !is.null(added) && identical(as.list(added@specs@columns[["PID"]])$header, chosen[[mode]][[1]])
+      )
+    }
   })
 })
 
-test_that("OQ-APP-051 | row-label edits keep a matrix valid: rename follows into the key, add extends the corner, removing the key is refused | REQ-APP-042", {
+test_that("OQ-APP-051 | row-label edits keep a matrix valid: rename follows into the key, adding a row label leaves the other headers unchanged, removing the key is refused | REQ-APP-042", {
   app <- qapp_skip_unless_app_installed()
   qapp_clean_session_files()
 
@@ -421,22 +448,38 @@ test_that("OQ-APP-051 | row-label edits keep a matrix valid: rename follows into
 
     # Rename the first row label (the row key).
     session$setInputs(col_edit_click = 1)
-    do.call(session$setInputs, mxa_label_form("GENE_UID", pattern = pat))
+    do.call(session$setInputs, mxa_label_form("GENE_UID", pattern = pat, header_mode = "text", header_text = "gene_id"))
     session$setInputs(col_save = 1)
     ds <- rv$dta@datasets[["gene_counts"]]
     qa_step("the renamed label is in the specification", c("GENE_UID", "GENE_NAME"), names(ds@specs@columns))
     qa_step("and the row key follows it", "GENE_UID", ds@matrix@row_key)
 
-    # Add a third row label: the corner list gets one more, empty, text.
+    # Add a third row label: the headers of the other two stay as they were.
     k <- length(ds@specs@columns)
+    header_of <- function(ds) lapply(ds@specs@columns, function(col) as.list(col)$header)
+    headers_before <- header_of(ds)
     session$setInputs(col_add = 1)
     do.call(session$setInputs, mxa_label_form("NOTE", nullable = TRUE))
     session$setInputs(col_save = 2)
     ds <- rv$dta@datasets[["gene_counts"]]
     qa_step("the new label is added", k + 1L, length(ds@specs@columns))
-    corner <- ds@matrix@corner
-    qa_step("the corner list has one more entry", k + 1L, length(corner))
-    qa_step("and the last entry is empty text", "", corner[[length(corner)]])
+    qa_step(
+      "the header of each earlier row label is unchanged", unname(headers_before),
+      unname(header_of(ds)[seq_len(k)])
+    )
+    qa_step("and the new row label's header is its id", "NOTE", names(ds@specs@columns)[[k + 1L]])
+    qa_check("with no header declared", is.null(header_of(ds)[[k + 1L]]))
+
+    # Remove the second row label, which is not the row key: the headers of
+    # the two that remain stay as they were.
+    kept_before <- header_of(ds)[c("GENE_UID", "NOTE")]
+    session$setInputs(col_del_click = 2)
+    ds <- rv$dta@datasets[["gene_counts"]]
+    qa_step("the row label is removed", c("GENE_UID", "NOTE"), names(ds@specs@columns))
+    qa_step(
+      "the header of each remaining row label is unchanged", unname(kept_before),
+      unname(header_of(ds))
+    )
 
     # Remove the row key: refused, nothing changes.
     before <- rv$dta
@@ -478,16 +521,14 @@ test_that("OQ-APP-052 | the matrix-layout editor saves into the specification an
     # character vector. The row-count minimum is the one saved just above.
     y <- yaml::read_yaml(system.file("extdata", "matrix_dta.yaml", package = "DTAtools"))$datasets[[1]]
     labels <- vapply(y$row_labels, function(l) l$id, "")
-    corner <- vapply(y$matrix$header$corner, as.character, "")
     do.call(session$setInputs, c(
       list(
-        mx_corner_mode = "list", mx_corner_none = FALSE,
-        mx_header_label = y$matrix$header$label,
-        mx_header_description = "",
-        mx_header_pattern = y$matrix$header$pattern,
-        mx_header_values = "", mx_header_length = "",
-        mx_n_columns_min = y$matrix$header$count$min,
-        mx_n_columns_max = y$matrix$header$count$max,
+        mx_columns_label = y$matrix$columns$label,
+        mx_columns_description = "",
+        mx_columns_pattern = y$matrix$columns$pattern,
+        mx_columns_values = "", mx_columns_length = "",
+        mx_n_columns_min = y$matrix$columns$count$min,
+        mx_n_columns_max = y$matrix$columns$count$max,
         mx_row_key = y$matrix$rows$key,
         mx_n_rows_min = rows + 1, mx_n_rows_max = NA_real_,
         mx_cell_type = y$matrix$cells$type,
@@ -496,8 +537,7 @@ test_that("OQ-APP-052 | the matrix-layout editor saves into the specification an
         mx_infinite = FALSE,
         mx_cell_values = "", mx_cell_pattern = "", mx_cell_length = "",
         mx_cell_format = "", mx_cell_label = "", mx_cell_description = ""
-      ),
-      stats::setNames(as.list(corner), paste0("mx_corner_", seq_along(labels)))
+      )
     ))
     before <- as.list(datasets(rv$dta, "gene_counts")@matrix)
     session$setInputs(mx_save = 2)
@@ -554,9 +594,8 @@ test_that("OQ-APP-054 | inspecting a too-few-rows finding states the declared mi
     "    type: matrix",
     "    files: { filename: \"few.tsv\", type: tsv }",
     "    row_labels:",
-    "      - { id: ID, type: SAS Char, nullable: No }",
+    "      - { id: ID, header: id, type: SAS Char, nullable: No }",
     "    matrix:",
-    "      header: { corner: [id] }",
     "      rows: { count: { min: 5 } }",
     "      cells: { type: SAS Int, nullable: No }"
   ), spec)
@@ -612,9 +651,9 @@ test_that("OQ-APP-055 | a refused file is listed in the dataset's messages until
     "      - { filename: \"a.tsv\", type: tsv }",
     "      - { filename: \"b.tsv\", type: tsv }",
     "    row_labels:",
-    "      - { id: GENE_ID, type: SAS Char, nullable: No }",
-    "      - { id: GENE_NAME, type: SAS Char, nullable: Yes }",
-    "    matrix:", "      header:", "        corner: [gene_id, gene_name]",
+    "      - { id: GENE_ID, header: gene_id, type: SAS Char, nullable: No }",
+    "      - { id: GENE_NAME, header: gene_name, type: SAS Char, nullable: Yes }",
+    "    matrix:",
     "      rows: { key: GENE_ID }", "      cells: { type: SAS Num }"
   )
   dta <- mxa_read(lines)
@@ -667,4 +706,144 @@ test_that("OQ-APP-055 | a refused file is listed in the dataset's messages until
     )
     qa_check("and the table passes", isTRUE(validation_status(rv$dta@datasets[["gc"]])$ok))
   })
+})
+
+# ---- the header of a row label in the application (REQ-APP-042, REQ-APP-047) --
+
+test_that("OQ-APP-056 | no field above a row label that is not first, and moving the first row label away while it has no field, are refused and change nothing | REQ-APP-042 | tags: white-box", {
+  qapp_skip_unless_app_installed()
+  set_column <- qapp_fn("dta_set_column")
+  move <- qapp_fn("dta_move_column")
+  header_of <- function(dta) {
+    lapply(datasets(dta, "gene_counts")@specs@columns, function(col) as.list(col)$header)
+  }
+  dta <- mxa_read(mxa_header_lines)
+
+  # header: No on the second row label.
+  r <- set_column(
+    dta, "gene_counts",
+    id = "GENE_NAME", backend = "SAS", type = "Char", nullable = TRUE,
+    old_id = "GENE_NAME", header_mode = "none"
+  )
+  qa_step("no field on a row label that is not the first is refused", FALSE, r$ok)
+  qa_check("and the dataset is not changed", is.null(r$value))
+
+  # The first row label has no field: it must stay first.
+  down <- move(dta, "gene_counts", "GENE_ID", "down")
+  qa_step("moving the first row label down while it has no field is refused", FALSE, down$ok)
+  up <- move(dta, "gene_counts", "GENE_NAME", "up")
+  qa_step("and so is moving another row label into first place", FALSE, up$ok)
+  qa_step(
+    "the order of the row labels is unchanged",
+    c("GENE_ID", "GENE_NAME", "NOTE", "BIOTYPE"), names(datasets(dta, "gene_counts")@specs@columns)
+  )
+  # Moving two later row labels is allowed and leaves every header as it was.
+  ok <- move(dta, "gene_counts", "NOTE", "down")
+  qa_step("moving a later row label is accepted", TRUE, ok$ok)
+  qa_step(
+    "and each row label keeps its own header",
+    list(GENE_ID = FALSE, GENE_NAME = "named", NOTE = "", BIOTYPE = NULL)[c("GENE_ID", "GENE_NAME", "NOTE")],
+    header_of(ok$value)[c("GENE_ID", "GENE_NAME", "NOTE")]
+  )
+})
+
+test_that("OQ-APP-057 | the row-label form reports and saves the header of a row label as a choice and a text | REQ-APP-047 | tags: white-box", {
+  qapp_skip_unless_app_installed()
+  fields <- qapp_fn("dta_column_fields")
+  set_column <- qapp_fn("dta_set_column")
+  dta <- mxa_read(mxa_header_lines)
+  got <- function(id) {
+    f <- fields(dta, "gene_counts", id)
+    c(f$header_mode, f$header_text)
+  }
+  qa_step("header: No is the choice none", c("none", ""), got("GENE_ID"))
+  qa_step("a text is the choice text with that text", c("text", "named"), got("GENE_NAME"))
+  qa_step("an empty text is the choice empty", c("empty", ""), got("NOTE"))
+  qa_step("no header is the choice id", c("id", ""), got("BIOTYPE"))
+
+  saved <- set_column(
+    dta, "gene_counts",
+    id = "BIOTYPE", backend = "SAS", type = "Char", nullable = TRUE,
+    old_id = "BIOTYPE", header_mode = "text", header_text = "biotype"
+  )
+  qa_check("saving the form succeeds", isTRUE(saved$ok))
+  col <- datasets(saved$value, "gene_counts")@specs@columns[["BIOTYPE"]]
+  qa_step("it declares exactly that header on the row label", "biotype", as.list(col)$header)
+  qa_step("and leaves the row label's other settings", c("SAS Char", TRUE), c(as.list(col)$type, col@nullable))
+})
+
+test_that("OQ-APP-058 | a matrix dataset shows a sketch of its file and the header text of each row label | REQ-APP-048 | tags: white-box", {
+  qapp_skip_unless_app_installed()
+  sketch <- qapp_fn("dta_matrix_sketch")
+  overview <- qapp_fn("dta_columns_overview")
+  # GENE_ID: no field; GENE_NAME: the text named; NOTE: an empty field;
+  # BIOTYPE: no header declared.
+  dta <- mxa_read(mxa_header_lines)
+  lines <- sketch(dta, "gene_counts")
+  qa_step("the sketch has two lines", 2L, length(lines))
+  ids <- c("GENE_ID", "GENE_NAME", "NOTE", "BIOTYPE")
+  at <- vapply(ids, function(id) as.integer(regexpr(id, lines[[2]], fixed = TRUE)), integer(1))
+  qa_check("the second line holds the row-label IDs in file order", all(at > 0L) && !is.unsorted(at, strictly = TRUE))
+  # What the first line holds above each ID (none of these texts is wider than its ID).
+  above <- vapply(ids, function(id) trimws(substr(lines[[1]], at[[id]], at[[id]] + nchar(id) - 1L)), character(1))
+  qa_step(
+    "the first line holds nothing, the text, two double quotes and the ID above them",
+    c("", "named", "\"\"", "BIOTYPE"), unname(above)
+  )
+  qa_check(
+    "and ends with a note naming the row label that has no field above it",
+    grepl("no field above GENE_ID", lines[[1]], fixed = TRUE)
+  )
+  qa_step(
+    "the row-label list carries the header of each row label in a column named header",
+    c("(no field)", "named", "(empty)", "BIOTYPE"), overview(dta, "gene_counts")$header
+  )
+
+  tab <- suppressMessages(read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools")))
+  qa_step("a tabular dataset has no sketch", 0L, length(sketch(tab, "clinical_data")))
+  qa_check(
+    "and its column list has no header column",
+    !("header" %in% names(overview(tab, "clinical_data")))
+  )
+})
+
+test_that("OQ-APP-059 | an edit of the row labels asks for the file to be loaded again exactly when the loaded table goes stale | REQ-APP-049 | tags: white-box", {
+  qapp_skip_unless_app_installed()
+  needs <- qapp_fn("dta_matrix_needs_reload")
+  set_column <- qapp_fn("dta_set_column")
+  value <- function(r) {
+    qa_check("the edit succeeds", isTRUE(r$ok))
+    r$value
+  }
+  set <- function(dta, id, ...) value(set_column(dta, "gene_counts", id = id, backend = "SAS", type = "Char", ...))
+  # The bundled specification with the genes file loaded: GENE_ID, GENE_NAME.
+  bound <- mxa_bound_gene_counts()
+
+  stale <- list(
+    "a renamed row label" = set(bound, "GENE_UID", nullable = FALSE, old_id = "GENE_ID"),
+    "an added row label" = set(bound, "NOTE", nullable = TRUE),
+    "a removed row label" = value(qapp_fn("dta_remove_column")(bound, "gene_counts", "GENE_NAME")),
+    "a moved row label" = value(qapp_fn("dta_move_column")(bound, "gene_counts", "GENE_NAME", "up")),
+    "no header field above the first row label" = set(bound, "GENE_ID", nullable = FALSE, header_mode = "none")
+  )
+  for (what in names(stale)) {
+    qa_step(sprintf("%s asks for a reload", what), TRUE, needs(bound, stale[[what]], "gene_counts"))
+  }
+
+  same <- list(
+    "another header text" = set(bound, "GENE_ID", nullable = FALSE, header_mode = "text", header_text = "Gene"),
+    "another constraint" = set(bound, "GENE_NAME", nullable = TRUE, pattern = "^[A-Z]"),
+    "no edit" = bound
+  )
+  for (what in names(same)) {
+    qa_step(sprintf("%s does not", what), FALSE, needs(bound, same[[what]], "gene_counts"))
+  }
+
+  unbound <- suppressMessages(read_dta_from_yaml(system.file("extdata", "matrix_dta.yaml", package = "DTAtools")))
+  qa_step(
+    "a rename with no table loaded does not",
+    FALSE, needs(unbound, set(unbound, "GENE_UID", nullable = FALSE, old_id = "GENE_ID"), "gene_counts")
+  )
+  tab <- suppressMessages(read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools")))
+  qa_step("a tabular dataset does not", FALSE, needs(tab, tab, "clinical_data"))
 })

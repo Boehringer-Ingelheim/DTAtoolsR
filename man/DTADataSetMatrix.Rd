@@ -24,7 +24,7 @@ DTADataSetMatrix(
 least one). Rules may refer to these columns only.}
 
 \item{matrix}{A \code{DTAMatrixSpec}, or the YAML-shaped list of the
-\code{matrix:} block (\code{header}, \code{rows}, \code{cells}).}
+\code{matrix:} block (\code{columns}, \code{rows}, \code{cells}).}
 
 \item{files}{A list of \code{DTAFileCSV} or \code{DTAFileTSV} handlers with
 \code{has_header = TRUE}.}
@@ -54,13 +54,50 @@ A \code{DTADataSetMatrix} is a \code{\link{DTADataSetTabular}}: it is loaded
 with \code{\link{load_file}}, validated with \code{\link{check}} and reported
 on like any tabular dataset. The columns of \code{specs} are the
 \emph{row-label} columns, matched to the file's leading columns by position;
-the first one is the default row key. What the header, the dimensions and
-the cells must look like is the \code{matrix} setting.
+the first one is the default row key. What the labels of the data columns,
+the dimensions and the cells must look like is the \code{matrix} setting.
 
 In a specification the row-label columns are written under
 \code{row_labels:} (not \code{columns:}) and the settings under
-\code{matrix:}, with \code{type: matrix}.
+\code{matrix:}, with \code{type: matrix}:
+
+\preformatted{
+- id: gene_counts
+  type: matrix
+  files: { filename: counts.tsv, type: tsv }
+  row_labels:              # the leading columns, by position
+    - id: GENE_ID
+      header: gene_id      # the header line's text above this column
+      type: SAS Char
+      nullable: No
+  matrix:
+    columns:               # every column after the row labels
+      pattern: "^S[0-9]{4}$"
+      count: { min: 1, max: 384 }
+    rows:
+      key: GENE_ID
+      count: { min: 1 }
+    cells:
+      type: SAS Num
+      nullable: No
+      range: { min: 0 }
 }
+}
+\section{The header line}{
+
+The header line holds one field per row-label column, then one label per
+data column. A row label says what its field holds with \code{header}: left
+out (or written without a value), it is the row label's \code{id} (as for a
+tabular column); a text is that text, compared after surrounding spaces and
+quotes are removed on both sides, and \code{""} an empty field (R
+\code{write.csv()}, a pandas index without a name); \code{No} says the header line has no field
+above the column at all, which is what R \code{write.table()} writes above
+the row names, and is allowed for the first row label only. In R, build the
+row labels from such a list with \code{\link{DTADataSetFactory}()}; a plain
+\code{\link{DTAColumnSpec}} is a row label whose header text is its
+\code{id}.
+}
+
 \section{Loading}{
 
 \code{load_file()} reads the header first and refuses a file whose first
@@ -80,21 +117,26 @@ The constructor and its validator abort with a class naming the problem:
 \code{load_file()}), \code{dta_matrix_invalid_row_labels} (no row label),
 \code{dta_matrix_invalid_row_key} (a key that is not a row-label id),
 \code{dta_matrix_invalid_key_nullable} (a key column declared
-\code{nullable: Yes}), \code{dta_matrix_invalid_corner} (a corner list whose
-length is not the number of row labels), \code{dta_matrix_invalid_file} (a
+\code{nullable: Yes}), \code{dta_matrix_invalid_header} (\code{header: No}
+on a row label that is not the first), \code{dta_matrix_invalid_file} (a
 file handler that is not CSV or TSV with a header),
 \code{dta_matrix_invalid_tables} (a table that is not an Arrow Table or
 Dataset) and \code{dta_matrix_invalid_rule} (a rule id starting with
 \code{.matrix:}). Loading aborts with \code{dta_matrix_header_gate} (and the
 subclasses \code{dta_matrix_header_fewer}, \code{dta_matrix_header_more},
-\code{dta_matrix_header_ragged}, \code{dta_matrix_header_empty}),
-\code{dta_matrix_preamble} or \code{dta_matrix_delimiter}.
+\code{dta_matrix_header_ragged}, \code{dta_matrix_header_short},
+\code{dta_matrix_header_empty}),
+\code{dta_matrix_preamble} or \code{dta_matrix_delimiter}. A row label whose
+\code{header} is not one text or \code{FALSE} aborts with
+\code{dta_row_label_header_invalid}, and a matrix dataset saved in the
+earlier format (see \code{\link{upgrade_dta}()}) with
+\code{dta_matrix_format_outdated}.
 }
 
 \examples{
 path <- file.path(tempdir(), "counts.tsv")
 writeLines(
-  c("\tS1\tS2\tS3", "geneA\t10\t0\t7", "geneB\t3\t25\t1"),
+  c("GENE\tS1\tS2\tS3", "geneA\t10\t0\t7", "geneB\t3\t25\t1"),
   path
 )
 
@@ -104,7 +146,7 @@ ds <- DTADataSetMatrix(
     columns = list(GENE = DTAColumnSpec(id = "GENE", type = "SAS Char", nullable = FALSE))
   ),
   matrix = list(
-    header = list(corner = "blank", pattern = "^S[0-9]+$", count = list(min = 1, max = 384)),
+    columns = list(pattern = "^S[0-9]+$", count = list(min = 1, max = 384)),
     cells = list(type = "SAS Int", nullable = FALSE, range = list(min = 0))
   ),
   files = list(DTAFileTSV(filename = "counts.tsv"))
@@ -112,4 +154,15 @@ ds <- DTADataSetMatrix(
 ds <- load_file(ds, file = path)
 ds <- check(ds, quiet = TRUE, persist = FALSE)
 validation_status(ds)
+
+# The same matrix as R's write.csv() writes it: an empty field above the
+# row names. The factory takes the row labels as a specification writes them.
+ds_csv <- DTADataSetFactory(
+  type = "matrix",
+  id = "counts",
+  files = list(type = "csv", filename = "counts.csv"),
+  row_labels = list(list(id = "GENE", header = "", type = "SAS Char", nullable = FALSE)),
+  matrix = list(cells = list(type = "SAS Int", nullable = FALSE, range = list(min = 0)))
+)
+ds_csv
 }

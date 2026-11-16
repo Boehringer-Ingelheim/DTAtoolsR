@@ -4,24 +4,25 @@ metadata:
   date: 2026-11-13
 
 datasets:
-  # Genes x samples, as merged by nf-core/rnaseq. The header starts with two
-  # named corner fields above the two row-label columns.
+  # Genes x samples, as merged by nf-core/rnaseq. Every line starts with two
+  # row-label columns; every further column is one sample.
   - id: gene_counts
     type: matrix
     files: { filename: "matrix_gene_counts.tsv", type: tsv }
-    row_labels:                       # row-label columns, by position
+    row_labels:                       # the leading columns, by position
       - id: GENE_ID                   # the first one is the default row key
+        header: gene_id               # the header line's text above this column
         type: SAS Char
         nullable: No
         pattern: '^ENSG[0-9]{11}(\.[0-9]+)?(_PAR_Y)?$'
       - id: GENE_NAME                 # a row description
+        header: gene_name
         type: SAS Char
         nullable: Yes
     matrix:
-      header:
-        corner: [gene_id, gene_name]  # exact header text above the row labels
+      columns:                        # the data columns: one per sample
         label: Sample ID
-        pattern: "^S[0-9]{4}$"
+        pattern: "^S[0-9]{4}$"        # what every column label must look like
         count: { min: 1, max: 384 }
       rows:
         key: GENE_ID
@@ -30,20 +31,20 @@ datasets:
         type: SAS Num                 # normalised counts are fractional
         nullable: No
         range: { min: 0 }
-        infinite: false
+        infinite: No
 
-  # Samples x miRNAs, as written by nf-core/smrnaseq (R write.csv: the corner
-  # of the header is blank).
+  # Samples x miRNAs, as written by nf-core/smrnaseq (R write.csv: the header
+  # line has an empty field above the row names).
   - id: mature_counts
     type: matrix
     files: { filename: "matrix_mature_counts.csv", type: csv }
     row_labels:
       - id: SAMPLE
+        header: ""
         type: SAS Char
         nullable: No
     matrix:
-      header:
-        corner: blank
+      columns:
         pattern: "^hsa-(miR|let)-"
       cells:
         type: SAS Int

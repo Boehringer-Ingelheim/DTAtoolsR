@@ -963,14 +963,14 @@ test_that("a matrix summary adds the structural rows and reports presence as not
   checks <- dta_columnspec_check_summary(
     schemas,
     matrix = TRUE,
-    structure_declared = c(corner = 2L, propertyNames = 3L, minItems = 1L)
+    structure_declared = c(rowLabelHeader = 2L, propertyNames = 3L, minItems = 1L)
   )
   expect_true(attr(checks, "matrix"))
   expect_equal(
     checks$keyword,
     c(
       "required", "additionalProperties", "type", "format", "maxLength", "enum",
-      "const", "pattern", "corner", "propertyNames", "uniqueNames",
+      "const", "pattern", "rowLabelHeader", "propertyNames", "uniqueNames",
       "minProperties", "maxProperties", "minItems", "maxItems",
       "minimum", "maximum", "finite"
     )
@@ -979,7 +979,7 @@ test_that("a matrix summary adds the structural rows and reports presence as not
   expect_equal(cc_status(checks, "additionalProperties"), "not_applicable")
   expect_equal(cc_status(checks, "minimum"), "passed")
   expect_equal(cc_status(checks, "finite"), "passed")
-  expect_equal(cc_status(checks, "corner"), "passed")
+  expect_equal(cc_status(checks, "rowLabelHeader"), "passed")
   expect_equal(cc_status(checks, "uniqueNames"), "not_applicable")
   expect_equal(cc_row(checks, "propertyNames")$columns_declared, 3L)
   expect_equal(cc_row(checks, "propertyNames")$columns_checked, 3L)
@@ -1095,9 +1095,9 @@ test_that("an unsettled header row does not claim declaring columns", {
   checks <- dta_columnspec_check_summary(
     schemas,
     settled = character(0), matrix = TRUE,
-    structure_declared = c(corner = 2L, minItems = 1L)
+    structure_declared = c(rowLabelHeader = 2L, minItems = 1L)
   )
-  expect_equal(cc_status(checks, "corner"), "not_checked")
+  expect_equal(cc_status(checks, "rowLabelHeader"), "not_checked")
   out <- cc_messages(dta_report_columnspec_checks(checks))
   expect_match(out, "Header check not checked", fixed = TRUE)
   expect_false(grepl("Header check not checked: [^.]*declaring column", out))
@@ -1114,7 +1114,12 @@ test_that("the report explains the range, finite and structure keywords", {
   expect_match(explain("minimum"), "below the declared minimum (5)", fixed = TRUE)
   expect_match(explain("maximum"), "above the declared maximum (5)", fixed = TRUE)
   expect_match(explain("finite"), "must be finite", fixed = TRUE)
-  expect_match(explain("corner"), "declared corner", fixed = TRUE)
+  expect_match(
+    explain("rowLabelHeader", "gene_id"),
+    "The header line must hold \"gene_id\" above this row-label column.",
+    fixed = TRUE
+  )
+  expect_match(explain("rowLabelHeader", ""), "must hold an empty field above", fixed = TRUE)
   expect_match(explain("uniqueNames"), "must be unique", fixed = TRUE)
   expect_match(explain("minItems"), "fewer data rows", fixed = TRUE)
   expect_match(explain("maxProperties"), "more data columns", fixed = TRUE)

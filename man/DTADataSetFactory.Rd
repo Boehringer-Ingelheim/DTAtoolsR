@@ -35,7 +35,10 @@ dataset with no file handlers.}
 
 \item{row_labels}{A list with the column specifications of the row-label
 columns of a matrix dataset, matched to the file's leading columns by
-position. Only for \code{type = "matrix"}.}
+position. Besides the keys of a column specification an entry may carry
+\code{header}: the text the header line holds above the column (left out:
+the \code{id}; \code{""}: an empty field; \code{FALSE}: no field at all,
+first row label only). Only for \code{type = "matrix"}.}
 
 \item{...}{Further arguments passed on to the \code{DTADataSetTabular()},
 \code{DTADataSetFile()} or \code{DTADataSetMatrix()} constructor,
@@ -71,9 +74,9 @@ DTADataSetFactory(
   type = "matrix",
   id = "counts",
   files = list(type = "tsv", filename = "counts.tsv"),
-  row_labels = list(list(id = "GENE", type = "SAS Char", nullable = FALSE)),
+  row_labels = list(list(id = "GENE", header = "", type = "SAS Char", nullable = FALSE)),
   matrix = list(
-    header = list(corner = "blank"),
+    columns = list(pattern = "^S[0-9]+$"),
     cells = list(type = "SAS Int", range = list(min = 0))
   )
 )

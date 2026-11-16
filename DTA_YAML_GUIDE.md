@@ -151,12 +151,13 @@ A list. Each dataset:
 | Key | Notes |
 | --- | --- |
 | `id` | **required**, unique, no spaces (`lab_results`). The key every validation message, `load_file()` call and `{COLUMN_SPECS:<id>}` placeholder uses. |
-| `type` | **required**: `tabular` (parsed and validated) or `file` (only checked to exist, be readable and non-empty: PDFs, archives, images). |
+| `type` | **required**: `tabular` (a table whose columns are listed: parsed and validated column by column), `matrix` (a table whose data columns are described by a rule, such as gene counts with one column per sample: section 6) or `file` (only checked to exist, be readable and non-empty: PDFs, archives, images). |
 | `name` | Short human-readable name (`Laboratory results`), shown in the app and as the heading in exported documents. Always write it. |
 | `description` | Longer free text: what the deliverable contains and why. Write it whenever there is more to say than the name. |
 | `files` | One file handler (mapping) or a list of handlers. |
-| `columns` | `tabular` only. |
-| `rules` | `tabular` only. |
+| `columns` | `tabular` only (section 4). |
+| `row_labels`, `matrix` | `matrix` only (section 6). |
+| `rules` | `tabular` (section 5) and `matrix` (on its row label columns). |
 
 No other keys (`template_source/version/date` are machine-written).
 
@@ -169,7 +170,7 @@ current shape in new files.
 
 | Key | Notes |
 | --- | --- |
-| `type` | **required**: `csv`, `tsv`, `sas7bdat`, `xpt` (for `tabular`), `any` (for `file`). |
+| `type` | **required**: `csv`, `tsv`, `sas7bdat`, `xpt` (for `tabular`), `csv`, `tsv` (for `matrix`), `any` (for `file`). |
 | `filename` | **required**. Literal name, or a regex if `pattern: true`. |
 | `pattern` | `true` → `filename` is a regex. Anchor it: `"^LAB_[0-9]{8}\\.csv$"`. |
 | `pattern_description` | Human wording of the regex (`LAB_<YYYYMMDD>.csv`). Always add it when `pattern: true`. |
@@ -545,7 +546,174 @@ membership) and don't write rules that are always true. Each rule's
 
 ---
 
-## 6. YAML pitfalls
+## 6. Matrix datasets (`type: matrix`)
+
+Use `type: matrix` for a delivery whose columns cannot be listed in advance:
+gene counts with one column per sample, expression or protein values, genotype
+calls. Every line starts with one or a few **row label columns** that identify
+and describe the row; **every further column is a data column**, and all data
+columns hold the same kind of value. The specification does not list the data
+columns: it says what their labels must look like, how many there may be and
+what a cell may hold.
+
+```
+header line →   gene_id   gene_name   S0001   S0002   S0003  …
+                ───────   ─────────   ─────   ─────   ─────
+data rows   →   ENSG…003  TSPAN6      118     0       7.25
+                ENSG…005  TNMD        0       1.5     0
+                └ row label columns ┘ └──── data columns ────┘
+                  (row_labels)          (matrix.columns, matrix.cells)
+```
+
+A table whose columns are known and differ in meaning (`SUBJID`, `VISIT`,
+`AGE`) is `type: tabular`, not a matrix.
+
+```yaml
+datasets:
+  - id: gene_counts
+    type: matrix
+    name: Gene counts
+    files: { filename: "gene_counts.tsv", type: tsv }
+    row_labels:                  # the leading columns, in file order
+      - id: GENE_ID
+        header: gene_id          # the header line's text above this column
+        type: SAS Char
+        nullable: false
+        pattern: "^ENSG[0-9]{11}$"
+      - id: GENE_NAME
+        header: gene_name
+        type: SAS Char
+        nullable: true
+    matrix:
+      columns:                   # the data columns
+        label: Sample ID
+        pattern: "^S[0-9]{4}$"   # what every column label must look like
+        count: { min: 1, max: 384 }
+      rows:
+        key: GENE_ID             # unique, never missing
+        count: { min: 1 }
+      cells:
+        type: SAS Num
+        nullable: false
+        range: { min: 0 }
+        infinite: false
+```
+
+A matrix dataset has `row_labels` and `matrix` **instead of** `columns`;
+writing `columns` on a matrix, or `row_labels`/`matrix` on another type, is an
+error. `files` takes `csv` or `tsv` handlers with a header line (`has_header`
+must stay `true`); the file may arrive loose or in a container like any other.
+
+### `row_labels` — the leading columns
+
+A list with at least one entry. Entry *i* is column *i* of the file: row labels
+are matched **by position**, not by name. An entry takes every key of a
+tabular column (section 4: `id`, `label`, `description`, `type`, `format`,
+`length`, `nullable`, `values`, `pattern`, `examples`) and one more:
+
+| Key | Notes |
+| --- | --- |
+| `header` | What the header line holds above this column. **Left out** (or written with no value, `header:`): the `id`, as for a tabular column. **A text**: that text (quote it; `""` is an empty field). **`false`** (or `No`): the header line has no field above this column at all — what R `write.table()` writes above the row names; allowed on the first row label only. |
+
+The first row label is the row key unless `matrix.rows.key` names another.
+Further row labels describe the row (a gene name, a chromosome); constrain
+them like any column.
+
+Which `header` to write depends on what wrote the file:
+
+| File written by | The header line starts | Write |
+| --- | --- | --- |
+| R `write.csv(x)` (row names) | `"",S1,S2` | `header: ""` |
+| pandas `to_csv()`, index without a name | `,S1,S2` | `header: ""` |
+| R `write.table(x, sep = "\t")` (row names) | `S1<TAB>S2` — one field fewer than the data rows | `header: false` |
+| pandas `to_csv()`, index named `protein_id` | `protein_id,S1,S2` | `id: protein_id`, or another `id` and `header: protein_id` |
+| any writer that names the column like your `id` | `GENE_ID<TAB>S1` | nothing |
+
+A header text is compared after surrounding quotes and spaces are removed, and
+is case-sensitive.
+
+### `matrix.columns` — the data columns
+
+Optional; left out, any label is accepted and at least one data column is
+required. Whatever is written, **a column label must always be present, unique,
+and different from every row label `id`**.
+
+| Key | Notes |
+| --- | --- |
+| `label` | What a data column is (`Sample ID`). Documentation, shown in the exported agreement. |
+| `description` | Longer free text. |
+| `pattern` | Regex every column label must match. Anchor it. |
+| `values` | Closed list of permitted column labels, **quoted** (`["S01", "S02"]`). `pattern` or `values`, not both. With `count` equal to the length of the list, the file must hold exactly these columns, in any order. |
+| `length` | Longest permitted label, in characters. |
+| `count` | Number of data columns: a whole number for exactly that many (`count: 96`), or `{ min: …, max: … }` with either side optional. Default `{ min: 1 }`; zero data columns is never valid. |
+
+### `matrix.rows`
+
+| Key | Notes |
+| --- | --- |
+| `key` | The row label `id` that identifies a row, or a list of ids that do so together. Default: the first row label. A key column must be unique across the file and must not be `nullable: true`. |
+| `count` | Number of data rows, written like `matrix.columns.count`. Default `{ min: 1 }`: a file with a header and no rows fails. Write `count: { min: 0 }` to accept one. |
+
+### `matrix.cells` — what every cell may hold
+
+**Required**, with `type`.
+
+| Key | Notes |
+| --- | --- |
+| `type` | **required**: `SAS Num` (decimal), `SAS Int` (whole number) or `SAS Char` (text). |
+| `nullable` | `true` / `false`. Whether a missing cell is allowed. **Set it explicitly** — if omitted, missing cells fail. |
+| `range` | `{ min: …, max: … }`, either side optional, both inclusive. `SAS Num` and `SAS Int` only. Write plain numbers (`1000`, `1.0e+3`; YAML reads `1e3` as text). |
+| `infinite` | `true` admits `Inf` and `-Inf`. `SAS Num` only; default `false`. |
+| `values` | Closed list of permitted values (`[0, 1, 2]`). |
+| `pattern`, `length`, `format` | As for a tabular column. |
+| `label`, `description` | Documentation (`Normalised count`). |
+
+How a raw cell is read — exactly as a tabular column of the same type:
+
+| Raw cell | Result |
+| --- | --- |
+| empty, `NA`, quoted `""` / `"NA"`, a token declared in `files.missing_values` | **missing**: allowed only with `nullable: true` |
+| only spaces | missing for `SAS Num` / `SAS Int`; text for `SAS Char` |
+| `12`, `+12`, `012`, `1e3` | the number |
+| `1.5` in a `SAS Int` matrix | error (not a whole number) |
+| `NaN` | error — never a value. To accept it as missing, declare `missing_values: "NaN"` on the file |
+| `Inf`, `-Inf` | error unless `infinite: true` |
+| `N/A`, `NULL`, `abc`, `1,5` | error — not missing unless declared in `files.missing_values` |
+
+Example: `files: { filename: "geno.tsv", type: tsv, missing_values: "./." }`
+with `cells: { type: SAS Int, nullable: true, values: [0, 1, 2] }` describes a
+genotype matrix in which `./.` is a call that was not made.
+
+### `rules` on a matrix
+
+Optional. The rule types of section 5, on **row label columns only** (a rule
+cannot name a data column). The uniqueness of the row key is checked without a
+rule, so no `col_unique` rule is needed for it. Rule ids must not start with
+`.matrix:`.
+
+### What a delivery is checked for
+
+- The header line: the text above each row label; every column label present,
+  unique and satisfying `matrix.columns`; the number of data columns.
+- The rows: every row label column like a tabular column; the row key unique
+  (a repeated key is reported under the rule id `.matrix:row_key`);
+  the number of data rows.
+- Every cell: type, missingness, `range`, `infinite`, `values`, `pattern`.
+- A file that cannot be a matrix of the declared shape is **refused before it
+  is read**, with the reason: the first data row has more or fewer fields than
+  the header implies, the file starts with a `#` line, or it is separated by
+  another character than the declared one.
+
+### Not supported
+
+Lines before the header (featureCounts, GCT); semicolon-separated files and
+decimal commas; annotation columns after the data columns; files without a
+header line or without a row label column; sparse and single-cell formats;
+`sas7bdat` / `xpt` matrices.
+
+---
+
+## 7. YAML pitfalls
 
 - **Quote anything that must stay text**: `"1.0"`, `"007"`, `"Y"`, `"N"`,
   `"YES"`, `"NO"`, `"ON"`, `"OFF"`, `"NA"`, phone numbers, codes with leading
@@ -554,6 +722,10 @@ membership) and don't write rules that are always true. Each rule's
 - Regexes: in double quotes, backslashes are doubled (`"\\."`); in single
   quotes they are not (`'^\d+$'`). Prefer character classes (`[0-9]`) to avoid both.
 - Dates: write `2026-03-01` (ISO). No other date format is understood.
+- A row label's `header` is a text or `false`. Quote the text: `header: "1"`,
+  `header: "Y"`. Unquoted, `1` is a number and `Y` is `true`, and both are refused;
+  unquoted `N`, `no`, `off` and `False` are `false`, which on the first row label
+  is accepted and means "no field".
 - 2-space indentation, no tabs; lists with `- `; inline `[a, b]` is fine.
 - A value that starts with `*` is a YAML alias and stops the file from being
   read; one that contains ` #` is cut at the `#`. Quote both:
@@ -561,7 +733,7 @@ membership) and don't write rules that are always true. Each rule's
 
 ---
 
-## 7. Complete example
+## 8. Complete example
 
 ```yaml
 metadata:
@@ -764,7 +936,7 @@ datasets:
 
 ---
 
-## 8. Final checklist
+## 9. Final checklist
 
 - [ ] Only allowed keys; `metadata.title` and quoted `metadata.version` present.
 - [ ] `date`, `study`, `version_history`, both parties with signing contacts,
@@ -781,3 +953,4 @@ datasets:
 - [ ] Rule and constraint ids unique, no whitespace; rules reference declared columns only.
 - [ ] A `container:` value is the id of a defined container, a `.zip` or `.xpt` file name (no folder) or `none`, on the file entry; container ids and file names are unique, at most one container is `default`.
 - [ ] No two pattern entries of different datasets can take the same file name.
+- [ ] Each matrix dataset: row labels in file order, each with the `header` text the file really has (`""` for an empty field, `false` for none); `matrix.columns` with a `pattern` or `values` and a `count`; `matrix.cells` with `type`, explicit `nullable` and a `range` where one exists; no `columns` key.

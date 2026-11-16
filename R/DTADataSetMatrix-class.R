@@ -11,12 +11,47 @@
 #' with \code{\link{load_file}}, validated with \code{\link{check}} and reported
 #' on like any tabular dataset. The columns of \code{specs} are the
 #' \emph{row-label} columns, matched to the file's leading columns by position;
-#' the first one is the default row key. What the header, the dimensions and
-#' the cells must look like is the \code{matrix} setting.
+#' the first one is the default row key. What the labels of the data columns,
+#' the dimensions and the cells must look like is the \code{matrix} setting.
 #'
 #' In a specification the row-label columns are written under
 #' \code{row_labels:} (not \code{columns:}) and the settings under
-#' \code{matrix:}, with \code{type: matrix}.
+#' \code{matrix:}, with \code{type: matrix}:
+#'
+#' \preformatted{
+#' - id: gene_counts
+#'   type: matrix
+#'   files: { filename: counts.tsv, type: tsv }
+#'   row_labels:              # the leading columns, by position
+#'     - id: GENE_ID
+#'       header: gene_id      # the header line's text above this column
+#'       type: SAS Char
+#'       nullable: No
+#'   matrix:
+#'     columns:               # every column after the row labels
+#'       pattern: "^S[0-9]{4}$"
+#'       count: { min: 1, max: 384 }
+#'     rows:
+#'       key: GENE_ID
+#'       count: { min: 1 }
+#'     cells:
+#'       type: SAS Num
+#'       nullable: No
+#'       range: { min: 0 }
+#' }
+#'
+#' @section The header line:
+#' The header line holds one field per row-label column, then one label per
+#' data column. A row label says what its field holds with \code{header}: left
+#' out (or written without a value), it is the row label's \code{id} (as for a
+#' tabular column); a text is that text, compared after surrounding spaces and
+#' quotes are removed on both sides, and \code{""} an empty field (R
+#' \code{write.csv()}, a pandas index without a name); \code{No} says the header line has no field
+#' above the column at all, which is what R \code{write.table()} writes above
+#' the row names, and is allowed for the first row label only. In R, build the
+#' row labels from such a list with \code{\link{DTADataSetFactory}()}; a plain
+#' \code{\link{DTAColumnSpec}} is a row label whose header text is its
+#' \code{id}.
 #'
 #' @section Loading:
 #' \code{load_file()} reads the header first and refuses a file whose first
@@ -34,21 +69,26 @@
 #' \code{load_file()}), \code{dta_matrix_invalid_row_labels} (no row label),
 #' \code{dta_matrix_invalid_row_key} (a key that is not a row-label id),
 #' \code{dta_matrix_invalid_key_nullable} (a key column declared
-#' \code{nullable: Yes}), \code{dta_matrix_invalid_corner} (a corner list whose
-#' length is not the number of row labels), \code{dta_matrix_invalid_file} (a
+#' \code{nullable: Yes}), \code{dta_matrix_invalid_header} (\code{header: No}
+#' on a row label that is not the first), \code{dta_matrix_invalid_file} (a
 #' file handler that is not CSV or TSV with a header),
 #' \code{dta_matrix_invalid_tables} (a table that is not an Arrow Table or
 #' Dataset) and \code{dta_matrix_invalid_rule} (a rule id starting with
 #' \code{.matrix:}). Loading aborts with \code{dta_matrix_header_gate} (and the
 #' subclasses \code{dta_matrix_header_fewer}, \code{dta_matrix_header_more},
-#' \code{dta_matrix_header_ragged}, \code{dta_matrix_header_empty}),
-#' \code{dta_matrix_preamble} or \code{dta_matrix_delimiter}.
+#' \code{dta_matrix_header_ragged}, \code{dta_matrix_header_short},
+#' \code{dta_matrix_header_empty}),
+#' \code{dta_matrix_preamble} or \code{dta_matrix_delimiter}. A row label whose
+#' \code{header} is not one text or \code{FALSE} aborts with
+#' \code{dta_row_label_header_invalid}, and a matrix dataset saved in the
+#' earlier format (see \code{\link{upgrade_dta}()}) with
+#' \code{dta_matrix_format_outdated}.
 #'
 #' @param id Character. Identifier of the dataset.
 #' @param specs A \code{DTAColumnSpecCollection} of the row-label columns (at
 #'   least one). Rules may refer to these columns only.
 #' @param matrix A \code{DTAMatrixSpec}, or the YAML-shaped list of the
-#'   \code{matrix:} block (\code{header}, \code{rows}, \code{cells}).
+#'   \code{matrix:} block (\code{columns}, \code{rows}, \code{cells}).
 #' @param files A list of \code{DTAFileCSV} or \code{DTAFileTSV} handlers with
 #'   \code{has_header = TRUE}.
 #' @param name Character or NULL. Human-readable name.
@@ -61,7 +101,7 @@
 #' @examples
 #' path <- file.path(tempdir(), "counts.tsv")
 #' writeLines(
-#'   c("\tS1\tS2\tS3", "geneA\t10\t0\t7", "geneB\t3\t25\t1"),
+#'   c("GENE\tS1\tS2\tS3", "geneA\t10\t0\t7", "geneB\t3\t25\t1"),
 #'   path
 #' )
 #'
@@ -71,7 +111,7 @@
 #'     columns = list(GENE = DTAColumnSpec(id = "GENE", type = "SAS Char", nullable = FALSE))
 #'   ),
 #'   matrix = list(
-#'     header = list(corner = "blank", pattern = "^S[0-9]+$", count = list(min = 1, max = 384)),
+#'     columns = list(pattern = "^S[0-9]+$", count = list(min = 1, max = 384)),
 #'     cells = list(type = "SAS Int", nullable = FALSE, range = list(min = 0))
 #'   ),
 #'   files = list(DTAFileTSV(filename = "counts.tsv"))
@@ -79,7 +119,19 @@
 #' ds <- load_file(ds, file = path)
 #' ds <- check(ds, quiet = TRUE, persist = FALSE)
 #' validation_status(ds)
+#'
+#' # The same matrix as R's write.csv() writes it: an empty field above the
+#' # row names. The factory takes the row labels as a specification writes them.
+#' ds_csv <- DTADataSetFactory(
+#'   type = "matrix",
+#'   id = "counts",
+#'   files = list(type = "csv", filename = "counts.csv"),
+#'   row_labels = list(list(id = "GENE", header = "", type = "SAS Char", nullable = FALSE)),
+#'   matrix = list(cells = list(type = "SAS Int", nullable = FALSE, range = list(min = 0)))
+#' )
+#' ds_csv
 #' @include DTADataSetTabular-class.R DTADataSetFile-class.R DTAMatrixSpec-class.R
+#' @include DTAColumnSpecRowLabel-class.R
 #' @export
 DTADataSetMatrix <- S7::new_class(
   "DTADataSetMatrix",
@@ -162,10 +214,16 @@ DTADataSetMatrix <- S7::new_class(
         class = "dta_matrix_invalid_key_nullable"
       )
     }
-    if (self@matrix@corner_mode == "list" && length(self@matrix@corner) != k) {
+    no_field <- ids[vapply(
+      self@specs@columns, function(col) identical(dta_row_label_header(col), FALSE), logical(1)
+    )]
+    if (length(setdiff(no_field, ids[[1L]])) > 0L) {
       cli_abort(
-        "{.field matrix.header.corner} lists {length(self@matrix@corner)} entr{?y/ies} but the dataset has {k} row-label column{?s}.",
-        class = "dta_matrix_invalid_corner"
+        c(
+          "Row label{?s} {.val {setdiff(no_field, ids[[1L]])}} cannot declare {.code header: No}.",
+          "i" = "Only the first row label can have no field above it in the header line; write {.code header: \"\"} for an empty field."
+        ),
+        class = "dta_matrix_invalid_header"
       )
     }
     for (h in self@files) {
@@ -205,23 +263,18 @@ DTADataSetMatrix <- S7::new_class(
 #' @name print
 #' @export
 method(print, DTADataSetMatrix) <- function(x, ...) {
-  dta_print_tabular(x, "DTADataSetMatrix")
+  dta_print_tabular(x, "DTADataSetMatrix", columns_word = "row labels")
   m <- x@matrix
-  corner <- if (m@corner_mode == "list") {
-    paste(ifelse(is.na(m@corner), "null", m@corner), collapse = ", ")
-  } else {
-    m@corner_mode
-  }
   key <- paste(dta_matrix_row_key(x), collapse = ", ")
-  n_columns <- paste(m@n_columns, collapse = " to ")
-  n_rows <- paste(m@n_rows, collapse = " to ")
   cli::cli_alert_info("Matrix:")
-  cli::cli_alert("corner: {corner}; row key: {key}")
-  cli::cli_alert("data columns: {n_columns}; rows: {n_rows}; cells: {dta_cell_type(m@cells)}")
+  cli::cli_alert("header line: {dta_matrix_header_words(x)}")
+  cli::cli_alert("data columns: {dta_matrix_count_words(m@n_columns)}")
+  cli::cli_alert("rows: {dta_matrix_count_words(m@n_rows)}; row key: {key}")
+  cli::cli_alert("cells: {dta_cell_type(m@cells)}")
   invisible(x)
 }
 
-# ---- row labels and corner ----------------------------------------------------
+# ---- row labels and their header fields ---------------------------------------
 
 # The ids of the row-label columns, in file order.
 dta_matrix_label_ids <- function(x) {
@@ -233,28 +286,60 @@ dta_matrix_row_key <- function(x) {
   x@matrix@row_key %||% dta_matrix_label_ids(x)[1L]
 }
 
-# Header fields above the row labels: k, or k - 1 when the corner's first entry
-# is `null` (R's write.table writes no field above the row names).
-dta_matrix_corner_n <- function(x) {
+# TRUE when the header line has no field above the first row label (`header:
+# No`; R's write.table writes none above the row names).
+dta_matrix_no_first_field <- function(x) {
+  cols <- x@specs@columns
+  length(cols) > 0L && identical(dta_row_label_header(cols[[1L]]), FALSE)
+}
+
+# Header fields above the row labels: k, or k - 1 when the first has none.
+dta_matrix_header_field_n <- function(x) {
   k <- length(dta_matrix_label_ids(x))
-  if (x@matrix@corner_mode == "list" && is.na(x@matrix@corner[[1L]])) k - 1L else k
+  if (dta_matrix_no_first_field(x)) k - 1L else k
 }
 
-# The header text each of the c corner fields must have, cleaned the way the
-# header read is.
-dta_matrix_corner_expected <- function(x) {
-  m <- x@matrix
-  expected <- switch(m@corner_mode,
-    named = dta_matrix_label_ids(x),
-    blank = rep("", length(dta_matrix_label_ids(x))),
-    list = if (is.na(m@corner[[1L]])) m@corner[-1L] else m@corner
-  )
-  dta_clean_column_names(expected)
+# The header text each of those fields must have (a row label's `header`, its
+# id when it declares none), cleaned the way the header read is.
+dta_matrix_header_expected <- function(x) {
+  cols <- x@specs@columns
+  if (dta_matrix_no_first_field(x)) cols <- cols[-1L]
+  expected <- vapply(cols, function(col) {
+    h <- dta_row_label_header(col)
+    if (is.null(h)) col@id else h
+  }, character(1))
+  dta_clean_column_names(unname(expected))
 }
 
-# The data labels of a header: everything after the corner.
+# The header line in words, for print() and the exported document: "gene_id,
+# gene_name, then one label per data column".
+dta_matrix_header_words <- function(x) {
+  fields <- vapply(x@specs@columns, function(col) {
+    h <- dta_row_label_header(col)
+    if (identical(h, FALSE)) {
+      NA_character_
+    } else if (is.null(h)) {
+      col@id
+    } else if (nzchar(trimws(h))) {
+      h
+    } else {
+      "(empty)"
+    }
+  }, character(1))
+  rest <- "one label per data column"
+  if (all(is.na(fields))) {
+    return(paste0(rest, " (no field above ", dta_matrix_label_ids(x)[[1L]], ")"))
+  }
+  out <- paste0(paste(fields[!is.na(fields)], collapse = ", "), ", then ", rest)
+  if (anyNA(fields)) {
+    out <- paste0(out, " (no field above ", dta_matrix_label_ids(x)[[1L]], ")")
+  }
+  out
+}
+
+# The data labels of a header: everything after the fields above the row labels.
 dta_matrix_data_labels <- function(head_fields, x) {
-  cn <- dta_matrix_corner_n(x)
+  cn <- dta_matrix_header_field_n(x)
   if (length(head_fields) > cn) head_fields[(cn + 1L):length(head_fields)] else character(0)
 }
 
@@ -285,7 +370,7 @@ dta_matrix_reading_names <- function(head_fields, x) {
 
 #' @title Structural Findings of a Matrix Header
 #' @description
-#' Judges a header against the \code{matrix:} settings: the corner, every data
+#' Judges a header against the \code{matrix:} settings: the text above each row label, every data
 #' label, repeated labels and the number of data columns. The findings are in
 #' the shape of the column-spec error frame; ordered by position in the header.
 #' @param head_fields The header fields as read (cleaned).
@@ -298,8 +383,8 @@ dta_matrix_head_findings <- function(head_fields, x) {
   m <- x@matrix
   ids <- dta_matrix_label_ids(x)
   k <- length(ids)
-  cn <- dta_matrix_corner_n(x)
-  expected <- dta_matrix_corner_expected(x)
+  cn <- dta_matrix_header_field_n(x)
+  expected <- dta_matrix_header_expected(x)
   labs <- dta_matrix_data_labels(head_fields, x)
   n_data <- length(labs)
   rnames <- dta_matrix_reading_names(head_fields, x)
@@ -324,15 +409,18 @@ dta_matrix_head_findings <- function(head_fields, x) {
     invisible()
   }
 
-  # corner ----------------------------------------------------------------------
+  # header fields above the row labels -------------------------------------------
   i <- seq_len(cn)
   found <- ifelse(i <= length(head_fields), head_fields[pmin(i, length(head_fields))], NA_character_)
   bad <- i[is.na(found) | found != expected[i]]
   if (length(bad) > 0L) {
     shown <- ifelse(is.na(found[bad]), "no field", quoted(found[bad]))
     add(
-      bad, ids[k - cn + bad], "corner",
-      sprintf("Header field %d is %s, expected %s.", bad, shown, quoted(expected[bad])),
+      bad, ids[k - cn + bad], "rowLabelHeader",
+      sprintf(
+        "Header field %d, above row label %s, is %s; expected %s.",
+        bad, ids[k - cn + bad], shown, quoted(expected[bad])
+      ),
       expected[bad], ifelse(is.na(found[bad]), "", found[bad])
     )
   }
@@ -374,10 +462,15 @@ dta_matrix_head_findings <- function(head_fields, x) {
     column <- ifelse(lab %in% ids, rnames[first_data], lab)
     message <- vapply(seq_along(groups), function(g) {
       occ <- groups[[g]]
-      sprintf(
-        "Header label %s appears %d times: %s.", quoted(lab[[g]]), length(occ),
-        paste0("column ", occ, " (read as ", quoted(rnames[occ]), ")", collapse = ", ")
-      )
+      at <- paste0("column ", occ[occ > k], " (read as ", quoted(rnames[occ[occ > k]]), ")", collapse = ", ")
+      if (any(occ <= k)) {
+        # The label repeats a row-label ID, which need not be in the header at all.
+        return(sprintf(
+          "Column label %s is also the ID of a row label, so it cannot name a data column: %s.",
+          quoted(lab[[g]]), at
+        ))
+      }
+      sprintf("Header label %s appears %d times: %s.", quoted(lab[[g]]), length(occ), at)
     }, character(1))
     add(cn + first_data - k, column, "uniqueNames", message, "unique labels", lab)
   }
@@ -417,7 +510,7 @@ dta_matrix_head_findings <- function(head_fields, x) {
   list(
     findings = findings,
     declared = c(
-      corner = as.integer(cn),
+      rowLabelHeader = as.integer(cn),
       propertyNames = as.integer(n_data),
       uniqueNames = as.integer(n_data),
       minProperties = 1L,
@@ -459,11 +552,11 @@ dta_matrix_gate <- function(head, x, path) {
     )
   }
   k <- length(dta_matrix_label_ids(x))
-  cn <- dta_matrix_corner_n(x)
+  cn <- dta_matrix_header_field_n(x)
   if (head$n_header < cn) {
     cli_abort(
       c(
-        "The header of {.path {path}} has {head$n_header} field{?s}, but the corner alone needs {cn}.",
+        "The header of {.path {path}} has {head$n_header} field{?s}, but the row labels alone need {cn}.",
         "i" = "Declare fewer row labels, or check the separator."
       ),
       class = c("dta_matrix_header_short", "dta_matrix_header_gate")
@@ -474,7 +567,8 @@ dta_matrix_gate <- function(head, x, path) {
   if (!is.na(found) && found != expected) {
     # More fields in the first data row than the header implies: the header
     # lacks the field above the row names ("fewer"). Fewer: the header has a
-    # corner field the spec does not declare ("more").
+    # field above the row labels that the spec does not declare ("more").
+    first <- dta_matrix_label_ids(x)[[1L]]
     shape <- if (found == expected + 1L) {
       "fewer"
     } else if (found == expected - 1L) {
@@ -483,11 +577,15 @@ dta_matrix_gate <- function(head, x, path) {
       "ragged"
     }
     hint <- switch(shape,
-      fewer = "The header has one field fewer than the data rows. If it has no field above the row names (R {.fn write.table}), declare {.code corner: [null, ...]}.",
-      more = if (cn < k) {
-        "The header has a field above the row labels that your corner does not declare (drop the {.code null})."
+      fewer = if (cn < k) {
+        "The first row label ({.val {first}}) already declares {.code header: No}, and the first data row still has one field more than the header allows: that row has a field too many, or ends with a separator."
       } else {
-        "The first data row has one field fewer than the header implies: that row is missing a field, or the header has a field above the row labels that your corner does not declare."
+        "The header has one field fewer than the data rows. If it has no field above the row names (R {.fn write.table}), declare {.code header: No} on the first row label ({.val {first}})."
+      },
+      more = if (cn < k) {
+        "The header has a field above the first row label ({.val {first}}), which declares {.code header: No}: give the field's text instead, e.g. {.code header: \"\"} for an empty one."
+      } else {
+        "The first data row has one field fewer than the header implies: that row is missing a field, or the header line ends with a separator."
       },
       ragged = "The first data row and the header have unrelated field counts: the file is ragged."
     )

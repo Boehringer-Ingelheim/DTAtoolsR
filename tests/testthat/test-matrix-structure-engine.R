@@ -22,9 +22,9 @@ ms_table <- function() {
 ms_header_findings <- function() {
   data.frame(
     row = c(NA_integer_, NA_integer_),
-    column = c("corner_id", "A"),
-    keyword = c("corner", "uniqueNames"),
-    message = c("corner differs", "label repeated"),
+    column = c("row_label_id", "A"),
+    keyword = c("rowLabelHeader", "uniqueNames"),
+    message = c("row label header differs", "label repeated"),
     columnspec = c("ROW", "A"),
     data = c("X", "A"),
     stringsAsFactors = FALSE
@@ -36,7 +36,7 @@ ms_structure <- function(rows = c(1, Inf), findings = ms_header_findings()) {
     findings = findings,
     rows = rows,
     declared = c(
-      corner = 1L, propertyNames = 1L, uniqueNames = 1L,
+      rowLabelHeader = 1L, propertyNames = 1L, uniqueNames = 1L,
       minProperties = 1L, maxProperties = 1L, minItems = 1L, maxItems = 1L
     ),
     matrix = TRUE
@@ -71,9 +71,9 @@ for (how in c("memory", "stream")) {
 
       expect_identical(
         fe$keyword,
-        c("corner", "uniqueNames", "minItems", rep("maxLength", 5))
+        c("rowLabelHeader", "uniqueNames", "minItems", rep("maxLength", 5))
       )
-      expect_identical(fe$message[[3]], "must have at least 10 rows (has 6)")
+      expect_identical(fe$message[[3]], "The file has 6 data row(s); at least 10 required.")
       expect_identical(fe$columnspec[[3]], "10")
       expect_identical(fe$data[[3]], "6")
       expect_true(is.na(fe$row[[3]]))
@@ -82,7 +82,7 @@ for (how in c("memory", "stream")) {
       expect_false(details$ok)
 
       expect_true(isTRUE(attr(details$columnspec_checks, "matrix")))
-      expect_identical(check_status(details, "corner"), "failed")
+      expect_identical(check_status(details, "rowLabelHeader"), "failed")
       expect_identical(check_status(details, "uniqueNames"), "failed")
       expect_identical(check_status(details, "minItems"), "failed")
       expect_identical(check_status(details, "maxItems"), "passed")
@@ -94,7 +94,7 @@ for (how in c("memory", "stream")) {
       details <- ms_run(ms_structure(rows = c(1, 6)), how)
       fe <- details$columnspec_errors$full_error
 
-      expect_identical(fe$keyword, c("corner", "uniqueNames", rep("maxLength", 5)))
+      expect_identical(fe$keyword, c("rowLabelHeader", "uniqueNames", rep("maxLength", 5)))
       expect_identical(details$n_columnspec_errors, 7L)
       expect_identical(check_status(details, "minItems"), "passed")
       expect_identical(check_status(details, "maxItems"), "passed")
@@ -107,9 +107,9 @@ for (how in c("memory", "stream")) {
       fe <- details$columnspec_errors$full_error
 
       expect_identical(fe$keyword, c("maxItems", rep("maxLength", 5)))
-      expect_identical(fe$message[[1]], "must have at most 4 rows (has 6)")
+      expect_identical(fe$message[[1]], "The file has 6 data row(s); at most 4 allowed.")
       expect_identical(check_status(details, "maxItems"), "failed")
-      expect_identical(check_status(details, "corner"), "passed")
+      expect_identical(check_status(details, "rowLabelHeader"), "passed")
     })
 
     test_that(paste0("[", how, "] no findings and an in-bounds count leave a clean table valid"), {
@@ -120,14 +120,14 @@ for (how in c("memory", "stream")) {
       )
       expect_true(details$columnspec_valid)
       expect_identical(details$n_columnspec_errors, 0L)
-      expect_identical(check_status(details, "corner"), "passed")
+      expect_identical(check_status(details, "rowLabelHeader"), "passed")
       expect_identical(check_status(details, "minItems"), "passed")
     })
   })
 }
 
 test_that("max_errors retains the same head on both paths; the stream spills the rest in order", {
-  expected <- c("corner", "uniqueNames", "minItems", rep("maxLength", 5))
+  expected <- c("rowLabelHeader", "uniqueNames", "minItems", rep("maxLength", 5))
   for (cap in c(0, 1, 2, 3, 4, 8, 20)) {
     mem <- ms_run(ms_structure(rows = c(10, Inf)), "memory", max_errors = cap)
     str <- ms_run(ms_structure(rows = c(10, Inf)), "stream", max_errors = cap)
@@ -166,9 +166,9 @@ test_that("[stream] fail_fast with a header finding stops after one batch withou
   fe <- details$columnspec_errors$full_error
 
   expect_false("minItems" %in% fe$keyword)
-  expect_true("corner" %in% fe$keyword)
+  expect_true("rowLabelHeader" %in% fe$keyword)
   expect_identical(check_status(details, "minItems"), "not_checked")
-  expect_identical(check_status(details, "corner"), "failed")
+  expect_identical(check_status(details, "rowLabelHeader"), "failed")
   expect_false(details$ok)
   # Stopped early: the first batch's cell finding only, not the five bad rows.
   n_cells <- sum(fe$keyword == "maxLength")
@@ -200,8 +200,8 @@ test_that("structure = NULL keeps the legacy shape", {
 ms_header3 <- function() {
   data.frame(
     row = rep(NA_integer_, 3),
-    column = c("corner_id", "A", "B"),
-    keyword = c("corner", "uniqueNames", "propertyNames"),
+    column = c("row_label_id", "A", "B"),
+    keyword = c("rowLabelHeader", "uniqueNames", "propertyNames"),
     message = c("m1", "m2", "m3"),
     columnspec = c("ROW", "A", "B"),
     data = c("X", "A", "B"),
@@ -210,7 +210,7 @@ ms_header3 <- function() {
 }
 
 test_that("[stream] collect_full_errors keeps [header, row count, cells] at every cap", {
-  expected <- c("corner", "uniqueNames", "propertyNames", "minItems", rep("maxLength", 5))
+  expected <- c("rowLabelHeader", "uniqueNames", "propertyNames", "minItems", rep("maxLength", 5))
   for (cap in c(0, 1, 2, 3, 10, Inf)) {
     details <- ms_run(
       ms_structure(rows = c(10, Inf), findings = ms_header3()), "stream",
@@ -263,8 +263,8 @@ test_that("on_missing_column = 'stop' has no effect when a structure is supplied
       table = table, on_missing_column = "stop"
     )
     # Not the early structural return: the header findings are reported.
-    expect_true("corner" %in% details$columnspec_errors$full_error$keyword, info = how)
-    expect_identical(check_status(details, "corner"), "failed", info = how)
+    expect_true("rowLabelHeader" %in% details$columnspec_errors$full_error$keyword, info = how)
+    expect_identical(check_status(details, "rowLabelHeader"), "failed", info = how)
     expect_identical(check_status(details, "minItems"), "passed", info = how)
   }
 })

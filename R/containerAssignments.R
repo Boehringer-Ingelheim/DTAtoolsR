@@ -134,13 +134,24 @@ dta_is_stale <- function(obj) {
   if (!inherits(obj, "S7_object")) {
     return(FALSE)
   }
-  if (lacks(obj)) {
+  if (lacks(obj) || dta_is_old_matrix(obj)) {
     return(TRUE)
   }
   if (inherits(obj, "DTAtools::DTA")) {
-    return(any(vapply(obj@datasets, function(d) inherits(d, "S7_object") && lacks(d), logical(1))))
+    return(any(vapply(
+      obj@datasets, function(d) inherits(d, "S7_object") && (lacks(d) || dta_is_old_matrix(d)), logical(1)
+    )))
   }
   FALSE
+}
+
+# A matrix dataset saved before the header text moved onto the row labels: its
+# settings still carry `corner_mode`. The class gained no property, so the
+# property scan above cannot see it; and it cannot be upgraded, because where
+# its header texts belong depends on a keyword this version no longer reads.
+dta_is_old_matrix <- function(obj) {
+  m <- attr(obj, "matrix", exact = TRUE)
+  inherits(m, "S7_object") && !is.null(attr(m, "corner_mode", exact = TRUE))
 }
 
 # Re-stamps EVERY DTAtools S7 object inside `x` with its current class,
@@ -153,6 +164,15 @@ dta_upgrade <- function(x) {
       return(obj) # Arrow R6 objects, frames
     }
     if (inherits(obj, "S7_object")) {
+      if (dta_is_old_matrix(obj)) {
+        cli::cli_abort(
+          c(
+            "This object holds a matrix dataset saved in an earlier format, whose header texts were declared under {.field matrix.header.corner}.",
+            "i" = "It cannot be upgraded: write the header text of each row label as its {.field header} and read the specification from its YAML again."
+          ),
+          class = "dta_matrix_format_outdated"
+        )
+      }
       cur <- dta_current_class(obj)
       if (is.null(cur)) {
         return(obj)
@@ -210,6 +230,13 @@ dta_upgrade <- function(x) {
 #' \code{check()}, \code{load_delivery()}, \code{container_assignments()})
 #' do this by themselves; call \code{upgrade_dta()} when you want to inspect or
 #' modify the object's properties directly.
+#'
+#' One kind of object cannot be upgraded and is refused, by
+#' \code{upgrade_dta()} and by those functions alike, with a condition of class
+#' \code{dta_matrix_format_outdated}: a matrix dataset saved while its header
+#' texts were still declared under \code{matrix.header.corner}. They now belong
+#' to the row labels (\code{header}), and reading the object on would replace
+#' them with the row-label ids. Read its specification from YAML again.
 #' @param x A \code{\link{DTA}} or a dataset (\code{DTADataSet}).
 #' @return \code{x}, with the current class definition. An object that is
 #'   current already comes back with identical property values.

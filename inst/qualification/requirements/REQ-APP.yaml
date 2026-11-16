@@ -492,22 +492,23 @@ requirements:
       Saving a document that holds a dataset of type matrix shall write the
       dataset's row-label column specifications under the key row_labels, in
       the order declared, and its matrix settings under the key matrix, and
-      shall write no columns key for it. A corner list whose first entry is
-      null shall be written with that entry as the YAML null, so that reading
-      the saved text back yields a dataset with the same row labels and the
-      same corner, and saving that dataset again shall give the identical
-      text.
+      shall write no columns key for it. The header of a row label shall be
+      written as it was declared: absent when absent, the text when a text
+      (an empty text and the texts named and blank included), and the plain
+      YAML boolean No when the header line has no field above the row label,
+      so that reading the saved text back yields a dataset with the same row
+      labels and the same header of each, and saving that dataset again shall
+      give the identical text.
     risk: high
     category: integrity
     covers: [run_dta_app, read_dta_from_yaml]
     source: >
-      PLAN-matrix-dataset.md 4.6, T1;
+      PLAN-matrix-dataset.md 4.6, T1; PLAN-matrix-format-review.md 2, 3;
       inst/shiny/dta_app/R/utils_dta.R (dta_dataset_to_list, .dta_compact)
     notes: >
-      The application drops empty entries recursively before it writes YAML,
-      and the null in a corner means "the header has no field above the first
-      row label"; dropping it would shift every later corner entry onto the
-      wrong row label.
+      The application drops empty entries recursively before it writes YAML;
+      an empty header text must not be dropped with them (it would become the
+      row label's id), and No must stay a boolean, not become a text.
 
   - id: REQ-APP-034
     text: >
@@ -562,8 +563,10 @@ requirements:
 
   - id: REQ-APP-037
     text: >
-      Applying edited raw YAML that changes the corner of a matrix dataset
-      with a loaded table shall not raise: the next check shall report the
+      Applying edited raw YAML that changes whether the first row label of a
+      matrix dataset with a loaded table has a field in the header line (for
+      example header: No in place of a text), so that the header line the
+      table was loaded with no longer fits, shall not raise: the next check shall report the
       dataset as failing, with a finding telling the user to load the file
       again, because the recorded header no longer yields the table's column
       names under the new specification.
@@ -619,38 +622,47 @@ requirements:
 
   - id: REQ-APP-041
     text: >
-      Adding a dataset of type matrix shall require a row-label column ID, the
-      header text above the row labels and a cell type, and shall refuse the
-      addition when any of them is missing. The dataset added shall be a matrix
-      whose single row-label column carries the given ID, is of type SAS Char,
-      is not nullable and is the row key, whose header corner and cell type are
-      those chosen, and which requires at least one data column and at least
-      one data row.
+      Adding a dataset of type matrix shall require a row-label column ID, a
+      choice of the header text above that row label (the ID, an empty field,
+      another text, or no field) and a cell type, and shall refuse the addition
+      when the ID, the choice or the cell type is missing, or when another text
+      is chosen and left blank. The dataset added shall be a matrix whose
+      single row-label column carries the given ID, is of type SAS Char, is
+      not nullable and is the row key, whose header is the one chosen (no
+      header key for the ID, "" for an empty field, the text, No for no field)
+      and whose cell type is the one chosen, and which requires at least one
+      data column and at least one data row.
     risk: high
     category: functional
     covers: [run_dta_app]
     source: >
-      PLAN-matrix-shiny.md 2.1;
+      PLAN-matrix-shiny.md 2.1; PLAN-matrix-format-review.md 3 (App);
       inst/shiny/dta_app/R/utils_dta.R (dta_add_dataset)
 
   - id: REQ-APP-042
     text: >
       Editing the row-label columns of a matrix dataset shall keep the dataset
-      valid: renaming a row-key column shall rename it in the row key; adding
-      a row-label column to a matrix whose header corner lists one text per row
-      label shall extend that list with an empty text; removing the row-key
-      column shall be refused and shall leave the dataset unchanged.
+      valid and shall leave the header text of every other row label
+      unchanged: renaming a row-key column shall rename it in the row key;
+      adding a row label, removing one that is not the row key or moving one
+      shall not change the header declared on any other row label; removing
+      the row-key column shall be refused; choosing no field above a row label
+      that is not the first, and moving the first row label away from first
+      place (or another row label into it) while the first has no field above
+      it, shall each be refused; every refusal shall leave the dataset
+      unchanged.
     risk: high
     category: integrity
     covers: [run_dta_app]
     source: >
-      PLAN-matrix-shiny.md 2.2;
-      inst/shiny/dta_app/R/utils_dta.R (dta_set_column, dta_remove_column)
+      PLAN-matrix-shiny.md 2.2; PLAN-matrix-format-review.md 3 (App);
+      inst/shiny/dta_app/R/utils_dta.R (dta_set_column, dta_remove_column,
+      dta_move_column)
 
   - id: REQ-APP-043
     text: >
-      The matrix-layout editor shall save the header, row and cell settings
-      entered for a matrix dataset into its specification and shall re-validate
+      The matrix-layout editor shall save the data-column, row and cell
+      settings entered for a matrix dataset into its specification and shall re-validate
       the dataset; saving it without changes shall leave the matrix settings
       unchanged; an entry whose minimum exceeds its maximum shall be refused
       and shall leave the dataset unchanged.
@@ -658,7 +670,7 @@ requirements:
     category: functional
     covers: [run_dta_app]
     source: >
-      PLAN-matrix-shiny.md 2.4;
+      PLAN-matrix-shiny.md 2.4; PLAN-matrix-format-review.md 3 (App);
       inst/shiny/dta_app/R/utils_dta.R (dta_matrix_fields, dta_set_matrix)
 
   - id: REQ-APP-044
@@ -703,3 +715,57 @@ requirements:
     notes: >
       A reason that vanishes after ten seconds is not evidence, and a false
       "changed" failure blocks a conforming delivery.
+
+  - id: REQ-APP-047
+    text: >
+      The row-label form of a matrix dataset shall carry the header text above
+      the row label as a choice of the ID, an empty field, another text or no
+      field, with the text: the values the application reads for a row label
+      shall report the choice and text that its header declares, and saving the
+      form shall declare exactly that header on the row label, leaving the
+      row label's other settings unchanged.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-format-review.md 3 (App);
+      inst/shiny/dta_app/R/utils_dta.R (dta_column_fields, dta_set_column)
+
+  - id: REQ-APP-048
+    text: >
+      For a matrix dataset the application shall hold a two-line sketch of the
+      file the dataset describes, which it shows above the row-label list and
+      above the matrix-layout form. The second line shall hold the row-label
+      IDs in file order, followed by placeholders for the cells. The first line
+      shall hold, above each row-label ID, the header text expected there: the
+      ID when the row label declares no header, the declared text, two double
+      quotes for an empty field, and nothing where the header line has no
+      field -- in which case the line shall end with a note naming the row
+      label that has no field above it -- followed by placeholders for the
+      data-column labels. The row-label list shall carry the header of each
+      row label in a column named header: the expected text, "(empty)" for an
+      empty field and "(no field)" for none. A dataset of another type shall
+      have no sketch, and its column list no header column.
+    risk: low
+    category: interface
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-format-review.md 3 (App), 6;
+      inst/shiny/dta_app/R/utils_dta.R (dta_matrix_sketch, dta_columns_overview)
+
+  - id: REQ-APP-049
+    text: >
+      After an edit of the row labels of a matrix dataset that has a loaded
+      table, the application shall tell the user to load the file again exactly
+      when the edit makes that table stale: when it changes the row-label IDs
+      or their order (a rename, an added, a removed or a moved row label) or
+      whether the header line has a field above the first row label. An edit
+      that changes neither (another header text, another constraint), an edit
+      of a matrix with no table loaded and an edit of a dataset of another
+      type shall not.
+    risk: medium
+    category: interface
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-format-review.md 6;
+      inst/shiny/dta_app/R/utils_dta.R (dta_matrix_needs_reload)

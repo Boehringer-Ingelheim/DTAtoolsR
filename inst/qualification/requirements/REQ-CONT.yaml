@@ -616,7 +616,9 @@ requirements:
       dataset saved by an older version with the current class definition,
       giving a property the old object lacks its default and keeping every
       other value, shall return a current object with identical property
-      values, and shall refuse anything else. The functions that read or write
+      values, and shall refuse anything else. A matrix dataset saved in the
+      earlier matrix format is the one object of an older version that is not
+      upgraded but refused (REQ-MATRIX-059). The functions that read or write
       such an object shall do the same by themselves.
     risk: medium
     category: integrity

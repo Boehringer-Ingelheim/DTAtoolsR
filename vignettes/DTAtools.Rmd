@@ -115,7 +115,7 @@ DTA                              ← top-level agreement container
     │       └── <table_name>     ← populated via load_file() or constructor
     │
     ├── DTADataSetMatrix         ← omics matrix (DTADataSetTabular subclass):
-    |                                row_labels + header/rows/cells, no
+    |                                row_labels + columns/rows/cells, no
     |                                per-column specs
     │
     └── DTADataSetFile           ← non-tabular: file presence/readability check
@@ -1913,23 +1913,40 @@ results(dta_mixed) # one row per dataset
 ## `DTADataSetMatrix`: Omics Matrices
 
 A count matrix (genes × samples, samples × miRNAs, SNPs × samples) has one
-row-label column or two, followed by hundreds or thousands of data columns that
+row label column or two, followed by hundreds or thousands of data columns that
 all mean the same thing. Describing each of them as a `DTAColumnSpec` is
 neither practical nor useful, because the sample names change from delivery to
 delivery. Use `type: matrix` when the delivery agreement is about the *shape*
-of such a file: what the header looks like, what identifies a row, how large
+of such a file: what its header line holds, what identifies a row, how large
 the matrix may be and what a cell may contain.
+
+```
+header line →   gene_id   gene_name   S0001   S0002   S0003  …
+data rows   →   ENSG…003  TSPAN6      118     0       7.25
+                ENSG…005  TNMD        0       1.5     0
+                └ row label columns ┘ └──── data columns ────┘
+                  row_labels:           matrix: columns, cells
+```
 
 A matrix dataset has two blocks instead of `columns:`:
 
-- `row_labels:` lists the leading columns by position. These are ordinary
-  column specs; the first one is the row key unless `matrix.rows.key` says
-  otherwise, further ones are row descriptions such as a gene name.
-- `matrix:` describes the rest. `header` holds the `corner` (the header text
-  above the row labels), a `pattern` or `values` list every data label must
-  satisfy, and a `count` of data columns. `rows` holds the `key` and a
-  `count`. `cells` holds the `type`, `nullable`, `range`, `values`, `pattern`
-  and `infinite`.
+- `row_labels:` lists the leading columns, matched to the file by position.
+  They are ordinary column specs with one more key, `header`: the text the
+  header line holds above the column. The first row label is the row key unless
+  `matrix.rows.key` says otherwise; further ones describe the row, such as a
+  gene name.
+- `matrix:` describes the rest in three blocks.
+  - `columns`: what the label of every data column must look like (`pattern`
+    or `values`, `length`), how many data columns there may be (`count`), and a
+    `label` and `description` for the exported document. Optional.
+  - `rows`: the `key` and a `count` of rows. Optional.
+  - `cells`: what every cell may hold: `type` (required), `nullable`,
+    `range`, `infinite`, `values`, `pattern`.
+
+A `count` is a whole number for exactly that many, or `{ min: …, max: … }`
+with either side optional. The defaults ask for at least one data column and
+at least one row, and a column label must always be present and unique, so a
+matrix specification never passes an empty file.
 
 The example specification that ships with the package describes two matrices:
 
@@ -1972,25 +1989,32 @@ dta_bad <- check(dta_bad, quiet = TRUE)
 messages(dta_bad)[, c("dataset", "id", "message")]
 ```
 
-### The corner depends on the writer
+### The header text above a row label depends on the writer
 
-The first header field is where writers disagree, so `matrix.header.corner` is
-required and has no default. `k` is the number of row labels.
+The start of the header line is where writers disagree, so each row label says
+what the header line holds above it. Left out, `header` is the row label's
+`id`, exactly as a tabular column is found by its `id`.
 
-| Writer | Header starts | `corner` |
+| Writer | Header line starts | Write on the row label(s) |
 |---|---|---|
-| R `write.csv(x)` (row names) | `"",S1,...` | `blank` |
-| R `write.table(x, sep = "\t", quote = FALSE)` (row names) | `S1<TAB>...` (no field) | `[null]` |
-| R `write.table` of `cbind(gene_name = ..., x)` | `gene_name<TAB>S1...` | `[null, gene_name]` |
-| pandas `to_csv(index=True)`, unnamed index | `,S1,...` | `blank` |
-| pandas, index named `protein_id` | `protein_id,S1,...` | `[protein_id]` |
-| pandas, unnamed index plus a `gene_name` column | `,gene_name,S1,...` | `["", gene_name]` |
-| header text equals the `row_labels` ids | `GENE_ID<TAB>S1...` | `named` |
+| R `write.csv(x)` (row names) | `"",S1,...` | `header: ""` |
+| pandas `to_csv(index=True)`, index without a name | `,S1,...` | `header: ""` |
+| R `write.table(x, sep = "\t", quote = FALSE)` (row names) | `S1<TAB>...` (no field) | `header: No` |
+| R `write.table` of `cbind(gene_name = ..., x)` | `gene_name<TAB>S1...` | first: `header: No`; second: `header: gene_name` |
+| pandas, index named `protein_id` | `protein_id,S1,...` | `id: protein_id`, or `header: protein_id` |
+| pandas, index without a name plus a `gene_name` column | `,gene_name,S1,...` | first: `header: ""`; second: `header: gene_name` |
+| header text equals the `row_labels` ids | `GENE_ID<TAB>S1...` | nothing |
 
-`blank` means every corner field is empty, `named` means the `row_labels` ids,
-and a leading `null` says the header has no field above the first row label.
-When the field count does not fit, the error says which of these you probably
-need.
+`header: ""` is an empty field. `header: No` says the header line has no field
+above the column at all, so it is one field shorter than the data rows; only
+the first row label can say that. When the number of fields does not fit,
+`load_file()` refuses the file and says which of these you probably need. A
+header text that is present but different is reported by `check()` as a
+finding on that row label.
+
+In R, `DTADataSetFactory(type = "matrix", row_labels = list(...), matrix =
+list(...))` takes the row labels as a specification writes them, `header`
+included.
 
 ### What a cell can be
 
@@ -2016,18 +2040,29 @@ Matrices are validated in memory and streamed, in containers and through
 `load_delivery()`, and the specification can be exported to a document like any
 other. A matrix with tens of thousands of columns is expensive to read, so on a
 very large file try `check(dta, fail_fast = TRUE)` first: it stops at the first
-batch that shows a problem, which is usually a wrong corner or header and not
-a million bad cells.
+batch that shows a problem, which is usually a wrong header line and not a
+million bad cells.
 
 ### In the app
 
-Add dataset offers Matrix, which asks for the first row-label column, the header
-text above the row labels (the corner) and the cell type. The Edit menu of a
-matrix has Row labels (the row-label columns, edited like columns and
-identified by position), Matrix layout (header, dimensions and cell values;
-changing the header of a loaded file asks for it to be loaded again) and Rules.
-A file whose header does not fit is refused with the reason, which also appears
-in the dataset's validation messages.
+Add dataset offers Matrix, which asks for the ID of the first column (the row
+label), the header text above it and the cell type. The Edit menu of a matrix
+has three entries:
+
+- Row labels: the row label columns, edited like columns and matched to the
+  file by position. Each one carries its header text: the same as its ID, empty,
+  another text, or no field at all (first row label only).
+- Matrix layout: the data columns (what their labels look like and how many
+  there may be), the rows (row key and count) and the cells (type, missing
+  values, range, allowed values).
+- Rules, on the row label columns.
+
+Adding, removing, renaming or reordering the row labels of a matrix whose file
+is loaded, or changing whether the first one has a header field, makes that
+file stale: the app says so and the next check asks for it to be loaded
+again. A file whose header line does not fit is
+refused with the reason, which also appears in the dataset's validation
+messages.
 
 ### What is not supported
 
@@ -2803,7 +2838,7 @@ datasets:
 | `DTAMetaData`             | Agreement metadata (title, version, contacts, transmission) |
 | `DTADataSet`              | Abstract base class for all dataset types                   |
 | `DTADataSetTabular`       | Dataset with column specs, rules, and data tables           |
-| `DTADataSetMatrix`        | Omics matrix: row labels + header, row and cell checks      |
+| `DTADataSetMatrix`        | Omics matrix: row labels + column-label, row, cell checks   |
 | `DTADataSetFile`          | Dataset that checks file presence and readability only      |
 | `DTAColumnSpecCollection` | Named list of column specs + optional list of rules          |
 | `DTAColumnSpec`           | Single column definition (type, nullable, values, pattern)  |

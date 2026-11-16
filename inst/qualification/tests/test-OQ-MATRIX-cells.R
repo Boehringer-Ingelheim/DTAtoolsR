@@ -368,8 +368,8 @@ test_that("OQ-MATRIX-039 | an inapplicable range or infinite setting, a reversed
   build <- function(cells) {
     dta_dataset_from_list(list(
       id = "m", type = "matrix", files = list(filename = "m.tsv", type = "tsv"),
-      row_labels = list(list(id = "ID", type = "SAS Char", nullable = FALSE)),
-      matrix = list(header = list(corner = "blank"), cells = cells)
+      row_labels = list(list(id = "ID", header = "", type = "SAS Char", nullable = FALSE)),
+      matrix = list(cells = cells)
     ))
   }
   qa_step(

@@ -38,7 +38,7 @@ areas:
     min_tests: 62
   - area: MATRIX
     title: Matrix datasets (type matrix)
-    min_tests: 54
+    min_tests: 57
   - area: STREAM
     title: Streaming validation and engine parity
     min_tests: 32
@@ -56,7 +56,7 @@ areas:
     min_tests: 18
   - area: APP
     title: The interactive application
-    min_tests: 52
+    min_tests: 56
   - area: ROBUST
     title: Error handling, integrity and isolation
     min_tests: 17

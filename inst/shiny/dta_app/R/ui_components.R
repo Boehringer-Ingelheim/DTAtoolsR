@@ -307,7 +307,7 @@ ds_edit_menu <- function(type = "tabular") {
           )),
           tags$li(ds_edit_menu_item(
             "edit_matrix", "&#x25A6;", "Matrix layout",
-            "Header, dimensions and cell values"
+            "Data columns, size of the matrix and cell values"
           )),
           tags$li(ds_edit_menu_item(
             "edit_rules", "&#x2696;&#xFE0F;", "Rules",
@@ -338,6 +338,20 @@ ds_edit_menu <- function(type = "tabular") {
 # would collapse into one run-on paragraph.
 load_failure_notice <- function(text) {
   div(class = "notice-multiline", text)
+}
+
+# The sketch of the file a matrix dataset describes (dta_matrix_sketch()): its
+# header line and one data row, shown above the Row labels list and the Matrix
+# layout form. NULL for a dataset that is not a matrix.
+matrix_sketch_ui <- function(dta, dataset) {
+  lines <- tryCatch(dta_matrix_sketch(dta, dataset), error = function(e) character(0))
+  if (length(lines) == 0L) {
+    return(NULL)
+  }
+  tags$pre(
+    class = "matrix-sketch", `aria-label` = "Layout of the file this matrix dataset describes",
+    paste(lines, collapse = "\n")
+  )
 }
 
 # Normalise a value that may arrive as NULL, character(0), NA, or a

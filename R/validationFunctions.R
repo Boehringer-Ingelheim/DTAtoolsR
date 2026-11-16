@@ -724,7 +724,7 @@ as.data.frame.dta_validation_details <- function(
 # Keywords of the header and dimension findings of a matrix dataset.
 dta_matrix_structure_keywords <- function() {
   c(
-    "corner", "propertyNames", "uniqueNames", "minProperties", "maxProperties",
+    "rowLabelHeader", "propertyNames", "uniqueNames", "minProperties", "maxProperties",
     "minItems", "maxItems"
   )
 }
@@ -765,11 +765,11 @@ dta_matrix_rowcount_finding <- function(n, rows, partial = FALSE) {
   if (!isTRUE(partial) && n < rows[[1]]) {
     keyword <- "minItems"
     bound <- rows[[1]]
-    msg <- sprintf("must have at least %s rows (has %s)", fmt(bound), fmt(n))
+    msg <- sprintf("The file has %s data row(s); at least %s required.", fmt(n), fmt(bound))
   } else if (n > rows[[2]]) {
     keyword <- "maxItems"
     bound <- rows[[2]]
-    msg <- sprintf("must have at most %s rows (has %s)", fmt(bound), fmt(n))
+    msg <- sprintf("The file has %s data row(s); at most %s allowed.", fmt(n), fmt(bound))
   } else {
     return(NULL)
   }
