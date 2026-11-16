@@ -12,12 +12,7 @@ skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
 
 # A fileInput() value for files this test wrote (or a fixture).
-fi <- function(path, name) {
-  data.frame(
-    name = name, size = file.size(path), type = "",
-    datapath = path, stringsAsFactors = FALSE
-  )
-}
+fi <- function(path, name) app_upload_value(path, name)
 
 # Write the lines of a YAML document to a temp file owned by the calling test.
 dv_yaml <- function(lines, env = parent.frame()) {

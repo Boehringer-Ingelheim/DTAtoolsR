@@ -304,10 +304,7 @@ test_that("OQ-APP-049 | a matrix dataset loads, validates, and its findings can 
   lines[2] <- paste(fields, collapse = "\t")
   negative <- file.path(qa_tempdir(), "matrix_gene_counts.tsv")
   writeLines(lines, negative)
-  upload <- data.frame(
-    name = "matrix_gene_counts.tsv", size = file.size(negative), type = "",
-    datapath = negative, stringsAsFactors = FALSE
-  )
+  upload <- qapp_upload_value(negative, "matrix_gene_counts.tsv")
 
   shiny::testServer(app, {
     mxa_load_and_check(session)
@@ -359,12 +356,7 @@ mxa_label_form <- function(id, nullable = FALSE, pattern = "") {
 }
 
 # An upload as the browser reports it, for a file written by a test.
-mxa_upload <- function(path) {
-  data.frame(
-    name = basename(path), size = file.size(path), type = "",
-    datapath = path, stringsAsFactors = FALSE
-  )
-}
+mxa_upload <- function(path) qapp_upload_value(path)
 
 test_that("OQ-APP-050 | adding a matrix dataset needs a row-label ID, a corner and a cell type and builds the declared matrix | REQ-APP-041", {
   app <- qapp_skip_unless_app_installed()

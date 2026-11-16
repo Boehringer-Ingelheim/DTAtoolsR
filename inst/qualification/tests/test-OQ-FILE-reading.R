@@ -412,3 +412,48 @@ test_that("OQ-FILE-067 | a header row over 1 MiB of quoted labels is read whole,
   qa_step("open_file(): the same 60000 columns", 60000L, length(names(opened)))
   qa_step("and the first and last labels", c("label number 1", "label number 60000"), names(opened)[c(1, 60000)])
 })
+
+test_that("OQ-FILE-068 | read_file(), open_file() and load_file() refuse a directory with class dta_file_is_directory and read nothing below it | REQ-FILE-044", {
+  dir <- qa_tempdir()
+  # A directory whose own name satisfies the handler, holding a member that is
+  # a perfectly good file: the refusal must be about the directory, not about
+  # a name or the content.
+  target <- file.path(dir, "delivery.csv")
+  dir.create(target)
+  member <- "member_of_the_directory_7731.csv"
+  writeLines(c("A,B", "1,2"), file.path(target, member))
+  # A regular file beside it, which must still read.
+  regular <- file.path(dir, "regular.csv")
+  writeLines(c("A,B", "1,2"), regular)
+
+  handler <- DTAFileCSV(filename = "delivery.csv")
+  err_read <- tryCatch(read_file(handler, target), error = function(e) e)
+  qa_check("read_file() raises dta_file_is_directory", inherits(err_read, "dta_file_is_directory"))
+  qa_check("read_file()'s message names no file below the directory", !grepl(member, conditionMessage(err_read), fixed = TRUE))
+
+  err_open <- tryCatch(open_file(handler, target), error = function(e) e)
+  qa_check("open_file() raises dta_file_is_directory", inherits(err_open, "dta_file_is_directory"))
+  qa_check("open_file()'s message names no file below the directory", !grepl(member, conditionMessage(err_open), fixed = TRUE))
+
+  ds <- DTADataSetFile(id = "delivery", files = list(DTAFileAny(filename = ".*", pattern = TRUE)))
+  err_load <- tryCatch(load_file(ds, file = target, handler_index = 1), error = function(e) e)
+  qa_check("load_file() raises dta_file_is_directory", inherits(err_load, "dta_file_is_directory"))
+  qa_check("load_file()'s message names no file below the directory", !grepl(member, conditionMessage(err_load), fixed = TRUE))
+
+  # The same functions accept an ordinary file, so the refusal above is about
+  # the directory.
+  read <- read_file(DTAFileCSV(filename = "regular.csv"), regular)
+  qa_step("a regular file still reads: one row", 1L, nrow(as.data.frame(read)))
+  opened <- open_file(DTAFileCSV(filename = "regular.csv"), regular)
+  qa_step("and opens with its two columns", c("A", "B"), names(opened))
+  bound <- load_file(ds, file = regular, handler_index = 1)
+  qa_step("and a regular file binds to the dataset", 1L, length(bound@file_paths))
+
+  # A matrix dataset refuses a directory the same way.
+  mx_dir <- file.path(dir, "m.tsv")
+  dir.create(mx_dir)
+  writeLines("a\tb", file.path(mx_dir, member))
+  err_matrix <- tryCatch(load_file(mx_ds(), file = mx_dir), error = function(e) e)
+  qa_check("load_file() on a matrix dataset raises dta_file_is_directory", inherits(err_matrix, "dta_file_is_directory"))
+  qa_check("and its message names no file below the directory", !grepl(member, conditionMessage(err_matrix), fixed = TRUE))
+})

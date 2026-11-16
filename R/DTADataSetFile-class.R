@@ -559,11 +559,12 @@ dta_resolve_file_handler_index <- function(handler_index, files_list) {
 #' Binds a delivered file to a file-backed dataset, the counterpart of the
 #' \code{\link{DTADataSetTabular}} method that reads a table.
 #'
-#' Nothing is read, opened or stat-ed here. Whether the file exists, is
-#' non-empty and can be opened is the entire contract of \code{\link{check}()}
-#' for this class, and deferring to it is what lets a specification bind a file
-#' that has not arrived yet and report it as missing rather than refusing to
-#' record it at all.
+#' Nothing is read or opened here; the only look at the path is a check that it
+#' is not a directory, which is refused with an error of class
+#' \code{dta_file_is_directory}. Whether the file exists, is non-empty and can
+#' be opened is the entire contract of \code{\link{check}()} for this class, and
+#' deferring to it is what lets a specification bind a file that has not arrived
+#' yet and report it as missing rather than refusing to record it at all.
 #'
 #' The delivered name is still checked against the handler, exactly as
 #' \code{\link{read_file}()} does for a tabular dataset, so a file dropped into
@@ -635,6 +636,8 @@ method(load_file, DTADataSetFile) <- function(
       "The provided file '{file}' does not match the filename or pattern in the DTAFile object."
     )
   }
+  # A directory first: one named "x.zip" is a directory, not a container.
+  dta_assert_not_directory(file, "load_file")
   dta_assert_not_container(x, handler, file)
 
   # Replace in place when this file is already bound, append otherwise -- the

@@ -687,10 +687,7 @@ test_that("carry-over 'From a file' reads the uploaded DTA's metadata", {
     ),
     anc_path
   )
-  anc_upload <- data.frame(
-    name = "ancestor.yaml", size = file.size(anc_path), type = "",
-    datapath = anc_path, stringsAsFactors = FALSE
-  )
+  anc_upload <- app_upload_value(anc_path, "ancestor.yaml")
 
   shiny::testServer(app_server_dir(), {
     pick_template_step1(session, output, "filecarry2_tpl", "1.0")
@@ -740,10 +737,7 @@ test_that("a carry-over file chosen in an earlier dialog is not silently reused 
     ),
     anc_path
   )
-  anc_upload <- data.frame(
-    name = "ancestor.yaml", size = file.size(anc_path), type = "",
-    datapath = anc_path, stringsAsFactors = FALSE
-  )
+  anc_upload <- app_upload_value(anc_path, "ancestor.yaml")
 
   shiny::testServer(app_server_dir(), {
     pick_template_step1(session, output, "stalecarry_tpl", "1.0")

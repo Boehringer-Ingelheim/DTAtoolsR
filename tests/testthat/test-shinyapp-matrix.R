@@ -224,12 +224,7 @@ test_that("a matrix dataset is offered csv and tsv handlers only", {
 
 # ---- App behaviour through the server (raw YAML, inspect panel) ------------------
 
-mxs_input <- function(path) {
-  data.frame(
-    name = basename(path), size = file.size(path), type = "",
-    datapath = path, stringsAsFactors = FALSE
-  )
-}
+mxs_input <- function(path) app_upload_value(path)
 
 mxs_ext <- function(f) system.file("extdata", f, package = "DTAtools")
 

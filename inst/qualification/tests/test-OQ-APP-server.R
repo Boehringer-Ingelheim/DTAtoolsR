@@ -939,3 +939,105 @@ test_that("OQ-APP-041 | the brand bar shows the header tag escaped beside the ti
     )
   }
 })
+
+test_that("OQ-APP-056 | a file-input value that is not an upload from Shiny's own upload folder is neither read nor loaded, and a staged upload is | REQ-APP-047", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+
+  spec_path <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+  qa_check("the specification fixture exists", nzchar(spec_path))
+
+  # (i) Not a data frame, although it names a real file in an upload folder.
+  # (ii) A data frame naming a real file that is outside any upload folder.
+  shiny::testServer(app, {
+    session$setInputs(dta_client_id = strrep("c", 32))
+    staged <- qapp_upload_value(spec_path, "clinical_dta.yaml")
+    session$setInputs(dta_file = list(name = "clinical_dta.yaml", datapath = staged$datapath))
+    qa_check("a list-valued value naming a real staged file loads no document", is.null(rv$dta))
+    qa_check("and shows no load failure", is.null(rv$load_failure))
+
+    outside <- data.frame(
+      name = "clinical_dta.yaml", size = file.size(spec_path), type = "",
+      datapath = spec_path, stringsAsFactors = FALSE
+    )
+    session$setInputs(dta_file = outside)
+    qa_check("a real file outside an upload folder loads no document", is.null(rv$dta))
+    qa_check("and shows no load failure", is.null(rv$load_failure))
+
+    # (iii) Positive control: the same specification, staged as Shiny would.
+    session$setInputs(dta_file = qapp_file_input("clinical_dta.yaml"))
+    qa_check("a properly staged upload of the same file loads", !is.null(rv$dta))
+  })
+
+  # (iv) With a document loaded, a data slot whose value names a directory
+  # (shaped like an upload, so the directory is the only fault).
+  # The stand-in folder is made by staging a file with qapp_upload_value() and
+  # replacing that file by a directory of the same name, so it sits where an
+  # upload would.
+  data_path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+  stand_in <- qapp_upload_value(data_path, "clinical_data.csv")
+  folder <- stand_in$datapath
+  withr::defer(unlink(dirname(folder), recursive = TRUE), envir = environment())
+  unlink(folder)
+  dir.create(folder)
+  shiny::testServer(app, {
+    session$setInputs(dta_client_id = strrep("d", 32))
+    session$setInputs(dta_file = qapp_file_input("clinical_dta.yaml"))
+    qa_check("control: a document is held", !is.null(rv$dta))
+    held <- rv$dta
+    uploads_before <- length(rv$uploads)
+    errors_before <- nrow(rv$load_errors)
+
+    qa_check("the stand-in directory exists", dir.exists(folder))
+    # A positive size, so only the directory (not the "empty or truncated"
+    # check) can stop it.
+    dir_value <- data.frame(
+      name = "clinical_data.csv", size = 1, type = "",
+      datapath = folder, stringsAsFactors = FALSE
+    )
+    session$setInputs(up_1_1 = dir_value)
+    qa_step(
+      "no table is bound to the dataset",
+      0L, length(DTAtools::datasets(rv$dta)[["clinical_data"]]@tables)
+    )
+    qa_step("no upload is recorded", uploads_before, length(rv$uploads))
+    qa_step("no load error is recorded", errors_before, nrow(rv$load_errors))
+    qa_check("and the document is unchanged", identical(held, rv$dta))
+
+    # The installed fixture itself: a real file, but not in an upload folder.
+    outside_slot <- data.frame(
+      name = "clinical_data.csv", size = file.size(data_path), type = "",
+      datapath = data_path, stringsAsFactors = FALSE
+    )
+    session$setInputs(up_1_1 = outside_slot)
+    qa_step(
+      "a real file outside an upload folder binds no table to the dataset",
+      0L, length(DTAtools::datasets(rv$dta)[["clinical_data"]]@tables)
+    )
+    qa_step("and records no load error", errors_before, nrow(rv$load_errors))
+    qa_check("and the document is unchanged by it", identical(held, rv$dta))
+
+    # A value shaped like an upload whose file no longer exists.
+    vanished <- qapp_upload_value(
+      system.file("extdata", "clinical_data.csv", package = "DTAtools"), "clinical_data.csv"
+    )
+    qa_check("the staged file exists before it is removed", file.exists(vanished$datapath))
+    unlink(vanished$datapath)
+    qa_check("and is gone afterwards", !file.exists(vanished$datapath))
+    session$setInputs(up_1_1 = vanished)
+    qa_step(
+      "a file that does not exist binds no table to the dataset",
+      0L, length(DTAtools::datasets(rv$dta)[["clinical_data"]]@tables)
+    )
+    qa_step("and records no upload", uploads_before, length(rv$uploads))
+    qa_step("and records no load error", errors_before, nrow(rv$load_errors))
+    qa_check("and the document is unchanged by it", identical(held, rv$dta))
+
+    # Positive control for the same slot.
+    session$setInputs(up_1_1 = qapp_file_input("clinical_data.csv"))
+    qa_step(
+      "control: a staged upload binds one table to the dataset",
+      1L, length(DTAtools::datasets(rv$dta)[["clinical_data"]]@tables)
+    )
+  })
+})
