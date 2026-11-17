@@ -457,3 +457,50 @@ test_that("OQ-FILE-068 | read_file(), open_file() and load_file() refuse a direc
   qa_check("load_file() on a matrix dataset raises dta_file_is_directory", inherits(err_matrix, "dta_file_is_directory"))
   qa_check("and its message names no file below the directory", !grepl(member, conditionMessage(err_matrix), fixed = TRUE))
 })
+
+test_that("OQ-FILE-069 | a quote at only one edge of a header name is kept, a matched pair around the whole name is removed, and Length 5\" checks clean in memory and streamed | REQ-FILE-045", {
+  dir <- qa_tempdir()
+
+  # `field` is what is written in the header line of the file; `name` is the
+  # column name REQ-FILE-045 says it reads as. A doubled quote inside a quoted
+  # CSV field stands for one quote, so "Length 5""" is the name Length 5" and
+  # """Subject ID""" is the name "Subject ID" with its quotes in the text.
+  cases <- list(
+    list(field = "\"Length 5\"\"\"", name = "Length 5\""),
+    list(field = "\"\"\"lead\"", name = "\"lead"),
+    list(field = "\"trail\"\"\"", name = "trail\""),
+    list(field = "\"\"\"Subject ID\"\"\"", name = "Subject ID"),
+    list(field = "\"\"\"  padded  \"\"\"", name = "padded")
+  )
+  for (i in seq_along(cases)) {
+    p <- fr_write_raw(c(paste0("ID,", cases[[i]]$field), "A1,5"), file.path(dir, sprintf("quote_%d.csv", i)))
+    t <- read_file(DTAFileCSV(filename = basename(p)), p)
+    qa_step(
+      sprintf("the header field %s reads as the column name %s", cases[[i]]$field, cases[[i]]$name),
+      c("ID", cases[[i]]$name), names(t)
+    )
+  }
+
+  # The same name written without CSV quoting at all.
+  bare <- fr_write_raw(c("ID,Length 5\"", "A1,5"), file.path(dir, "bare.csv"))
+  qa_step(
+    "a bare header field Length 5\" reads as the name Length 5\"",
+    c("ID", "Length 5\""), names(read_file(DTAFileCSV(filename = "bare.csv"), bare))
+  )
+
+  specs <- DTAColumnSpecCollection(columns = stats::setNames(
+    list(
+      DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
+      DTAColumnSpec(id = "Length 5\"", type = "SAS Char", length = 8, nullable = FALSE)
+    ),
+    c("ID", "Length 5\"")
+  ))
+  path <- fr_write_raw(c("ID,\"Length 5\"\"\"", "A1,x1"), file.path(dir, "inches.csv"))
+  for (mode in c("never", "always")) {
+    qa_step(
+      sprintf("stream = \"%s\": a file headed Length 5\" is valid against the column Length 5\"", mode),
+      list(ok = TRUE, columnspec = 0L, import = 0L),
+      fr_verdict_fields(fr_verdict(path, specs = specs, stream = mode))
+    )
+  }
+})

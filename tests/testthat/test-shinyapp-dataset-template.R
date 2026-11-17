@@ -910,3 +910,403 @@ test_that("apply_dataset_patch() modify_columns still deletes a property set to 
   expect_false("type" %in% names(gfnam))
   expect_equal(gfnam$id, "GFNAM")
 })
+
+# ---- column ids that contain spaces or dots ------------------------------------
+
+# A column id is the exact header text, so `Subject ID`, `Wt. (kg)` and `a.b`
+# are all legal. Paths are split on ".", which is why an id with a dot cannot
+# be told apart from a field path unless it is matched against the declared
+# ids: the LONGEST declared id wins (dataset_item_split_path()).
+
+col_ids <- function(ds, key = "columns") {
+  vapply(ds[[key]], function(x) x$id, character(1))
+}
+
+test_that("a path addresses a column whose id contains spaces", {
+  fn <- app_fn("apply_dataset_template_path")
+  ds <- minimal_dataset_spec()
+  ds$columns <- list(
+    list(id = "Subject ID", label = "Subject", type = "SAS Char"),
+    list(id = "Visit Date (UTC)", label = "Visit", type = "SAS Char"),
+    list(id = "Dose mg/kg", label = "Dose", type = "SAS Num")
+  )
+
+  out <- fn(ds, "dataset.columns.Visit Date (UTC).values", "2024-01-01")
+
+  expect_identical(col_ids(out), c("Subject ID", "Visit Date (UTC)", "Dose mg/kg"))
+  expect_identical(out$columns[[2]]$values, "2024-01-01")
+  expect_null(out$columns[[1]]$values)
+  expect_null(out$columns[[3]]$values)
+  out <- fn(ds, "dataset.columns.Dose mg/kg.description", "mg per kg")
+  expect_identical(out$columns[[3]]$description, "mg per kg")
+})
+
+test_that("a path addresses a column whose id contains dots, and nothing else", {
+  fn <- app_fn("apply_dataset_template_path")
+  ds <- minimal_dataset_spec()
+  ds$columns <- list(
+    list(id = "Subject.ID", label = "S", type = "SAS Char"),
+    list(id = "Wt. (kg)", label = "W", type = "SAS Num"),
+    list(id = "Dose No.", label = "D", type = "SAS Num")
+  )
+
+  out <- fn(ds, "dataset.columns.Subject.ID.description", "one")
+  expect_identical(out$columns[[1]]$description, "one")
+  expect_null(out$columns[[2]]$description)
+  # the id is not split into a column `Subject` carrying a field `ID`
+  expect_identical(col_ids(out), c("Subject.ID", "Wt. (kg)", "Dose No."))
+  expect_false("ID" %in% names(out$columns[[1]]))
+
+  out <- fn(ds, "dataset.columns.Wt. (kg).description", "two")
+  expect_identical(out$columns[[2]]$description, "two")
+  expect_null(out$columns[[1]]$description)
+
+  # An id that ENDS in a dot: the path reads "Dose No." + "." + "description".
+  out <- fn(ds, "dataset.columns.Dose No..description", "three")
+  expect_identical(out$columns[[3]]$description, "three")
+  expect_null(out$columns[[2]]$description)
+})
+
+test_that("a column field below the id may itself be a nested path", {
+  # Column fields are not flat (`values_from` is a mapping): the id is the
+  # longest declared id that leaves a field behind, not "everything up to the
+  # last segment".
+  fn <- app_fn("apply_dataset_template_path")
+  ds <- minimal_dataset_spec()
+  ds$columns <- list(list(
+    id = "Wt. (kg)", label = "W", type = "SAS Char",
+    values_from = list(vocabulary = "v@1.0", exclude = list("x"))
+  ))
+
+  out <- fn(ds, "dataset.columns.Wt. (kg).values_from.exclude", list("y"))
+
+  expect_identical(col_ids(out), "Wt. (kg)")
+  expect_identical(out$columns[[1]]$values_from$exclude, list("y"))
+  expect_identical(out$columns[[1]]$values_from$vocabulary, "v@1.0")
+})
+
+test_that("the longest declared id wins when one id is a prefix of another", {
+  fn <- app_fn("apply_dataset_template_path")
+  ds <- minimal_dataset_spec()
+  ds$columns <- list(
+    list(id = "a", label = "A", type = "SAS Char", b = "field b of column a"),
+    list(id = "a.b", label = "AB", type = "SAS Char"),
+    list(id = "TAIL", label = "T", type = "SAS Char")
+  )
+
+  # `columns.a.b.description` is the column `a.b`; column `a` is left alone.
+  out <- fn(ds, "dataset.columns.a.b.description", "for a.b")
+  expect_identical(out$columns[[2]]$description, "for a.b")
+  expect_null(out$columns[[1]]$description)
+  expect_identical(out$columns[[1]]$b, "field b of column a")
+
+  # The shorter id still answers for its own fields.
+  out <- fn(ds, "dataset.columns.a.description", "for a")
+  expect_identical(out$columns[[1]]$description, "for a")
+  expect_null(out$columns[[2]]$description)
+})
+
+test_that("an unknown id in a dotted path is reported whole, with the declared ids", {
+  fn <- app_fn("apply_dataset_template_path")
+  ds <- minimal_dataset_spec()
+  ds$columns <- list(list(id = "Wt. (kg)", label = "W", type = "SAS Num"))
+
+  expect_error(
+    fn(ds, "dataset.columns.Wt.nope.values", "x"),
+    regexp = "Unknown column id 'Wt.nope'", fixed = TRUE, class = "rlang_error"
+  )
+})
+
+test_that("dataset_item_split_path() returns the item and the field path below it", {
+  split <- app_fn("dataset_item_split_path")
+  items <- list(list(id = "a"), list(id = "a.b"), list(id = "a.b.c"), list(id = "Wt. (kg)"))
+
+  hit <- split(items, c("a", "b", "c", "label"), "column", "ds1")
+  expect_identical(hit$idx, 3L)
+  expect_identical(hit$rest, "label")
+  hit <- split(items, c("a", "b", "label"), "column", "ds1")
+  expect_identical(hit$idx, 2L)
+  expect_identical(hit$rest, "label")
+  hit <- split(items, c("a", "values_from", "exclude"), "column", "ds1")
+  expect_identical(hit$idx, 1L)
+  expect_identical(hit$rest, c("values_from", "exclude"))
+  hit <- split(items, c("Wt", " (kg)", "description"), "column", "ds1")
+  expect_identical(hit$idx, 4L)
+  expect_identical(hit$rest, "description")
+  # An id may not eat the whole path: at least one field must remain, so the
+  # only reading of `a.b` here is column `a`'s field `b`, and `a` is not
+  # declared. The declared id `a.b` with no field behind it is said to be one,
+  # not reported as unknown.
+  err <- tryCatch(split(list(list(id = "a.b")), c("a", "b"), "column", "ds1"), error = function(e) e)
+  expect_s3_class(err, "dta_template_path_no_field")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)), "'a.b' is a column id of dataset 'ds1'", fixed = TRUE)
+  expect_error(
+    split(list(list(id = "z")), c("a", "b"), "column", "ds1"),
+    regexp = "Unknown column id 'a' in dataset 'ds1'", fixed = TRUE, class = "rlang_error"
+  )
+  # A column id must be followed by a column FIELD: `zzz` is none, so neither the
+  # id `a.b` nor the id `a` qualifies; the longest declared id is named.
+  err <- tryCatch(split(items, c("a", "b", "zzz"), "column", "ds1"), error = function(e) e)
+  expect_s3_class(err, "dta_template_path_no_field")
+  expect_match(
+    gsub("\\s+", " ", conditionMessage(err)),
+    "'a.b' is a column id of dataset 'ds1', but 'zzz' is not one of its fields",
+    fixed = TRUE
+  )
+  # and the whole path being a declared id is the same refusal
+  err <- tryCatch(split(items, c("a", "b", "c"), "column", "ds1"), error = function(e) e)
+  expect_s3_class(err, "dta_template_path_no_field")
+  # Only columns and row labels have fields to test; a rule's field path is free.
+  # The one-segment id wins when it is declared (what every earlier release
+  # read) ...
+  rules <- list(list(id = "a"), list(id = "a.b"))
+  hit <- split(rules, c("a", "b", "c"), "rule", "ds1")
+  expect_identical(hit$idx, 1L)
+  expect_identical(hit$rest, c("b", "c"))
+  # ... and a dotted rule id is reached when its first segment is not declared.
+  hit <- split(list(list(id = "a.b"), list(id = "z")), c("a", "b", "c"), "rule", "ds1")
+  expect_identical(hit$idx, 1L)
+  expect_identical(hit$rest, "c")
+})
+
+test_that("a column path whose segment after the id is not a column field is refused whole", {
+  # With columns `Wt` and `Wt. (kg)` both declared, `columns.Wt. (kg)` read as
+  # the field " (kg)" of the column `Wt` and was written into it, and the build
+  # died later on an unused argument. It is a path with no field: refuse it, and
+  # say so -- a declared id is not an UNKNOWN id.
+  fn <- app_fn("apply_dataset_template_path")
+  ds <- minimal_dataset_spec()
+  ds$columns <- list(
+    list(id = "Wt", label = "W", type = "SAS Char"),
+    list(id = "Wt. (kg)", label = "WK", type = "SAS Num")
+  )
+
+  # the whole path is a declared id, with no field behind it
+  err <- tryCatch(fn(ds, "dataset.columns.Wt. (kg)", "L"), error = function(e) e)
+  expect_s3_class(err, "dta_template_path_no_field")
+  expect_s3_class(err, "rlang_error")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)), "'Wt. (kg)' is a column id", fixed = TRUE)
+  expect_false(grepl("Unknown", conditionMessage(err), fixed = TRUE))
+  # a declared id followed by something that is not one of its fields
+  err <- tryCatch(fn(ds, "dataset.columns.Wt.zzz", "L"), error = function(e) e)
+  expect_s3_class(err, "dta_template_path_no_field")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)), "'zzz' is not one of its fields", fixed = TRUE)
+  # no declared id at all stays the plain unknown-id error, without that class
+  err <- tryCatch(fn(ds, "dataset.columns.Nope.label", "L"), error = function(e) e)
+  expect_s3_class(err, "rlang_error")
+  expect_false(inherits(err, "dta_template_path_no_field"))
+  expect_match(gsub("\\s+", " ", conditionMessage(err)), "Unknown column id 'Nope'", fixed = TRUE)
+  # a real field of either column still goes where it belongs
+  out <- fn(ds, "dataset.columns.Wt. (kg).label", "new")
+  expect_identical(out$columns[[2]]$label, "new")
+  expect_identical(out$columns[[1]]$label, "W")
+  out <- fn(ds, "dataset.columns.Wt.label", "other")
+  expect_identical(out$columns[[1]]$label, "other")
+  expect_identical(out$columns[[2]]$label, "WK")
+})
+
+test_that("an option target with no column field is reported by validate_template, not lost", {
+  dir <- withr::local_tempdir()
+  dir.create(file.path(dir, "templates"))
+  write_template <- function(target) {
+    writeLines(
+      c(
+        "kind: dta_dataset_template", "id: weights", "version: \"1.0\"",
+        "options:",
+        sprintf("  - {id: o1, label: L, type: text, target: '%s', default: x}", target),
+        "dataset:", "  id: inl", "  type: tabular", "  files: {filename: inl.csv, type: csv}",
+        "  columns:",
+        "    - {id: Wt, type: SAS Char, length: 3, nullable: Yes}",
+        "    - {id: Wt. (kg), type: SAS Num, nullable: Yes}"
+      ),
+      file.path(dir, "templates", "weights.dta-dataset-template.yaml")
+    )
+  }
+
+  write_template("dataset.columns.Wt. (kg)")
+  res <- validate_template(dir)
+  expect_identical(res$code[res$severity != "info"], "target_invalid")
+
+  write_template("dataset.columns.Wt. (kg).description")
+  expect_identical(nrow(validate_template(dir)), 0L)
+})
+
+test_that("a rule id and a row-label id that contain dots are addressed whole", {
+  fn <- app_fn("apply_dataset_template_path")
+  ds <- minimal_dataset_spec()
+  ds$rules <- list(
+    list(id = "plain", description = "plain", type = "col_condition"),
+    list(id = "r.1", description = "dotted", type = "col_condition")
+  )
+  out <- fn(ds, "dataset.rules.r.1.description", "changed")
+  expect_identical(out$rules[[2]]$description, "changed")
+  expect_identical(out$rules[[1]]$description, "plain")
+
+  # With a rule `chk` AND a rule `chk.description` declared, `rules.chk.description`
+  # is the field `description` of `chk` -- as in every earlier release -- and the
+  # dotted rule can only be named as a whole.
+  ds$rules <- list(
+    list(id = "chk", description = "chk text", type = "col_condition"),
+    list(id = "chk.description", description = "sibling text", type = "col_condition")
+  )
+  out <- fn(ds, "dataset.rules.chk.description", "changed")
+  expect_identical(out$rules[[1]]$description, "changed")
+  expect_identical(out$rules[[2]]$description, "sibling text")
+
+  mx <- list(
+    id = "counts", type = "matrix", files = list(filename = "c.tsv", type = "tsv"),
+    row_labels = list(
+      list(id = "GENE", header = "gene", type = "SAS Char"),
+      list(id = "GENE.ID", header = "gene_id", type = "SAS Char")
+    )
+  )
+  out <- fn(mx, "dataset.row_labels.GENE.ID.nullable", FALSE)
+  expect_false(out$row_labels[[2]]$nullable)
+  expect_null(out$row_labels[[1]]$nullable)
+  expect_error(
+    fn(mx, "dataset.row_labels.NOPE.x.nullable", FALSE),
+    regexp = "Unknown row label id 'NOPE.x'", fixed = TRUE, class = "rlang_error"
+  )
+})
+
+test_that("a rules path writes the rule its FIRST segment names, through a patch and an option", {
+  # With rules `chk` and `chk.params` declared, `rules.chk.params.min` is the
+  # field `params.min` of the rule `chk` -- the reading of every earlier release
+  # -- and not the field `min` of the rule `chk.params`. Taking the longest
+  # declared id first would write into the sibling and leave `chk` unchanged.
+  rule_list <- function() {
+    list(
+      list(id = "chk", description = "chk text", params = list(min = 1)),
+      list(id = "chk.params", description = "sibling text", min = 100)
+    )
+  }
+
+  patch <- app_fn("apply_dataset_patch")
+  ds <- minimal_dataset_spec()
+  ds$rules <- rule_list()
+  res <- patch(ds, list(set = list(
+    "rules.chk.description" = "changed",
+    "rules.chk.params.min" = 5
+  )))
+  rules <- res$dataset$rules
+  expect_identical(rules[[1]]$description, "changed")
+  expect_identical(rules[[1]]$params$min, 5)
+  expect_identical(rules[[2]]$description, "sibling text")
+  expect_equal(rules[[2]]$min, 100)
+
+  # the same path as an option target, written by build_dataset_from_template()
+  dir <- withr::local_tempdir()
+  path <- file.path(dir, "template.yaml")
+  writeLines(
+    c(
+      "kind: dta_dataset_template", "id: chk_rules", 'version: "1.0"',
+      "options:",
+      "  - id: minimum",
+      "    type: text",
+      "    target: dataset.rules.chk.params.min",
+      "    default: seven",
+      "dataset:",
+      "  id: ds1",
+      "  type: tabular",
+      "  files: { filename: a.csv, type: csv }",
+      "  columns:",
+      "    - { id: X, label: X, type: SAS Char }",
+      "  rules:",
+      "    - { id: chk, type: col_unique, columns: [X], description: chk text, params: { min: 1 } }",
+      "    - { id: chk.params, type: col_unique, columns: [X], description: sibling text, min: 100 }"
+    ),
+    path
+  )
+  def <- app_fn("read_dataset_template")(path)$value
+  built <- app_fn("build_dataset_from_template")(def)
+  expect_true(built$ok, info = built$error)
+  rules <- built$value$dataset$rules
+  expect_identical(rules[[1]]$params$min, "seven")
+  expect_equal(rules[[2]]$min, 100)
+  expect_identical(rules[[2]]$description, "sibling text")
+})
+
+test_that("a patch adds, modifies and sets columns whose ids contain spaces and dots", {
+  patch <- app_fn("apply_dataset_patch")
+  ds <- minimal_dataset_spec()
+  ds$columns <- list(
+    list(id = "Subject ID", label = "Subject", type = "SAS Char"),
+    list(id = "Wt. (kg)", label = "Weight", type = "SAS Num")
+  )
+
+  res <- patch(ds, list(
+    add_columns = list(list(id = "New Col (x)", label = "New", type = "SAS Char")),
+    modify_columns = list(list(id = "Wt. (kg)", label = "Body weight")),
+    set = list(
+      "columns.New Col (x).description" = "added by the patch",
+      "columns.Wt. (kg).description" = "set by the patch"
+    )
+  ))
+
+  cols <- res$dataset$columns
+  expect_identical(col_ids(res$dataset), c("Subject ID", "Wt. (kg)", "New Col (x)"))
+  expect_identical(cols[[2]]$label, "Body weight")
+  expect_identical(cols[[2]]$description, "set by the patch")
+  expect_identical(cols[[3]]$description, "added by the patch")
+  expect_null(cols[[1]]$description)
+  # a column id the patch removes is matched exactly, spaces and all
+  res <- patch(ds, list(remove_columns = "Subject ID"))
+  expect_identical(col_ids(res$dataset), "Wt. (kg)")
+})
+
+test_that("an option target and a set patch reach spaced and dotted columns through a build", {
+  dir <- withr::local_tempdir()
+  path <- file.path(dir, "template.yaml")
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: spaced",
+      'version: "1.0"',
+      "options:",
+      "  - id: unit",
+      "    type: text",
+      '    target: "dataset.columns.Wt. (kg).values"',
+      "    default: kg",
+      "  - id: visit",
+      "    type: text",
+      '    target: "dataset.columns.Visit Date (UTC).description"',
+      "    default: when",
+      "dataset:",
+      "  id: ds1",
+      "  type: tabular",
+      "  files: { filename: s.csv, type: csv }",
+      "  columns:",
+      "    - { id: Subject ID, label: Subject, type: SAS Char }",
+      '    - { id: "Visit Date (UTC)", label: Visit, type: SAS Char }',
+      '    - { id: "Wt. (kg)", label: Weight, type: SAS Char }',
+      '    - { id: "a", label: A, type: SAS Char }',
+      '    - { id: "a.b", label: AB, type: SAS Char }',
+      "  rules: []"
+    ),
+    path
+  )
+  def <- app_fn("read_dataset_template")(path)$value
+
+  res <- app_fn("build_dataset_from_template")(
+    def,
+    selections = list(unit = "lb"),
+    patch = list(set = list("columns.a.b.description" = "the dotted one"))
+  )
+
+  expect_true(res$ok, info = res$error)
+  cols <- res$value$dataset$columns
+  expect_identical(
+    vapply(cols, function(x) x$id, character(1)),
+    c("Subject ID", "Visit Date (UTC)", "Wt. (kg)", "a", "a.b")
+  )
+  expect_identical(cols[[3]]$values, "lb")
+  expect_identical(cols[[2]]$description, "when")
+  expect_identical(cols[[5]]$description, "the dotted one")
+  expect_null(cols[[4]]$description)
+  # and the result is a valid dataset, every id verbatim
+  ds_obj <- DTAtools::dta_dataset_from_list(res$value$dataset)
+  expect_identical(
+    names(ds_obj@specs@columns),
+    c("Subject ID", "Visit Date (UTC)", "Wt. (kg)", "a", "a.b")
+  )
+})

@@ -39,7 +39,6 @@ test_that("DTAColumnSpec constructor works", {
 })
 
 test_that("DTAColumnSpec rejects invalid metadata combinations", {
-  expect_error(DTAColumnSpec(id = "STUDY ID"), "whitespaces")
   expect_error(DTAColumnSpec(id = "AGE", values = list("A"), pattern = "^[0-9]+$"), "pattern")
   expect_error(DTAColumnSpec(id = "AGE", values = list("A"), examples = c("A")), "examples")
   expect_error(DTAColumnSpec(id = "AGE", pattern = "^[0-9]+$", examples = c("A")), "must conform")
@@ -266,11 +265,69 @@ test_that("a column declaring only a length aborts with a package error naming t
   )
 })
 
-test_that("a column id must be a single, non-missing, non-empty string without whitespace", {
-  for (bad in list("", NA_character_, character(0), c("A", "B"), "A B")) {
+test_that("a column id must be a single, non-missing, non-empty string", {
+  for (bad in list("", NA_character_, character(0), c("A", "B"))) {
     expect_error(DTAColumnSpec(id = bad), class = "dta_spec_invalid_id")
   }
   expect_s3_class(DTAColumnSpec(id = "A_B"), "S7_object")
+})
+
+test_that("a column id may hold plain spaces between characters and is kept verbatim", {
+  # A column id is the exact text of a data header, so these are all legal ids.
+  ids <- c("Subject ID", "Subject  ID", "Visit Date (UTC)", "Dose mg/kg", "STUDY ID")
+  for (id in ids) {
+    spec <- DTAColumnSpec(id = id)
+    expect_identical(spec@id, id, info = id)
+  }
+})
+
+test_that("a column id with a leading or trailing space, tab or line break is refused", {
+  bad_ids <- list(
+    leading_space = " Subject ID",
+    trailing_space = "Subject ID ",
+    only_space = " ",
+    tab_inside = "Subject\tID",
+    tab_leading = "\tSubject",
+    tab_trailing = "Subject\t",
+    lf_inside = "Subject\nID",
+    cr_inside = "Subject\rID",
+    crlf_trailing = "Subject ID\r\n"
+  )
+  for (nm in names(bad_ids)) {
+    expect_error(DTAColumnSpec(id = bad_ids[[nm]]), class = "dta_spec_invalid_id", info = nm)
+  }
+})
+
+test_that("a column id valid before the space relaxation is still valid", {
+  # Superset guarantee: the new rule only adds ids, it never removes one. An id
+  # holding a control character that is not whitespace was accepted before.
+  for (id in c("A\001B", "A\007B", "A_B", "x.y", "%Change", "{id}", "O'Brien")) {
+    expect_identical(DTAColumnSpec(id = id)@id, id, info = id)
+  }
+})
+
+test_that("an id whose bytes are not valid in this locale builds as it always did, not as a bare simpleError", {
+  # `Gr\xf6\xdfe` as raw latin1 bytes (built from raw so this file stays ASCII).
+  # Scanning such a string for whitespace can fail inside R; the old rule judged
+  # it as having none, and so does the new one. Warnings are left unasserted: how
+  # R reports an invalid string depends on the platform and locale.
+  bytes <- as.raw(c(0x47, 0x72, 0xf6, 0xdf, 0x65))
+  for (enc in c("unknown", "UTF-8", "latin1")) {
+    id <- rawToChar(bytes)
+    Encoding(id) <- enc
+    spec <- NULL
+    suppressWarnings(expect_no_error(spec <- DTAColumnSpec(id = id, type = "SAS Char"), message = enc))
+    expect_s3_class(spec, "DTAtools::DTAColumnSpec")
+    # the id is kept as given, byte for byte (for latin1 R keeps the marked bytes too)
+    expect_identical(charToRaw(spec@id), bytes, info = enc)
+  }
+})
+
+test_that("a rule id still refuses whitespace although a column id may hold spaces", {
+  expect_error(
+    DTARule(id = "my rule", type = "col_range", description = NULL),
+    class = "dta_rule_invalid_id"
+  )
 })
 
 test_that("nullable must be a single TRUE or FALSE", {

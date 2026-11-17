@@ -970,9 +970,62 @@ test_that("vocabulary_slot_target_parts() accepts only the one supported shape",
   expect_null(parts_of("datasets.ds1.columns.VISIT"))
   expect_null(parts_of("datasets.ds1.rules.VISIT.values"))
   expect_null(parts_of("datasets..columns.VISIT.values"))
-  # A dataset or column whose name contains a dot is deliberately not
-  # addressable -- the alternative is an escaping grammar in a YAML string.
+  expect_null(parts_of("datasets.ds1.columns..values"))
+  expect_null(parts_of("datasets.ds1.columns.values"))
+  # A DATASET whose name contains a dot is deliberately not addressable -- the
+  # alternative is an escaping grammar in a YAML string. A COLUMN id is: it is
+  # everything between "columns." and the closing ".values".
   expect_null(parts_of("datasets.a.b.columns.VISIT.values"))
+})
+
+test_that("vocabulary_slot_target_parts() reads a column id with spaces and dots whole", {
+  parts_of <- app_fn("vocabulary_slot_target_parts")
+
+  spaced <- parts_of("datasets.ds1.columns.Visit Date (UTC).values")
+  expect_identical(spaced$dataset, "ds1")
+  expect_identical(spaced$column, "Visit Date (UTC)")
+  expect_identical(spaced$segment, "columns")
+  expect_identical(parts_of("datasets.ds1.columns.Wt. (kg).values")$column, "Wt. (kg)")
+  expect_identical(parts_of("datasets.ds1.columns.Subject.ID.values")$column, "Subject.ID")
+  # an id that ends in a dot, and one that ends in the field name itself
+  expect_identical(parts_of("datasets.ds1.columns.Dose No..values")$column, "Dose No.")
+  expect_identical(parts_of("datasets.ds1.columns.a.values.values")$column, "a.values")
+  row_label <- parts_of("datasets.counts.row_labels.GENE.ID.values")
+  expect_identical(row_label$column, "GENE.ID")
+  expect_identical(row_label$segment, "row_labels")
+})
+
+test_that("a slot writes into the column whose whole id it targets, and no other", {
+  normalise <- app_fn("normalise_vocabulary_slots")
+  apply_overrides <- app_fn("apply_vocabulary_slot_overrides")
+  ids <- c("Visit Date (UTC)", "Wt. (kg)", "a", "a.b", "Dose No.")
+  ds <- vocab_dataset_body(lapply(ids, function(id) list(id = id, type = "SAS Char")))
+  values_of <- function(out) {
+    stats::setNames(
+      vapply(out$columns, function(col) paste(col$values %||% "", collapse = ","), character(1)),
+      vapply(out$columns, function(col) col$id, character(1))
+    )
+  }
+
+  for (id in ids) {
+    slot <- normalise(list(vocab_slot_def(target = paste0("datasets.ds1.columns.", id, ".values"))))[[1]]
+    expect_identical(slot$column, id)
+    out <- apply_overrides(ds, list(list(
+      dataset = slot$dataset, column = slot$column, values = "SCR", slot = slot$id,
+      segment = slot$segment
+    )))
+    expected <- stats::setNames(ifelse(ids == id, "SCR", ""), ids)
+    expect_identical(values_of(out), expected)
+  }
+
+  # A dotted target that names no declared column is still the loud error.
+  slot <- normalise(list(vocab_slot_def(target = "datasets.ds1.columns.Wt.nope.values")))[[1]]
+  expect_vocab_error_contains(
+    apply_overrides(ds, list(list(
+      dataset = "ds1", column = slot$column, values = "SCR", slot = slot$id, segment = "columns"
+    ))),
+    "has no such column"
+  )
 })
 
 test_that("normalise_vocabulary_slots() fills defaults and rejects malformed slots", {

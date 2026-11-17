@@ -91,12 +91,28 @@ test_that("dta_matrix_read_head returns header labels verbatim", {
   h <- dta_matrix_read_head(handler, path)
   expect_identical(
     h$fields,
-    # Literal on purpose: `"say ""hi"""` loses its closing quote to the cleaning rule.
-    c("007", "1e3", "NA", "", ".", "S 1", "a{b}", "dup", "dup", "say \"hi")
+    # Literal on purpose: `"say ""hi"""` is the CSV spelling of `say "hi"`. Its closing
+    # quote has no opening quote, so the cleaning rule leaves it.
+    c("007", "1e3", "NA", "", ".", "S 1", "a{b}", "dup", "dup", "say \"hi\"")
   )
   expect_identical(h$n_header, 10L)
   expect_identical(h$n_first_row, 11L)
   expect_null(h$hint)
+})
+
+test_that("dta_matrix_read_head keeps an unpaired edge quote and strips a padded quoted pair", {
+  handler <- DTAFileCSV(filename = "m.csv")
+  # Fields as the CSV spells them: Length 5" | "lead | trail" | padded | ` "Subject ID" ` | Visit Date
+  path <- mx_file('"Length 5""","""lead","trail""","  padded  "," ""Subject ID"" ",Visit Date\n1,2,3,4,5,6\n')
+  h <- dta_matrix_read_head(handler, path)
+  expect_identical(h$fields, c('Length 5"', '"lead', 'trail"', "padded", "Subject ID", "Visit Date"))
+  expect_identical(h$n_header, 6L)
+})
+
+test_that("dta_matrix_read_head strips whitespace outside a quoted pair written literally", {
+  handler <- DTAFileCSV(filename = "m.csv")
+  h <- dta_matrix_read_head(handler, mx_file('S 1, "Subject ID" ,Dose mg/kg\n1,2,3\n'))
+  expect_identical(h$fields, c("S 1", "Subject ID", "Dose mg/kg"))
 })
 
 test_that("dta_matrix_read_head reads a latin1 label through the handler's encoding", {

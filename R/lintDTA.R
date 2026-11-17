@@ -158,6 +158,33 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
     )
   }
 
+  # A template path names a field of a column as `columns.<id>.<field>`. A path
+  # that can be read both as the column `X.<field>` and as the field <field> of
+  # a column `X` is read as the field, so a column `X.<field>` beside a column
+  # `X` can never be reached by that path: `Specimen` with `Specimen.type`. Only
+  # an id that spells a column field is ambiguous; `a.b` or `Wt. (kg)` beside
+  # `a` are not, so those are not reported.
+  # Only an id that holds a dot can be such a pair, and the parent is the text
+  # before one of its dots, so each dotted id is cut at each dot and the parts
+  # are looked up together: linear in the ids, not a scan of all ids per id.
+  declared_ids <- unique(col_ids)
+  dotted <- declared_ids[grepl(".", declared_ids, fixed = TRUE)]
+  if (length(dotted) > 0L) {
+    at <- unlist(gregexpr(".", dotted, fixed = TRUE), use.names = FALSE)
+    ids_at <- rep(dotted, lengths(gregexpr(".", dotted, fixed = TRUE)))
+    parent <- substr(ids_at, 1L, at - 1L)
+    field <- substring(ids_at, at + 1L)
+    for (i in which(parent %in% declared_ids & field %in% dta_column_field_names())) {
+      fb$add(
+        "column", ids_at[[i]], "warning", "column_id_shadows_field",
+        sprintf(
+          "Column id '%s' is also the field '%s' of column '%s' in a template path (columns.%s.%s), which is read as that field. Rename one of them.",
+          ids_at[[i]], field[[i]], parent[[i]], parent[[i]], field[[i]]
+        )
+      )
+    }
+  }
+
   # Declared type per column, computed once: dta_column_type() is not free and
   # the rule loop below would otherwise repeat it per operator.
   col_types <- vapply(columns, dta_column_type, character(1), USE.NAMES = FALSE)
@@ -413,7 +440,9 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
 #' `rule_column_undeclared`, `rule_range_non_numeric`,
 #' `rule_condition_operator_invalid`, `rule_condition_numeric_on_text`,
 #' `rule_condition_value_unfit`, `rule_condition_value_outside_values`,
-#' `group_constraint_unknown_condition`, `file_container_invalid`,
+#' `group_constraint_unknown_condition`, `matrix_row_label_id_invalid` (a matrix
+#' row-label id contains whitespace: write the exact header text under
+#' `header`), `file_container_invalid`,
 #' `file_field_unknown`, `file_container_misplaced`, `file_count_bound_invalid`,
 #' `container_invalid` (the `containers` section is malformed, an element lacks
 #' an `id` or `filename`, has an unknown field or a value a container cannot
@@ -422,7 +451,11 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
 #' names an id the document's `containers` do not define).
 #'
 #' Warnings: `rules_without_columns`, `rule_not_checkable`,
-#' `format_narrower_than_length`, `metadata_import_issue`, `version_unquoted`
+#' `format_narrower_than_length`, `column_id_shadows_field` (a column `X.<field>`
+#' beside a column `X`, where `<field>` is a column field such as `values`: a
+#' template path `columns.X.<field>` is read as that field of `X`, so a seal or
+#' `required:` on it can never guard the column `X.<field>`),
+#' `metadata_import_issue`, `version_unquoted`
 #' (an unquoted numeric `metadata.version` in a YAML file, which YAML reads
 #' as a number: `1.10` becomes `1.1`), `container_unused` (an explicit,
 #' non-default container no file entry refers to), `document_field_unknown` (a
@@ -1019,6 +1052,18 @@ dta_lint_matrix_block <- function(m, dataset, row_labels = NULL, rules = NULL) {
   for (i in seq_along(labels)) {
     h <- labels[[i]][["header"]]
     lid <- as.character(labels[[i]][["id"]] %||% paste0("#", i))[[1L]]
+    # Judged on the raw entry: the column builder allows a space in a column id,
+    # which a row-label id may not have (see the DTADataSetMatrix validator).
+    rl_id <- labels[[i]][["id"]]
+    if (is.character(rl_id) && length(rl_id) == 1L && !is.na(rl_id) && grepl("\\s", rl_id)) {
+      add(
+        "column", lid, "matrix_row_label_id_invalid",
+        sprintf(
+          "Row label '%s': a row-label id cannot contain whitespace. Write the exact header text under 'header', for example 'id: SAMPLE_ID' with 'header: \"Sample ID\"'.",
+          lid
+        )
+      )
+    }
     if (is.null(h)) {
       next
     }

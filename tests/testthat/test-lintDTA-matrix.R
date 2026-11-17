@@ -256,3 +256,107 @@ test_that("the cross-checks run even when the block does not build, and every pr
   ))
   expect_identical(mxl_codes(d3), "matrix_key_invalid")
 })
+
+# ---- whitespace in a row-label id ----------------------------------------------
+#
+# A column id may hold spaces (it is the header text); a row-label id may not,
+# because the reader names data columns `<column p>` and a spaced row-label id
+# could collide with one. The exact header text of a row label is its `header`.
+
+test_that("a row-label id with spaces is matrix_row_label_id_invalid, named on the row label", {
+  for (bad in c("Sample ID", "Sample  ID")) {
+    d <- mxl_matrix(row_labels = list(list(id = bad, type = "SAS Char", nullable = FALSE)))
+    out <- lint_dta(d)
+    expect_identical(mxl_codes(d), "matrix_row_label_id_invalid", info = bad)
+    expect_identical(out$id[out$code == "matrix_row_label_id_invalid"], bad, info = bad)
+    expect_identical(out$object[out$code == "matrix_row_label_id_invalid"], "column", info = bad)
+  }
+})
+
+test_that("a row-label id with a tab or an edge space is reported by both guards", {
+  # No column may have such an id, so the column spec is invalid as well.
+  for (bad in c("SAMPLE\tID", " SAMPLE")) {
+    d <- mxl_matrix(row_labels = list(list(id = bad, type = "SAS Char", nullable = FALSE)))
+    expect_true("matrix_row_label_id_invalid" %in% mxl_codes(d), info = bad)
+    expect_true("column_spec_invalid" %in% mxl_codes(d), info = bad)
+  }
+})
+
+test_that("a spaced row-label id is refused even when it carries a header", {
+  d <- mxl_matrix(row_labels = list(
+    list(id = "Sample ID", header = "Sample ID", type = "SAS Char", nullable = FALSE)
+  ))
+  expect_identical(mxl_codes(d), "matrix_row_label_id_invalid")
+})
+
+test_that("only the spaced row label is reported, not its well-formed neighbour", {
+  d <- mxl_matrix(row_labels = list(
+    list(id = "SAMPLE_ID", header = "", type = "SAS Char", nullable = FALSE),
+    list(id = "Sample Name", type = "SAS Char", nullable = TRUE)
+  ))
+  out <- lint_dta(d)
+  expect_identical(out$id[out$code == "matrix_row_label_id_invalid"], "Sample Name")
+})
+
+test_that("the exact header text goes under header: SAMPLE_ID with header 'Sample ID' lints clean", {
+  d <- mxl_matrix(row_labels = list(
+    list(id = "SAMPLE_ID", header = "Sample ID", type = "SAS Char", nullable = FALSE)
+  ))
+  expect_identical(nrow(lint_dta(d)), 0L)
+})
+
+test_that("the same spaced id is fine on a tabular column, not on a matrix row label", {
+  tab <- list(
+    id = "t", type = "tabular", files = list(filename = "t.csv", type = "csv"),
+    columns = list(list(id = "Sample ID", type = "SAS Char", nullable = FALSE))
+  )
+  expect_identical(nrow(lint_dta(tab)), 0L)
+})
+
+test_that("a YAML matrix with row label `Sample ID` and no header fails to load with dta_lint_error", {
+  p <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(c(
+    "metadata:", "  title: T", "  version: '1'",
+    "datasets:",
+    "  - id: m",
+    "    type: matrix",
+    "    files: { filename: \"m.tsv\", type: tsv }",
+    "    row_labels:",
+    "      - id: Sample ID",
+    "        type: SAS Char",
+    "        nullable: No",
+    "    matrix:",
+    "      cells: { type: SAS Int, nullable: No }"
+  ), p)
+
+  out <- lint_dta(p)
+  expect_identical(out$code[out$severity == "error"], "matrix_row_label_id_invalid")
+  expect_identical(out$dataset[out$code == "matrix_row_label_id_invalid"], "m")
+
+  err <- expect_error(suppressWarnings(read_dta_from_yaml(p)), class = "dta_lint_error")
+  expect_true("matrix_row_label_id_invalid" %in% err$findings$code)
+})
+
+test_that("the same YAML with id SAMPLE_ID and header 'Sample ID' loads", {
+  p <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(c(
+    "metadata:", "  title: T", "  version: '1'",
+    "datasets:",
+    "  - id: m",
+    "    type: matrix",
+    "    files: { filename: \"m.tsv\", type: tsv }",
+    "    row_labels:",
+    "      - id: SAMPLE_ID",
+    "        header: \"Sample ID\"",
+    "        type: SAS Char",
+    "        nullable: No",
+    "    matrix:",
+    "      cells: { type: SAS Int, nullable: No }"
+  ), p)
+
+  expect_identical(nrow(lint_dta(p)), 0L)
+  dta <- suppressWarnings(suppressMessages(read_dta_from_yaml(p)))
+  label <- dta@datasets[["m"]]@specs@columns[["SAMPLE_ID"]]
+  expect_identical(label@id, "SAMPLE_ID")
+  expect_identical(label@header, "Sample ID")
+})

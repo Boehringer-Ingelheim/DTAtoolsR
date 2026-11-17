@@ -3610,9 +3610,13 @@ dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
   dta_try({
     id <- trimws(as.character(id)[1] %||% "")
     if (!nzchar(id)) stop("A column id is required.")
-    if (grepl("\\s", id)) stop("Column id cannot contain whitespace.")
-
     ds <- DTAtools::datasets(dta, dataset)
+    # A column id is the exact header text and may hold spaces ("Subject ID"); the
+    # constructor below judges it. A matrix row-label id may not (its header text
+    # has its own field), so that one is refused here, as it always was.
+    if (dta_is_matrix_ds(ds) && grepl("\\s", id)) {
+      stop("Row-label column ID cannot contain whitespace.")
+    }
     specs <- ds@specs
     cols <- specs@columns %||% list()
 

@@ -13,9 +13,12 @@ dta_clean_column_names(x)
 The cleaned character vector.
 }
 \description{
-Strips surrounding quotes and whitespace from header names. Applied once, by
-\code{\link[=dta_delim_reader_plan]{dta_delim_reader_plan()}}, to the names both readers are then given -- so the
-identical file cannot present different column names depending on how it
-happened to be loaded, and cannot match the specs on only one path.
+Strips surrounding whitespace and one pair of surrounding double quotes from
+header names. A quote is stripped only as a matched pair: a header such as
+\verb{Length 5"} (inches) keeps its closing quote, because nothing opens it.
+Applied once, by \code{\link[=dta_delim_reader_plan]{dta_delim_reader_plan()}}, to the names both readers are then
+given -- so the identical file cannot present different column names
+depending on how it happened to be loaded, and cannot match the specs on only
+one path.
 }
 \keyword{internal}

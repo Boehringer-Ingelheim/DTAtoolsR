@@ -95,6 +95,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   values edited under Matrix layout, and its rules edited on the row label
   columns. The format is documented key by key in `DTA_YAML_GUIDE.md` section 6
   and in the README. Example data: `inst/extdata/matrix_dta.yaml`.
+- **Spaces and punctuation in column ids.** A column `id` is the exact text of
+  its header, so a header such as `Subject ID`, `Visit Date (UTC)` or
+  `Dose mg/kg` can now be declared and validated. The id is compared with the
+  header character for character: case-sensitive, so `Subject  ID` (two spaces)
+  is not `Subject ID`. An id cannot start or end with a space or contain
+  whitespace other than spaces between characters (a tab or a line break, say).
+  Matrix row-label ids still cannot contain any whitespace (a row label's exact
+  header text is its `header:`), and neither can rule ids (a space in one is
+  written as an underscore when a YAML file is read). The app's column editor
+  accepts spaced column ids as well. `DTA_YAML_GUIDE.md` lists the ids YAML
+  reads as something other than text and which need quotes: `Y`, `No`, `null`,
+  `007`, `0.5`, `%Change`, `{id}`, `*x` and more.
+- New lint codes: `matrix_row_label_id_invalid` (error: a matrix row-label `id`
+  contains whitespace; write the exact header text under `header`) and
+  `column_id_shadows_field` (warning: a column `X.<field>` beside a column `X`,
+  such as `Specimen` and `Specimen.type`, where a template path reads
+  `columns.Specimen.type` as the field of `Specimen`).
 
 ### Changed
 
@@ -140,6 +157,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   closed, and the refusal is listed in that dataset's validation messages until
   a file loads in its place. Before, the reason was run together into one line
   and disappeared after ten seconds.
+- **Breaking:** the Word specification import
+  (`columns_specs_from_word()`) keeps the spaces typed in an id. A cell
+  `STUDY ID` now imports as `STUDY ID`, not `STUDYID`, so a specification
+  imported again from an unchanged Word file can come out with different column
+  ids. The ends of a cell are still trimmed, and any other whitespace inside it
+  (a line break, a tab, a thin or ideographic space) is still dropped (`CONSENT_` +
+  line break + `DATE` is `CONSENT_DATE`).
 
 ### Fixed
 
@@ -173,6 +197,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - The app's template comparison no longer aborts with "argument 1 is not a
   vector" when both sides have nothing to compare, for example two documents
   with no datasets and no metadata fields. It now reports no differences.
+- **A header with an unpaired quote at its edge is no longer stripped.** A
+  header such as `Length 5"` (inches) was read as `Length 5`, because the header
+  cleaning removed a quote at either end of the name, so no specification could
+  declare the column under its real name. Only one matched pair of double quotes
+  around the whole header (`"Subject ID"`) is removed now; a quote at one edge
+  only stays part of the name. This changes which specification matches such a
+  file: a specification that declared the stripped name (`Length 5` for the
+  header `Length 5"`) used to match, and now reports one column missing and one
+  undeclared, because the header keeps its quote. If you declared the stripped
+  name, declare the real header.
+- **Template paths, seals, required fields, vocabulary targets, history labels
+  and the template guide now handle ids that contain a dot** (a column
+  `Wt. (kg)`, `No. of Doses`, a rule `age.range`). Every path was split at each
+  dot, so `columns.Wt. (kg).description` looked for a column `Wt`. A seal on such
+  a column was silently ignored, so a child template could change what its
+  parent had sealed without a `sealed_violation`, and `validate_template()`
+  reported a false `patch_incoherent` or `target_invalid` for the template. A
+  path now reads an id whole. For a column or a row label that is the longest
+  declared id followed by a column field name, then (in a `sealed:` or
+  `required:` path) the longest declared id, which may end the path at the
+  column itself. For a rule, an option or a dataset it is the one-segment id
+  when that is declared and a segment remains after it, as in every earlier
+  release, otherwise the longest declared id. So for columns and row labels a
+  longer id is read whole unless a column field name follows it (`Wt` and
+  `Wt. (kg)`, or `a` and `a.b`, read the longer id whole; `X` and `X.values`
+  reads the field `values` of `X`, and the column `X.values` can then be sealed
+  only through one of its own fields, which `lint_dta()` warns about). For rules,
+  options and datasets the shorter id always wins when it is declared: with rules
+  `chk` and `chk.description`, a longer rule, option or dataset cannot be named
+  by a seal or `required:` path at all. Every path that an earlier release could
+  address keeps its meaning except one that ends with a dot (`version.`,
+  `options.`): that was changed on purpose so that an id such as `Dose No.`
+  resolves, and such a path now reads nothing, so a `required:` on it fails and a
+  `sealed:` on it is reported as dead, loudly.
+  A path that writes, such as `set:`, refuses a column id that no field follows
+  (condition class `dta_template_path_no_field`, reported as `target_invalid`),
+  so `columns.Wt. (kg)` is not written into a column `Wt` as a field. The
+  template guide names such a column whole ("Column Wt. (kg) in inl"); having no
+  declared ids, it reads the id as everything before the first column field
+  name, so with only `Dose.length` declared it says "Length of column Dose".
+  Still not addressable: a `set:` path to the `condition` or `then` key of a
+  rule on a dotted column id, and a dotted dataset id in a vocabulary slot
+  target.
 
 ### Security
 

@@ -52,6 +52,49 @@ test_that("dta_normalize_column_names leaves already-clean names untouched", {
   expect_equal(names(dta_normalize_column_names(tbl)), c("AGE", "SEX"))
 })
 
+test_that("dta_clean_column_names strips whitespace and one matched pair of double quotes", {
+  raw <- c(
+    '"AGE"', " SEX ", '  "RACE"  ', ' "Subject ID" ', '"  padded  "', '""', "Visit Date (UTC)",
+    '""x""'
+  )
+  expect_identical(
+    dta_clean_column_names(raw),
+    # a doubled pair loses one pair only: the inner quotes are part of the name
+    c("AGE", "SEX", "RACE", "Subject ID", "padded", "", "Visit Date (UTC)", '"x"')
+  )
+})
+
+test_that("dta_clean_column_names keeps a quote that nothing pairs", {
+  # `Length 5"` is inches: its closing quote is the name, not a wrapper.
+  raw <- c('Length 5"', '"lead', 'trail"', '"', ' Length 5" ')
+  expect_identical(
+    dta_clean_column_names(raw),
+    c('Length 5"', '"lead', 'trail"', '"', 'Length 5"')
+  )
+})
+
+test_that("dta_clean_column_names keeps NA and an empty vector", {
+  expect_identical(dta_clean_column_names(c("A", NA_character_)), c("A", NA_character_))
+  expect_identical(dta_clean_column_names(character(0)), character(0))
+})
+
+test_that("dta_normalize_column_names keeps a trailing quote that nothing opens", {
+  tbl <- arrow::arrow_table(data.frame(a = 1, b = 2, c = 3))
+  names(tbl) <- c('Length 5"', '"lead', '"Subject ID"')
+
+  expect_equal(names(dta_normalize_column_names(tbl)), c('Length 5"', '"lead', "Subject ID"))
+})
+
+test_that("a CSV header with spaces, a quoted field and an inch mark is read as the names it spells", {
+  path <- withr::local_tempfile(fileext = ".csv")
+  # Fields: Subject ID | Length 5" (CSV-quoted) | "lead (quote kept) | padded (quotes strip)
+  writeLines(c('Subject ID,"Length 5""","""lead","  padded  "', "1,2,3,4"), path)
+
+  x <- read_file(DTAFileCSV(basename(path)), path)
+
+  expect_identical(names(x), c("Subject ID", 'Length 5"', '"lead', "padded"))
+})
+
 
 test_that("DTAFileTSV object is created from reading in tsv and table is accessible", {
   path <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")

@@ -226,6 +226,13 @@ test_that("OQ-SPEC-052 | each remaining code is reported alone, at its severity 
     list(
       code = "rules_without_columns", severity = "warning",
       input = list(rules = list(list(id = "r", type = "col_unique", columns = "X")))
+    ),
+    # Column Specimen.type beside column Specimen: type is a column field.
+    list(
+      code = "column_id_shadows_field", severity = "warning",
+      input = list(columns = list(
+        list(id = "Specimen", type = "SAS Char"), list(id = "Specimen.type", type = "SAS Char")
+      ))
     )
   )
   for (case in cases) {
@@ -233,6 +240,31 @@ test_that("OQ-SPEC-052 | each remaining code is reported alone, at its severity 
     qa_step(paste0(case$code, " is the only code reported"), case$code, unique(out$code))
     qa_step(paste0("and at severity ", case$severity), case$severity, unique(out$severity))
   }
+
+  # column_id_shadows_field (REQ-SPEC-028): the ids reported are the X.<field>
+  # ones, for every field the requirement names that is tried here; a dotted id
+  # that does not spell a field is not reported, and neither is X.<field> when
+  # there is no column X. Every "not reported" input holds the parent column,
+  # so that it could be reported and is not.
+  shadowed <- function(...) {
+    ids <- c(...)
+    out <- lint_dta(list(columns = lapply(ids, function(id) list(id = id, type = "SAS Char"))))
+    sort(out$id[out$code == "column_id_shadows_field"], method = "radix")
+  }
+  qa_step(
+    "X.<field> beside X is reported for the fields type, values, values_from, length and header",
+    c("Dose.length", "GENE.header", "Specimen.type", "V.values_from", "a.values"),
+    shadowed(
+      "Specimen", "Specimen.type", "a", "a.values", "V", "V.values_from", "Dose", "Dose.length",
+      "GENE", "GENE.header"
+    )
+  )
+  qa_step(
+    "a dotted id beside its parent that does not spell a field is not reported",
+    character(0),
+    shadowed("a", "a.b", "Wt", "Wt. (kg)", "No", "No. of Doses")
+  )
+  qa_step("X.<field> with no column X is not reported", character(0), shadowed("Specimen.type"))
 
   doc <- lint_dta(list(
     metadata = list(title = "T", version = "1"),
@@ -442,6 +474,11 @@ test_that("OQ-SPEC-058 | lint_dta() reports each problem of a matrix dataset und
       "a rule id that starts with .matrix:",
       mx_body(rules = list(list(id = ".matrix:mine", type = "col_unique", columns = "ID"))),
       "matrix_rule_id_reserved"
+    ),
+    list(
+      "a row-label id with a space (the exact header text belongs under header)",
+      mx_body(row_labels = list(list(id = "Sample ID", header = "", type = "SAS Char", nullable = FALSE))),
+      "matrix_row_label_id_invalid"
     ),
     list("a range on a Char cell", matrix(cells = list(type = "SAS Char", range = list(min = 1))), "cell_range_type"),
     list("a range with min above max", matrix(cells = list(type = "SAS Int", range = list(min = 5, max = 1))), "cell_range_invalid"),

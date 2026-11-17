@@ -625,3 +625,25 @@ requirements:
       or enumerate files the caller never named, and its error would name one
       of them. Evidence of "no file below the directory was read" is the
       condition class and the absence of any member's name from its message.
+
+  - id: REQ-FILE-045
+    text: >
+      When a delimited-text file's header names are cleaned, a double quote
+      shall be removed only as one matched pair wrapped around the whole name
+      (the inside is then trimmed), never a single quote at one edge. A name
+      that is Length 5" keeps its closing quote, as do "lead and trail", while
+      "Subject ID" with its quotes part of the name reads as Subject ID. A file
+      headed Length 5" shall check clean against a specification declaring the
+      column Length 5", read in memory or streamed. REQ-FILE-018 and
+      REQ-FILE-019 are unchanged.
+    risk: medium
+    category: integrity
+    covers: [read_file, load_file, check, validation_status]
+    source: R/DTAFileTabular-class.R (dta_clean_column_names); CHANGELOG Unreleased, Fixed
+    notes: >
+      Before, the cleaning removed a quote at either edge on its own, so a
+      header for a length in inches could not be declared at all: the file
+      read as Length 5, one declared column was missing and one undeclared. In
+      CSV the name Length 5" is written "Length 5""" (a doubled quote stands
+      for one), and "Subject ID" with its quotes in the name is written
+      """Subject ID""".
