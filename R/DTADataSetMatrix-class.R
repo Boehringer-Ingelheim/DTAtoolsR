@@ -200,6 +200,23 @@ DTADataSetMatrix <- S7::new_class(
         class = "dta_matrix_invalid_row_labels"
       )
     }
+    # A column id may hold spaces (it is the header text); a row-label id may
+    # not. The header line of a matrix names its data columns by label, and a
+    # label that is empty or repeated is read under a generated "<column p>"
+    # name, which a row-label id with a space could collide with. The exact
+    # header text of a row label has its own key, `header`. Judged here, over the
+    # ids, because a matrix's columns may be plain DTAColumnSpec objects as well
+    # as DTAColumnSpecRowLabel ones.
+    spaced <- ids[vapply(ids, function(id) !is.null(dta_id_problem(id)), logical(1))]
+    if (length(spaced) > 0L) {
+      cli_abort(
+        c(
+          "A row-label id cannot contain whitespace: {.val {spaced}}.",
+          "i" = "Write the exact header text under {.field header}, for example {.code id: SAMPLE_ID} with {.code header: \"Sample ID\"}."
+        ),
+        class = "dta_spec_invalid_id"
+      )
+    }
     key <- dta_matrix_row_key(self)
     if (!all(key %in% ids)) {
       cli_abort(

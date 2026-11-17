@@ -2197,3 +2197,257 @@ test_that("a creation template whose datasets conflict on a file name is an erro
   expect_match(rows$message, "'ae'", fixed = TRUE)
   expect_match(rows$message, "'dm'", fixed = TRUE)
 })
+
+# ---- column ids with spaces ---------------------------------------------------
+#
+# A column id is the exact header text, so a template may declare "Subject ID".
+# Every path a template takes to a column (inline, an imported dataset template,
+# the add/modify/remove verbs) must keep the id as written. A matrix row-label
+# id may not hold whitespace: its header text goes under `header`.
+
+test_that("a library whose templates declare spaced column ids validates with no finding", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: spaced_ds",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: ds1",
+      "  type: tabular",
+      "  files: {filename: x.csv, type: csv}",
+      "  columns:",
+      "    - {id: Subject ID, type: SAS Char, nullable: No}",
+      "    - {id: Visit Date (UTC), type: SAS Char}",
+      "    - {id: Dose mg/kg, type: SAS Num}"
+    ),
+    lib_file(dir, "spaced_ds.dta-dataset-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: spaced_inline",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Spaced",
+      "datasets:",
+      "  - id: ds2",
+      "    type: tabular",
+      "    files: {filename: y.csv, type: csv}",
+      "    columns:",
+      "      - {id: Subject ID, type: SAS Char, nullable: No}",
+      "      - {id: Visit Date (UTC), type: SAS Char}",
+      "    rules:",
+      "      - {id: ukey, type: col_unique, columns: [Subject ID, Visit Date (UTC)]}"
+    ),
+    lib_file(dir, "spaced_inline.dta-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: spaced_patch",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Patched",
+      "datasets:",
+      "  - template: spaced_ds@1.0",
+      "    patch:",
+      "      add_columns:",
+      "        - {id: New Col (x), type: SAS Char}",
+      "      modify_columns:",
+      "        - {id: Subject ID, label: Subject}",
+      "      remove_columns: [Dose mg/kg]"
+    ),
+    lib_file(dir, "spaced_patch.dta-template.yaml")
+  )
+
+  result <- validate_template(dir)
+  expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
+})
+
+test_that("a patch that names a spaced column id that is not there is still patch_incoherent", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: spaced_ds",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: ds1",
+      "  type: tabular",
+      "  files: {filename: x.csv, type: csv}",
+      "  columns:",
+      "    - {id: Subject ID, type: SAS Char}"
+    ),
+    lib_file(dir, "spaced_ds.dta-dataset-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: bad_patch",
+      "version: \"1.0\"",
+      "abstract: true",
+      "base: {metadata: {}}",
+      "datasets:",
+      "  - template: spaced_ds@1.0",
+      "    patch:",
+      "      remove_columns: [Subject  ID]"
+    ),
+    lib_file(dir, "bad_patch.dta-template.yaml")
+  )
+
+  expect_code_row(validate_template(dir), "patch_incoherent", "warning")
+})
+
+test_that("a dataset template whose matrix row label has a spaced id is a matrix_row_label_id_invalid error", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: spaced_matrix",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: counts",
+      "  type: matrix",
+      "  files: {filename: c.tsv, type: tsv}",
+      "  row_labels:",
+      "    - {id: Sample ID, type: SAS Char, nullable: No}",
+      "  matrix:",
+      "    cells: {type: SAS Num}"
+    ),
+    lib_file(dir, "spaced_matrix.dta-dataset-template.yaml")
+  )
+
+  rows <- expect_code_row(validate_template(dir), "matrix_row_label_id_invalid", "error")
+  expect_equal(nrow(rows), 1)
+  expect_equal(rows$id, "spaced_matrix")
+})
+
+test_that("the same matrix with id SAMPLE_ID and header 'Sample ID' validates with no finding", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: headed_matrix",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: counts",
+      "  type: matrix",
+      "  files: {filename: c.tsv, type: tsv}",
+      "  row_labels:",
+      "    - {id: SAMPLE_ID, header: Sample ID, type: SAS Char, nullable: No}",
+      "  matrix:",
+      "    cells: {type: SAS Num}"
+    ),
+    lib_file(dir, "headed_matrix.dta-dataset-template.yaml")
+  )
+
+  expect_equal(nrow(validate_template(dir)), 0)
+})
+
+test_that("an inline matrix with a spaced row-label id in a creation template is instantiate_failed", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: inline_matrix",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Inline matrix",
+      "datasets:",
+      "  - id: counts",
+      "    type: matrix",
+      "    files: {filename: c.tsv, type: tsv}",
+      "    row_labels:",
+      "      - {id: Sample ID, type: SAS Char, nullable: No}",
+      "    matrix:",
+      "      cells: {type: SAS Num}"
+    ),
+    lib_file(dir, "inline_matrix.dta-template.yaml")
+  )
+
+  rows <- expect_code_row(validate_template(dir), "instantiate_failed", "error")
+  expect_equal(rows$id, "inline_matrix")
+  # the lint code, which is an identifier and not prose, names the cause
+  expect_match(rows$message, "matrix_row_label_id_invalid", fixed = TRUE)
+})
+
+test_that("a patch that adds a spaced row label to an imported matrix is instantiate_failed", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: plain_matrix",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: counts",
+      "  type: matrix",
+      "  files: {filename: c.tsv, type: tsv}",
+      "  row_labels:",
+      "    - {id: GENE_ID, type: SAS Char, nullable: No}",
+      "  matrix:",
+      "    cells: {type: SAS Num}"
+    ),
+    lib_file(dir, "plain_matrix.dta-dataset-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: adds_spaced",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Adds",
+      "datasets:",
+      "  - template: plain_matrix@1.0",
+      "    patch:",
+      "      add_columns:",
+      "        - {id: Gene Name, type: SAS Char, nullable: Yes}"
+    ),
+    lib_file(dir, "adds_spaced.dta-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: adds_spaced_verb",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Adds",
+      "datasets:",
+      "  - template: plain_matrix@1.0",
+      "    patch:",
+      "      columns:",
+      "        add:",
+      "          - {id: Gene Name, type: SAS Char, nullable: Yes}"
+    ),
+    lib_file(dir, "adds_spaced_verb.dta-template.yaml")
+  )
+  # the control: the same label under an unspaced id, its text under `header`
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: adds_headed",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Adds",
+      "datasets:",
+      "  - template: plain_matrix@1.0",
+      "    patch:",
+      "      add_columns:",
+      "        - {id: GENE_NAME, header: Gene Name, type: SAS Char, nullable: Yes}"
+    ),
+    lib_file(dir, "adds_headed.dta-template.yaml")
+  )
+
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "instantiate_failed", "error")
+  expect_setequal(rows$id, c("adds_spaced", "adds_spaced_verb"))
+  # the space is what fails: the unspaced control and the matrix template itself are fine
+  expect_false("adds_headed" %in% result$id)
+  expect_false("plain_matrix" %in% result$id)
+})

@@ -884,3 +884,83 @@ test_that("document-level container rows carry an empty dataset, never NA", {
   expect_identical(unused$dataset, c("", ""))
   expect_false(anyNA(out$dataset))
 })
+
+# ---- column ids that spell a field of another column -------------------------
+
+shadow_cols <- function(...) {
+  ids <- c(...)
+  lapply(ids, function(id) list(id = id, type = "SAS Char"))
+}
+
+test_that("column_id_shadows_field warns when a column X.<field> sits beside a column X", {
+  cases <- list(
+    c("Specimen", "Specimen.type"),
+    c("a", "a.values"),
+    c("V", "V.values_from"),
+    c("Dose", "Dose.length"),
+    c("Subject ID", "Subject ID.label")
+  )
+  for (ids in cases) {
+    out <- lint_dta(list(columns = shadow_cols(ids)))
+    info <- paste(ids, collapse = " + ")
+    expect_identical(codes_of(out), "column_id_shadows_field", info = info)
+    expect_identical(out$severity, "warning", info = info)
+    expect_identical(out$object, "column", info = info)
+    # reported on the longer id, the one that is read as a field
+    expect_identical(out$id, ids[[2]], info = info)
+  }
+})
+
+test_that("column_id_shadows_field is silent for dotted ids that spell no column field", {
+  expect_identical(nrow(lint_dta(list(columns = shadow_cols("a", "a.b")))), 0L)
+  expect_identical(nrow(lint_dta(list(columns = shadow_cols("Wt. (kg)", "No. of Doses")))), 0L)
+  # the longer id alone, with no shorter column to be a field of
+  expect_identical(nrow(lint_dta(list(columns = shadow_cols("Specimen.type")))), 0L)
+  # a sibling that is not a prefix
+  expect_identical(nrow(lint_dta(list(columns = shadow_cols("Specimen", "Other.type")))), 0L)
+})
+
+test_that("column_id_shadows_field is a warning only: the document still reads", {
+  p <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(c(
+    "metadata:", "  title: T", "  version: '1'",
+    "datasets:",
+    "  - id: d",
+    "    type: tabular",
+    "    files: { filename: \"d.csv\", type: csv }",
+    "    columns:",
+    "      - { id: Specimen, type: SAS Char }",
+    "      - { id: Specimen.type, type: SAS Char }"
+  ), p)
+
+  out <- lint_dta(p)
+  expect_identical(out$code, "column_id_shadows_field")
+  expect_identical(out$dataset, "d")
+  expect_identical(out$severity, "warning")
+
+  # a warning is passed on and the document is still built, both columns kept
+  dta <- NULL
+  expect_warning(dta <- suppressMessages(read_dta_from_yaml(p)), class = "dta_lint_warning")
+  expect_identical(names(dta@datasets[["d"]]@specs@columns), c("Specimen", "Specimen.type"))
+})
+
+test_that("column ids with spaces lint clean", {
+  out <- lint_dta(list(columns = shadow_cols(
+    "Subject ID", "Subject  ID", "Visit Date (UTC)", "Dose mg/kg"
+  )))
+  expect_identical(nrow(out), 0L)
+})
+
+test_that("a column id with a leading space or a tab is a column_spec_invalid error", {
+  for (bad in c(" Subject ID", "Subject ID ", "Subject\tID")) {
+    out <- lint_dta(list(columns = shadow_cols(bad)))
+    expect_identical(codes_of(out), "column_spec_invalid", info = bad)
+    expect_identical(out$severity, "error", info = bad)
+  }
+})
+
+test_that("a rule id with spaces is still rewritten to underscores, not kept as typed", {
+  rule <- DTARuleFactory("my rule", "col_unique", columns = "SEX")
+  expect_identical(rule@id, "my_rule")
+  expect_identical(nrow(lint_rules(list(list(id = "my rule", type = "col_unique", columns = "SEX")))), 0L)
+})

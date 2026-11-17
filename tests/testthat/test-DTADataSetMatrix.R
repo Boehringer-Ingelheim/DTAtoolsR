@@ -983,3 +983,79 @@ test_that("counts in the bound findings are written out, not in scientific notat
   expect_identical(f$columnspec, "1000000")
   expect_match(f$message, "at least 1000000 required", fixed = TRUE)
 })
+
+# ---- a row-label id cannot hold whitespace ----------------------------------------
+#
+# A tabular column id may ("Subject ID" is the header text); a matrix row-label
+# id may not. The text above a row label has its own key, `header`.
+
+test_that("the validator refuses a plain DTAColumnSpec row label whose id has whitespace", {
+  m <- list(cells = list(type = "SAS Int", nullable = FALSE))
+  for (bad in c("Sample ID", "Sample  ID")) {
+    # the column itself is legal: only the matrix refuses it as a row label
+    col <- DTAColumnSpec(id = bad, type = "SAS Char", nullable = FALSE)
+    expect_identical(col@id, bad)
+    expect_error(
+      DTADataSetMatrix(
+        id = "m",
+        specs = DTAColumnSpecCollection(columns = stats::setNames(list(col), bad)),
+        matrix = m,
+        files = list(DTAFileTSV(filename = "m.tsv"))
+      ),
+      class = "dta_spec_invalid_id",
+      info = bad
+    )
+  }
+})
+
+test_that("the validator refuses a DTAColumnSpecRowLabel whose id has whitespace, header or not", {
+  m <- list(cells = list(type = "SAS Int", nullable = FALSE))
+  for (header in list("", "Sample ID")) {
+    col <- DTAColumnSpecRowLabel(
+      DTAColumnSpec(id = "Sample ID", type = "SAS Char", nullable = FALSE),
+      header = header
+    )
+    expect_error(
+      DTADataSetMatrix(
+        id = "m",
+        specs = DTAColumnSpecCollection(columns = list(`Sample ID` = col)),
+        matrix = m,
+        files = list(DTAFileTSV(filename = "m.tsv"))
+      ),
+      class = "dta_spec_invalid_id",
+      info = format(header)
+    )
+  }
+})
+
+test_that("the factory refuses a spaced row-label id by the same class", {
+  expect_error(
+    dta_dataset_from_list(list(
+      id = "m", type = "matrix",
+      files = list(filename = "m.tsv", type = "tsv"),
+      row_labels = list(list(id = "Sample ID", type = "SAS Char", nullable = FALSE)),
+      matrix = list(cells = list(type = "SAS Int", nullable = FALSE))
+    )),
+    class = "dta_spec_invalid_id"
+  )
+})
+
+test_that("id SAMPLE_ID with header 'Sample ID' loads and validates against that header", {
+  ds <- dta_dataset_from_list(list(
+    id = "m", type = "matrix",
+    files = list(filename = "m.tsv", type = "tsv"),
+    row_labels = list(
+      list(id = "SAMPLE_ID", header = "Sample ID", type = "SAS Char", nullable = FALSE)
+    ),
+    matrix = list(cells = list(type = "SAS Int", nullable = FALSE))
+  ))
+  good <- mxd_file("Sample ID\tG1\tG2\ns1\t1\t2\ns2\t3\t4\n")
+  for (stream in c("never", "always")) {
+    d <- mxd_checked(ds, good, stream)
+    expect_true(validation_status(d)$ok, info = stream)
+    expect_identical(names(tables(d)[[1]]), c("SAMPLE_ID", "G1", "G2"), info = stream)
+  }
+  # the id is not the header text: a file headed `SAMPLE_ID` does not match
+  wrong <- mxd_file("SAMPLE_ID\tG1\tG2\ns1\t1\t2\ns2\t3\t4\n")
+  expect_false(validation_status(mxd_checked(ds, wrong, "never"))$ok)
+})

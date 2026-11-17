@@ -20,6 +20,14 @@ wd_fixture <- function(...) {
   base
 }
 
+# One row per id, every other cell the same.
+wd_id_rows <- function(ids) {
+  rows <- wd_fixture()[rep(1L, length(ids)), , drop = FALSE]
+  rows$id <- ids
+  rownames(rows) <- NULL
+  rows
+}
+
 # The facts a spec carries, in a form expect_identical() can compare.
 wd_facts <- function(spec) {
   s <- spec@structure
@@ -86,7 +94,7 @@ test_that("nullable accepts yes, y and true in any case, and leaves a blank cell
   expect_null(back@columns$E@nullable)
 })
 
-test_that("blank rows are dropped and whitespace is removed from ids", {
+test_that("blank rows are dropped and the spaces of an id are kept as typed", {
   path <- wd_docx(data.frame(
     id = c("SUB JID", "", "AGE"),
     label = c("Subject", "", "Age"), type = c("SAS Char", "", "SAS Num"),
@@ -95,8 +103,78 @@ test_that("blank rows are dropped and whitespace is removed from ids", {
     stringsAsFactors = FALSE
   ))
   back <- columns_specs_from_word(path)
-  expect_identical(names(back@columns), c("SUBJID", "AGE"))
-  expect_identical(back@columns$SUBJID@id, "SUBJID")
+  expect_identical(names(back@columns), c("SUB JID", "AGE"))
+  expect_identical(back@columns[["SUB JID"]]@id, "SUB JID")
+})
+
+test_that("a Word id keeps interior spaces, including a double space, and punctuation", {
+  ids <- c("Subject  ID", "Visit Date (UTC)", "Dose mg/kg", "Wt. (kg)")
+  path <- wd_docx(wd_id_rows(ids))
+  back <- columns_specs_from_word(path)
+  expect_identical(names(back@columns), ids)
+  expect_identical(unname(vapply(back@columns, function(s) s@id, "")), ids)
+})
+
+test_that("the ends of a Word id are trimmed", {
+  path <- wd_docx(wd_id_rows(c("  Padded ID  ", "Tail ID ")))
+  back <- columns_specs_from_word(path)
+  expect_identical(names(back@columns), c("Padded ID", "Tail ID"))
+})
+
+test_that("a line break or tab inside an id cell is deleted, not turned into a space", {
+  path <- wd_docx(wd_id_rows(c("SUB\nJID", "CONSENT_\nDATE", "TAB\tID")))
+  back <- columns_specs_from_word(path)
+  expect_identical(names(back@columns), c("SUBJID", "CONSENT_DATE", "TABID"))
+})
+
+test_that("Unicode whitespace inside or at the edge of a Word id is removed, and the import does not abort", {
+  # Written as code points so the file stays ASCII: thin space, ideographic
+  # space, em space at the front.
+  thin <- intToUtf8(0x2009)
+  ideographic <- intToUtf8(0x3000)
+  em <- intToUtf8(0x2003)
+  path <- wd_docx(wd_id_rows(c(
+    paste0("STUDY", thin, "ID"),
+    paste0("SUBJ", ideographic, "ID"),
+    paste0(em, "VISITID"),
+    paste0("ARM", thin, "CODE", em)
+  )))
+
+  back <- NULL
+  expect_no_error(back <- columns_specs_from_word(path))
+
+  expect_identical(names(back@columns), c("STUDYID", "SUBJID", "VISITID", "ARMCODE"))
+  expect_identical(unname(vapply(back@columns, function(s) s@id, "")), names(back@columns))
+})
+
+test_that("a plain space is kept while the other whitespace in the same id is removed", {
+  thin <- intToUtf8(0x2009)
+  path <- wd_docx(wd_id_rows(c(
+    "STUDY ID",
+    paste0("STUDY ID", thin, "CODE"),
+    paste0(" ", intToUtf8(0x2003), "Padded ID  ")
+  )))
+
+  back <- columns_specs_from_word(path)
+
+  expect_identical(names(back@columns), c("STUDY ID", "STUDY IDCODE", "Padded ID"))
+})
+
+test_that("a vertical tab or form feed inside an id is removed, not kept and not an abort", {
+  # Word's XML cannot hold these two characters, so no .docx can carry them; an
+  # extractor can still hand them back, so the id cleaning is exercised with the
+  # table the reader would return.
+  table <- wd_id_rows(c("STUDY\vID", "SUBJ\fID", "VISIT \vID"))
+  path <- wd_docx(wd_id_rows(c("A", "B", "C")))
+  testthat::local_mocked_bindings(
+    docx_extract_all_tbls = function(...) list(table),
+    .package = "docxtractr"
+  )
+
+  back <- NULL
+  expect_no_error(back <- columns_specs_from_word(path))
+
+  expect_identical(names(back@columns), c("STUDYID", "SUBJID", "VISIT ID"))
 })
 
 test_that("a table narrower or wider than colnames is an error, not a misaligned read", {
@@ -229,4 +307,20 @@ test_that("columns_specs_from_word() takes the backend of an unprefixed Format f
   expect_identical(back@columns$A@structure@format, "$10.")
   expect_identical(back@columns$A@structure@backend, "SAS")
   expect_null(back@columns$B@structure@format)
+})
+
+test_that("a spaced column id survives export_specs_table() and columns_specs_from_word()", {
+  ids <- c("Subject ID", "Visit Date (UTC)", "Dose mg/kg")
+  original <- DTAColumnSpecCollection(columns = stats::setNames(
+    lapply(ids, function(id) DTAColumnSpec(id = id, label = "x", type = "SAS Char", length = 10, nullable = FALSE)),
+    ids
+  ))
+  f <- tempfile(fileext = ".docx")
+  on.exit(unlink(f, force = TRUE), add = TRUE)
+  export_specs_table(original, file = f, quiet = TRUE)
+
+  back <- columns_specs_from_word(f)
+
+  expect_identical(names(back@columns), ids)
+  expect_identical(unname(vapply(back@columns, function(s) s@id, "")), ids)
 })

@@ -1009,6 +1009,35 @@ test_that("OQ-EXPORT-025 | columns_specs_from_word reconstructs id, type, length
     c("Unique study ID", "Age in years\nnot part of the pattern"),
     c(tagged_back@columns$STUDYID@description, tagged_back@columns$AGE@description)
   )
+
+  # REQ-EXPORT-018, last sentence: an id cell is read as typed. The two spaces
+  # of "Subject  ID" are two spaces; the padding around the third id is
+  # dropped; a line break inside the fourth is deleted, not read as a space.
+  # A tab cannot be typed into a Word cell as text, so the fifth id is written
+  # as a placeholder and the placeholder's text node is then given a tab.
+  typed <- fixture[rep(1L, 5L), ]
+  typed$id <- c("STUDY ID", "Subject  ID", "  Visit Date (UTC) ", "SUB\nJID", "CON@TAB@SENT")
+  typed_doc <- flextable::body_add_flextable(officer::read_docx(), flextable::flextable(typed))
+  text_nodes <- xml2::xml_find_all(typed_doc$doc_obj$get(), "//*[local-name()='t']")
+  tab_node <- text_nodes[xml2::xml_text(text_nodes) == "CON@TAB@SENT"]
+  qa_step("the fixture holds the tab placeholder exactly once", 1L, length(tab_node))
+  xml2::xml_text(tab_node[[1L]]) <- "CON\tSENT"
+  typed_path <- file.path(dir, "specs_table_typed_ids.docx")
+  print(typed_doc, target = typed_path)
+  typed_back <- columns_specs_from_word(
+    typed_path,
+    colnames = c("id", "label", "type", "length", "format", "nullable", "description")
+  )
+  qa_step(
+    "each id is read as typed: spaces kept, padding dropped, a line break or tab deleted",
+    c("STUDY ID", "Subject  ID", "Visit Date (UTC)", "SUBJID", "CONSENT"),
+    names(typed_back@columns)
+  )
+  qa_step(
+    "and each column carries that id",
+    c("STUDY ID", "Subject  ID", "Visit Date (UTC)", "SUBJID", "CONSENT"),
+    vapply(typed_back@columns, function(column) column@id, character(1), USE.NAMES = FALSE)
+  )
 })
 
 test_that("OQ-EXPORT-026 | columns_specs_from_word reads back the table export_specs_table just wrote | REQ-EXPORT-019", {
@@ -1047,6 +1076,20 @@ test_that("OQ-EXPORT-026 | columns_specs_from_word reads back the table export_s
   qa_step(
     "every column's type, format, length, nullability, values and pattern survive the round trip",
     facts(coll), facts(back)
+  )
+
+  # REQ-EXPORT-019, last sentence: an id with spaces is written as it is and
+  # read back as it was written (it used to come back with the spaces removed).
+  spaced <- DTAColumnSpecCollection(columns = list(
+    `Subject ID` = DTAColumnSpec(id = "Subject ID", label = "Subject", type = "SAS Char", length = 8, nullable = FALSE),
+    `Visit Date (UTC)` = DTAColumnSpec(id = "Visit Date (UTC)", label = "Visit date", type = "SAS Char", length = 10, nullable = TRUE)
+  ))
+  spaced_path <- file.path(dir, "roundtrip_spaced.docx")
+  export_specs_table(spaced, file = spaced_path, quiet = TRUE)
+  spaced_back <- columns_specs_from_word(spaced_path)
+  qa_step(
+    "ids with spaces come back as they were written",
+    c("Subject ID", "Visit Date (UTC)"), names(spaced_back@columns)
   )
 })
 
@@ -2765,5 +2808,64 @@ test_that("OQ-EXPORT-075 | write_dta docx carries the row-label heading, the lay
       grepl("gene_name", first$col2[first$col1 == "Header line"], fixed = TRUE),
       first$col2[first$col1 == "Data rows"]
     )
+  )
+})
+
+test_that("OQ-EXPORT-077 | a column id with spaces, dots or a placeholder-like spelling appears exactly in the column table, in a template block and in a rule's wording | REQ-EXPORT-003 REQ-EXPORT-014 REQ-EXPORT-036", {
+  dir <- qa_tempdir()
+  # "{DTA_TITLE}" is a column id that is spelled like a placeholder of the
+  # template language: nothing the export inserts may be replaced again.
+  ids <- c("Subject ID", "Wt. (kg)", "{DTA_TITLE}")
+  dta <- DTA(
+    datasets = list(DTADataSetTabular(
+      id = "ADSL",
+      specs = DTAColumnSpecCollection(
+        columns = list(
+          `Subject ID` = DTAColumnSpec(id = "Subject ID", type = "SAS Char", length = 10, nullable = FALSE),
+          `Wt. (kg)` = DTAColumnSpec(id = "Wt. (kg)", type = "SAS Num", nullable = TRUE),
+          `{DTA_TITLE}` = DTAColumnSpec(id = "{DTA_TITLE}", type = "SAS Char", length = 10, nullable = TRUE)
+        ),
+        rules = list(DTARuleColRange(id = "wt_range", columns = "Wt. (kg)", range = c(0, 300)))
+      )
+    )),
+    metadata = DTAMetaData(title = "Id Fixture", version = "1.0")
+  )
+
+  # REQ-EXPORT-003: the column table, in declaration order, id by id.
+  out <- file.path(dir, "ids.docx")
+  write_dta(dta, file = out, quiet = TRUE)
+  tbl <- et_docx_table(out, "Variable Name")
+  qa_check("the column specification table is found", !is.null(tbl))
+  qa_step("each declared id is the first cell of its row, in declaration order", ids, tbl$col1[-1])
+
+  # REQ-EXPORT-036: the rule's wording names the column by its exact id.
+  rules <- et_docx_table(out, "Rule ID")
+  qa_check("the rules table is found", !is.null(rules))
+  qa_check(
+    "the description of wt_range names the column Wt. (kg) exactly",
+    grepl("Wt. (kg)", rules$col2[rules$col1 == "wt_range"], fixed = TRUE)
+  )
+
+  # REQ-EXPORT-014: a {COLUMN_SPECS:ADSL} block inserts the same cells, and the
+  # id spelled like a placeholder is neither replaced nor reported unresolved.
+  template <- et_write_template(c("Columns:", "{COLUMN_SPECS:ADSL}"), dir)
+  filled <- file.path(dir, "ids_template.docx")
+  warnings_seen <- character(0)
+  withCallingHandlers(
+    export_with_template(dta, template, filled, quiet = TRUE),
+    warning = function(w) {
+      warnings_seen <<- c(warnings_seen, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
+  )
+  block <- Filter(function(t) nrow(t) > 0 && "Subject ID" %in% t$col1, et_docx_tables(filled))
+  qa_check("the block holds the column table", length(block) == 1L)
+  qa_step(
+    "its first column holds each id exactly, {DTA_TITLE} included",
+    ids, if (length(block) == 1L) block[[1]]$col1[-1] else character(0)
+  )
+  qa_check(
+    "and no warning names {DTA_TITLE} as a placeholder left unresolved",
+    !any(grepl("DTA_TITLE", warnings_seen, fixed = TRUE))
   )
 })

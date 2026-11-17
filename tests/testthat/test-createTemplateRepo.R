@@ -613,3 +613,30 @@ test_that("the Bitbucket and Jenkins assets install from a current repository, n
     expect_false(grepl("/[0-9]{4}-[0-9]{2}-[0-9]{2}\"", installs[[nm]]), info = nm)
   }
 })
+
+test_that("a scaffold stays clean when a template added to it declares spaced column ids", {
+  # A column id is the exact header text, so "Subject ID" is a legal id. The
+  # scaffold's own validation (and the strict form a CI job runs) must accept it.
+  dir <- withr::local_tempdir()
+  suppressMessages(create_template_repo(dir))
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: spaced_dataset",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: spaced_data",
+      "  type: tabular",
+      "  files: {filename: spaced.csv, type: csv}",
+      "  columns:",
+      "    - {id: Subject ID, type: SAS Char, nullable: No}",
+      "    - {id: Visit Date (UTC), type: SAS Char}",
+      "    - {id: Dose mg/kg, type: SAS Num}"
+    ),
+    file.path(dir, "templates", "spaced_dataset.dta-dataset-template.yaml")
+  )
+
+  result <- validate_template(dir)
+  expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
+  expect_no_error(validate_template(dir, strict = TRUE))
+})

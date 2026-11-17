@@ -508,6 +508,10 @@ The supported target form is `datasets.<dataset id>.columns.<column id>.values`.
 template actually builds. For a `type: matrix` dataset, whose column specs are its row labels, write `row_labels` in place of `columns`:
 `datasets.<dataset id>.row_labels.<row label id>.values`. The segment must match the dataset's own key.
 
+A column id may contain spaces and dots, and the target names it whole: the id is everything between `columns.` (or `row_labels.`) and the closing
+`.values`, and it must be one the dataset declares. The dataset id in a slot target is a single segment, so a dataset whose id contains a dot is not
+addressable there; such a target is reported as `vocab_slot_invalid`.
+
 `mode` is `closed` or `open`. `closed` only offers vocabulary terms; `open` also permits the author to type additional terms. The final document
 still receives the selected values as its permitted-value list. `include` and `exclude` narrow the terms offered by the vocabulary, and
 `default` selects initial terms. `min` is a non-negative whole number that sets a minimum selection count; it is not a numeric-input lower bound.
@@ -560,7 +564,7 @@ A column specification is passed into `DTAColumnSpec`. Supported fields are:
 
 | Field | Purpose |
 | --- | --- |
-| `id` | Required column identifier; it must not contain whitespace. |
+| `id` | Required column identifier: the exact text of the column's header. Spaces and punctuation are allowed between characters (`Subject ID`, `Wt. (kg)`); no space at the start or end, and no whitespace other than spaces between characters (tabs, line breaks and other whitespace such as an ideographic space are refused). A matrix row label is the exception, see below. |
 | `label` | Human-readable column label. |
 | `type` | Data type, including the supported SAS-prefixed types below. |
 | `format` | Format string, such as a SAS format. |
@@ -572,6 +576,16 @@ A column specification is passed into `DTAColumnSpec`. Supported fields are:
 | `examples` | Example value or values displayed with the specification. |
 | `description` | Explanation of the column. |
 | `colclass` | Supported R/SAS storage-class hint. |
+
+The id is compared with the delivered file's header character for character: case-sensitive and codepoint-exact, so `Subject  ID` (two spaces) is
+not `Subject ID`, and a no-break space is not a space. A plain id needs no quotes (`id: Subject ID`). Quote an id that YAML would read as something
+other than text (`id: "Y"`): a word or number YAML reads as a non-string (`Y`, `N`, `yes`, `no`, `true`, `false`, `on`, `off`, `null`, `~`, `007`, `1.10`, `0.5`,
+`0x1F`, `.inf`; numeric headers such as `0.5` are realistic) is refused with `column_spec_invalid`, as are `{id}` and `[a, b]`; an id that starts with `%`,
+`|`, `>`, `'`, `"`, `@`, a backtick, `- ` or `? `, or contains `: `, makes the file unreadable; and an id that starts with `*`, contains ` #`, or is `[a]`
+is changed without a word (`_yaml.bad-anchor_`, cut at the `#`, `a`). Inside an inline list such as `columns: [A, B]` also quote an id that contains
+`,`, `[`, `]`, `{` or `}`. The `id` of a matrix row label may not contain whitespace
+(its header text has its own key, `header:`): write `id: SAMPLE_ID` with `header: "Sample ID"`. `lint_dta()` reports such a row-label id as
+`matrix_row_label_id_invalid`, and a dataset built from it is refused.
 
 Use `examples` (plural), matching the column-specification field. Do not use `example` as a synonym. `values` and `pattern` are mutually
 exclusive. When a column uses `values_from`, do not also set `pattern`; that is an error. A literal `values` list combined with `values_from` is
@@ -664,6 +678,22 @@ Dataset paths address columns and rules by their `id`, not by list position. A `
 `row_labels:` instead of `columns:`, so its paths read `dataset.row_labels.<id>.<field>`; a path that names the other one fails with a hint. The specific path grammar is implemented by the dataset-template
 engine; validate the target rather than assuming any dotted string is valid. Dataset-template options are supplied by the importing creation template entry's `options:` mapping, or by the dataset-template caller. They are not prompted as creation-template options merely because they
 exist in the imported file.
+
+A column, row-label or rule id may contain dots, and a column id spaces too (`Subject ID`, `Wt. (kg)`). A dataset path (`set:` paths and option targets
+always end in a field) reads an id whole. For a column or a row label it is the longest declared id that is followed by a column field name (`values`,
+`description`, `type`, `label`, ...). For a rule it is the one-segment id when that is declared, and otherwise the longest declared id that leaves a
+segment for the field (`rules.age.range.description`). A path with no such reading is refused. A column path that stops at a declared column id, or runs
+on with something that is not one of its fields, is refused with a message that says so (the condition class is `dta_template_path_no_field`, and
+`validate_template()` reports `target_invalid` for an option): with columns `Wt` and `Wt. (kg)` both declared, `columns.Wt. (kg)` is refused and is not
+written into `Wt` as a field called ` (kg)`. A path whose id is not declared is refused naming that id. So with a column `X` and a column `X.values`
+both declared, `columns.X.values` is the field `values` of `X`, and the column `X.values` is reached through one of its own fields
+(`columns.X.values.label`); with rules `chk` and `chk.description`, `rules.chk.description` is the field `description` of the rule `chk`, and the rule
+`chk.description` cannot be reached with a field. Avoid such pairs: a column `X.<field>` beside a column `X`, where `<field>` is a column field name (for
+example `Specimen` and `Specimen.type`), is warned about by `lint_dta()` as `column_id_shadows_field`. Three limits remain. The keys under a rule's
+`condition:` and `then:` are column ids, and a `set:` path cannot address such a key when the id contains a dot. A dotted dataset id is not addressable in
+a vocabulary slot target. And the template guide, which has no declared ids to consult, reads a column path as everything before the first later segment
+that is a column field name: with only a column `Dose.length` declared (and no `Dose`) it words `columns.Dose.length` as "Length of column Dose" (display
+only; the engine resolves the whole column `Dose.length`).
 
 ### Dataset rules
 
@@ -1010,6 +1040,21 @@ sealed:
   - base.metadata.title
   - options.header
 ```
+
+A path into a column, a rule, an option or a dataset uses the whole id, spaces and dots included. In the `columns` (or `row_labels`) of a dataset a
+`sealed:` or `required:` path reads the longest declared id that is followed by a column field name, and only when there is none the longest declared
+id, which may then end the path at the column itself and covers the whole column (`columns.Wt. (kg)`, `columns.Dose No.`). With a column `X` and a column
+`X.values` both declared, `columns.X.values` is always the field `values` of `X`; the longer column can be sealed through one of its own fields. In every
+other list (datasets, options, rules) it reads the one-segment id when that is declared and a segment remains after it (what every earlier release did,
+except that a path ending in a dot such as `options.` now reads nothing, so that an id like `Dose No.` resolves; a `required:` on it fails and a `sealed:`
+on it is reported dead),
+otherwise the longest declared id that leaves a segment (`rules.age.range.description`, or `datasets.inl.v2.columns.A.label` for a dataset `inl.v2` when no dataset `inl` is declared), otherwise the id that ends the
+path at the entry. So with rules `chk` and `chk.description` declared, `rules.chk.description` is always the field `description` of `chk`: when `chk` has
+no `description`, a `required:` on the path fails and a seal on it is reported dead (`sealed_path_unknown`), and the rule `chk.description` cannot be
+named by such a path. The same holds for options `hdr` and `hdr.default` and for datasets `vit` and `vit.v2`: a dotted key whose first segment is also a
+declared key of the same list cannot be reached by a `sealed:` or `required:` path, with or without a field. Avoid such pairs. A dataset name that
+contains a dot resolves when its first segment is not itself a declared dataset. A `sealed:` or `required:` path resolves only against what the template
+itself declares: a column that comes in through a `datasets[].template` import is not in the template's own definition, so a path into it matches nothing.
 
 A seal on a parent constrains descendants, not the parent itself. An unknown sealed path protects nothing and is reported as
 `sealed_path_unknown` with warning severity. A descendant that changes a sealed value is reported as `sealed_violation`; the validator also

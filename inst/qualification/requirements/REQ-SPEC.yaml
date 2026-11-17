@@ -362,7 +362,14 @@ requirements:
       dataset_id_duplicate and metadata_invalid. It shall report
       rules_without_columns and format_narrower_than_length at severity
       warning, and version_unquoted at warning for an unquoted numeric
-      metadata.version in a file. The bundled clinical specification shall
+      metadata.version in a file. It shall report column_id_shadows_field at
+      severity warning for a column id X.<field> declared beside a column X,
+      where <field> is the name of a column field (label, type, format,
+      length, nullable, values, values_from, pattern, examples, description,
+      colclass, or header, the key of a matrix row label), and shall not
+      report it for any other dotted id, such as
+      a.b, "Wt. (kg)" or "No. of Doses" beside a, Wt or No, or for X.<field>
+      with no column X. The bundled clinical specification shall
       lint with zero rows. An equals/in operand outside a values list is an
       error; a not_equals/not_in operand outside it shall not be an error.
     risk: high
@@ -373,7 +380,14 @@ requirements:
       A column or rule that cannot be built is reported rather than thrown, so
       one broken entry does not hide the others; a broken column still counts
       as declared, so the rules naming it are not additionally reported as
-      dangling.
+      dangling. column_id_shadows_field exists because a template path names a
+      field of a column as columns.<id>.<field>: with columns Specimen and
+      Specimen.type, the path columns.Specimen.type is read as the field type
+      of Specimen (REQ-TMPL-056), so the column Specimen.type can be sealed or
+      required only through one of its own fields. Only an id that spells a
+      column field is ambiguous, so only that is reported. The ids a path takes
+      whole in every other case, such as a.b beside a, or Wt. (kg), are read as
+      the longest declared id (REQ-TMPL-056) and are not reported.
 
   - id: REQ-SPEC-029
     text: >
@@ -441,7 +455,8 @@ requirements:
       row_label_header_position (header: No on a row label that is not the first),
       row_label_header_invalid (a header that is neither one text nor No),
       matrix_row_key_invalid, matrix_key_nullable, matrix_number_text,
-      matrix_rule_id_reserved, cell_range_type, cell_range_invalid and
+      matrix_rule_id_reserved, matrix_row_label_id_invalid (a row-label id
+      that contains whitespace), cell_range_type, cell_range_invalid and
       cell_finite_type. A rule naming a data column rather than a row label
       shall be reported as rule_column_undeclared. A clean matrix dataset shall
       lint with zero rows.
@@ -449,3 +464,82 @@ requirements:
     category: functional
     covers: [lint_dta]
     source: R/lintDTA.R; PLAN-matrix-dataset.md 4.6
+
+  # ---- column ids: the exact text of a header ----------------------------------
+
+  - id: REQ-SPEC-033
+    text: >
+      A column id shall be the exact text of the column's header, so
+      DTAColumnSpec() shall accept an id with plain spaces between its
+      characters ("Subject ID", "Visit Date (UTC)", two consecutive spaces)
+      and carry it unchanged, in a DTAColumnSpecCollection and through
+      write_columns_to_yaml() and import_specs_from_yaml(). It shall refuse,
+      with a condition of class dta_spec_invalid_id, an id that starts or ends
+      with a space, an id that contains whitespace other than the plain space
+      (a tab, a carriage return, a line feed, a vertical tab or a form feed,
+      and any other character the regular-expression class \s matches), and an
+      id that is missing, empty or not a single string.
+    risk: high
+    category: integrity
+    covers: [DTAColumnSpec, DTAColumnSpecCollection, write_columns_to_yaml, import_specs_from_yaml]
+    source: R/DTAColumnSpec-class.R (dta_column_id_problem); DTA_YAML_GUIDE.md section 4
+    notes: >
+      The readers trim the edges of a header (REQ-FILE-018), so an id with an
+      edge space could never match one, and a tab or line break cannot be
+      written in a header or in a YAML key. Every id without whitespace stays
+      valid. Which non-ASCII characters count as whitespace (a thin or an
+      ideographic space) is the platform's, so only the ASCII ones are
+      asserted. A string R cannot scan in the current locale (bytes that are
+      not valid there) is judged as before, as accepted. Rule ids and matrix
+      row-label ids are not column ids and keep their ban on whitespace (a rule
+      built from a YAML file has a space in its id written as an underscore;
+      REQ-SPEC-035 for a row label). A dataset id was never restricted this
+      way. A no-break space is not a space here: it is kept verbatim and
+      matches only an identical code point (REQ-SPEC-034).
+
+  - id: REQ-SPEC-034
+    text: >
+      A delivered table's header shall be compared with the declared column
+      ids exactly. A file whose header is "Subject ID" shall check clean
+      against a specification declaring the column "Subject ID", read in
+      memory or streamed, and a finding about that column shall name it
+      "Subject ID". A header that differs from the declared id by one more
+      space, by letter case, or by a no-break space in place of the space shall
+      not match: the check shall report one declared column missing and one
+      column undeclared, both as column-specification errors.
+    risk: high
+    category: integrity
+    covers: [load_file, check, validation_status, messages, DTAColumnSpec, DTAColumnSpecCollection]
+    source: R/DTAFileTabular-class.R; R/DTADataSetTabular-class.R; DTA_YAML_GUIDE.md section 4
+    notes: >
+      The reader hands the header through with its interior spaces untouched,
+      so nothing between the file and the specification can make "Subject  ID"
+      equal "Subject ID"; the same holds for the streamed reader.
+
+  - id: REQ-SPEC-035
+    text: >
+      A matrix row-label id shall not contain whitespace, unlike a column id.
+      DTADataSetMatrix() shall refuse, with a condition of class
+      dta_spec_invalid_id, a row label whose id contains a space, whether the
+      row label is a row-label column or a plain column specification;
+      lint_dta() shall report it as matrix_row_label_id_invalid at severity
+      error, and only a row-label id that is a single, non-missing string
+      containing whitespace (an empty, missing or non-string id is reported as
+      column_spec_invalid alone), so that read_dta_from_yaml() aborts with a
+      condition of class dta_lint_error carrying that finding. The same row
+      label written with an id without whitespace and the exact header text
+      under header shall be accepted, and a file whose header line holds that
+      text shall check clean.
+    risk: medium
+    category: integrity
+    covers: [DTADataSetMatrix, dta_dataset_from_list, lint_dta, read_dta_from_yaml, load_file, check, validation_status]
+    source: R/DTADataSetMatrix-class.R; R/lintDTA.R (dta_lint_matrix_block); DTA_YAML_GUIDE.md section 6
+    notes: >
+      A matrix reader names data columns whose label is empty or repeated
+      "<column p>" and never checks that name against the row-label ids, so a
+      row-label id of "<column 2>" would collide with a generated name. That
+      id is impossible only while an id cannot contain a space. The exact text
+      of a row label's header has its own key, header, so nothing is lost.
+      lint_dta() judges the raw entry because it builds row labels as plain
+      column specifications, which accept a space, and never builds the
+      dataset.
