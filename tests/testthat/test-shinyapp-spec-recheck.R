@@ -10,13 +10,7 @@ skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
 
-recheck_input <- function(filename) {
-  path <- app_fixture_path(filename)
-  data.frame(
-    name = filename, size = file.size(path), type = "",
-    datapath = path, stringsAsFactors = FALSE
-  )
-}
+recheck_input <- function(filename) app_upload_value(app_fixture_path(filename), filename)
 
 recheck_clean_session <- function() {
   unlink(

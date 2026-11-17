@@ -17,12 +17,7 @@ file_ds_app_dir <- function() .shiny_app_dir()
 # A fileInput() value for a file this test creates, rather than one bundled with
 # the package -- the point is to deliver a non-tabular file, which the fixtures
 # deliberately do not contain.
-file_ds_upload <- function(path, name = basename(path)) {
-  data.frame(
-    name = name, size = file.size(path), type = "",
-    datapath = path, stringsAsFactors = FALSE
-  )
-}
+file_ds_upload <- function(path, name = basename(path)) app_upload_value(path, name)
 
 file_ds_write <- function(dir, name, contents = "report body") {
   path <- file.path(dir, name)

@@ -79,7 +79,7 @@ cont_cut <- function(fixture, n, name = fixture, env = parent.frame()) {
 
 # A shiny fileInput row for a file on disk.
 cont_fi <- function(path, name = basename(path)) {
-  data.frame(name = name, size = file.size(path), type = "", datapath = path, stringsAsFactors = FALSE)
+  qapp_upload_value(path, name)
 }
 
 # ---- helpers shared by the case files -----------------------------------------

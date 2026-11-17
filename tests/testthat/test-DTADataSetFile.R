@@ -264,6 +264,30 @@ test_that("load_file() aborts on a non-matching filename", {
   )
 })
 
+test_that("load_file() refuses a directory", {
+  dir <- withr::local_tempdir()
+  path <- file.path(dir, "any.txt")
+  writeLines("x", path)
+  sub <- file.path(dir, "sub.txt")
+  dir.create(sub)
+
+  ds <- DTADataSetFile(id = "delivery", files = list(DTAFileAny(filename = ".*", pattern = TRUE)))
+  expect_error(
+    load_file(ds, file = sub, handler_index = 1),
+    class = "dta_file_is_directory"
+  )
+  # A directory named like an archive is a directory, not a container.
+  zipdir <- file.path(dir, "x.zip")
+  dir.create(zipdir)
+  expect_error(
+    load_file(ds, file = zipdir, handler_index = 1),
+    class = "dta_file_is_directory"
+  )
+
+  ds <- load_file(ds, file = path, handler_index = 1)
+  expect_equal(ds@file_paths, path)
+})
+
 test_that("load_file() aborts on an out-of-range handler_index", {
   h <- DTAFileAny(filename = "any.txt")
   ds <- DTADataSetFile(id = "delivery", files = list(h))

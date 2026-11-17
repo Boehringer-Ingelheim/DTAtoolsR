@@ -24,6 +24,7 @@ The validated \code{file} path.
 Both generics accept the same arguments and must reject the same malformed
 input the same way before handing off to their respective \verb{*_execution()}
 method -- factored out here so the two stay in sync rather than drifting,
-as two independent copies of the same checks eventually do.
+as two independent copies of the same checks eventually do. A path that is
+a directory is refused with class \code{dta_file_is_directory}.
 }
 \keyword{internal}

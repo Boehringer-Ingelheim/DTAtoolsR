@@ -621,6 +621,13 @@ test_that("a .zip path is refused by load_file() before any head is read", {
   expect_error(load_file(ds, file = zip_path), class = "dta_load_file_container")
 })
 
+test_that("load_file() refuses a directory the handler's name would accept", {
+  dir <- file.path(withr::local_tempdir(), "m.tsv")
+  dir.create(dir)
+  writeLines("\tS1\nr1\t1", file.path(dir, "inner.tsv"))
+  expect_error(load_file(mxd_ds(), file = dir), class = "dta_file_is_directory")
+})
+
 test_that("load_delivery() binds a matrix from a zip and container_findings() sees it recorded", {
   dta <- DTA(datasets = list(mxd_ds()))
   z <- cont_zip(list("m.tsv" = "\tS1\tS2\nr1\t1\t2\nr2\t3\t4\n"), "delivery.zip")

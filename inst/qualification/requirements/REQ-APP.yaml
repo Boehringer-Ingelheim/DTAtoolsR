@@ -769,3 +769,28 @@ requirements:
     source: >
       PLAN-matrix-format-review.md 6;
       inst/shiny/dta_app/R/utils_dta.R (dta_matrix_needs_reload)
+
+  - id: REQ-APP-050
+    text: >
+      The application shall act on a file-input value only when it is a data
+      frame in which every file path names a file that exists and is not a
+      directory, located at
+      <R session temporary directory>/<24 lowercase hexadecimal
+      characters>/<digits>[.<alphanumeric extension>]. For any other value (not
+      a data frame, a path outside such a folder, a directory, a file that does
+      not exist) it shall read nothing, load nothing and leave the loaded
+      document unchanged.
+    risk: high
+    category: security
+    covers: [run_dta_app]
+    source: >
+      inst/shiny/dta_app/R/utils_dta.R (dta_upload_value_problem,
+      dta_stage_upload); inst/shiny/dta_app/app.R (accept_upload)
+    notes: >
+      A file input's value carries a server path, and a client that writes the
+      value itself could name any readable file. The application additionally
+      refuses any value that arrived as a client input message.
+      shiny::testServer cannot deliver one, so that binding rests on the
+      developer suite's wiring and Shiny-contract tests
+      (tests/testthat/test-shinyapp-upload-guard.R) and on a browser run, not on
+      this suite. This requirement is verified here for the value itself.

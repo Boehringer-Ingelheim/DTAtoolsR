@@ -114,10 +114,7 @@ skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
 
-agreement_file_input <- function(filename) {
-  path <- app_fixture_path(filename)
-  data.frame(name = filename, size = file.size(path), type = "", datapath = path, stringsAsFactors = FALSE)
-}
+agreement_file_input <- function(filename) app_upload_value(app_fixture_path(filename), filename)
 
 test_that("the real section editor adds, edits, reorders and confirms deletion by stable ID", {
   shiny::testServer(.shiny_app_dir(), {

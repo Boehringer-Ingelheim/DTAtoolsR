@@ -608,3 +608,20 @@ requirements:
     notes: >
       Wide matrix deliveries (tens of thousands of samples) made the header
       row exceed the 1 MiB window in which a quoted line break is looked for.
+
+  - id: REQ-FILE-044
+    text: >
+      read_file(), open_file() and load_file() shall refuse a path that names a
+      directory before any reader runs: no file below that directory shall be
+      read and the message shall name none of them; when the handler accepts the
+      directory's name the condition shall be of class dta_file_is_directory. A
+      regular file in the same directory shall still be read.
+    risk: high
+    category: security
+    covers: [read_file, open_file, load_file]
+    source: R/DTAFile-class.R; R/DTADataSetFile-class.R; R/DTADataSetMatrix-class.R
+    notes: >
+      A directory passes a file-exists test, so a reader handed one could open
+      or enumerate files the caller never named, and its error would name one
+      of them. Evidence of "no file below the directory was read" is the
+      condition class and the absence of any member's name from its message.

@@ -1632,6 +1632,22 @@ server <- function(input, output, session) {
     owned[[kind]] <<- unique(c(owned[[kind]], path))
     assign(session$token, unlist(owned, use.names = FALSE), envir = .dta_live_session_paths)
   }
+
+  # See dta_upload_guard_install for why a file-input value is not trusted
+  # until the guard has seen it. accept_upload() calls take() first so a mark is
+  # consumed even when the value is also malformed. No path and no reason is
+  # echoed to the user.
+  upload_guard <- dta_upload_guard_install(
+    dta_upload_guard(), session, isolate(reactiveValuesToList(input))
+  )
+  accept_upload <- function(id, value) {
+    client_sent <- upload_guard$take(id)
+    if (!client_sent && is.null(dta_upload_value_problem(value))) {
+      return(TRUE)
+    }
+    showNotification("That is not a file uploaded in this session, so it was not opened.", type = "error")
+    FALSE
+  }
   try(dta_sweep_session_files(), silent = TRUE)
   session$onSessionEnded(function() {
     unlink(owned$export, force = TRUE)
@@ -1930,7 +1946,13 @@ server <- function(input, output, session) {
   # document with no ancestor at all, same as a template with no carry-over
   # feature ever had.
   observeEvent(input$tmpl_carry_file, {
-    rv$tmpl_carry_upload <- input$tmpl_carry_file
+    v <- input$tmpl_carry_file
+    if (!is.null(v) && !accept_upload("tmpl_carry_file", v)) {
+      session$sendCustomMessage("dta_reset_fileinput", "tmpl_carry_file")
+      rv$tmpl_carry_upload <- NULL
+      return()
+    }
+    rv$tmpl_carry_upload <- v
   })
 
   resolve_carry_over <- function() {
@@ -2091,6 +2113,12 @@ server <- function(input, output, session) {
   # --- landing: load a DTA YAML ------------------------------------------
   observeEvent(input$dta_file, {
     f <- input$dta_file
+    # Ask the guard first so a client mark is consumed even for a value that
+    # req() would drop; observeEvent already ignores NULL.
+    if (!accept_upload("dta_file", f)) {
+      session$sendCustomMessage("dta_reset_fileinput", "dta_file")
+      return()
+    }
     req(f)
     txt <- tryCatch(paste(readLines(f$datapath, warn = FALSE), collapse = "\n"),
       error = function(e) NULL
@@ -3316,7 +3344,12 @@ server <- function(input, output, session) {
       # stage the bytes under the ORIGINAL name first, else a valid file is
       # rejected inside load_file() (failure mode F7).
       staged <- dta_stage_upload(dp, nm)
-      if (!identical(staged, dp)) own("upload", dirname(staged))
+      if (is.na(staged)) {
+        rejected <- c(rejected, sprintf("'%s' (could not be staged)", nm))
+        rej_recs[[length(rej_recs) + 1L]] <- list(file = nm, table = tbl, reason = "could not be staged", slot = one_slot)
+        next
+      }
+      own("upload", dirname(staged))
       before <- dta_dataset_content_count(dta_get_dataset(rv$dta, dsname))
       res <- dta_load_file(
         rv$dta,
@@ -3516,9 +3549,24 @@ server <- function(input, output, session) {
     if (is.null(staged)) {
       staged <- vapply(seq_len(nrow(fileinfo)), function(r) {
         s <- dta_stage_upload(fileinfo$datapath[r], fileinfo$name[r])
-        if (!identical(s, fileinfo$datapath[r])) own("upload", dirname(s))
+        if (!is.na(s)) own("upload", dirname(s))
         s
       }, character(1))
+      # A file that could not be staged (no longer a file that exists and is not a directory) is dropped
+      # here, before anything reads it, and reported like the empty ones above.
+      unstaged <- is.na(staged)
+      if (any(unstaged)) {
+        if (all(unstaged)) {
+          showNotification("The delivery is empty or was not transferred completely.", type = "error")
+          return(invisible())
+        }
+        showNotification(sprintf(
+          "Not loaded (could not be staged): %s",
+          paste(fileinfo$name[unstaged], collapse = ", ")
+        ), type = "warning", duration = 10)
+        fileinfo <- fileinfo[!unstaged, , drop = FALSE]
+        staged <- staged[!unstaged]
+      }
     }
     copies <- staged[staged != fileinfo$datapath] # our own staged copies, never Shiny's upload file
     exdir <- tempfile("dta_upload_delivery_")
@@ -3764,7 +3812,12 @@ server <- function(input, output, session) {
             HI <- hi
             observeEvent(input[[UP]],
               {
-                handle_upload(DSIDX, HI, input[[UP]])
+                v <- input[[UP]]
+                if (!is.null(v) && !accept_upload(UP, v)) {
+                  session$sendCustomMessage("dta_reset_fileinput", UP)
+                  return()
+                }
+                handle_upload(DSIDX, HI, v)
               },
               ignoreInit = TRUE
             )
@@ -3810,8 +3863,15 @@ server <- function(input, output, session) {
   # --- delivery: the sidebar's drop zone and the ambiguity dialog ----------
   observeEvent(input$delivery_files,
     {
+      v <- input$delivery_files
+      # Before req(rv$dta): the guard's mark for this value is consumed even when
+      # no document is open, so it cannot refuse a later genuine upload.
+      if (!accept_upload("delivery_files", v)) {
+        session$sendCustomMessage("dta_reset_fileinput", "delivery_files")
+        return()
+      }
       req(rv$dta)
-      handle_delivery(input$delivery_files)
+      handle_delivery(v)
       session$sendCustomMessage("dta_reset_fileinput", "delivery_files")
     },
     ignoreInit = TRUE

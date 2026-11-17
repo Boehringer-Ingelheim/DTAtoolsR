@@ -174,6 +174,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   vector" when both sides have nothing to compare, for example two documents
   with no datasets and no metadata fields. It now reports no differences.
 
+### Security
+
+- **`read_file()`, `open_file()` and `load_file()` refuse a directory.** A path
+  that is a directory passed the existence check, so a delimited-text reader
+  was handed the directory and its error message named a file inside it and
+  quoted one of its rows, and a file dataset bound the directory as if it were
+  a delivered file. Such a path is now refused before any reader runs, and
+  aborts with a condition of class `dta_file_is_directory` when the handler
+  accepts the directory's name (for a tabular or file dataset, a name the
+  handler does not accept is still refused by the name check first).
+- **The app's upload controls only act on files that were uploaded in the current session.** A
+  browser can set the value of an upload control itself, and the app used the
+  file path in that value as given, so a user could make the server read a file
+  they had never uploaded and see its content. A value that did not arrive
+  through an upload of the session, or that does not point at a file in one of
+  Shiny's own upload folders, is now refused before anything is read.
+- **An uploaded file is always staged inside its own folder.** An upload whose
+  name was `..` was staged into the temporary directory shared by all sessions,
+  and a path that could not be copied was passed on unchanged; either way the
+  loader could be handed that directory. The staged copy now keeps to its own
+  folder under a safe name, and only a path to a file that exists and is not a directory is accepted.
+
 ## [0.27.0] - 2026-11-12
 
 ### Added
