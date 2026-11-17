@@ -335,7 +335,7 @@ dta_matches_filename_base <- function(x, file) {
     # `x@filename` may hold several patterns, and the result is one logical per
     # pattern. Folding with OR over the candidates preserves that shape.
     Reduce(`|`, lapply(candidates, function(nm) {
-      stringr::str_detect(nm, x@filename)
+      dta_str_detect(nm, x@filename)
     }))
   } else {
     any(candidates %in% x@filename)
@@ -411,6 +411,12 @@ dta_container_value_problem <- function(value) {
   }
   if (is.na(dta_container_kind(value))) {
     return(sprintf("The container '%s' must name a .zip archive or a .xpt SAS transport file.", value))
+  }
+  # Each `*` is a backtracking choice point when two globs are compared for
+  # overlap (file_name_conflicts()): matching a long literal costs about
+  # length^stars steps. Real names use one or two.
+  if (nchar(gsub("[^*]", "", value)) > 3L) {
+    return(sprintf("The container '%s' has more than three `*`; use fewer wildcards.", value))
   }
   NULL
 }

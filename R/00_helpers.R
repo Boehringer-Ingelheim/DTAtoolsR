@@ -877,3 +877,62 @@ DTAFileFactory <- function(
     cli_abort("Filetype '{type}' not implemented.")
   )
 }
+
+# ---- bounded regex matching ---------------------------------------------------
+
+# A pattern a specification supplies (a file entry with `pattern: true`, a
+# container glob turned into a regex) is run by ICU, whose backtracking engine
+# has NO time or stack limit unless one is asked for: `^(a+)+$` against a short
+# name that ends in `!` keeps the R process busy for as long as the name is
+# long. This is the one place those patterns are matched, with both limits on.
+# A pattern that hits a limit matches nothing and says so in a warning of class
+# `dta_regex_limit`; any other failure (an invalid pattern) still errors as it
+# did before. The limits are ICU's own units (about a millisecond per step):
+# an ordinary file-name pattern takes a few hundred steps.
+dta_regex_time_limit <- 1000L
+dta_regex_stack_limit <- 1e6
+
+dta_str_detect <- function(string, pattern) {
+  if (length(pattern) != 1L) {
+    # stringr recycles a single string over several patterns; keep that.
+    n <- if (length(string) == 0L || length(pattern) == 0L) 0L else max(length(string), length(pattern))
+    string <- rep_len(string, n)
+    pattern <- rep_len(pattern, n)
+    return(vapply(seq_len(n), function(i) dta_str_detect(string[i], pattern[i]), logical(1)))
+  }
+  tryCatch(
+    stringr::str_detect(
+      string,
+      stringr::regex(pattern, time_limit = dta_regex_time_limit, stack_limit = dta_regex_stack_limit)
+    ),
+    error = function(e) {
+      # ICU names its limit errors by code, which is not translated.
+      if (!grepl("U_REGEX_(TIME_OUT|STACK_OVERFLOW)", conditionMessage(e))) {
+        stop(e)
+      }
+      # One string that trips the limit must not hide the others.
+      if (length(string) > 1L) {
+        return(vapply(string, function(s) dta_str_detect(s, pattern), logical(1), USE.NAMES = FALSE))
+      }
+      cli::cli_warn(
+        "The pattern {.val {pattern}} took too long to match and was treated as not matching.",
+        class = "dta_regex_limit"
+      )
+      rep(FALSE, length(string))
+    }
+  )
+}
+
+# ---- where the package's own temporary copies go -------------------------------
+
+# The directory for the large copies the package writes while it works on a
+# file: the UTF-8 copy of a non-UTF-8 delimited file and the spill of row errors
+# past the in-memory cap. `tempdir()` unless `DTAtools.temp_dir` names an
+# existing directory. A host that serves several sessions from one process
+# (the Shiny app) points it, for the duration of one call, at a directory it
+# can delete when the session starts over or the retention window ends; a copy
+# in `tempdir()` lives as long as the R process.
+dta_temp_dir <- function() {
+  d <- getOption("DTAtools.temp_dir")
+  if (is.character(d) && length(d) == 1L && !is.na(d) && nzchar(d) && dir.exists(d)) d else tempdir()
+}

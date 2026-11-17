@@ -1627,14 +1627,44 @@ server <- function(input, output, session) {
   # deleted when the session ends (nothing can download them after that);
   # the autosave, its tables and staged uploads stay for 'Restore previous
   # session' until the sweep ages them out.
-  owned <- list(export = character(0), upload = character(0), autosave = character(0))
+  owned <- list(
+    export = character(0), upload = character(0), autosave = character(0),
+    # Where the package writes its working copies for this session; see
+    # dta_session_scratch_path(). Start over empties it; it is never reset.
+    scratch = dta_session_scratch_path(session$token)
+  )
+  # The `datapath` strings a CLIENT typed, as opposed to the ones Shiny's own
+  # upload channel produced (see dta_track_client_paths()). Every upload input
+  # (dta_file, tmpl_carry_file, the slots, delivery_files) is read only after
+  # upload_refused() has passed it: a fileInput id can be set by any websocket
+  # message, so without that check a client names the file the server reads.
+  client_paths <- dta_track_client_paths(session, isolate(shiny::reactiveValuesToList(input)))
+  upload_refused <- function(f, one = FALSE) {
+    if (dta_upload_trusted(f, client_paths, one = one)) {
+      return(FALSE)
+    }
+    showNotification("That upload was not accepted: this session did not receive it.", type = "error")
+    TRUE
+  }
   own <- function(kind, path) {
     owned[[kind]] <<- unique(c(owned[[kind]], path))
     assign(session$token, unlist(owned, use.names = FALSE), envir = .dta_live_session_paths)
   }
+  own("scratch", owned$scratch)
   try(dta_sweep_session_files(), silent = TRUE)
+  try(dta_worker_heartbeat(), silent = TRUE)
+  try(dta_sweep_dead_workers(), silent = TRUE)
+  # A session that stays open for longer than the retention window keeps this
+  # worker's directory out of the sibling sweep.
+  observe({
+    shiny::invalidateLater(dta_heartbeat_interval_ms())
+    try(dta_worker_heartbeat(), silent = TRUE)
+  })
   session$onSessionEnded(function() {
     unlink(owned$export, force = TRUE)
+    # The package's working copies (a UTF-8 copy, spilled error rows) are of no
+    # use to Restore, which re-reads files and takes tables from the autosave.
+    unlink(owned$scratch, recursive = TRUE, force = TRUE)
     # Restore re-reads file datasets from their files; tables come back from the
     # autosave's own Arrow copies (dta_restore_session(), dta_table_store()). So
     # only the extracted files a file dataset uses are kept for "Restore previous session".
@@ -1930,7 +1960,9 @@ server <- function(input, output, session) {
   # document with no ancestor at all, same as a template with no carry-over
   # feature ever had.
   observeEvent(input$tmpl_carry_file, {
-    rv$tmpl_carry_upload <- input$tmpl_carry_file
+    f <- input$tmpl_carry_file
+    # A value this session did not receive is dropped, so "Choose a file" shows.
+    rv$tmpl_carry_upload <- if (dta_upload_trusted(f, client_paths, one = TRUE)) f else NULL
   })
 
   resolve_carry_over <- function() {
@@ -2092,6 +2124,9 @@ server <- function(input, output, session) {
   observeEvent(input$dta_file, {
     f <- input$dta_file
     req(f)
+    if (upload_refused(f, one = TRUE)) {
+      return()
+    }
     txt <- tryCatch(paste(readLines(f$datapath, warn = FALSE), collapse = "\n"),
       error = function(e) NULL
     )
@@ -3200,6 +3235,9 @@ server <- function(input, output, session) {
     if (is.null(fileinfo)) {
       return()
     }
+    if (upload_refused(fileinfo)) {
+      return()
+    }
     names_ds <- dta_dataset_names(rv$dta)
     if (ds_idx < 1 || ds_idx > length(names_ds)) {
       return()
@@ -3315,8 +3353,13 @@ server <- function(input, output, session) {
       # like "0.csv"; matches_filename()/read_file() key off basename(file), so
       # stage the bytes under the ORIGINAL name first, else a valid file is
       # rejected inside load_file() (failure mode F7).
-      staged <- dta_stage_upload(dp, nm)
-      if (!identical(staged, dp)) own("upload", dirname(staged))
+      staged <- tryCatch(dta_stage_upload(dp, nm), dta_stage_failed = function(e) NULL)
+      if (is.null(staged)) {
+        rejected <- c(rejected, sprintf("'%s' (could not be read from the upload)", nm))
+        rej_recs[[length(rej_recs) + 1L]] <- list(file = nm, table = tbl, reason = "could not be read from the upload", slot = one_slot)
+        next
+      }
+      own("upload", dirname(staged))
       before <- dta_dataset_content_count(dta_get_dataset(rv$dta, dsname))
       res <- dta_load_file(
         rv$dta,
@@ -3486,6 +3529,9 @@ server <- function(input, output, session) {
   # ambiguity dialog asked about; `origin` is "sidebar" or "slot".
   handle_delivery <- function(fileinfo, datasets = NULL, route = NULL, staged = NULL, origin = "sidebar") {
     if (is.null(staged)) {
+      if (upload_refused(fileinfo)) {
+        return(invisible())
+      }
       sz <- suppressWarnings(as.numeric(fileinfo$size))
       ok <- !is.na(sz) & sz > 0
       if (!any(ok)) {
@@ -3514,11 +3560,17 @@ server <- function(input, output, session) {
       return(invisible())
     }
     if (is.null(staged)) {
-      staged <- vapply(seq_len(nrow(fileinfo)), function(r) {
-        s <- dta_stage_upload(fileinfo$datapath[r], fileinfo$name[r])
-        if (!identical(s, fileinfo$datapath[r])) own("upload", dirname(s))
-        s
-      }, character(1))
+      staged <- character(0)
+      for (r in seq_len(nrow(fileinfo))) {
+        s <- tryCatch(dta_stage_upload(fileinfo$datapath[r], fileinfo$name[r]), dta_stage_failed = function(e) NULL)
+        if (is.null(s)) {
+          unlink(dirname(staged), recursive = TRUE)
+          showNotification("The delivery could not be read from the upload.", type = "error")
+          return(invisible())
+        }
+        own("upload", dirname(s))
+        staged <- c(staged, s)
+      }
     }
     copies <- staged[staged != fileinfo$datapath] # our own staged copies, never Shiny's upload file
     exdir <- tempfile("dta_upload_delivery_")
@@ -10094,7 +10146,7 @@ server <- function(input, output, session) {
     try(unlink(session_file() %||% character(0)), silent = TRUE)
     try(session_tables()$clear(), silent = TRUE)
     # ... except what a second tab that restored the same autosave still owns.
-    unlink(dta_not_owned_elsewhere(c(owned$upload, owned$export), session$token),
+    unlink(dta_not_owned_elsewhere(c(owned$upload, owned$export, owned$scratch), session$token),
       recursive = TRUE, force = TRUE
     )
     owned$upload <<- character(0)

@@ -474,7 +474,9 @@ dta_refuse_wide_encoding <- function(encoding, path) {
 #' That is what the block boundary is for. Each block is trimmed back to its
 #' last `0x0A` byte and the remainder carried into the next one, so the
 #' converter never cuts a line and never has to decide what a line ending is; a
-#' line longer than one block simply grows the buffer until a newline arrives.
+#' line longer than one block grows the buffer until a newline arrives, up to 64
+#' blocks (256 MiB by default), past which the conversion aborts with class
+#' `dta_transcode_line_too_long`.
 #' The pieces a block is then converted in (see [dta_transcode_spans()]) are cut
 #' on newline bytes for the same reason, and rejoined verbatim, so they are a
 #' fact about how fast iconv runs and not about what the copy contains.
@@ -506,7 +508,9 @@ dta_refuse_wide_encoding <- function(encoding, path) {
 #' latin1 that is mostly ASCII, up to twice it for text that is wholly
 #' accented, and the full decoded size for a `.gz` source. Free space under
 #' `tempdir()`, not memory, is therefore what a very large non-UTF-8 delivery
-#' needs.
+#' needs. The copy may not grow past `DTAtools.container_max_bytes`; the
+#' conversion aborts with class `dta_container_too_large` and deletes the
+#' partial copy.
 #'
 #' @param path Character path to the file, optionally gzip-compressed.
 #' @param encoding The encoding the file is declared to be in, as accepted by
@@ -548,7 +552,12 @@ dta_transcode_to_utf8 <- function(path, encoding) {
     }
   }
 
-  destination <- tempfile(fileext = ".csv")
+  # In the caller's scratch directory when it names one (the Shiny app gives each
+  # session its own, which Start over and the retention sweep remove), else
+  # tempdir(). A copy whose file is gone is dropped from the cache here, so the
+  # cache cannot grow by one entry per upload for the life of the process.
+  dta_transcode_cache_prune()
+  destination <- tempfile("dta_transcode_", tmpdir = dta_temp_dir(), fileext = ".csv")
   block <- dta_transcode_block_bytes()
 
   input <- if (tolower(tools::file_ext(path)) %in% dta_compression_extensions()) {
@@ -577,6 +586,15 @@ dta_transcode_to_utf8 <- function(path, encoding) {
   # precisely because this is carried rather than terminated: nothing here
   # decides what a line ending is.
   pending <- list()
+  pending_bytes <- 0
+
+  # Two bounds, because a gzip stream is no measure of what it holds (deflate
+  # reaches about 1000:1): the copy may not outgrow DTAtools.container_max_bytes
+  # (the bytes one call may write; the app sets it for every load), and one
+  # newline-free stretch, held whole in memory until a line ends, may not outgrow
+  # 64 blocks (256 MiB by default). A line that long is not a delimited file.
+  max_copy <- dta_container_limits()$max_bytes
+  max_line <- 64 * block
 
   repeat {
     chunk <- readBin(input, "raw", n = block)
@@ -587,11 +605,22 @@ dta_transcode_to_utf8 <- function(path, encoding) {
     # Everything carried over holds no line break, so only the new chunk can.
     cut <- dta_last_newline(chunk)
     pending[[length(pending) + 1L]] <- chunk
+    pending_bytes <- pending_bytes + length(chunk)
 
     if (is.na(cut)) {
       # A single stretch longer than one block. Hold everything and read on: the
       # alternative is cutting a line in half, and with it any multi-byte
       # character that happens to straddle the cut.
+      if (pending_bytes > max_line) {
+        cli::cli_abort(
+          c(
+            "{.path {path}} cannot be converted to UTF-8: it holds a line longer than {dta_format_count(max_line)} bytes.",
+            "x" = "No line ends in the {dta_format_count(pending_bytes)} bytes read from offset {dta_format_count(bytes_done)}.",
+            "i" = "A delimited file whose line is this long is damaged, or is not delimited text."
+          ),
+          class = "dta_transcode_line_too_long", path = path
+        )
+      }
       next
     }
 
@@ -602,6 +631,10 @@ dta_transcode_to_utf8 <- function(path, encoding) {
       buffer[seq_len(cut)], output, encoding, path, bytes_done
     )
     bytes_done <- bytes_done + cut
+    if (bytes_done > max_copy) {
+      dta_container_too_large(path, "DTAtools.container_max_bytes", bytes_done, max_copy)
+    }
+    pending_bytes <- length(buffer) - cut
     pending <- if (cut < length(buffer)) {
       list(buffer[(cut + 1L):length(buffer)])
     } else {
@@ -870,6 +903,15 @@ dta_first_undecodable_byte <- function(bytes, encoding, offset) {
   }
 
   offset + 1
+}
+
+dta_transcode_cache_prune <- function() {
+  cache <- `__DTAtools_transcode_cache__`
+  for (key in ls(envir = cache, all.names = TRUE)) {
+    entry <- get(key, envir = cache, inherits = FALSE)
+    if (!is.list(entry) || !file.exists(entry$copy)) rm(list = key, envir = cache)
+  }
+  invisible(NULL)
 }
 
 #' @title Drop Every Cached Copy of One Delivery
@@ -1288,6 +1330,10 @@ dta_header_layout <- function(path, quote = '"', delim = ",") {
   list(blank = h$blank, multiline = isTRUE(h$multiline[1L]))
 }
 
+# The most fields a matrix header or first data row may have (the supported
+# scale is 60,000 data labels).
+dta_matrix_max_header_fields <- 250000L
+
 #' @title The Header Fields of a Matrix File, Verbatim
 #' @description
 #' Tokenises the first two records of a delimited file for a matrix dataset,
@@ -1346,6 +1392,18 @@ dta_matrix_read_head <- function(handler, path) {
     on.exit(unlink(tmp), add = TRUE)
     writeBin(c(bytes, as.raw(0x0a)), tmp)
     k <- sum(bytes == charToRaw(delim)[[1L]]) + 1L
+    # The schema below has one named field per delimiter byte, quoted ones
+    # included, so a record of nothing but delimiters would cost one schema
+    # field per byte of the file. No real header comes near the cap.
+    if (k > dta_matrix_max_header_fields) {
+      cli::cli_abort(
+        c(
+          "The header of {.path {path}} has more than {format(dta_matrix_max_header_fields, scientific = FALSE, big.mark = ',')} fields.",
+          "i" = "Check the separator: this may not be a matrix file."
+        ),
+        class = "dta_matrix_header_too_wide"
+      )
+    }
     nms <- paste0("f", seq_len(k) - 1L)
     # One schema call on a named list: the names f0.. are never empty.
     col_types <- arrow::schema(stats::setNames(rep(list(arrow::binary()), k), nms))

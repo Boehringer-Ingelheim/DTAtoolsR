@@ -141,6 +141,73 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   a file loads in its place. Before, the reason was run together into one line
   and disappeared after ten seconds.
 
+### Security
+
+- **The app reads only uploads this session received.** A file input's value
+  can be set by any websocket message, so a browser could name a server path or
+  an `http://` URL as the `datapath` of the "load a YAML" or "carry metadata
+  over" input and have the server read it (a file that is not a valid
+  specification was shown back in the failure dialog). The app now refuses any
+  `datapath` the client typed, any URL, and anything that is not a regular
+  file, for every upload input. Real uploads, which Shiny stores itself, are
+  unaffected.
+- **Staging an upload cannot leave its own directory.** A file named `..` was
+  copied into the shared `tempdir()`, and a failed copy handed back the original
+  path (a directory, in the worst case). Staging now refuses `.` and `..` and
+  anything that is not a regular file, and a failed copy rejects the file.
+- **Compressed uploads are bounded by what they inflate to.** A loose `.csv.gz`
+  or `.sas7bdat.gz` dropped on a slot was read whole with no limit on its
+  inflated size, unlike the same file inside a delivery; `load_file()` now
+  refuses a gzip file that inflates past `DTAtools.container_max_member_bytes`
+  before an in-memory read, and the app runs every load under its own limits (2
+  GB per file, 10 GB written). The SAS transport scan applied
+  `DTAtools.container_max_bytes` to gzip streams only, so a bzip2 or xz `.xpt`
+  was uncapped; it now applies to any stream that inflates past its size on
+  disk. The UTF-8 conversion of a non-UTF-8 file stops at
+  `DTAtools.container_max_bytes` and removes its partial copy, and refuses a
+  single line longer than 64 conversion blocks (256 MiB by default) with a
+  condition of class `dta_transcode_line_too_long`.
+- **A specification cannot hold the shared worker with sheer size.** The app
+  refused an alias-expanded YAML past a million values but not one that simply
+  declares a very large number of columns and rules, each of which is built and
+  linted several times per load; it now refuses a document with more than
+  10,000 columns and rules in total (`dta_app.max_spec_objects` raises it).
+  File-name patterns and container globs were matched by a regular-expression
+  engine with no time or stack limit, so a short pattern such as `^(a+)+$` kept
+  the process busy for as long as a name was long; they are now matched under
+  a step and stack limit, and a pattern that hits it matches nothing and
+  warns (class `dta_regex_limit`). A container glob may use at most three `*`.
+  A matrix header whose labels chain through the generated `<column n>` names
+  was renamed with one pass over all labels per link; it is now one pass, and
+  a header or first row of more than 250,000 fields is refused (class
+  `dta_matrix_header_too_wide`) before a schema is built from it.
+- **A specification cannot bind server paths.** A `paths:` key in a dataset
+  of a specification YAML (also `tables:` and `specs:`) became the paths a file
+  dataset checks, so the check and the report revealed whether, and how large, any
+  file the server could see was. The linter now reports it as an error
+  (`dataset_invalid`) and building a dataset from a list refuses it (class
+  `dta_dataset_runtime_key`); `DTADataSetFile(paths = )` in R is unchanged.
+- **The app's working copies are removed with the session's other files.** The
+  UTF-8 copy of a non-UTF-8 file and the spilled rows of a check with more
+  than `max_errors` errors were written to the shared `tempdir()` and lived as
+  long as the R process, outside "Start over", the 24-hour sweep and the other
+  retention. The app now gives each session a scratch directory for them
+  (`DTAtools.temp_dir`, set for the duration of a load or check), which "Start
+  over" deletes, the sweep ages out and the sweep spares while the session
+  lives; `dta_transcode_` copies and `dta_error_spill_` directories left in
+  `tempdir()` are swept too, and a copy that is gone no longer leaves a cache
+  entry behind.
+- **A worker that ended without cleaning up no longer leaves its files
+  forever.** The sweep only saw the temp directory of the process that ran it,
+  so the autosave, staged uploads and extractions of a worker that was killed or
+  recycled stayed for good. Every worker now leaves a heartbeat file in its temp
+  directory (touched at each session start and hourly while one is open), and
+  when a session starts the sweep also visits the `Rtmp*` directories beside its
+  own that hold such a file with a heartbeat older than the retention window,
+  removing what carries the app's prefixes and is older than the window, and the
+  directory itself once nothing else is left in it. Directories without the
+  heartbeat are never touched.
+
 ### Fixed
 
 - **The app's pickers no longer stop working after the validation messages

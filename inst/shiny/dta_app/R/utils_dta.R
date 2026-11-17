@@ -209,6 +209,58 @@ dta_check_yaml_size <- function(x, max_leaves = 1e6) {
     }
   }
   walk(x)
+  dta_check_spec_cardinality(x)
+  invisible(TRUE)
+}
+
+# Reject a spec that declares an absurd NUMBER of columns and rules. The leaf
+# count above does not bound it: a column or rule costs a few milliseconds to
+# build and lint, and the app lints a loaded document several times on the one
+# synchronous worker, so ~1e5 objects (a few MB of YAML, well inside the leaf
+# limit) would hold every other session for many minutes. Counts the
+# `columns:`/`rules:` entries of every dataset (or of a bare dataset YAML) and
+# refuses past `max_objects`, so a bomb costs one pass over the dataset list.
+dta_max_spec_objects <- function() {
+  n <- suppressWarnings(as.numeric(getOption("dta_app.max_spec_objects", 10000)))
+  if (length(n) != 1L || is.na(n) || n < 1) 10000 else n
+}
+
+dta_check_spec_cardinality <- function(x, max_objects = dta_max_spec_objects()) {
+  if (!is.list(x)) {
+    return(invisible(TRUE))
+  }
+  count <- function(ds) {
+    if (!is.list(ds)) {
+      return(0)
+    }
+    n <- 0
+    for (k in c("columns", "rules", "files")) {
+      # `files:` is one mapping or a list of entries; only the list is a count.
+      if (is.list(ds[[k]]) && (k != "files" || is.null(names(ds[[k]])))) n <- n + length(ds[[k]])
+    }
+    n
+  }
+  # A document (`datasets:`), a bare dataset, or a bare list of datasets.
+  datasets <- if (is.list(x[["datasets"]])) {
+    x[["datasets"]]
+  } else if (is.null(names(x))) {
+    x
+  } else {
+    list(x)
+  }
+  total <- 0
+  for (ds in datasets) {
+    total <- total + count(ds)
+    if (total > max_objects) {
+      stop(
+        "The specification declares more than ",
+        format(max_objects, scientific = FALSE, big.mark = ""),
+        " columns and rules in total, which is too many to check in a shared ",
+        "session. Split it into several documents.",
+        call. = FALSE
+      )
+    }
+  }
   invisible(TRUE)
 }
 
@@ -459,20 +511,99 @@ handler_matches <- function(h, filename) {
 # upload name. Shiny stores uploads as "0.csv", "1.csv", ... (input$file$datapath);
 # matches_filename() / read_file() key off basename(file), so passing the raw
 # datapath makes the package see "0.csv" -- which matches no handler pattern and
-# a valid file is wrongly rejected inside load_file(). Returns the staged path
-# (or the original datapath on any copy failure).
+# a valid file is wrongly rejected inside load_file(). Returns the staged path: a
+# regular file in a fresh directory of its own, never anywhere else. Anything
+# less aborts with class `dta_stage_failed` -- a name that is not one component
+# (basename() hands back "." and ".." unchanged, and ".." is the shared tempdir()
+# that holds every session's files), a source that is not a regular file, a copy
+# that failed -- because falling back to the original datapath handed callers a
+# path (or a directory) that is not theirs to read or delete.
 dta_stage_upload <- function(datapath, filename) {
   base <- basename(filename %||% "")
   if (!nzchar(base)) base <- basename(datapath)
+  stage_failed <- function(why) cli::cli_abort(why, class = "dta_stage_failed")
+  if (base %in% c(".", "..")) {
+    stage_failed("The file name {.val {base}} is not a file name.")
+  }
+  if (!isTRUE(utils::file_test("-f", datapath))) {
+    stage_failed("The upload is not a regular file.")
+  }
   target_dir <- tempfile("dta_upload_")
-  tryCatch(
-    {
-      dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)
-      target <- file.path(target_dir, base)
-      if (isTRUE(file.copy(datapath, target, overwrite = TRUE))) target else datapath
-    },
-    error = function(e) datapath
-  )
+  on.exit(if (!is.null(target_dir)) unlink(target_dir, recursive = TRUE), add = TRUE)
+  dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)
+  target <- file.path(target_dir, base)
+  copied <- tryCatch(isTRUE(file.copy(datapath, target, overwrite = TRUE)), error = function(e) FALSE)
+  inside <- utils::file_test("-f", target) &&
+    identical(
+      normalizePath(dirname(target), winslash = "/"),
+      normalizePath(target_dir, winslash = "/")
+    )
+  if (!copied || !inside) {
+    stage_failed("The upload could not be copied.")
+  }
+  target_dir <- NULL # staged: keep it
+  target
+}
+
+# ---- Which upload paths a session may read ---------------------------------
+# A fileInput's value arrives in one of two ways. Shiny's own upload channel
+# (`@uploadEnd`) stores the file under tempdir() and sets the input from the
+# server side; nothing a browser sends can name that path. But the SAME input id
+# can also be set by any websocket message, and Shiny binds a message value to an
+# id without checking that it came from an upload -- so a client can send
+# `datapath = "/etc/passwd"` (or an http:// URL: file() opens those too) for
+# `dta_file`, and the server would read it. Every value that arrives as a client
+# message passes through session$onInputReceived(); a real upload never does.
+# So the datapaths the CLIENT typed are exactly the ones to refuse, and what is
+# left is what this session's own uploads produced. (The message that opens the
+# session carries inputs before the server function runs, so those are noted at
+# start too: no upload can have happened by then.)
+#
+# `seen` holds a hash of every client-typed `datapath` string, exact and never
+# normalised. A session that cannot say where its input values came from (no
+# onInputReceived, and not shiny's test session) trusts nothing.
+dta_client_datapaths <- function(x, depth = 0L) {
+  if (!is.list(x) || depth > 4L) {
+    return(character(0))
+  }
+  own <- x[["datapath"]]
+  own <- if (is.null(own)) character(0) else as.character(unlist(own, use.names = FALSE))
+  c(own, unlist(lapply(x, dta_client_datapaths, depth = depth + 1L), use.names = FALSE))
+}
+
+dta_track_client_paths <- function(session, initial = list()) {
+  seen <- new.env(parent = emptyenv())
+  note <- function(values) {
+    for (p in dta_client_datapaths(values)) {
+      assign(rlang::hash(p), TRUE, envir = seen)
+    }
+    invisible()
+  }
+  note(initial)
+  if (is.function(session$onInputReceived)) {
+    session$onInputReceived(note)
+  } else if (!inherits(session, "MockShinySession")) {
+    attr(seen, "untracked") <- TRUE
+  }
+  seen
+}
+
+# TRUE when `f` (a fileInput value) is a data frame of uploads this session's own
+# upload channel produced: not typed by the client, not a URL, and a regular file.
+# `one` additionally demands a single row, for the inputs that take one file.
+dta_upload_trusted <- function(f, seen, one = FALSE) {
+  if (!is.data.frame(f) || nrow(f) < 1L || (one && nrow(f) != 1L) || !all(c("name", "datapath") %in% names(f))) {
+    return(FALSE)
+  }
+  dp <- f$datapath
+  if (!is.character(dp) || anyNA(dp) || !all(nzchar(dp)) || isTRUE(attr(seen, "untracked"))) {
+    return(FALSE)
+  }
+  if (any(grepl("^[A-Za-z][A-Za-z0-9+.-]*://", dp))) {
+    return(FALSE)
+  }
+  !any(vapply(dp, function(p) exists(rlang::hash(p), envir = seen, inherits = FALSE), logical(1))) &&
+    all(utils::file_test("-f", dp))
 }
 
 # Is a dropped file a delivery container? A .zip archive, or a SAS transport
@@ -587,8 +718,12 @@ dta_example_yaml_path <- function(filename) {
 # The load runs with cli.width = Inf so a failure reads as sentences broken only
 # between cli bullets, not wrapped at 80 columns. `display_name` replaces the
 # (temporary) upload path in the failure text with the name the user delivered.
+#
+# It runs under the app's container limits too (dta_app_container_options()), for
+# this call only: a loose upload reaches load_file() directly, so without them a
+# gzip file would be judged only by its size on disk.
 dta_load_file <- function(dta, dataset, file, handler_index, name = NULL, display_name = NULL) {
-  op <- options(cli.width = Inf)
+  op <- options(c(list(cli.width = Inf), dta_app_container_options()))
   on.exit(options(op), add = TRUE)
   # The default key belongs to the DATASET TYPE, not to this helper. A tabular
   # dataset names a table after the file with its extension stripped; a file
@@ -613,6 +748,10 @@ dta_load_file <- function(dta, dataset, file, handler_index, name = NULL, displa
     handler_index = handler_index,
     name = nm
   ))
+  # A refusal for size names an R option; the user gets the app's wording.
+  if (!isTRUE(r$ok) && is.character(r$error) && length(r$error) == 1L) {
+    r$error <- dta_app_reason(r$error)
+  }
   if (!isTRUE(r$ok) && !is.null(display_name) && nzchar(display_name) && !is.null(r$error)) {
     paths <- unique(c(
       file,
@@ -629,6 +768,8 @@ dta_load_file <- function(dta, dataset, file, handler_index, name = NULL, displa
 # Run validation for all datasets or one named dataset. Returns dta_try()
 # result whose value (on success) is the UPDATED dta object.
 dta_check <- function(dta, dataset = NULL) {
+  op <- options(dta_scratch_options())
+  on.exit(options(op), add = TRUE)
   # check(datasets = ) keeps the file-count findings of the datasets it does
   # not check (re-judged on the datasets as they are now), so the attribute it
   # returns is already complete; merging the prior rows in here as well would
@@ -4890,7 +5031,7 @@ dta_sweep_session_files <- function(dir = tempdir(), ttl = dta_session_ttl_secon
                                     keep = unlist(as.list(.dta_live_session_paths), use.names = FALSE),
                                     now = Sys.time()) {
   paths <- list.files(dir,
-    pattern = "^(dtatools_app_session_|dta_upload_|dta-export-)",
+    pattern = "^(dtatools_app_session_|dta_upload_|dta-export-|dta_scratch_|dta_transcode_|dta_error_spill_)",
     full.names = TRUE, all.files = TRUE
   )
   norm <- function(p) normalizePath(p, winslash = "/", mustWork = FALSE)
@@ -4899,6 +5040,71 @@ dta_sweep_session_files <- function(dir = tempdir(), ttl = dta_session_ttl_secon
   old <- paths[!is.na(age) & age > ttl]
   unlink(old, recursive = TRUE, force = TRUE)
   invisible(old)
+}
+
+# The sweep above only sees the temp directory of the process that runs it, and
+# a worker that is killed (or recycled, or loses its host) never runs it again:
+# its temp directory, with the autosave, staged uploads and extractions in it,
+# stays behind. So every worker that runs this app leaves a heartbeat file in
+# its temp directory, touched when a session starts and hourly while one is
+# open, and the sweep also visits the sibling temp directories (`Rtmp*` next to
+# this one) that hold such a file. A sibling whose heartbeat is older than the
+# retention window belongs to a worker that has not been serving a session for
+# that long, and is swept like this process's own: whatever carries the app's
+# prefixes and is older than the window goes; a directory left with nothing but
+# the heartbeat goes too. Directories without the heartbeat are never touched.
+dta_worker_heartbeat_name <- "dtatools_worker.heartbeat"
+
+dta_worker_heartbeat <- function(dir = tempdir()) {
+  f <- file.path(dir, dta_worker_heartbeat_name)
+  if (file.exists(f)) {
+    Sys.setFileTime(f, Sys.time())
+  } else {
+    writeLines(as.character(Sys.getpid()), f)
+  }
+  invisible(f)
+}
+
+# TRUE/FALSE when the platform can say whether process `pid` is running (a
+# /proc file system), NA when it cannot.
+dta_pid_alive <- function(pid) {
+  pid <- suppressWarnings(as.integer(pid))
+  if (length(pid) != 1L || is.na(pid) || !dir.exists("/proc/self")) {
+    return(NA)
+  }
+  dir.exists(file.path("/proc", pid))
+}
+
+# How often a session refreshes the heartbeat: hourly, and at least four times
+# per retention window, so a short window cannot outrun it.
+dta_heartbeat_interval_ms <- function(ttl = dta_session_ttl_seconds()) {
+  max(1, min(3600, ttl / 4)) * 1000
+}
+
+dta_sweep_dead_workers <- function(root = dirname(tempdir()), self = tempdir(),
+                                   ttl = dta_session_ttl_seconds(), now = Sys.time(),
+                                   alive = dta_pid_alive) {
+  norm <- function(p) normalizePath(p, winslash = "/", mustWork = FALSE)
+  dirs <- list.dirs(root, recursive = FALSE, full.names = TRUE)
+  dirs <- dirs[grepl("^Rtmp", basename(dirs)) & norm(dirs) != norm(self)]
+  swept <- character(0)
+  for (d in dirs) {
+    hb <- file.path(d, dta_worker_heartbeat_name)
+    age <- as.numeric(difftime(now, file.mtime(hb), units = "secs"))
+    if (!file.exists(hb) || is.na(age) || age <= ttl) next
+    # A process that is still running is idle, not dead: leave it alone. When
+    # the platform cannot tell, only files go, never the directory itself,
+    # which R does not recreate for a live process.
+    pid <- tryCatch(readLines(hb, n = 1L, warn = FALSE), error = function(e) NA_character_)
+    if (isTRUE(alive(pid))) next
+    dta_sweep_session_files(dir = d, ttl = ttl, keep = character(0), now = now)
+    if (identical(alive(pid), FALSE) &&
+      !length(setdiff(list.files(d, all.files = TRUE, no.. = TRUE), dta_worker_heartbeat_name))) {
+      unlink(d, recursive = TRUE, force = TRUE)
+    }
+    swept <- c(swept, d)
+  }
+  invisible(swept)
 }
 
 # Format the date/time suffix of an export file name as "%Y-%m-%d_%H-%M".
@@ -4964,6 +5170,42 @@ dta_export_stem <- function(dta, when = Sys.time()) {
 # keep the app's limits, the extracted files on disk and the wording around
 # that one call.
 
+# The limits the app puts on what one load may inflate, for the call that sets
+# them (options() with on.exit, never the R session). An operator's value for
+# either option wins. `bytes_left` is the room the caller has for bytes written.
+# Without them a gzip file the package judged only by size on disk -- a
+# transport library read in place, a .csv.gz or .sas7bdat.gz read whole, a
+# non-UTF-8 text copy -- runs under the package defaults (1e13 bytes: off).
+dta_app_container_options <- function(bytes_left = Inf) {
+  c(
+    list(
+      DTAtools.container_max_bytes = min(getOption("DTAtools.container_max_bytes", 1e10), bytes_left),
+      DTAtools.container_max_member_bytes = getOption("DTAtools.container_max_member_bytes", 2e9)
+    ),
+    dta_scratch_options()
+  )
+}
+
+# The directory the package writes its large working copies to for this
+# session (the UTF-8 copy of a non-UTF-8 file, spilled error rows): one per
+# session, named so that the retention sweep ages it out, and registered with
+# the session's owned paths so that "Start over" deletes it and the sweep spares
+# it while the session lives. Outside a session (tests, scripts) there is none
+# and the package uses tempdir().
+dta_session_scratch_path <- function(token, base = tempdir()) {
+  file.path(base, paste0("dta_scratch_", substr(token, 1L, 16L)))
+}
+
+dta_scratch_options <- function() {
+  token <- tryCatch(shiny::getDefaultReactiveDomain()$token, error = function(e) NULL)
+  if (!is.character(token) || length(token) != 1L || !nzchar(token)) {
+    return(list())
+  }
+  dir <- dta_session_scratch_path(token)
+  dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+  list(DTAtools.temp_dir = dir)
+}
+
 # Load a delivery into a copy of `dta`, under the app's own limits, for this
 # call only: they are never set for the R session, so a run_dta_app() inside a
 # user's session leaves its options alone. `bytes_left` is the session's room
@@ -4978,11 +5220,7 @@ dta_load_delivery <- function(dta, paths, exdir, bytes_left, held = 0, route = N
   # small session budget set by the administrator) neither remedy exists, so
   # the refusal names the administrator's limit instead.
   budget_limited <- held > 0 && bytes_left < getOption("DTAtools.container_max_bytes", 1e10)
-  op <- options(
-    cli.width = Inf,
-    DTAtools.container_max_bytes = min(getOption("DTAtools.container_max_bytes", 1e10), bytes_left),
-    DTAtools.container_max_member_bytes = getOption("DTAtools.container_max_member_bytes", 2e9)
-  )
+  op <- options(c(list(cli.width = Inf), dta_app_container_options(bytes_left)))
   on.exit(options(op), add = TRUE)
   missing <- character(0)
   # A delivery that binds nothing aborts with its routing table attached; a

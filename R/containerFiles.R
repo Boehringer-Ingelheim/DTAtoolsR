@@ -62,6 +62,32 @@ dta_container_too_large <- function(path, limit, value, allowed) {
   )
 }
 
+# A gzip file that is about to be read WHOLE (into memory, or into a full-size
+# temporary file) is judged by what it inflates to, not by its size on disk:
+# deflate reaches about 1000:1, so a few megabytes can stand for gigabytes.
+# Counting stops the moment the cap is passed, so a refused file costs at most
+# `cap` bytes of inflation. A file that cannot pass the cap even at deflate's
+# 1032:1 is not read at all, and a file that is not gzip-named is left alone.
+# `cap` is DTAtools.container_max_member_bytes unless the caller says otherwise.
+dta_check_inflated_size <- function(path, cap = dta_container_limits()$max_member_bytes) {
+  # An unreadable path (size NA) is left to the reader, which reports it.
+  size <- file.size(path)
+  if (!grepl("\\.gz$", path, ignore.case = TRUE) || is.na(size) || size * 1032 <= cap) {
+    return(invisible())
+  }
+  con <- gzfile(path, "rb")
+  on.exit(close(con))
+  n <- 0
+  repeat {
+    b <- readBin(con, "raw", `__DTAtools_container_chunk__`)
+    if (!length(b)) {
+      return(invisible())
+    }
+    n <- n + length(b)
+    if (n > cap) dta_container_too_large(path, "DTAtools.container_max_member_bytes", n, cap)
+  }
+}
+
 # ---- zip: names ----------------------------------------------------------------
 dta_zip_entry_basename <- function(entry) sub(".*[/\\\\]", "", entry)
 
@@ -563,8 +589,13 @@ dta_xpt_members <- function(path, limits = dta_container_limits(), chunk = `__DT
     if (awaiting && any(obs_positions() >= starts[length(starts)] + 400 & obs_positions() < defer)) awaiting <- FALSE
     base <- base + length(b)
     # No ratio check here: one deflate stream cannot exceed about 1032:1, below
-    # the ratio cap, so only the byte cap can stop a gzip stream.
-    if (gz && base > limits$max_bytes) dta_container_too_large(path, "DTAtools.container_max_bytes", base, limits$max_bytes)
+    # the ratio cap, so only the byte cap can stop a compressed stream. gzfile()
+    # also inflates bzip2 and xz, which are far past 1032:1, so the cap is not
+    # tied to the gzip magic: it applies once the stream has inflated beyond its
+    # own size on disk, which a plain file never does.
+    if (base > file.size(path) && base > limits$max_bytes) {
+      dta_container_too_large(path, "DTAtools.container_max_bytes", base, limits$max_bytes)
+    }
     if (eof) break
     carry <- buf[(length(buf) - 399):length(buf)]
   }

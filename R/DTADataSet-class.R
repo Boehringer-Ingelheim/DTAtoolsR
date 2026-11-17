@@ -368,7 +368,27 @@ dta_dataset_from_list <- function(x, recursive = TRUE) {
     cli_abort("Dataset {.val {id}} must contain a {.field type}.")
   }
 
+  bad <- dta_dataset_runtime_keys(x)
+  if (length(bad) > 0L) {
+    cli_abort(
+      c(
+        "Dataset {.val {id}} has {.field {bad}}, which a specification cannot set.",
+        "i" = "It holds what the running session has bound or read; remove it from the YAML."
+      ),
+      class = "dta_dataset_runtime_key"
+    )
+  }
+
   do.call(DTADataSetFactory, x)
+}
+
+# Constructor arguments that hold session state, not specification: `paths`
+# binds server file paths to a file dataset, `tables` and `specs` hand over
+# built objects. The product never writes them to YAML, and read from one
+# `paths` would make the app stat arbitrary server paths on the author's behalf.
+#' @keywords internal
+dta_dataset_runtime_keys <- function(x) {
+  intersect(names(x), c("paths", "tables", "specs"))
 }
 
 
