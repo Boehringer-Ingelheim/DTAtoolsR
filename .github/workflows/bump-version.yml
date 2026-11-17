@@ -39,6 +39,15 @@ concurrency:
 jobs:
   bump:
     runs-on: ubuntu-latest
+    # `release-bump` is the only place BUMP_PAT may live (see the NOTE on the
+    # PR step). A repository secret is readable by any workflow a writer pushes
+    # on their own branch; an environment secret is released only to runs that
+    # satisfy the environment's deployment-branch rule (set it to `dev`, plus a
+    # required reviewer), which a branch-edited copy of this file cannot
+    # change. The `if` is a convenience on top of that rule: it skips the job
+    # when dispatched from another ref instead of failing at the environment.
+    if: github.ref == 'refs/heads/dev'
+    environment: release-bump
 
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -66,7 +75,11 @@ jobs:
       # Either close and reopen the PR to kick them off, or set a repo secret
       # named BUMP_PAT (a fine-grained PAT with contents:write and
       # pull-requests:write) -- the token expression below prefers it when
-      # present and falls back to GITHUB_TOKEN when it is not.
+      # present and falls back to GITHUB_TOKEN when it is not. Store it as a
+      # secret of the `release-bump` ENVIRONMENT, not as a repository secret
+      # (a repository secret would reach any workflow a writer pushes on a
+      # branch of their own); when both exist the environment's wins here, but
+      # the repository one stays exposed, so delete it.
       - name: Open the pull request
         uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
