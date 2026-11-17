@@ -260,7 +260,7 @@ dta_pattern_examples <- function(pattern, limit = 40L) {
   if (length(ex) == 0L) {
     return(character(0))
   }
-  ok <- tryCatch(stringr::str_detect(ex, pattern), error = function(e) rep(FALSE, length(ex)))
+  ok <- tryCatch(dta_str_detect(ex, pattern), error = function(e) rep(FALSE, length(ex)))
   ex <- ex[!is.na(ok) & ok]
   ex <- ex[order(nchar(ex), ex, method = "radix")]
   utils::head(ex, as.integer(limit))
@@ -282,8 +282,8 @@ dta_globs_overlap <- function(g1, g2, memo = new.env(parent = emptyenv())) {
   if (is.null(hit)) {
     r1 <- dta_container_regex(g1)
     r2 <- dta_container_regex(g2)
-    hit <- any(stringr::str_detect(dta_pattern_examples(r2), r1)) ||
-      any(stringr::str_detect(dta_pattern_examples(r1), r2))
+    hit <- any(dta_str_detect(dta_pattern_examples(r2), r1)) ||
+      any(dta_str_detect(dta_pattern_examples(r1), r2))
     assign(key, hit, envir = memo)
   }
   hit

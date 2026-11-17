@@ -909,6 +909,12 @@ dta_lint_dataset_list <- function(d, label, container_ids = NULL) {
         "'container' belongs to a file entry: write it under 'files:'."
       ))
     }
+    for (k in dta_dataset_runtime_keys(d)) {
+      out <- rbind(out, dta_lint_row(
+        label, "dataset", label, "error", "dataset_invalid",
+        sprintf("'%s' is session state, not specification, and cannot be set in a dataset: remove it.", k)
+      ))
+    }
     out <- rbind(out, dta_lint_files_list(d[["files"]], label, container_ids))
     if (!(type %in% c("tabular", "matrix"))) {
       return(rbind(out, dta_lint_matrix_keys(d, label, is_matrix = FALSE)))

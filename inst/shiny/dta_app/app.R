@@ -1627,11 +1627,17 @@ server <- function(input, output, session) {
   # deleted when the session ends (nothing can download them after that);
   # the autosave, its tables and staged uploads stay for 'Restore previous
   # session' until the sweep ages them out.
-  owned <- list(export = character(0), upload = character(0), autosave = character(0))
+  owned <- list(
+    export = character(0), upload = character(0), autosave = character(0),
+    # Where the package writes its working copies for this session; see
+    # dta_session_scratch_path(). Start over empties it; it is never reset.
+    scratch = dta_session_scratch_path(session$token)
+  )
   own <- function(kind, path) {
     owned[[kind]] <<- unique(c(owned[[kind]], path))
     assign(session$token, unlist(owned, use.names = FALSE), envir = .dta_live_session_paths)
   }
+  own("scratch", owned$scratch)
 
   # See dta_upload_guard_install for why a file-input value is not trusted
   # until the guard has seen it. accept_upload() calls take() first so a mark is
@@ -1649,8 +1655,19 @@ server <- function(input, output, session) {
     FALSE
   }
   try(dta_sweep_session_files(), silent = TRUE)
+  try(dta_worker_heartbeat(), silent = TRUE)
+  try(dta_sweep_dead_workers(), silent = TRUE)
+  # A session that stays open for longer than the retention window keeps this
+  # worker's directory out of the sibling sweep.
+  observe({
+    shiny::invalidateLater(dta_heartbeat_interval_ms())
+    try(dta_worker_heartbeat(), silent = TRUE)
+  })
   session$onSessionEnded(function() {
     unlink(owned$export, force = TRUE)
+    # The package's working copies (a UTF-8 copy, spilled error rows) are of no
+    # use to Restore, which re-reads files and takes tables from the autosave.
+    unlink(owned$scratch, recursive = TRUE, force = TRUE)
     # Restore re-reads file datasets from their files; tables come back from the
     # autosave's own Arrow copies (dta_restore_session(), dta_table_store()). So
     # only the extracted files a file dataset uses are kept for "Restore previous session".
@@ -10154,7 +10171,7 @@ server <- function(input, output, session) {
     try(unlink(session_file() %||% character(0)), silent = TRUE)
     try(session_tables()$clear(), silent = TRUE)
     # ... except what a second tab that restored the same autosave still owns.
-    unlink(dta_not_owned_elsewhere(c(owned$upload, owned$export), session$token),
+    unlink(dta_not_owned_elsewhere(c(owned$upload, owned$export, owned$scratch), session$token),
       recursive = TRUE, force = TRUE
     )
     owned$upload <<- character(0)

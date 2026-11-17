@@ -166,7 +166,10 @@ DTATOOLS_TEMPLATE_GIT_AUTH  = "bearer"
 
 **The token never reaches the command line, a URL, or disk.** It is passed to
 the `git` child process purely as an environment variable
-(`GIT_CONFIG_KEY_0`/`GIT_CONFIG_VALUE_0`, delivering an `http.extraHeader`),
+(`GIT_CONFIG_KEY_0`/`GIT_CONFIG_VALUE_0`, delivering an `http.extraHeader`
+scoped to the scheme, host and port of the source's `https://` or `http://`
+address, so git, and any helper it starts, sends it nowhere else; a source
+with any other kind of address, such as an ssh one, is cloned without it),
 never embedded in the clone URL and never passed as a `-c` command-line flag.
 An `https://user:TOKEN@host/repo.git`-style URL would persist the token in
 `.git/config` forever, readable by anyone who later runs `git remote -v`; a

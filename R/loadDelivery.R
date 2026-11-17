@@ -510,7 +510,7 @@ dta_delivery_slot_hits <- function(s, names) {
     return(names %in% f | stripped %in% f)
   }
   hit <- logical(length(names))
-  for (p in f) hit <- hit | stringr::str_detect(names, p) | stringr::str_detect(stripped, p)
+  for (p in f) hit <- hit | dta_str_detect(names, p) | dta_str_detect(stripped, p)
   hit
 }
 

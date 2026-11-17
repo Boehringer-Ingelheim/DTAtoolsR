@@ -348,6 +348,18 @@ test_that("a 60,000-label quoted header (over 1 MiB) is read whole by the matrix
   expect_lt(elapsed, 10)
 })
 
+test_that("a record with more fields than the cap is refused before a schema is built from it", {
+  testthat::local_mocked_bindings(dta_matrix_max_header_fields = 5L)
+  handler <- DTAFileCSV(filename = "m.csv")
+  # five fields are at the cap and still read
+  expect_identical(dta_matrix_read_head(handler, mx_file("a,b,c,d,e\n1,2,3,4,5\n"))$n_header, 5L)
+  expect_error(dta_matrix_read_head(handler, mx_file("a,b,c,d,e,f\n1,2,3,4,5,6\n")), class = "dta_matrix_header_too_wide")
+  # delimiters inside quotes count too: they size the schema
+  expect_error(dta_matrix_read_head(handler, mx_file("\",,,,,,\"\n1\n")), class = "dta_matrix_header_too_wide")
+  # and so does a first data row that is too wide
+  expect_error(dta_matrix_read_head(handler, mx_file("a,b\n1,2,3,4,5,6\n")), class = "dta_matrix_header_too_wide")
+})
+
 test_that("dta_matrix_read_head names an unsupported encoding itself", {
   handler <- DTAFileCSV(filename = "m.csv", encoding = "no-such-encoding")
   expect_error(
