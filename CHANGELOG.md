@@ -141,6 +141,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   a file loads in its place. Before, the reason was run together into one line
   and disappeared after ten seconds.
 
+### Fixed
+
+- **The app's pickers no longer stop working after the validation messages
+  have been shown.** Once the messages table had rendered, a picker opened
+  afterwards (the container of a file entry, the columns of a uniqueness rule,
+  the people authorized for corrections) stayed a plain list, and the fields of
+  its dialog could stop responding with it. The table's filter
+  row loaded an older copy of the picker library that lacks a component every
+  picker needs; the app now loads its own copy with the page.
+- A quoted header longer than 1 MiB no longer aborts as a "quoted line break"
+  when the file is read, for tabular files as well as matrices.
+- A numeric cell holding the text `NaN` (or `nan`, `-nan`) is now missing after
+  import, like every other value that cannot be converted. It used to stay `NaN`
+  in the loaded table, so a non-nullable column got no `type` finding when read
+  eagerly while the streamed scan reported one. Both now report the
+  `not_convertible` import finding, plus the `type` finding when the column is
+  not nullable.
+- `explain_messages()`, `inspect()` and the HTML validation report no longer
+  show "Actual: (missing / not present)" or duplicated empty rows for a finding
+  with no row number or no column (a matrix header or dimension finding) once
+  the table also has other findings. A missing field now selects only the
+  entries that are themselves missing it.
+- A `fail_fast` scan that stopped early no longer reports the unsettled import
+  check as "validation artifact predates import checking"; it says the scan
+  stopped before every value was read.
+- The `validate-templates` workflow written by `create_template_repo()` uses
+  `r-lib/actions` v2.14.0. With v2.12.1 it failed on Ubuntu 26.04 runners
+  (now `ubuntu-latest`) before installing anything, because `sudo-rs` ignores
+  `sudo -E`.
+- The app's template comparison no longer aborts with "argument 1 is not a
+  vector" when both sides have nothing to compare, for example two documents
+  with no datasets and no metadata fields. It now reports no differences.
+
 ### Security
 
 - **The app reads only uploads this session received.** A file input's value
@@ -207,39 +240,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   removing what carries the app's prefixes and is older than the window, and the
   directory itself once nothing else is left in it. Directories without the
   heartbeat are never touched.
-
-### Fixed
-
-- **The app's pickers no longer stop working after the validation messages
-  have been shown.** Once the messages table had rendered, a picker opened
-  afterwards (the container of a file entry, the columns of a uniqueness rule,
-  the people authorized for corrections) stayed a plain list, and the fields of
-  its dialog could stop responding with it. The table's filter
-  row loaded an older copy of the picker library that lacks a component every
-  picker needs; the app now loads its own copy with the page.
-- A quoted header longer than 1 MiB no longer aborts as a "quoted line break"
-  when the file is read, for tabular files as well as matrices.
-- A numeric cell holding the text `NaN` (or `nan`, `-nan`) is now missing after
-  import, like every other value that cannot be converted. It used to stay `NaN`
-  in the loaded table, so a non-nullable column got no `type` finding when read
-  eagerly while the streamed scan reported one. Both now report the
-  `not_convertible` import finding, plus the `type` finding when the column is
-  not nullable.
-- `explain_messages()`, `inspect()` and the HTML validation report no longer
-  show "Actual: (missing / not present)" or duplicated empty rows for a finding
-  with no row number or no column (a matrix header or dimension finding) once
-  the table also has other findings. A missing field now selects only the
-  entries that are themselves missing it.
-- A `fail_fast` scan that stopped early no longer reports the unsettled import
-  check as "validation artifact predates import checking"; it says the scan
-  stopped before every value was read.
-- The `validate-templates` workflow written by `create_template_repo()` uses
-  `r-lib/actions` v2.14.0. With v2.12.1 it failed on Ubuntu 26.04 runners
-  (now `ubuntu-latest`) before installing anything, because `sudo-rs` ignores
-  `sudo -E`.
-- The app's template comparison no longer aborts with "argument 1 is not a
-  vector" when both sides have nothing to compare, for example two documents
-  with no datasets and no metadata fields. It now reports no differences.
+- The **Bump version** workflow runs in a `release-bump` environment and only
+  from `dev`. The optional `BUMP_PAT` secret belongs in that environment (with
+  its deployment branches limited to `dev`), no longer at repository scope,
+  where any workflow a contributor pushes on their own branch could read it.
+- **A Word template from a template library can no longer write outside its
+  scratch directory on R older than 4.5.1.** The app scans every library
+  `.docx` when it builds its configuration, and an export extracts the chosen
+  one; R's `unzip()` only neutralises an archive member such as `../x` from
+  4.5.1 on, while the package supports R 4.1.0. Both places now read the member
+  names first and treat an archive with an absolute, drive-lettered or
+  `.`/`..` name as an unreadable template, whatever R version runs.
+- **The git token for a private template library is now sent only to the
+  library's own host.** `DTATOOLS_TEMPLATE_GIT_TOKEN` was handed to git as an
+  unscoped `http.extraHeader`, so every server git, or a helper git started
+  while checking out the repository (a git-lfs filter reading a `.lfsconfig`
+  from the cloned content, say), contacted received it. It is now scoped to the
+  scheme, host and port of the source's locator; a locator that is not
+  `http(s)://` (an ssh address, a local path) is cloned without the header.
+- **A template library can no longer redirect the app's refresh stamp.** The
+  stamp that dates a cached git library sat inside the checkout, so a library
+  that tracked a symlink named `.dta-last-refresh` made the app overwrite the
+  link's target with the time on every refresh. It now lives next to the
+  checkout (`<hash>.stamp`), where the repository cannot reach it. Existing
+  caches refresh once more on first use to create it.
 
 ## [0.27.0] - 2026-11-12
 
@@ -4921,7 +4945,6 @@ All of the following belong to the manifest verification work above.
 - added `remotes` to package Suggests and GitHub Actions workflow setup-r-dependencies to resolve macOS CI failures during S7 installation
 - `inspect()` (and the Shiny app's message inspector) no longer errors with `Can't find property <DTAtools::DTARuleColRange>@range` when highlighting the failing rows of a `check_range` rule. The failing-row helper now reads the rule's `min`/`max` properties directly instead of a non-existent `range` property.
 - `validate_table()` / `check()` no longer abort with `No method asJSON S3 class: vctrs_unspecified` when a table contains a fully-empty column. Arrow reads such columns as its `null` type (a `vctrs_unspecified` vector in R), which `jsonlite::toJSON()` cannot serialise; they are now coerced to all-`NA` and emitted as JSON `null`, so nullable empty columns validate correctly instead of crashing the whole validation run.
-
 
 ## [0.11.0] - 2026-07-27
 
