@@ -570,12 +570,35 @@ dta_assert_single_file_path <- function(file, .caller) {
   file
 }
 
+#' @title Refuse a Directory Where a File Is Expected
+#' @description
+#' A directory passes `file.exists()`, so a reader handed one would open or
+#' enumerate files the caller never named -- and its error message would name
+#' one of them. Aborts with a condition of class `dta_file_is_directory`.
+#' @param file A character string specifying the path.
+#' @param .caller Name of the function to blame in the error message.
+#' @return `file`, invisibly.
+#' @keywords internal
+dta_assert_not_directory <- function(file, .caller) {
+  if (dir.exists(file)) {
+    cli::cli_abort(
+      c(
+        "{.fn {(.caller)}} was given a directory, not a file: {.path {file}}.",
+        "i" = "Pass the path of one file."
+      ),
+      class = "dta_file_is_directory"
+    )
+  }
+  invisible(file)
+}
+
 #' @title The Guard Sequence Shared by `read_file()` and `open_file()`
 #' @description
 #' Both generics accept the same arguments and must reject the same malformed
 #' input the same way before handing off to their respective `*_execution()`
 #' method -- factored out here so the two stay in sync rather than drifting,
-#' as two independent copies of the same checks eventually do.
+#' as two independent copies of the same checks eventually do. A path that is
+#' a directory is refused with class `dta_file_is_directory`.
 #' @param x A `DTAFile` object (or subclass).
 #' @param file A character string specifying the path to the file.
 #' @param namecheck Logical; when `TRUE` the file name must match the
@@ -607,6 +630,8 @@ dta_check_readable_file <- function(x, file, namecheck, .caller) {
   if (!file.exists(file)) {
     cli::cli_abort("File {.path {file}} cannot be found.")
   }
+
+  dta_assert_not_directory(file, .caller)
 
   # A missing file is the more fundamental problem, so this check runs after
   # file.exists() above rather than before it. Arrow does not reject a `.zip`

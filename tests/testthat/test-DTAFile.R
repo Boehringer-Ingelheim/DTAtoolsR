@@ -1490,6 +1490,20 @@ test_that("a file name containing braces still reports the real problem", {
   )
 })
 
+test_that("read_file() and open_file() refuse a directory but still read a file", {
+  dir <- withr::local_tempdir()
+  csv <- file.path(dir, "data.csv")
+  writeLines(c("A", "1"), csv)
+  # The pattern matches every name, so the name check passes and it is the
+  # directory check that fires.
+  handler <- DTAFileCSV(filename = ".*", pattern = TRUE)
+
+  expect_error(read_file(handler, dir), class = "dta_file_is_directory")
+  expect_error(open_file(handler, dir), class = "dta_file_is_directory")
+
+  expect_equal(nrow(read_file(handler, csv)), 1)
+})
+
 test_that("a file name containing cli markup is not rendered as markup", {
   # `{.field x}` is a style, not a variable, so it would not have aborted --
   # it would have printed the name in colour with the markup silently removed,

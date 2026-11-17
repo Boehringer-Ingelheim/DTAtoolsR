@@ -409,13 +409,7 @@ test_that("editor tables escape attacker-controlled text but keep the Actions bu
   # see.
 
   app_server_dir <- function() .shiny_app_dir()
-  app_file_input <- function(filename) {
-    path <- app_fixture_path(filename)
-    data.frame(
-      name = filename, size = file.size(path), type = "", datapath = path,
-      stringsAsFactors = FALSE
-    )
-  }
+  app_file_input <- function(filename) app_upload_value(app_fixture_path(filename), filename)
 
   xss <- "<img src=x onerror=alert(1)>"
   escaped_xss <- "&lt;img src=x onerror=alert(1)&gt;"

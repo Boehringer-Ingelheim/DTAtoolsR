@@ -721,12 +721,14 @@ method(load_file, DTADataSetMatrix) <- function(
   name = dta_default_table_name(file),
   stream = getOption("DTAtools.stream", "auto")
 ) {
-  # The guards of the tabular method, in its order: nothing is read, and no
-  # property of a stale object is touched, before they have passed.
+  # The guards of the tabular method: nothing is read, and no property of a
+  # stale object is touched, before they have passed. Unlike there, the
+  # directory check runs first, before the header is read.
   if (dta_is_stale(x)) x <- dta_upgrade(x)
   handler_index <- dta_resolve_file_handler_index(handler_index, x@files)
   handler <- files(x, handler_index)
   file <- dta_assert_single_file_path(file, "load_file")
+  dta_assert_not_directory(file, "load_file")
   if (!is.character(name) || length(name) != 1 || is.na(name) || !nzchar(name)) {
     cli::cli_abort(
       "{.fn load_file} requires {.arg name} to be a single non-missing, non-empty string."

@@ -13,12 +13,7 @@ skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
 
-ct_fi <- function(path, name) {
-  data.frame(
-    name = name, size = file.size(path), type = "",
-    datapath = path, stringsAsFactors = FALSE
-  )
-}
+ct_fi <- function(path, name) app_upload_value(path, name)
 
 ct_yaml <- function(lines, env = parent.frame()) {
   f <- withr::local_tempfile(fileext = ".yaml", .local_envir = env)

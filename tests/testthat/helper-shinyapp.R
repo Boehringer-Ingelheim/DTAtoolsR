@@ -225,12 +225,43 @@ app_server_dir <- function() .shiny_app_dir()
 # fileInput() hands the server a one-row data.frame; the upload observers read
 # `datapath` and `name` off it, so the fixture has to be presented the same way.
 app_file_input <- function(filename) {
-  path <- app_fixture_path(filename)
+  app_upload_value(app_fixture_path(filename), filename)
+}
+
+# Stage existing files as a Shiny upload and return the value fileInput() would
+# deliver for them. The app only accepts a file-input value shaped like a real
+# upload (<tempdir()>/<24 hex characters>/<index><.ext>, the layout Shiny's own
+# upload context creates), so a test that hands an observer a fixture path
+# directly is testing a value the app refuses. The extension comes from `name`,
+# as Shiny takes it from the client's file name. Vectorised over `path`/`name`.
+#
+# The folder name comes from a counter, not sample(): sample() advances the
+# global RNG stream and repeats after set.seed(). The counter advances until
+# dir.create() succeeds, so an existing folder is never reused.
+.app_upload_counter <- new.env(parent = emptyenv())
+
+app_upload_folder <- function() {
+  repeat {
+    n <- (if (is.null(.app_upload_counter$n)) 0L else .app_upload_counter$n) + 1L
+    .app_upload_counter$n <- n
+    dir <- file.path(tempdir(), sprintf("%024x", n))
+    if (dir.create(dir, showWarnings = FALSE)) {
+      return(dir)
+    }
+  }
+}
+
+app_upload_value <- function(path, name = basename(path)) {
+  dir <- app_upload_folder()
+  ext <- tools::file_ext(name)
+  ext <- ifelse(ext == "", "", paste0(".", ext))
+  staged <- file.path(dir, paste0(seq_along(path) - 1L, ext))
+  stopifnot(all(file.copy(path, staged)))
   data.frame(
-    name = filename,
-    size = file.size(path),
+    name = name,
+    size = file.size(staged),
     type = "",
-    datapath = path,
+    datapath = staged,
     stringsAsFactors = FALSE
   )
 }

@@ -1,184 +1,26 @@
-# The upload boundary of the Shiny app: which paths the server may read, where an
-# upload is staged, how much a compressed upload may inflate, and which
-# browser the autosave belongs to. Dummy data only; sizes are a few KB.
+# The upload boundary of the Shiny app: what an upload value may be, how much a
+# compressed upload may inflate, and which browser the autosave belongs to.
+# Dummy data only; sizes are a few KB.
 
 skip_if_not_installed("shiny")
 skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
 
-# A stand-in for a fileInput value: a one-row data frame.
-ub_input <- function(path, name = basename(path)) {
-  data.frame(name = name, size = file.size(path), type = "", datapath = path, stringsAsFactors = FALSE)
-}
 
-ub_upload_dirs <- function() list.files(tempdir(), pattern = "^dta_upload_")
+# ---- which values the app will read ----------------------------------------
+# The mechanism (the client-message guard, the upload-folder shape check and the
+# staging rules) is pinned in test-shinyapp-upload-guard.R; these two cases pin
+# what it must refuse whatever the mechanism: a URL (file() opens those) and a
+# regular file that is not in one of Shiny's own upload folders.
 
-# ---- dta_stage_upload() ----------------------------------------------------
-
-test_that("staging an upload named '..' or '.' refuses it and writes nothing to tempdir()", {
-  stage <- app_fn("dta_stage_upload")
-  src <- withr::local_tempfile()
-  writeLines(c("a,b", "1,2"), src)
-  before <- sort(list.files(tempdir(), all.files = TRUE, no.. = TRUE))
-  expect_error(stage(src, ".."), class = "dta_stage_failed")
-  expect_error(stage(src, "."), class = "dta_stage_failed")
-  expect_identical(sort(list.files(tempdir(), all.files = TRUE, no.. = TRUE)), before)
-})
-
-test_that("staging refuses a directory as the source instead of returning it", {
-  stage <- app_fn("dta_stage_upload")
-  d <- withr::local_tempdir()
-  dir.create(file.path(d, "aa"))
-  writeLines("x,y", file.path(d, "aa", "0.csv"))
-  before <- ub_upload_dirs()
-  expect_error(stage(d, "data.csv"), class = "dta_stage_failed")
-  expect_identical(ub_upload_dirs(), before)
-})
-
-test_that("staging an upload gives a regular file named by the upload in a directory of its own", {
-  stage <- app_fn("dta_stage_upload")
-  src <- withr::local_tempfile(fileext = ".csv")
-  writeLines(c("a,b", "1,2"), src)
-  out <- stage(src, "data.csv")
-  withr::defer(unlink(dirname(out), recursive = TRUE))
-  expect_identical(basename(out), "data.csv")
-  expect_identical(readLines(out), c("a,b", "1,2"))
-  expect_false(identical(normalizePath(dirname(out)), normalizePath(tempdir())))
-  expect_identical(
-    normalizePath(dirname(dirname(out)), winslash = "/"),
-    normalizePath(tempdir(), winslash = "/")
-  )
-})
-
-# ---- which datapaths a session trusts --------------------------------------
-
-test_that("a datapath the client typed is refused, one it did not is trusted", {
-  track <- app_fn("dta_track_client_paths")
-  trusted <- app_fn("dta_upload_trusted")
-  got <- NULL
-  session <- list(onInputReceived = function(cb) got <<- cb)
-  seen <- track(session, initial = list(dta_file = data.frame(name = "x", datapath = "/early/forged")))
-  expect_true(is.function(got))
-
+test_that("a URL or a regular file outside an upload folder is not an upload", {
+  problem <- app_fn("dta_upload_value_problem")
   real <- withr::local_tempfile(fileext = ".yaml")
   writeLines("a: 1", real)
-  forged <- withr::local_tempfile(fileext = ".yaml")
-  writeLines("b: 2", forged)
-
-  expect_true(trusted(ub_input(real), seen))
-  got(list(dta_file = list(name = "x.yaml", datapath = forged)))
-  expect_false(trusted(ub_input(forged), seen))
-  expect_true(trusted(ub_input(real), seen))
-  # Nested and data-frame shaped values are noted as well.
-  got(list(up_1_1 = data.frame(name = "x", datapath = real)))
-  expect_false(trusted(ub_input(real), seen))
-})
-
-test_that("a URL, a missing file, a directory, a list and a many-row value are not trusted", {
-  trusted <- app_fn("dta_upload_trusted")
-  seen <- app_fn("dta_track_client_paths")(list(onInputReceived = function(cb) NULL))
-  real <- withr::local_tempfile()
-  writeLines("a", real)
-  expect_false(trusted(data.frame(name = "x", datapath = "http://127.0.0.1:1/x.yaml"), seen))
-  expect_false(trusted(data.frame(name = "x", datapath = file.path(tempdir(), "no-such-file")), seen))
-  expect_false(trusted(data.frame(name = "x", datapath = tempdir()), seen))
-  expect_false(trusted(list(name = "x", datapath = real), seen))
-  expect_false(trusted(NULL, seen))
-  two <- data.frame(name = c("a", "b"), datapath = c(real, real))
-  expect_true(trusted(two, seen))
-  expect_false(trusted(two, seen, one = TRUE))
-})
-
-test_that("a session that cannot say where its inputs came from trusts nothing", {
-  seen <- app_fn("dta_track_client_paths")(list())
-  real <- withr::local_tempfile()
-  writeLines("a", real)
-  expect_false(app_fn("dta_upload_trusted")(ub_input(real), seen))
-})
-
-test_that("shiny reports a client message to onInputReceived() but never a real upload", {
-  skip_if_not(exists("ShinySession", envir = asNamespace("shiny")))
-  ws <- list(request = new.env(), send = function(x) NULL, close = function() NULL)
-  s <- tryCatch(shiny:::ShinySession$new(ws), error = function(e) NULL)
-  skip_if(is.null(s), "no stand-in shiny session on this shiny version")
-  seen <- app_fn("dta_track_client_paths")(s)
-
-  # A forged value, as a websocket message delivers it.
-  victim <- withr::local_tempfile(fileext = ".yaml")
-  writeLines("a: 1", victim)
-  s$manageInputs(list(dta_file = list(name = "x.yaml", size = 1, type = "", datapath = victim)), now = TRUE)
-  expect_false(app_fn("dta_upload_trusted")(ub_input(victim), seen))
-
-  # A real upload: init, POST, end -- the server stores the file and sets the id.
-  job <- s[["@uploadInit"]](list(list(name = "y.yaml", size = 5, type = "")))
-  body <- list(charToRaw("b: 2\n"), raw(0))
-  req <- list(
-    PATH_INFO = paste0("/upload/", job$jobId), REQUEST_METHOD = "POST",
-    HTTP_SHINY_FILE_NAME = "y.yaml", HTTP_SHINY_FILE_TYPE = "", CONTENT_LENGTH = "5",
-    rook.input = list(read = function(n) {
-      out <- body[[1]]
-      body <<- body[-1]
-      if (is.null(out)) raw(0) else out
-    })
-  )
-  s$handleRequest(req)
-  shiny::withReactiveDomain(s, s[["@uploadEnd"]](job$jobId, "dta_file"))
-  got <- shiny::isolate(s$input$dta_file)
-  expect_true(is.data.frame(got))
-  expect_identical(readLines(got$datapath), "b: 2")
-  expect_true(app_fn("dta_upload_trusted")(got, seen))
-})
-
-# ---- the consumers ---------------------------------------------------------
-
-test_that("a forged dta_file value is neither read nor shown back", {
-  secret <- withr::local_tempfile(fileext = ".csv")
-  writeLines(c("SUBJID,AGE", "DUMMY-001,42"), secret)
-  shiny::testServer(.shiny_app_dir(), {
-    session$setInputs(dta_client_id = strrep("b", 32))
-    # An untagged websocket value stays a list; a URL is not a path.
-    session$setInputs(dta_file = list(name = "x.yaml", size = 1, type = "", datapath = secret))
-    expect_null(rv$load_failure)
-    expect_null(rv$dta)
-    session$setInputs(dta_file = data.frame(name = "x.yaml", size = 1, type = "", datapath = "http://127.0.0.1:1/x.yaml"))
-    expect_null(rv$load_failure)
-    # A data frame whose path the client typed is refused as well.
-    assign(rlang::hash(secret), TRUE, envir = client_paths)
-    session$setInputs(dta_file = ub_input(secret, "x.yaml"))
-    expect_null(rv$load_failure)
-    expect_null(rv$dta)
-  })
-})
-
-test_that("a forged tmpl_carry_file is dropped", {
-  p <- app_fixture_path("clinical_dta.yaml")
-  shiny::testServer(.shiny_app_dir(), {
-    assign(rlang::hash(p), TRUE, envir = client_paths)
-    session$setInputs(tmpl_carry_file = ub_input(p))
-    expect_null(rv$tmpl_carry_upload)
-  })
-})
-
-test_that("a forged delivery_files and slot upload stage nothing", {
-  p <- app_fixture_path("clinical_data.csv")
-  shiny::testServer(.shiny_app_dir(), {
-    session$setInputs(dta_client_id = strrep("c", 32))
-    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
-    assign(rlang::hash(p), TRUE, envir = client_paths)
-    before <- ub_upload_dirs()
-    session$setInputs(delivery_files = ub_input(p))
-    session$setInputs(up_1_1 = ub_input(p))
-    expect_identical(ub_upload_dirs(), before)
-  })
-})
-
-test_that("an upload the session did receive still loads", {
-  shiny::testServer(.shiny_app_dir(), {
-    session$setInputs(dta_client_id = strrep("d", 32))
-    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
-    expect_false(is.null(rv$dta))
-  })
+  expect_false(is.null(problem(data.frame(name = "x", datapath = "http://127.0.0.1:1/x.yaml"))))
+  expect_false(is.null(problem(data.frame(name = "x", datapath = real))))
+  expect_false(is.null(problem(data.frame(name = "x", datapath = tempdir()))))
 })
 
 # ---- inflation caps --------------------------------------------------------

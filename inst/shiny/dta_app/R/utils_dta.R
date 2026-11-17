@@ -511,99 +511,150 @@ handler_matches <- function(h, filename) {
 # upload name. Shiny stores uploads as "0.csv", "1.csv", ... (input$file$datapath);
 # matches_filename() / read_file() key off basename(file), so passing the raw
 # datapath makes the package see "0.csv" -- which matches no handler pattern and
-# a valid file is wrongly rejected inside load_file(). Returns the staged path: a
-# regular file in a fresh directory of its own, never anywhere else. Anything
-# less aborts with class `dta_stage_failed` -- a name that is not one component
-# (basename() hands back "." and ".." unchanged, and ".." is the shared tempdir()
-# that holds every session's files), a source that is not a regular file, a copy
-# that failed -- because falling back to the original datapath handed callers a
-# path (or a directory) that is not theirs to read or delete.
-dta_stage_upload <- function(datapath, filename) {
-  base <- basename(filename %||% "")
-  if (!nzchar(base)) base <- basename(datapath)
-  stage_failed <- function(why) cli::cli_abort(why, class = "dta_stage_failed")
-  if (base %in% c(".", "..")) {
-    stage_failed("The file name {.val {base}} is not a file name.")
-  }
-  if (!isTRUE(utils::file_test("-f", datapath))) {
-    stage_failed("The upload is not a regular file.")
-  }
-  target_dir <- tempfile("dta_upload_")
-  on.exit(if (!is.null(target_dir)) unlink(target_dir, recursive = TRUE), add = TRUE)
-  dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)
-  target <- file.path(target_dir, base)
-  copied <- tryCatch(isTRUE(file.copy(datapath, target, overwrite = TRUE)), error = function(e) FALSE)
-  inside <- utils::file_test("-f", target) &&
-    identical(
-      normalizePath(dirname(target), winslash = "/"),
-      normalizePath(target_dir, winslash = "/")
-    )
-  if (!copied || !inside) {
-    stage_failed("The upload could not be copied.")
-  }
-  target_dir <- NULL # staged: keep it
-  target
-}
-
-# ---- Which upload paths a session may read ---------------------------------
-# A fileInput's value arrives in one of two ways. Shiny's own upload channel
-# (`@uploadEnd`) stores the file under tempdir() and sets the input from the
-# server side; nothing a browser sends can name that path. But the SAME input id
-# can also be set by any websocket message, and Shiny binds a message value to an
-# id without checking that it came from an upload -- so a client can send
-# `datapath = "/etc/passwd"` (or an http:// URL: file() opens those too) for
-# `dta_file`, and the server would read it. Every value that arrives as a client
-# message passes through session$onInputReceived(); a real upload never does.
-# So the datapaths the CLIENT typed are exactly the ones to refuse, and what is
-# left is what this session's own uploads produced. (The message that opens the
-# session carries inputs before the server function runs, so those are noted at
-# start too: no upload can have happened by then.)
+# a valid file is wrongly rejected inside load_file(). Returns the staged copy,
+# or NA when there is none: it never returns the client's datapath, so what a
+# caller opens is always a copy this function made.
 #
-# `seen` holds a hash of every client-typed `datapath` string, exact and never
-# normalised. A session that cannot say where its input values came from (no
-# onInputReceived, and not shiny's test session) trusts nothing.
-dta_client_datapaths <- function(x, depth = 0L) {
-  if (!is.list(x) || depth > 4L) {
-    return(character(0))
+# Two rules keep the staged copy inside its own fresh directory. A datapath that
+# is not a single existing file that is not a directory yields NA (it used to be returned
+# unchanged on a failed copy, so a directory reached the reader). And a client
+# name that would resolve onto the directory or outside it used to make the
+# target the shared temporary directory of every session, so such a name is
+# replaced by the basename of the datapath. On Windows basename() already turns
+# "a\.." into "..", so the literal "." / ".." test catches it; the
+# normalizePath() comparison catches names Windows resolves to the folder itself
+# or its parent (e.g. "...", ". ."). On POSIX such names are ordinary file
+# names. The folder is normalised first because normalizePath() only
+# canonicalises paths that exist (8.3 names, junctions, symlinks such as macOS
+# /var), so a non-canonical tempdir() spelling would otherwise fail the
+# comparison for every upload. No folder is left behind when NA is returned.
+dta_stage_upload <- function(datapath, filename, tmpdir = tempdir()) {
+  if (length(datapath) != 1L || is.na(datapath) || !file.exists(datapath) ||
+    dir.exists(datapath)) {
+    return(NA_character_)
   }
-  own <- x[["datapath"]]
-  own <- if (is.null(own)) character(0) else as.character(unlist(own, use.names = FALSE))
-  c(own, unlist(lapply(x, dta_client_datapaths, depth = depth + 1L), use.names = FALSE))
+  base <- basename(filename %||% "")
+  target_dir <- tempfile("dta_upload_", tmpdir = tmpdir)
+  if (!dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)) {
+    return(NA_character_)
+  }
+  res <- tryCatch(
+    {
+      target_dir <- normalizePath(target_dir, winslash = "/", mustWork = TRUE)
+      target <- file.path(target_dir, base)
+      usable <- nzchar(base) && !base %in% c(".", "..") &&
+        identical(
+          dirname(normalizePath(target, winslash = "/", mustWork = FALSE)),
+          target_dir
+        )
+      if (!usable) {
+        target <- file.path(target_dir, basename(datapath))
+      }
+      if (isTRUE(file.copy(datapath, target, overwrite = FALSE))) target else NA_character_
+    },
+    error = function(e) NA_character_
+  )
+  if (is.na(res)) {
+    unlink(target_dir, recursive = TRUE)
+  }
+  res
 }
 
-dta_track_client_paths <- function(session, initial = list()) {
-  seen <- new.env(parent = emptyenv())
-  note <- function(values) {
-    for (p in dta_client_datapaths(values)) {
-      assign(rlang::hash(p), TRUE, envir = seen)
+# Is this the id of a file input? The ids are fixed (dta_file, tmpl_carry_file,
+# delivery_files) or built per dataset slot as up_<dataset>_<slot>.
+dta_is_file_input_id <- function(id) {
+  if (!is.character(id)) {
+    return(rep(FALSE, length(id)))
+  }
+  id %in% c("dta_file", "tmpl_carry_file", "delivery_files") |
+    (!is.na(id) & grepl("^up_[0-9]+_[0-9]+$", id))
+}
+
+# Tell client-supplied file-input values from real uploads. Only client messages
+# reach the callback that feeds note(): a real upload is written by Shiny's
+# upload machinery and never does, so a marked id means the current value of that
+# input was supplied by the client and must not be used as a server path. A mark
+# is consumed by the observer that handles the value, so a later genuine upload
+# is accepted; every interleaving fails closed (a genuine upload racing a forged
+# value is refused, never the reverse).
+dta_upload_guard <- function() {
+  marks <- new.env(parent = emptyenv())
+  list(
+    note = function(data) {
+      if (is.list(data) && length(data) > 0L && !is.null(names(data))) {
+        for (i in seq_along(data)) {
+          id <- sub(":.*$", "", names(data)[i])
+          if (!is.na(id) && dta_is_file_input_id(id) && !is.null(data[[i]])) {
+            assign(id, TRUE, envir = marks)
+          }
+        }
+      }
+      invisible(NULL)
+    },
+    take = function(id) {
+      hit <- exists(id, envir = marks, inherits = FALSE)
+      if (hit) rm(list = id, envir = marks)
+      hit
     }
-    invisible()
-  }
-  note(initial)
-  if (is.function(session$onInputReceived)) {
-    session$onInputReceived(note)
-  } else if (!inherits(session, "MockShinySession")) {
-    attr(seen, "untracked") <- TRUE
-  }
-  seen
+  )
 }
 
-# TRUE when `f` (a fileInput value) is a data frame of uploads this session's own
-# upload channel produced: not typed by the client, not a URL, and a regular file.
-# `one` additionally demands a single row, for the inputs that take one file.
-dta_upload_trusted <- function(f, seen, one = FALSE) {
-  if (!is.data.frame(f) || nrow(f) < 1L || (one && nrow(f) != 1L) || !all(c("name", "datapath") %in% names(f))) {
-    return(FALSE)
+# Connect the guard to a session. A browser can set the value of a file input
+# itself (Shiny.setInputValue), so the datapath in such a value is not a server
+# path this session may open. The guard learns which file inputs the client
+# wrote: the first note() covers values delivered in the client's init message,
+# which Shiny applies before the server function runs, and the callback covers
+# every later message (a real upload never passes through it). A Shiny without
+# the callback must fail loudly rather than run unguarded; the mock session of
+# the tests has none and delivers no client messages.
+dta_upload_guard_install <- function(guard, session, inputs) {
+  guard$note(inputs)
+  if (is.function(session$onInputReceived)) {
+    session$onInputReceived(guard$note)
+  } else if (!inherits(session, "MockShinySession")) {
+    stop("This Shiny version does not report client input messages; the upload guard cannot run.", call. = FALSE)
   }
-  dp <- f$datapath
-  if (!is.character(dp) || anyNA(dp) || !all(nzchar(dp)) || isTRUE(attr(seen, "untracked"))) {
-    return(FALSE)
+  invisible(guard)
+}
+
+# Why a file-input value is not what Shiny's own upload would have delivered, or
+# NULL when it is. A real upload is a data frame whose datapath is
+# <tempdir()>/<24 hex characters>/<index><.ext>, the layout Shiny's upload
+# context creates. This is a second, version-independent check that closes the
+# arbitrary-path read even if a future Shiny delivered client values by another
+# route. It is NOT by itself a session binding (another session's upload has the
+# same shape): the guard above is the binding. The reason is for tests and
+# comments and is never shown to users.
+dta_upload_value_problem <- function(value, tmp = tempdir()) {
+  if (!is.data.frame(value)) {
+    return("not a data frame")
   }
-  if (any(grepl("^[A-Za-z][A-Za-z0-9+.-]*://", dp))) {
-    return(FALSE)
+  if (nrow(value) < 1L) {
+    return("no rows")
   }
-  !any(vapply(dp, function(p) exists(rlang::hash(p), envir = seen, inherits = FALSE), logical(1))) &&
-    all(utils::file_test("-f", dp))
+  for (col in c("name", "datapath")) {
+    x <- value[[col]]
+    if (!is.character(x) || anyNA(x) || any(!nzchar(x))) {
+      return(sprintf("column '%s' is missing or not a usable character column", col))
+    }
+  }
+  nt <- sub("/+$", "", normalizePath(tmp, winslash = "/", mustWork = FALSE))
+  for (p in value$datapath) {
+    if (!file.exists(p) || dir.exists(p)) {
+      return("not a file that exists and is not a directory")
+    }
+    np <- normalizePath(p, winslash = "/", mustWork = FALSE)
+    if (!identical(dirname(dirname(np)), nt)) {
+      return("not directly inside an upload directory of the temporary directory")
+    }
+    if (!grepl("^[0-9a-f]{24}$", basename(dirname(np)))) {
+      return("upload directory name has the wrong shape")
+    }
+    if (!grepl("^[0-9]+([.][[:alnum:]]+)?$", basename(np))) {
+      return("file name has the wrong shape")
+    }
+  }
+  NULL
 }
 
 # Is a dropped file a delivery container? A .zip archive, or a SAS transport

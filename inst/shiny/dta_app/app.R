@@ -1633,24 +1633,27 @@ server <- function(input, output, session) {
     # dta_session_scratch_path(). Start over empties it; it is never reset.
     scratch = dta_session_scratch_path(session$token)
   )
-  # The `datapath` strings a CLIENT typed, as opposed to the ones Shiny's own
-  # upload channel produced (see dta_track_client_paths()). Every upload input
-  # (dta_file, tmpl_carry_file, the slots, delivery_files) is read only after
-  # upload_refused() has passed it: a fileInput id can be set by any websocket
-  # message, so without that check a client names the file the server reads.
-  client_paths <- dta_track_client_paths(session, isolate(shiny::reactiveValuesToList(input)))
-  upload_refused <- function(f, one = FALSE) {
-    if (dta_upload_trusted(f, client_paths, one = one)) {
-      return(FALSE)
-    }
-    showNotification("That upload was not accepted: this session did not receive it.", type = "error")
-    TRUE
-  }
   own <- function(kind, path) {
     owned[[kind]] <<- unique(c(owned[[kind]], path))
     assign(session$token, unlist(owned, use.names = FALSE), envir = .dta_live_session_paths)
   }
   own("scratch", owned$scratch)
+
+  # See dta_upload_guard_install for why a file-input value is not trusted
+  # until the guard has seen it. accept_upload() calls take() first so a mark is
+  # consumed even when the value is also malformed. No path and no reason is
+  # echoed to the user.
+  upload_guard <- dta_upload_guard_install(
+    dta_upload_guard(), session, isolate(reactiveValuesToList(input))
+  )
+  accept_upload <- function(id, value) {
+    client_sent <- upload_guard$take(id)
+    if (!client_sent && is.null(dta_upload_value_problem(value))) {
+      return(TRUE)
+    }
+    showNotification("That is not a file uploaded in this session, so it was not opened.", type = "error")
+    FALSE
+  }
   try(dta_sweep_session_files(), silent = TRUE)
   try(dta_worker_heartbeat(), silent = TRUE)
   try(dta_sweep_dead_workers(), silent = TRUE)
@@ -1960,9 +1963,13 @@ server <- function(input, output, session) {
   # document with no ancestor at all, same as a template with no carry-over
   # feature ever had.
   observeEvent(input$tmpl_carry_file, {
-    f <- input$tmpl_carry_file
-    # A value this session did not receive is dropped, so "Choose a file" shows.
-    rv$tmpl_carry_upload <- if (dta_upload_trusted(f, client_paths, one = TRUE)) f else NULL
+    v <- input$tmpl_carry_file
+    if (!is.null(v) && !accept_upload("tmpl_carry_file", v)) {
+      session$sendCustomMessage("dta_reset_fileinput", "tmpl_carry_file")
+      rv$tmpl_carry_upload <- NULL
+      return()
+    }
+    rv$tmpl_carry_upload <- v
   })
 
   resolve_carry_over <- function() {
@@ -2123,10 +2130,13 @@ server <- function(input, output, session) {
   # --- landing: load a DTA YAML ------------------------------------------
   observeEvent(input$dta_file, {
     f <- input$dta_file
-    req(f)
-    if (upload_refused(f, one = TRUE)) {
+    # Ask the guard first so a client mark is consumed even for a value that
+    # req() would drop; observeEvent already ignores NULL.
+    if (!accept_upload("dta_file", f)) {
+      session$sendCustomMessage("dta_reset_fileinput", "dta_file")
       return()
     }
+    req(f)
     txt <- tryCatch(paste(readLines(f$datapath, warn = FALSE), collapse = "\n"),
       error = function(e) NULL
     )
@@ -3235,9 +3245,6 @@ server <- function(input, output, session) {
     if (is.null(fileinfo)) {
       return()
     }
-    if (upload_refused(fileinfo)) {
-      return()
-    }
     names_ds <- dta_dataset_names(rv$dta)
     if (ds_idx < 1 || ds_idx > length(names_ds)) {
       return()
@@ -3353,10 +3360,10 @@ server <- function(input, output, session) {
       # like "0.csv"; matches_filename()/read_file() key off basename(file), so
       # stage the bytes under the ORIGINAL name first, else a valid file is
       # rejected inside load_file() (failure mode F7).
-      staged <- tryCatch(dta_stage_upload(dp, nm), dta_stage_failed = function(e) NULL)
-      if (is.null(staged)) {
-        rejected <- c(rejected, sprintf("'%s' (could not be read from the upload)", nm))
-        rej_recs[[length(rej_recs) + 1L]] <- list(file = nm, table = tbl, reason = "could not be read from the upload", slot = one_slot)
+      staged <- dta_stage_upload(dp, nm)
+      if (is.na(staged)) {
+        rejected <- c(rejected, sprintf("'%s' (could not be staged)", nm))
+        rej_recs[[length(rej_recs) + 1L]] <- list(file = nm, table = tbl, reason = "could not be staged", slot = one_slot)
         next
       }
       own("upload", dirname(staged))
@@ -3529,9 +3536,6 @@ server <- function(input, output, session) {
   # ambiguity dialog asked about; `origin` is "sidebar" or "slot".
   handle_delivery <- function(fileinfo, datasets = NULL, route = NULL, staged = NULL, origin = "sidebar") {
     if (is.null(staged)) {
-      if (upload_refused(fileinfo)) {
-        return(invisible())
-      }
       sz <- suppressWarnings(as.numeric(fileinfo$size))
       ok <- !is.na(sz) & sz > 0
       if (!any(ok)) {
@@ -3560,16 +3564,25 @@ server <- function(input, output, session) {
       return(invisible())
     }
     if (is.null(staged)) {
-      staged <- character(0)
-      for (r in seq_len(nrow(fileinfo))) {
-        s <- tryCatch(dta_stage_upload(fileinfo$datapath[r], fileinfo$name[r]), dta_stage_failed = function(e) NULL)
-        if (is.null(s)) {
-          unlink(dirname(staged), recursive = TRUE)
-          showNotification("The delivery could not be read from the upload.", type = "error")
+      staged <- vapply(seq_len(nrow(fileinfo)), function(r) {
+        s <- dta_stage_upload(fileinfo$datapath[r], fileinfo$name[r])
+        if (!is.na(s)) own("upload", dirname(s))
+        s
+      }, character(1))
+      # A file that could not be staged (no longer a file that exists and is not a directory) is dropped
+      # here, before anything reads it, and reported like the empty ones above.
+      unstaged <- is.na(staged)
+      if (any(unstaged)) {
+        if (all(unstaged)) {
+          showNotification("The delivery is empty or was not transferred completely.", type = "error")
           return(invisible())
         }
-        own("upload", dirname(s))
-        staged <- c(staged, s)
+        showNotification(sprintf(
+          "Not loaded (could not be staged): %s",
+          paste(fileinfo$name[unstaged], collapse = ", ")
+        ), type = "warning", duration = 10)
+        fileinfo <- fileinfo[!unstaged, , drop = FALSE]
+        staged <- staged[!unstaged]
       }
     }
     copies <- staged[staged != fileinfo$datapath] # our own staged copies, never Shiny's upload file
@@ -3816,7 +3829,12 @@ server <- function(input, output, session) {
             HI <- hi
             observeEvent(input[[UP]],
               {
-                handle_upload(DSIDX, HI, input[[UP]])
+                v <- input[[UP]]
+                if (!is.null(v) && !accept_upload(UP, v)) {
+                  session$sendCustomMessage("dta_reset_fileinput", UP)
+                  return()
+                }
+                handle_upload(DSIDX, HI, v)
               },
               ignoreInit = TRUE
             )
@@ -3862,8 +3880,15 @@ server <- function(input, output, session) {
   # --- delivery: the sidebar's drop zone and the ambiguity dialog ----------
   observeEvent(input$delivery_files,
     {
+      v <- input$delivery_files
+      # Before req(rv$dta): the guard's mark for this value is consumed even when
+      # no document is open, so it cannot refuse a later genuine upload.
+      if (!accept_upload("delivery_files", v)) {
+        session$sendCustomMessage("dta_reset_fileinput", "delivery_files")
+        return()
+      }
       req(rv$dta)
-      handle_delivery(input$delivery_files)
+      handle_delivery(v)
       session$sendCustomMessage("dta_reset_fileinput", "delivery_files")
     },
     ignoreInit = TRUE

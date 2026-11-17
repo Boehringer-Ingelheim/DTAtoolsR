@@ -69,11 +69,12 @@ Load the content of the file into dataset
 Binds a delivered file to a file-backed dataset, the counterpart of the
 \code{\link{DTADataSetTabular}} method that reads a table.
 
-Nothing is read, opened or stat-ed here. Whether the file exists, is
-non-empty and can be opened is the entire contract of \code{\link{check}()}
-for this class, and deferring to it is what lets a specification bind a file
-that has not arrived yet and report it as missing rather than refusing to
-record it at all.
+Nothing is read or opened here; the only look at the path is a check that it
+is not a directory, which is refused with an error of class
+\code{dta_file_is_directory}. Whether the file exists, is non-empty and can
+be opened is the entire contract of \code{\link{check}()} for this class, and
+deferring to it is what lets a specification bind a file that has not arrived
+yet and report it as missing rather than refusing to record it at all.
 
 The delivered name is still checked against the handler, exactly as
 \code{\link{read_file}()} does for a tabular dataset, so a file dropped into

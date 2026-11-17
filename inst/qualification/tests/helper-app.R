@@ -110,9 +110,43 @@ qapp_file_input <- function(filename) {
   if (!nzchar(path)) {
     cli::cli_abort("{.file {filename}} is missing from inst/extdata.")
   }
+  qapp_upload_value(path, filename)
+}
+
+.qapp_upload_counter <- new.env(parent = emptyenv())
+
+# Stage file(s) as Shiny would have received them, and return the fileInput
+# value (a data frame: name, size, type, datapath). The app acts on a file
+# input only when every datapath is an existing file, not a directory, at
+# <tempdir()>/<24 lowercase hex>/<index><.ext>, the layout of Shiny's own upload
+# context (REQ-APP-050), so a fixture path handed over directly is a value the
+# application correctly refuses.
+#
+# WHY THIS WRITES UNDER tempdir() AND NOT qa_tempdir(): qa_tempdir() is a
+# "qa-*" folder below tempdir(), so a file in it is two levels down and is not
+# an upload location. The upload folder has to be a direct child of tempdir(),
+# exactly where Shiny puts it on a target system; the R session's temporary
+# directory is writable there and is removed with the session. The folder name
+# comes from a counter, not the random stream, because the suite seeds that
+# stream deliberately and a drawn name would repeat across stages. The counter
+# advances until dir.create() succeeds, so a helper file sourced twice in one R
+# session (which resets the counter) never reuses or trips over an existing
+# folder. `name` sets the extension (as the client's file name does in Shiny).
+# Vectorised over `path`/`name`, order preserved.
+qapp_upload_value <- function(path, name = basename(path)) {
+  repeat {
+    n <- (if (is.null(.qapp_upload_counter$n)) 0L else .qapp_upload_counter$n) + 1L
+    .qapp_upload_counter$n <- n
+    dir <- file.path(tempdir(), sprintf("%024x", n))
+    if (dir.create(dir, showWarnings = FALSE)) break
+  }
+  ext <- tools::file_ext(name)
+  ext <- ifelse(ext == "", "", paste0(".", ext))
+  staged <- file.path(dir, paste0(seq_along(path) - 1L, ext))
+  stopifnot(all(file.copy(path, staged)))
   data.frame(
-    name = filename, size = file.size(path), type = "",
-    datapath = path, stringsAsFactors = FALSE
+    name = name, size = file.size(staged),
+    type = "", datapath = staged, stringsAsFactors = FALSE
   )
 }
 
