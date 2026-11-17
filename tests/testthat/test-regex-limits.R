@@ -44,9 +44,27 @@ test_that("a container glob with more than three wildcards is refused", {
   )
   expect_identical(DTAFileCSV("x.csv", container = "*a*a*.zip")@container, "*a*a*.zip")
 })
+
 test_that("one name that trips the limit does not hide the others in the same call", {
   testthat::local_mocked_bindings(dta_regex_time_limit = 10L)
   nm <- c("fine", paste0(strrep("a", 18), "!"), "also fine")
   expect_warning(res <- dta_str_detect(nm, "^(a+)+$|fine"), class = "dta_regex_limit")
   expect_identical(res, c(TRUE, FALSE, TRUE))
+})
+
+test_that("a vector of hostile names is cut off after a few trips, with one warning for the call", {
+  testthat::local_mocked_bindings(dta_regex_time_limit = 10L, dta_regex_max_trips = 2L)
+  bad <- paste0(strrep("a", 18), "!")
+  nm <- c("fine", bad, bad, "not tried fine", bad)
+  n_warn <- 0L
+  res <- withCallingHandlers(
+    dta_str_detect(nm, "^(a+)+$|fine"),
+    dta_regex_limit = function(w) {
+      n_warn <<- n_warn + 1L
+      invokeRestart("muffleWarning")
+    }
+  )
+  expect_identical(n_warn, 1L)
+  # the benign name tried before the cap still matches; those after it stay FALSE
+  expect_identical(res, c(TRUE, FALSE, FALSE, FALSE, FALSE))
 })

@@ -209,7 +209,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   engine with no time or stack limit, so a short pattern such as `^(a+)+$` kept
   the process busy for as long as a name was long; they are now matched under
   a step and stack limit, and a pattern that hits it matches nothing and
-  warns (class `dta_regex_limit`). A container glob may use at most three `*`.
+  warns (class `dta_regex_limit`). When one call matches many names, it stops
+  after five that hit the limit and warns once for the call, instead of
+  spending the full limit on every name. A container glob may use at most three `*`.
   A matrix header whose labels chain through the generated `<column n>` names
   was renamed with one pass over all labels per link; it is now one pass, and
   a header or first row of more than 250,000 fields is refused (class
@@ -227,9 +229,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   retention. The app now gives each session a scratch directory for them
   (`DTAtools.temp_dir`, set for the duration of a load or check), which "Start
   over" deletes, the sweep ages out and the sweep spares while the session
-  lives; `dta_transcode_` copies and `dta_error_spill_` directories left in
-  `tempdir()` are swept too, and a copy that is gone no longer leaves a cache
-  entry behind.
+  lives; `dta_transcode_` copies and `dta_error_spill_` directories left in the
+  `tempdir()` of a worker known to be dead are swept too (a running process's
+  own are not, since an object may still stream from them), and a copy that is
+  gone no longer leaves a cache entry behind.
 - **A worker that ended without cleaning up no longer leaves its files
   forever.** The sweep only saw the temp directory of the process that ran it,
   so the autosave, staged uploads and extractions of a worker that was killed or
@@ -239,7 +242,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   own that hold such a file with a heartbeat older than the retention window,
   removing what carries the app's prefixes and is older than the window, and the
   directory itself once nothing else is left in it. Directories without the
-  heartbeat are never touched.
+  heartbeat are never touched, and neither is one whose process is running or
+  cannot be checked (Windows, macOS), since it may be a live idle worker.
 - The **Bump version** workflow runs in a `release-bump` environment and only
   from `dev`. The optional `BUMP_PAT` secret belongs in that environment (with
   its deployment branches limited to `dev`), no longer at repository scope,
