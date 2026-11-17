@@ -358,10 +358,26 @@ dta_matrix_reading_names <- function(head_fields, x) {
   generated <- paste0("<column ", length(ids) + seq_len(m), ">")
   usable <- !is.na(labs) & nzchar(labs) & !(labs %in% ids) &
     !(duplicated(labs) | duplicated(labs, fromLast = TRUE))
-  repeat {
-    colliding <- usable & (labs %in% generated[!usable])
-    if (!any(colliding)) break
-    usable[colliding] <- FALSE
+  # A usable label equal to the generated name of an unusable column is itself
+  # replaced, which can make the next one collide, and so on down a chain. The
+  # usable labels are unique, so each generated name has at most one such label
+  # (`nxt`), and one queue walks every chain in a single pass over the columns
+  # (a header of 60,000 chained labels costs 60,000 steps, not 60,000 passes
+  # over 60,000 labels).
+  keep <- which(usable)
+  nxt <- keep[match(generated, labs[keep])]
+  queue <- which(!usable)
+  qlen <- length(queue)
+  length(queue) <- m
+  head <- 1L
+  while (head <= qlen) {
+    j <- nxt[queue[[head]]]
+    head <- head + 1L
+    if (!is.na(j) && usable[[j]]) {
+      usable[[j]] <- FALSE
+      qlen <- qlen + 1L
+      queue[[qlen]] <- j
+    }
   }
   c(ids, ifelse(usable, labs, generated))
 }

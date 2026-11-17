@@ -176,6 +176,86 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Security
 
+- **Compressed uploads are bounded by what they inflate to.** A loose `.csv.gz`
+  or `.sas7bdat.gz` dropped on a slot was read whole with no limit on its
+  inflated size, unlike the same file inside a delivery; `load_file()` now
+  refuses a gzip file that inflates past `DTAtools.container_max_member_bytes`
+  before an in-memory read, and the app runs every load under its own limits (2
+  GB per file, 10 GB written). The SAS transport scan applied
+  `DTAtools.container_max_bytes` to gzip streams only, so a bzip2 or xz `.xpt`
+  was uncapped; it now applies to any stream that inflates past its size on
+  disk. The UTF-8 conversion of a non-UTF-8 file stops at
+  `DTAtools.container_max_bytes` and removes its partial copy, and refuses a
+  single line longer than 64 conversion blocks (256 MiB by default) with a
+  condition of class `dta_transcode_line_too_long`.
+- **A specification cannot hold the shared worker with sheer size.** The app
+  refused an alias-expanded YAML past a million values but not one that simply
+  declares a very large number of columns and rules, each of which is built and
+  linted several times per load; it now refuses a document with more than
+  10,000 columns and rules in total (`dta_app.max_spec_objects` raises it).
+  File-name patterns and container globs were matched by a regular-expression
+  engine with no time or stack limit, so a short pattern such as `^(a+)+$` kept
+  the process busy for as long as a name was long; they are now matched under
+  a step and stack limit, and a pattern that hits it matches nothing and
+  warns (class `dta_regex_limit`). When one call matches many names, it stops
+  after five that hit the limit and warns once for the call, instead of
+  spending the full limit on every name. A container glob may use at most three `*`.
+  A matrix header whose labels chain through the generated `<column n>` names
+  was renamed with one pass over all labels per link; it is now one pass, and
+  a header or first row of more than 250,000 fields is refused (class
+  `dta_matrix_header_too_wide`) before a schema is built from it.
+- **A specification cannot bind server paths.** A `paths:` key in a dataset
+  of a specification YAML (also `tables:` and `specs:`) became the paths a file
+  dataset checks, so the check and the report revealed whether, and how large, any
+  file the server could see was. The linter now reports it as an error
+  (`dataset_invalid`) and building a dataset from a list refuses it (class
+  `dta_dataset_runtime_key`); `DTADataSetFile(paths = )` in R is unchanged.
+- **The app's working copies are removed with the session's other files.** The
+  UTF-8 copy of a non-UTF-8 file and the spilled rows of a check with more
+  than `max_errors` errors were written to the shared `tempdir()` and lived as
+  long as the R process, outside "Start over", the 24-hour sweep and the other
+  retention. The app now gives each session a scratch directory for them
+  (`DTAtools.temp_dir`, set for the duration of a load or check), which "Start
+  over" deletes, the sweep ages out and the sweep spares while the session
+  lives; `dta_transcode_` copies and `dta_error_spill_` directories left in the
+  `tempdir()` of a worker known to be dead are swept too (a running process's
+  own are not, since an object may still stream from them), and a copy that is
+  gone no longer leaves a cache entry behind.
+- **A worker that ended without cleaning up no longer leaves its files
+  forever.** The sweep only saw the temp directory of the process that ran it,
+  so the autosave, staged uploads and extractions of a worker that was killed or
+  recycled stayed for good. Every worker now leaves a heartbeat file in its temp
+  directory (touched at each session start and hourly while one is open), and
+  when a session starts the sweep also visits the `Rtmp*` directories beside its
+  own that hold such a file with a heartbeat older than the retention window,
+  removing what carries the app's prefixes and is older than the window, and the
+  directory itself once nothing else is left in it. Directories without the
+  heartbeat are never touched, and neither is one whose process is running or
+  cannot be checked (Windows, macOS), since it may be a live idle worker.
+- The **Bump version** workflow runs in a `release-bump` environment and only
+  from `dev`. The optional `BUMP_PAT` secret belongs in that environment (with
+  its deployment branches limited to `dev`), no longer at repository scope,
+  where any workflow a contributor pushes on their own branch could read it.
+- **A Word template from a template library can no longer write outside its
+  scratch directory on R older than 4.5.1.** The app scans every library
+  `.docx` when it builds its configuration, and an export extracts the chosen
+  one; R's `unzip()` only neutralises an archive member such as `../x` from
+  4.5.1 on, while the package supports R 4.1.0. Both places now read the member
+  names first and treat an archive with an absolute, drive-lettered or
+  `.`/`..` name as an unreadable template, whatever R version runs.
+- **The git token for a private template library is now sent only to the
+  library's own host.** `DTATOOLS_TEMPLATE_GIT_TOKEN` was handed to git as an
+  unscoped `http.extraHeader`, so every server git, or a helper git started
+  while checking out the repository (a git-lfs filter reading a `.lfsconfig`
+  from the cloned content, say), contacted received it. It is now scoped to the
+  scheme, host and port of the source's locator; a locator that is not
+  `http(s)://` (an ssh address, a local path) is cloned without the header.
+- **A template library can no longer redirect the app's refresh stamp.** The
+  stamp that dates a cached git library sat inside the checkout, so a library
+  that tracked a symlink named `.dta-last-refresh` made the app overwrite the
+  link's target with the time on every refresh. It now lives next to the
+  checkout (`<hash>.stamp`), where the repository cannot reach it. Existing
+  caches refresh once more on first use to create it.
 - **`read_file()`, `open_file()` and `load_file()` refuse a directory.** A path
   that is a directory passed the existence check, so a delimited-text reader
   was handed the directory and its error message named a file inside it and
@@ -4876,7 +4956,6 @@ All of the following belong to the manifest verification work above.
 - added `remotes` to package Suggests and GitHub Actions workflow setup-r-dependencies to resolve macOS CI failures during S7 installation
 - `inspect()` (and the Shiny app's message inspector) no longer errors with `Can't find property <DTAtools::DTARuleColRange>@range` when highlighting the failing rows of a `check_range` rule. The failing-row helper now reads the rule's `min`/`max` properties directly instead of a non-existent `range` property.
 - `validate_table()` / `check()` no longer abort with `No method asJSON S3 class: vctrs_unspecified` when a table contains a fully-empty column. Arrow reads such columns as its `null` type (a `vctrs_unspecified` vector in R), which `jsonlite::toJSON()` cannot serialise; they are now coerced to all-`NA` and emitted as JSON `null`, so nullable empty columns validate correctly instead of crashing the whole validation run.
-
 
 ## [0.11.0] - 2026-07-27
 

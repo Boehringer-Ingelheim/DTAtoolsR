@@ -179,7 +179,7 @@ requirements:
       split out of a library, streamed or not, or a gzip file it would read
       into memory, is larger than
       DTAtools.container_max_member_bytes, the gzip file judged by what it
-      inflates to. A gzip-compressed transport
+      inflates to. A compressed (gzip, bzip2 or xz) transport
       file that decompresses to more than DTAtools.container_max_bytes shall be
       refused the same way when an entry's effective container names it or a
       type xpt entry reads it; one that no entry names or claims is listed as unused with

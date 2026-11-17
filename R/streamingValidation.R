@@ -503,7 +503,7 @@ dta_error_sink_spill <- function(sink, errs) {
     return(invisible(sink))
   }
   if (is.null(sink$spill_dir)) {
-    sink$spill_dir <- tempfile("dta_error_spill_")
+    sink$spill_dir <- tempfile("dta_error_spill_", tmpdir = dta_temp_dir())
     dir.create(sink$spill_dir, recursive = TRUE)
   }
   sink$spill_parts <- sink$spill_parts + 1L

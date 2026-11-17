@@ -1000,6 +1000,15 @@ dta_load_tabular <- function(x, file, handler, name, stream, column_names = NULL
     return(dta_set_provenance(x, name, rec))
   }
 
+  # An eager read inflates the whole stream into memory (or, for SAS, into a
+  # full-size temporary file first), and the "auto" size guess is a typical ratio,
+  # not a bound -- so a gzip file is judged by what it inflates to here, for
+  # every caller of load_file(), not only for load_delivery(). A transport file
+  # checks its own member size (dta_read_xpt()).
+  if (!inherits(handler, "DTAtools::DTAFileXPT")) {
+    dta_check_inflated_size(file)
+  }
+
   coerced <- dta_coerce_table_to_specs(
     handler |> read_file(file, specs = x@specs, column_names = column_names),
     coerce_specs

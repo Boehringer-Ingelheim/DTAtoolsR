@@ -478,7 +478,7 @@ limitations:
   - id: LIM-006
     title: A ragged data row is reported as if the header were unreadable
     affects: [REQ-FILE-017]
-    reference: R/DTAFileTabular-class.R:1038
+    reference: R/DTAFileTabular-class.R:1066
     consequence: >
       Every failure of the underlying reader is wrapped as "Cannot read the
       column names of ... Is this a 'csv' file?", including a row with too few
@@ -632,7 +632,12 @@ limitations:
       at once, and at session end keeps only the files a file dataset uses,
       because "Restore previous session" re-reads file datasets from their
       files while tables come back from the autosave's own copies. Those, and
-      anything a crash leaves, are removed by the 24-hour sweep. The
+      anything a crash leaves, are removed by the 24-hour sweep (a worker that
+      is killed leaves its temp directory behind; the next session started by
+      a worker with the same parent temp directory removes it once the dead
+      worker's heartbeat file is older than the window; where each worker has
+      a private temp root nothing can, and the platform or an operator must).
+      The
       application's per-session budget (DTATOOLS_SESSION_DELIVERY_BYTES) bounds
       one session, not the server: one R process serving several sessions, or
       one user with several browser tabs, can hold that amount for each of them

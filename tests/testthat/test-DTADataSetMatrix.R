@@ -806,6 +806,46 @@ test_that("reading names follow the plan: ids, then usable labels, else <column 
   )
 })
 
+test_that("a header of chained generated-looking labels is renamed in one pass, as the repeat-until-stable rule says", {
+  ds <- mxd_ds(headers = list(FALSE, "d"), k = 2L)
+  # The rule, written out: a label is replaced when it is empty, repeated or an
+  # id, or equals the generated name of a column that was replaced; repeat
+  # until no label changes. Here label 1 is empty and label i is the generated
+  # name of column i - 1, so the replacement runs down the whole chain.
+  rule <- function(labs, ids) {
+    gen <- paste0("<column ", length(ids) + seq_along(labs), ">")
+    bad <- is.na(labs) | !nzchar(labs) | labs %in% ids | duplicated(labs) | duplicated(labs, fromLast = TRUE)
+    repeat {
+      more <- !bad & labs %in% gen[bad]
+      if (!any(more)) break
+      bad <- bad | more
+    }
+    c(ids, ifelse(bad, gen, labs))
+  }
+  for (m in c(1L, 2L, 7L, 40L)) {
+    labs <- c("", if (m > 1L) paste0("<column ", 1L + seq_len(m - 1L) + 1L, ">"))
+    expect_identical(
+      dta_matrix_reading_names(c("d", labs), ds),
+      rule(labs, c("ID", "DESC")),
+      info = paste("m =", m)
+    )
+  }
+  # a chain that stops, and a label that only looks generated
+  labs <- c("", "<column 4>", "x", "<column 9>", "<column 6>")
+  expect_identical(dta_matrix_reading_names(c("d", labs), ds), rule(labs, c("ID", "DESC")))
+})
+
+test_that("renaming a long chained header costs one pass, not one pass per label", {
+  ds <- mxd_ds(headers = list(FALSE, "d"), k = 2L)
+  m <- 20000L
+  labs <- c("", paste0("<column ", 1L + seq_len(m - 1L) + 1L, ">"))
+  # The repeat-until-stable loop needs m passes over m labels (4e8 lookups);
+  # a pass count of one is checked by the budget, not by timing alone.
+  elapsed <- system.time(res <- dta_matrix_reading_names(c("d", labs), ds))[["elapsed"]]
+  expect_identical(res[-(1:2)], paste0("<column ", 2L + seq_len(m), ">"))
+  expect_lt(elapsed, 5)
+})
+
 test_that("header findings are ordered by position and declare their denominators", {
   ds <- mxd_ds(headers = list(NULL, NULL), k = 2L, columns = list(pattern = "^S[0-9]$", count = list(max = 2)))
   hf <- dta_matrix_head_findings(c("x", "DESC", "S1", "Q", "S1"), ds)
