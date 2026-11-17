@@ -62,18 +62,24 @@ sw_mk <- function(dir, name, age_h, dir_entry = FALSE) {
   p
 }
 
-test_that("the sweep ages out the package's transcoded copies, error spills and session scratch directories", {
+test_that("the sweep ages out session scratch directories but leaves the package's own copies to the running process", {
   dir <- withr::local_tempdir()
-  old <- c(
+  scratch <- sw_mk(dir, "dta_scratch_0123456789abcdef", 48, dir_entry = TRUE)
+  copies <- c(
     sw_mk(dir, "dta_transcode_1a2b.csv", 48),
-    sw_mk(dir, "dta_error_spill_1a2b", 48, dir_entry = TRUE),
-    sw_mk(dir, "dta_scratch_0123456789abcdef", 48, dir_entry = TRUE)
+    sw_mk(dir, "dta_error_spill_1a2b", 48, dir_entry = TRUE)
   )
-  fresh <- sw_mk(dir, "dta_transcode_fresh.csv", 1)
+  fresh <- sw_mk(dir, "dta_scratch_fresh", 1, dir_entry = TRUE)
   live <- sw_mk(dir, "dta_scratch_live", 48, dir_entry = TRUE)
   other <- sw_mk(dir, "file1a2b.csv", 48)
+  # An object read through the API may still stream from a copy in tempdir():
+  # the own-process sweep must not take it.
   app_fn("dta_sweep_session_files")(dir, ttl = 24 * 3600, keep = live)
-  expect_false(any(file.exists(old)))
+  expect_false(file.exists(scratch))
+  expect_true(all(file.exists(c(copies, fresh, live, other))))
+  # A worker known to be dead owns nothing, so its copies go once expired.
+  app_fn("dta_sweep_session_files")(dir, ttl = 24 * 3600, keep = live, package_copies = TRUE)
+  expect_false(any(file.exists(copies)))
   expect_true(all(file.exists(c(fresh, live, other))))
 })
 
@@ -168,6 +174,7 @@ test_that("the sweep of sibling temp directories removes only expired app files 
   dead_old <- sw_mk(dead, "dtatools_app_session_k.rds", 48)
   dead_fresh <- sw_mk(dead, "dta_upload_fresh", 2)
   dead_other <- sw_mk(dead, "Rf1234.tmp", 48)
+  dead_copy <- sw_mk(dead, "dta_transcode_old.csv", 48)
   alive_old <- sw_mk(alive, "dta_upload_old", 48)
   foreign_old <- sw_mk(foreign, "dta_upload_old", 48)
   self_old <- sw_mk(self, "dta_upload_old", 48)
@@ -177,19 +184,25 @@ test_that("the sweep of sibling temp directories removes only expired app files 
 
   expect_identical(basename(swept), "RtmpDead111")
   expect_false(file.exists(dead_old))
+  # a positively dead worker owns nothing, package copies included
+  expect_false(file.exists(dead_copy))
   expect_true(all(file.exists(c(dead_fresh, dead_other, alive_old, foreign_old, self_old, file.path(notr, "dta_upload_x")))))
 
   # once nothing but the heartbeat is left, the directory goes too
   unlink(c(dead_fresh, dead_other))
-  # ... but never when the process cannot be shown dead (NA) or is running (TRUE)
+  # ... but nothing in it is touched when the process is running (TRUE) or the
+  # platform cannot tell (NA): either may be a live idle worker.
+  idle <- c(sw_mk(dead, "dta_upload_idle", 48), sw_mk(dead, "dta_transcode_idle.csv", 48))
+  for (unknown in list(NA, TRUE)) {
+    swept <- app_fn("dta_sweep_dead_workers")(root, self = self, ttl = 24 * 3600, alive = function(pid) unknown)
+    expect_identical(swept, character(0))
+    expect_true(all(file.exists(idle)))
+    expect_true(dir.exists(dead))
+  }
+  unlink(idle)
+  # an empty directory is not removed for an unknown process either
   app_fn("dta_sweep_dead_workers")(root, self = self, ttl = 24 * 3600, alive = function(pid) NA)
   expect_true(dir.exists(dead))
-  app_fn("dta_sweep_dead_workers")(root, self = self, ttl = 24 * 3600, alive = function(pid) TRUE)
-  expect_true(dir.exists(dead))
-  sw_mk(dead, "dta_upload_idle", 48)
-  app_fn("dta_sweep_dead_workers")(root, self = self, ttl = 24 * 3600, alive = function(pid) TRUE)
-  expect_true(file.exists(file.path(dead, "dta_upload_idle")))
-  unlink(file.path(dead, "dta_upload_idle"))
   app_fn("dta_sweep_dead_workers")(root, self = self, ttl = 24 * 3600, alive = gone)
   expect_false(dir.exists(dead))
   expect_true(dir.exists(alive))

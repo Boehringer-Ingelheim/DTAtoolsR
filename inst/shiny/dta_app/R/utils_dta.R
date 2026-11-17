@@ -5029,9 +5029,15 @@ dta_session_ttl_seconds <- function() {
 
 dta_sweep_session_files <- function(dir = tempdir(), ttl = dta_session_ttl_seconds(),
                                     keep = unlist(as.list(.dta_live_session_paths), use.names = FALSE),
-                                    now = Sys.time()) {
+                                    now = Sys.time(), package_copies = FALSE) {
+  # The package's own copies (a transcoded file, an error spill) belong to
+  # whichever object still streams from them, and this process cannot tell
+  # which; they are swept only for a worker known to be dead. Inside a session
+  # they sit in a dta_scratch_* directory, which is swept whole.
+  prefixes <- c("dtatools_app_session_", "dta_upload_", "dta-export-", "dta_scratch_")
+  if (isTRUE(package_copies)) prefixes <- c(prefixes, "dta_transcode_", "dta_error_spill_")
   paths <- list.files(dir,
-    pattern = "^(dtatools_app_session_|dta_upload_|dta-export-|dta_scratch_|dta_transcode_|dta_error_spill_)",
+    pattern = paste0("^(", paste(prefixes, collapse = "|"), ")"),
     full.names = TRUE, all.files = TRUE
   )
   norm <- function(p) normalizePath(p, winslash = "/", mustWork = FALSE)
@@ -5052,7 +5058,8 @@ dta_sweep_session_files <- function(dir = tempdir(), ttl = dta_session_ttl_secon
 # retention window belongs to a worker that has not been serving a session for
 # that long, and is swept like this process's own: whatever carries the app's
 # prefixes and is older than the window goes; a directory left with nothing but
-# the heartbeat goes too. Directories without the heartbeat are never touched.
+# the heartbeat goes too. A running process, or one the platform cannot tell
+# about, is never touched, and neither are directories without the heartbeat.
 dta_worker_heartbeat_name <- "dtatools_worker.heartbeat"
 
 dta_worker_heartbeat <- function(dir = tempdir()) {
@@ -5092,14 +5099,12 @@ dta_sweep_dead_workers <- function(root = dirname(tempdir()), self = tempdir(),
     hb <- file.path(d, dta_worker_heartbeat_name)
     age <- as.numeric(difftime(now, file.mtime(hb), units = "secs"))
     if (!file.exists(hb) || is.na(age) || age <= ttl) next
-    # A process that is still running is idle, not dead: leave it alone. When
-    # the platform cannot tell, only files go, never the directory itself,
-    # which R does not recreate for a live process.
+    # A process that is still running is idle, not dead, and one the platform
+    # cannot tell about (NA) may be too: only a positively dead one is swept.
     pid <- tryCatch(readLines(hb, n = 1L, warn = FALSE), error = function(e) NA_character_)
-    if (isTRUE(alive(pid))) next
-    dta_sweep_session_files(dir = d, ttl = ttl, keep = character(0), now = now)
-    if (identical(alive(pid), FALSE) &&
-      !length(setdiff(list.files(d, all.files = TRUE, no.. = TRUE), dta_worker_heartbeat_name))) {
+    if (!identical(alive(pid), FALSE)) next
+    dta_sweep_session_files(dir = d, ttl = ttl, keep = character(0), now = now, package_copies = TRUE)
+    if (!length(setdiff(list.files(d, all.files = TRUE, no.. = TRUE), dta_worker_heartbeat_name))) {
       unlink(d, recursive = TRUE, force = TRUE)
     }
     swept <- c(swept, d)
