@@ -589,6 +589,29 @@ test_that("dta_as_numeric_strict separates missing from unconvertible", {
   expect_true(dta_as_numeric_strict(c(1, NA, 3))$missing[[2]])
 })
 
+test_that("dta_reread_overflow corrects an infinity the platform parser invented", {
+  # macOS arm64 reads "1.7976931348623157e308" as Inf. Windows and Linux read it
+  # correctly, so the misreading is supplied here rather than produced.
+  raw <- c(
+    "1.7976931348623157e308", " -1.7976931348623157E308 ", "+1.7976931348623157e308",
+    "1e400", "Inf", "-inf", "0x1p1024", "1e308, 2", "12"
+  )
+  misread <- c(Inf, -Inf, Inf, Inf, Inf, -Inf, Inf, Inf, 12)
+  out <- dta_reread_overflow(raw, misread)
+
+  max_double <- .Machine$double.xmax
+  expect_identical(out[1:3], c(max_double, -max_double, max_double))
+  # A real overflow, the infinity spellings, text JSON refuses, and text that
+  # JSON would read as more than one number all keep their first reading.
+  expect_identical(out[4:9], misread[4:9])
+
+  # End to end: the strict converter keeps the largest double finite, which is
+  # what macOS arm64 got wrong (OQ-MATRIX-030).
+  converted <- dta_as_numeric_strict(c("1.7976931348623157e308", "1e400"))
+  expect_identical(converted$values, c(max_double, Inf))
+  expect_false(any(converted$unconvertible))
+})
+
 test_that("dta_as_numeric_strict does not render the whole column as text", {
   # Pins the v0.17.2 memory regression. The conversion used to carry a `raw`
   # field holding `as.character()` of the entire column, even though the text is

@@ -68,7 +68,7 @@ dta_as_numeric_strict <- function(x) {
   # a handful of rows, so the trimws() pass -- two regex substitutions and a
   # full character-vector reallocation per numeric column per batch on the
   # streaming path -- runs on that subset instead of the whole column.
-  values <- suppressWarnings(as.numeric(raw_chr))
+  values <- dta_reread_overflow(raw_chr, suppressWarnings(as.numeric(raw_chr)))
   missing <- is.na(raw_chr)
   # as.numeric() also reads hex ("0x1A" is 26) and "Inf" spellings. That is
   # deliberate: the oracle matrix (vc_numeric_edges) and the qualification
@@ -88,6 +88,39 @@ dta_as_numeric_strict <- function(x) {
     missing = missing,
     unconvertible = is.na(values) & !missing
   )
+}
+
+#' @title Re-read Overflowed Numbers With a Correctly Rounded Parser
+#' @description
+#' R's own text-to-number conversion is not correctly rounded on platforms
+#' without an extended `long double` (macOS arm64): there `as.numeric()` reads
+#' the largest finite double, `"1.7976931348623157e308"`, as `Inf`.
+#'
+#' The rows that came back infinite and whose text holds a digit are read again
+#' with `jsonlite::parse_json()`, which uses the C library's correctly rounded
+#' `strtod`. The value is replaced only when that read yields exactly one finite
+#' number. A genuine overflow (`"1e400"`) is infinite under both readers, and a
+#' spelling the JSON grammar refuses (`"Inf"`, hex, a leading zero) keeps its
+#' first reading, so nothing that converted before converts differently on a
+#' platform whose parser was already correct.
+#' @param raw_chr The character vector that was parsed.
+#' @param values `as.numeric(raw_chr)`.
+#' @return `values`, with misread infinities replaced by the finite value.
+#' @keywords internal
+dta_reread_overflow <- function(raw_chr, values) {
+  idx <- which(is.infinite(values))
+  idx <- idx[grepl("[0-9]", raw_chr[idx])]
+  for (i in idx) {
+    text <- sub("^\\+", "", trimws(raw_chr[[i]]))
+    reread <- tryCatch(
+      jsonlite::parse_json(paste0("[", text, "]")),
+      error = function(e) NULL
+    )
+    if (length(reread) == 1L && is.numeric(reread[[1]]) && is.finite(reread[[1]])) {
+      values[[i]] <- as.double(reread[[1]])
+    }
+  }
+  values
 }
 
 #' @title The Source Text Behind a Strict Numeric Conversion
