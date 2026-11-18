@@ -15,7 +15,8 @@ as their \code{container}.}
 \item{filename}{Character. The name of the archive: a \code{.zip} or
 \code{.xpt} file name. \code{*} matches any text and \code{?} one
 character (\code{"STUDY_SDTM_*.zip"}); the name is matched as a whole and
-letter case must match.}
+letter case must match. A file name, not a path, with at most three
+\code{*}.}
 
 \item{description}{Character or \code{NULL}. Free text shown in exported
 documents.}

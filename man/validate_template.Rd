@@ -112,7 +112,10 @@ repository root), and the \code{\link[=lint_dta]{lint_dta()}} errors \code{rule_
 \code{rule_id_duplicate}, \code{rule_column_undeclared}, \code{rule_range_non_numeric},
 \code{rule_condition_operator_invalid}, \code{rule_condition_numeric_on_text},
 \code{rule_condition_value_unfit}, \code{rule_condition_value_outside_values} (only for \code{equals}/\verb{in}; the negated
-operators raise no finding), \code{group_constraint_unknown_condition}.
+operators raise no finding), \code{group_constraint_unknown_condition}, and
+\code{file_name_conflict} (file entries of two datasets could take the same file
+name; the linter's warning is an error here). Any other \code{\link[=lint_dta]{lint_dta()}} code
+(see its Codes section) is passed on with the linter's severity.
 The linter codes come from the columns and rules of a dataset template's
 body, and from every instantiated variant of a creation template.
 Warnings: the linter's \code{rules_without_columns}, \code{rule_not_checkable} and

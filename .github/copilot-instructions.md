@@ -30,9 +30,11 @@
 
 The package is organized as a hierarchy of S7 classes, all defined in `R/<ClassName>-class.R` files:
 
-- **DTA** — Root object: holds metadata + a list of datasets + rules.
+- **DTA** — Root object: holds metadata + a list of datasets + a list of containers.
+- **DTAContainer** — One delivery archive (`.zip` or `.xpt`) named once at document level; file entries refer to it by id.
 - **DTADataSet** (abstract base)
   - **DTADataSetTabular** — In-memory or on-disk tabular data (delimited text such as CSV or TSV, a SAS dataset, or a SAS transport file).
+    - **DTADataSetMatrix** — Omics-style matrix: row labels plus a declared data-column layout (child of DTADataSetTabular).
   - **DTADataSetFile** — Non-tabular deliverable files (presence/readability validation only).
 - **DTAFile** (abstract base, for file I/O)
   - **DTAFileTabular** — Tabular file handler (child of DTAFile).

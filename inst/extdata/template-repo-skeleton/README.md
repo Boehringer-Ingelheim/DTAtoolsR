@@ -369,11 +369,11 @@ dataset:
 
 - Where the token sits in a regular expression -- a `filename` whose entry says `pattern: true`, a column's `pattern:`, or a rule's
   `pattern` condition -- the identifier is escaped, so it is matched literally: `1199.187` does not also accept `1199x187`. Everywhere else
-  (`values`, `example`, `equals`, `pattern_description`, ...) it is inserted as entered.
+  (`values`, `examples`, `equals`, `pattern_description`, ...) it is inserted as entered.
 - Creating a document fails, naming the dataset, when its body uses a study token the document has no value for. An empty value would
   otherwise silently mean "STUDYID must be empty".
 - The value is copied in when the document is created. Changing the study identity in the Metadata tab later does not update the datasets.
-- Use the token in `example:` too when the column has a `pattern:` built from it; a literal example cannot match every study.
+- Use the token in `examples:` too when the column has a `pattern:` built from it; a literal example cannot match every study.
 - `path:`/`source:` dataset entries are finished specification files and are not substituted.
 - `validate_template()`, the template guide and the template history build a template without anyone entering a study identity. They use
   the first `choices:` suggestion of the option that asks for the field, else the stand-ins `STUDY-ID` and `PROT-ID`, and a guide shows
@@ -602,8 +602,9 @@ dataset:
       examples: [SUBJ0001]
 ```
 
-Supported dataset `type` values are `tabular` and `file`. A tabular dataset contains column specifications and may contain `rules`. A file
-dataset specifies deliverable files rather than a tabular column schema.
+Supported dataset `type` values are `tabular`, `file` and `matrix`. A tabular dataset contains column specifications and may contain `rules`. A file
+dataset specifies deliverable files rather than a tabular column schema. A matrix dataset has `row_labels:` and a `matrix:` block instead of
+`columns:` (see "Patches" for its paths).
 
 ### Column fields
 
@@ -1565,8 +1566,10 @@ configuration focused on the same command and avoid maintaining different rules 
 
 ### Validator codes
 
-This table lists every code emitted by `validate_template()` in the current validator, including the library-layout codes. Severity is the
-literal severity reported in the result. A concrete template can receive `instantiate_failed` in addition to a more specific inheritance code.
+This table lists every template-specific code emitted by `validate_template()` in the current validator, including the library-layout codes.
+It also passes on the `lint_dta()` codes of the columns and rules it builds (`?validate_template` lists them), with their severity, except
+`file_name_conflict`, which is an error here. Severity is the literal severity reported in the result. A concrete template can receive
+`instantiate_failed` in addition to a more specific inheritance code.
 
 | Code | Severity | Meaning | Typical fix |
 | --- | --- | --- | --- |
@@ -1595,6 +1598,10 @@ literal severity reported in the result. A concrete template can receive `instan
 | `dataset_id_missing` | error | A dataset template's body, or an inline dataset in a creation template, has no `id` (absent, null or empty). | Add an `id`; `as:` on an import does not replace it. |
 | `dataset_field_invalid` | error | A dataset's `id`, `name` or `description` is a list, a sequence or a missing value. | Write a single text value. |
 | `dataset_no_files` | warning | A dataset template's body, or a dataset a non-abstract creation template builds, declares no files (no `files:` entry, or an empty one), so nothing can be loaded into it. A patch may still supply them. | Add a `files:` entry with a `filename` and a `type`. |
+| `column_spec_invalid` | error | A column of a dataset template is rejected by the column specification, for example an example longer than its declared length. | Correct the column as the message says. |
+| `file_name_conflict` | error | File entries of different datasets can take the same file name. | Make the file names or patterns distinct; see "File handlers and non-tabular deliverables". |
+| `token_unknown` | warning | A `${...}` placeholder other than `${today}`, `${version}`, `${study.id}` and `${study.protocol_id}`, or a `${version}` inside a dataset; it is left in the document as literal text. | Correct the spelling, or move `${version}` out of the dataset. |
+| `study_token_unanswered` | warning | A dataset or metadata value uses `${study.id}` or `${study.protocol_id}`, but no option and no base metadata supplies that study field, so a new document cannot be created. | Add an option or a base value for `metadata.study.id` / `metadata.study.protocol_id`. |
 | `values_and_values_from` | warning | One column defines both literal values and a vocabulary binding. | Remove one; the vocabulary binding takes precedence. |
 | `values_from_pattern` | error | A column combines `values_from` and `pattern`. | Choose a vocabulary-backed permitted-value list or a pattern. |
 | `values_from_invalid` | error | The vocabulary binding is malformed or cannot be read. | Use a valid reference or mapping and a supported field. |

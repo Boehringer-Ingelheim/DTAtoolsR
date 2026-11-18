@@ -571,6 +571,9 @@ import_specs_from_json <- function(file) {
 #'   matched by their header instead, so the six-column layout without a
 #'   Length column is read correctly too. Recognised names: `id`, `label`,
 #'   `type`, `length`, `format`, `nullable`, `description`; `id` is required.
+#'   An id keeps the plain spaces typed inside it (`STUDY ID` stays
+#'   `STUDY ID`); its ends are trimmed and any other whitespace inside it (a
+#'   line break, a tab) is dropped.
 #'
 #'   A description cell may carry markers on their own lines:
 #'   \code{#@values: a;b;c} gives the permitted values (separated by

@@ -218,6 +218,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   its dialog could stop responding with it. The table's filter
   row loaded an older copy of the picker library that lacks a component every
   picker needs; the app now loads its own copy with the page.
+- On macOS arm64, the largest finite number, `1.7976931348623157e308`, is no
+  longer read as infinite. A numeric column holding it was reported as not
+  finite, and an integer column as not whole rather than out of range. R's own
+  parser rounds inexactly on that platform, so a value it reads as infinite is
+  now checked again with a correctly rounded reader.
 - A quoted header longer than 1 MiB no longer aborts as a "quoted line break"
   when the file is read, for tabular files as well as matrices.
 - A numeric cell holding the text `NaN` (or `nan`, `-nan`) is now missing after

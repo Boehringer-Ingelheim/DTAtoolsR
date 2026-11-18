@@ -442,7 +442,15 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
 #' `rule_condition_value_unfit`, `rule_condition_value_outside_values`,
 #' `group_constraint_unknown_condition`, `matrix_row_label_id_invalid` (a matrix
 #' row-label id contains whitespace: write the exact header text under
-#' `header`), `file_container_invalid`,
+#' `header`), the other matrix errors `matrix_columns_key`,
+#' `matrix_row_labels_missing`, `row_labels_key`, `matrix_key`,
+#' `matrix_file_type`, `matrix_field_missing`,
+#' `matrix_columns_count_unsatisfiable`, `matrix_row_key_invalid`,
+#' `matrix_key_nullable`, `matrix_rule_id_reserved`,
+#' `row_label_header_position` and `row_label_header_invalid`, a code named
+#' after the matrix reader's own condition for a `matrix:` block it refuses
+#' (`matrix_field_unknown`, `matrix_header_invalid`, ...; `matrix_invalid` when
+#' it has none), `file_container_invalid`,
 #' `file_field_unknown`, `file_container_misplaced`, `file_count_bound_invalid`,
 #' `container_invalid` (the `containers` section is malformed, an element lacks
 #' an `id` or `filename`, has an unknown field or a value a container cannot
@@ -451,6 +459,9 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
 #' names an id the document's `containers` do not define).
 #'
 #' Warnings: `rules_without_columns`, `rule_not_checkable`,
+#' `rule_condition_numeric_on_text` when the column is not `SAS Char` but is
+#' read as text (a date), `rule_condition_value_unfit` when a number is written
+#' where the column holds text,
 #' `format_narrower_than_length`, `column_id_shadows_field` (a column `X.<field>`
 #' beside a column `X`, where `<field>` is a column field such as `values`: a
 #' template path `columns.X.<field>` is read as that field of `X`, so a seal or

@@ -248,11 +248,14 @@ transfer, before submission rather than after failure.*
 
 DTAtools is an R package (R ≥ 4.1.0) built on the S7 object system. A
 top-level `DTA` object holds a `DTAMetaData` (title, version, contacts,
-transmission schedule) and a named list of datasets. Two dataset classes
-implement the two kinds of deliverable found in agreements:
-`DTADataSetTabular` carries file handlers, a `DTAColumnSpecCollection`
-(per-column `DTAColumnSpec` objects plus a list of `DTARule` objects), and the
-delivered tables as Arrow Tables; `DTADataSetFile` checks only that declared
+transmission schedule), a named list of datasets and, optionally, a list of
+delivery containers. Three dataset classes implement the kinds of deliverable
+found in agreements: `DTADataSetTabular` carries file handlers, a
+`DTAColumnSpecCollection` (per-column `DTAColumnSpec` objects plus a list of
+`DTARule` objects), and the delivered tables as Arrow Tables;
+`DTADataSetMatrix`, a tabular subclass for omics matrices, validates row labels
+and a declared data-column layout instead of per-column specs;
+`DTADataSetFile` checks only that declared
 files arrived, are non-empty, and are readable — for PDFs, archives, and raw
 instrument output that are never parsed. File handlers (`DTAFileCSV`,
 `DTAFileTSV`, `DTAFileDelim`, `DTAFileSAS7BDAT`, `DTAFileXPT`, `DTAFileAny`) encapsulate delivery-name

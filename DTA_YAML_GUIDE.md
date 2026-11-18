@@ -5,7 +5,7 @@ specification is **one YAML file** that is both the human-readable Data
 Transfer Agreement (DTA) document and the machine contract that every
 delivered file is validated against. You will not have the package, its docs or
 its website: everything you need is here. Follow it literally — the parser
-rejects unknown keys.
+rejects unknown keys (an unknown top-level key is flagged by the linter).
 
 **Your goal is a spec that would catch real data errors and that a reviewer
 could sign.** That means: every column precisely typed and constrained, rules
@@ -133,7 +133,7 @@ containers:
 | Key | Notes |
 | --- | --- |
 | `id` | **required**. A letter, then letters, digits, `_` or `-` (`sdtm`, `adam-2`); no dot. Unique. `none` is reserved (in any letter case). File entries refer to the container by it. |
-| `filename` | **required**. The archive's file name, a `.zip` or `.xpt` name, no folder. `*` and `?` are wildcards (`STUDY_SDTM_*.zip`); the name is matched as a whole and letter case must match. Quote a value that starts with `*` or contains ` #`. Unique. |
+| `filename` | **required**. The archive's file name, a `.zip` or `.xpt` name, no folder. `*` and `?` are wildcards (`STUDY_SDTM_*.zip`, at most three `*`); the name is matched as a whole and letter case must match. Quote a value that starts with `*` or contains ` #`. Unique. |
 | `description` | Free text; printed in the Containers section of the exported agreement. |
 | `default` | `true` on at most one container: every file entry **without** a `container` of its own must then arrive inside it, including datasets added later. Must be `true` or `false`. |
 
@@ -162,9 +162,9 @@ A list. Each dataset:
 No other keys (`template_source/version/date` are machine-written).
 
 A file written before `id` existed carried the identifier in `name` and the
-short label in `description`. Such an entry (`name` but no `id`) is still
-read: `name` becomes the `id` and `description` the `name`. Write the
-current shape in new files.
+short label in `description`. Such an entry (`name` but no `id`) is refused
+with "A dataset needs an id", not reinterpreted: rename the identifier key to
+`id:`.
 
 ### `files` — handler keys
 
@@ -182,7 +182,7 @@ current shape in new files.
 | `missing_values` | Extra token meaning "missing" besides empty, e.g. `"."` or `"NA"`. |
 | `newlines_in_values` | `true` if quoted cells may contain line breaks. |
 | `extensions` | `any` only: allowed endings, e.g. `[pdf, zip]`. A `.zip` or `.xpt` that such an entry accepts is kept as one file, not opened; to have its contents checked, name it as the `container` of their entries. |
-| `container` | Optional. Where the file must arrive: the **id** of a container of the top-level `containers` section (`sdtm`, no dot); or a container **file name** (it has a dot): `sdtm.zip`, with `*` and `?` as wildcards (`sdtm_*.zip`) and letter case significant (`sdtm.zip` does not match `SDTM.ZIP`); or `none`, which exempts the entry from the default container. Quote a value that starts with `*` or contains ` #`: `container: "*_SDTM.zip"`. Leave it out when the file may come loose or in any container (or, if a container is the `default`, must arrive inside that one). |
+| `container` | Optional. Where the file must arrive: the **id** of a container of the top-level `containers` section (`sdtm`, no dot); or a container **file name** (it has a dot): `sdtm.zip`, with `*` and `?` as wildcards (`sdtm_*.zip`, at most three `*`) and letter case significant (`sdtm.zip` does not match `SDTM.ZIP`); or `none`, which exempts the entry from the default container. Quote a value that starts with `*` or contains ` #`: `container: "*_SDTM.zip"`. Leave it out when the file may come loose or in any container (or, if a container is the `default`, must arrive inside that one). |
 
 CSV is comma-separated, TSV tab-separated; `.gz` files are read transparently.
 

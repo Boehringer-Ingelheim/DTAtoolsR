@@ -886,9 +886,9 @@ messages(dta)</code></pre>
     <div class="callout callout-tip">
       <div class="callout-icon">💡</div>
       <div class="callout-body">
-        <strong>The <code>name</code> must match exactly</strong>
-        <p>The <code>name:</code> field in your YAML must be passed as-is to <code>load_file(..., dataset = "my_data")</code>.
-        They are case-sensitive.</p>
+        <strong>The <code>id</code> must match exactly</strong>
+        <p>The <code>id:</code> field in your YAML is what you pass to <code>load_file(..., dataset = "my_data")</code>;
+        <code>name</code> is only a label. Ids are case-sensitive.</p>
       </div>
     </div>
 
@@ -947,7 +947,7 @@ messages(dta)</code></pre>
           <tr>
             <td><code>id</code></td>
             <td><span class="badge badge-yes">✔ yes</span></td>
-            <td>Column name — must match the CSV header exactly</td>
+            <td>Column name — must match the CSV header exactly, case and inner spaces included; spaces and punctuation are allowed (<code>Subject ID</code>), leading or trailing spaces are not</td>
             <td><code>PATIENT_ID</code></td>
           </tr>
           <tr>
@@ -989,7 +989,7 @@ messages(dta)</code></pre>
           <tr>
             <td><code>format</code></td>
             <td><span class="badge badge-no">optional</span></td>
-            <td>SAS format string (documentation only)</td>
+            <td>SAS format; values that do not fit it are reported</td>
             <td><code>SAS $10.</code></td>
           </tr>
           <tr>
@@ -997,6 +997,18 @@ messages(dta)</code></pre>
             <td><span class="badge badge-no">optional</span></td>
             <td>Free-text documentation</td>
             <td><code>Planned visit code</code></td>
+          </tr>
+          <tr>
+            <td><code>examples</code></td>
+            <td><span class="badge badge-no">optional</span></td>
+            <td>Example value(s), shown in the exported agreement</td>
+            <td><code>[PAT0001]</code></td>
+          </tr>
+          <tr>
+            <td><code>colclass</code></td>
+            <td><span class="badge badge-no">optional</span></td>
+            <td>Semantic category of the column, e.g. <code>patient_info</code>, <code>measurement</code>, <code>visit_related</code></td>
+            <td><code>patient_info</code></td>
           </tr>
         </tbody>
       </table>
@@ -1131,6 +1143,7 @@ messages(dta)</code></pre>
           <tr><td><code>less</code></td><td><span class="badge badge-yes">✅</span></td><td><span class="badge badge-yes">✅</span></td><td><code>less: 200</code></td></tr>
           <tr><td><code>less_equal</code></td><td><span class="badge badge-yes">✅</span></td><td><span class="badge badge-yes">✅</span></td><td><code>less_equal: 65</code></td></tr>
           <tr><td><code>min</code> + <code>max</code></td><td><span class="badge badge-yes">✅</span></td><td><span class="badge badge-yes">✅</span></td><td><code>min: 10</code> + <code>max: 100</code></td></tr>
+          <tr><td><code>range</code></td><td><span class="badge badge-yes">✅</span></td><td><span class="badge badge-yes">✅</span></td><td><code>range: [18, 65]</code></td></tr>
         </tbody>
       </table>
     </div>
@@ -1328,7 +1341,7 @@ specs_with_group_rule <- DTAColumnSpecCollection(
     <div class="code-wrap">
       <div class="code-label"><span>R</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
       <pre><code class="language-r"># Load just one dataset definition (no top-level metadata)
-# Note: the YAML must start directly with name/type/files/columns
+# Note: the YAML must start directly with id/type/files/columns
 #   (no surrounding "datasets:" wrapper — that's only for read_dta_from_yaml())
 ds <- read_dataset_from_yaml("my_dataset_spec.yaml")
 
@@ -1414,7 +1427,7 @@ specs_with_rules <- DTAColumnSpecCollection(
       </div>
     </div>
 
-    <p>The <code>import_reason</code> column has two possible values:</p>
+    <p>The <code>import_reason</code> column has four possible values:</p>
 
     <div class="table-wrap">
       <table>
@@ -1429,8 +1442,18 @@ specs_with_rules <- DTAColumnSpecCollection(
           </tr>
           <tr>
             <td><code>trailing_residue</code></td>
-            <td>Value has a valid prefix but trailing garbage</td>
+            <td>A metadata date field has a valid date prefix but trailing text, which is dropped</td>
             <td><code>"2024-06-19 at the earliest"</code></td>
+          </tr>
+          <tr>
+            <td><code>not_whole</code></td>
+            <td>A number in a declared integer column is fractional or not finite</td>
+            <td><code>"8.5"</code></td>
+          </tr>
+          <tr>
+            <td><code>out_of_range</code></td>
+            <td>A whole number in a declared integer column lies outside the 32-bit integer range</td>
+            <td><code>"5000000000"</code></td>
           </tr>
         </tbody>
       </table>

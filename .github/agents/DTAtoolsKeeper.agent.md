@@ -37,8 +37,9 @@ checks, docs) says it's done.
   `DTAColumnSpec-class.R`). Helper/shared logic lives in `00_helpers.R`,
   `DTAMetaData-helpers.R`, `formattingHelpers.R`. Respect this file layout for
   new classes/functions instead of dumping code into unrelated files.
-- Core class hierarchy: `DTA` (metadata + datasets) → `DTADataSet` (abstract)
-  → `DTADataSetTabular` / `DTADataSetFile`. Column specs:
+- Core class hierarchy: `DTA` (metadata + datasets + containers of class
+  `DTAContainer`) → `DTADataSet` (abstract) → `DTADataSetTabular` (with the
+  subclass `DTADataSetMatrix`) / `DTADataSetFile`. Column specs:
   `DTAColumnSpecCollection` (named list of `DTAColumnSpec` + optional rules).
   Rules: `DTARule` → `DTARuleColCondition` / `DTARuleColRange` /
   `DTARuleColUnique` / `DTARuleGroupCondition`. File handlers: `DTAFile` →

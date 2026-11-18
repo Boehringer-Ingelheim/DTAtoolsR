@@ -791,8 +791,8 @@ read and the list of what is not supported are in
 
 ### Building a full `DTA` object, mixing dataset types
 
-A single `DTA` object can hold **any mix** of `DTADataSetTabular` and
-`DTADataSetFile` datasets alongside its `metadata`, letting you validate an
+A single `DTA` object can hold **any mix** of `DTADataSetTabular`,
+`DTADataSetMatrix` and `DTADataSetFile` datasets alongside its `metadata`, letting you validate an
 entire delivery — column-level content *and* file presence — in one
 `check()` call. This is exactly what `read_dta_from_yaml()` builds for you
 under the hood when loading a full DTA YAML.
@@ -1452,6 +1452,7 @@ row-level validation.
 |----------------------------|--------------------------------------------------------------|
 | `DTA`                     | Top-level container: metadata + multiple datasets           |
 | `DTAMetaData`             | Agreement metadata (title, version, contacts, transmission) |
+| `DTAContainer`            | A delivery archive named once at document level (`id`, `filename`, `description`, `default`) |
 | `DTADataSet`              | Abstract base class for all dataset types                   |
 | `DTADataSetTabular`       | Dataset with column specs, rules, and data tables            |
 | `DTADataSetMatrix`        | Omics matrix: row labels + column-label, row and cell checks |
@@ -1478,7 +1479,7 @@ row-level validation.
 | `import_specs_from_yaml(file)`| Load bare column specs + rules from a standalone YAML      |
 | `columns_specs_from_word(file)`| Import column specs from a Word table                     |
 | `load_file(dta, dataset, file, stream)`| Read a data file into a dataset using its YAML-defined handler; `stream` keeps it lazy instead |
-| `load_delivery(x, files, stream, on_error, exdir)` | Load loose files, `.zip` archives and SAS transport libraries into the datasets whose entries match them |
+| `load_delivery(x, files, stream, on_error, exdir, route, datasets)` | Load loose files, `.zip` archives and SAS transport libraries into the datasets whose entries match them; `route` settles an ambiguous file, `datasets` restricts the load to chosen datasets |
 | `read_file(handler, file)`     | Read a file using a file handler (`DTAFileCSV`, etc.)       |
 | `open_file(handler, file)`     | Open a file lazily as an Arrow `Dataset` (the counterpart of `read_file()`) |
 | `check(x, force, persist, quiet, batch_rows, max_errors, …)` | Validate all datasets/tables; returns the updated object |
