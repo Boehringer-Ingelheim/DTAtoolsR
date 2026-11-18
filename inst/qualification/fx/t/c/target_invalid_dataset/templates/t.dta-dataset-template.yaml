@@ -8,5 +8,6 @@ options:
     target: metadata.wrong_root
 dataset:
   id: ds1
+  files: {filename: x.tsv, type: tsv}
   columns:
     - id: A

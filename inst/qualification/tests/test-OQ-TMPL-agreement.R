@@ -25,6 +25,7 @@ test_that("OQ-TMPL-067 | structured metadata inherits and carries over without r
     )),
     datasets = list(list(
       id = "records", type = "tabular",
+      files = list(filename = "records.tsv", type = "tsv"),
       columns = list(list(id = "SUBJECT", type = "SAS Char"))
     ))
   )

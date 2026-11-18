@@ -5,5 +5,6 @@ base: {}
 datasets:
   - id: obs
     type: tabular
+    files: {filename: obs.tsv, type: tsv}
     columns:
       - id: A

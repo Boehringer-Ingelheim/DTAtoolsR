@@ -119,6 +119,9 @@ Warnings: the linter's \code{rules_without_columns}, \code{rule_not_checkable} a
 \code{format_narrower_than_length}, plus \code{kind_unknown}, \code{id_missing}, \code{version_missing},
 \code{version_unparseable}, \code{target_invalid}, \code{party_slot_invalid},
 \code{vocab_slot_unresolved}, \code{dataset_template_unresolved}, \code{patch_incoherent},
+\code{dataset_no_files} (a dataset template body, or a dataset built by a
+non-abstract creation template, that declares no files, so nothing can be
+loaded into it; a patch may still supply them, hence a warning),
 \code{extends_unresolved}, \code{extends_cycle}, \code{mixin_unresolved} (a \verb{mixins:}
 reference that does not resolve within the directory; a warning for the
 same reason as \code{extends_unresolved}), \code{sealed_violation},

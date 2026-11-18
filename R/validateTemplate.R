@@ -880,12 +880,31 @@
               .dta_template_lint_message(prefix, lint[i, , drop = FALSE])
             )
           }
+          # The BUILT datasets, not the raw `datasets:` entries: a `modify:` or
+          # `remove: true` entry, a mixin or an inherited dataset is only part
+          # of what is declared, and a patch may add the file. What reaches a
+          # person creating a document is the built dataset, so that is judged.
+          built <- datasets(build_res$value)
+          for (ds_id in names(built)) {
+            if (length(built[[ds_id]]@files) == 0L) {
+              add("warning", "dataset_no_files", paste0(prefix, .dta_template_no_files_message(ds_id)))
+            }
+          }
         }
       }
     }
   }
 
   rows
+}
+
+# The one wording for a dataset that declares no files, shared by the dataset
+# template check and the creation template's dry-run so the two cannot drift.
+.dta_template_no_files_message <- function(dataset_id) {
+  sprintf(
+    "Dataset '%s' declares no files, so nothing can be loaded into it. Add a 'files:' entry (filename and type).",
+    as.character(dataset_id)[[1]]
+  )
 }
 
 # One lint_dta() row as a template-row message: "[variant] dataset/object id: text".
@@ -1156,6 +1175,19 @@
   identity <- .dta_template_dataset_identity_issue(ds_body)
   if (!is.null(identity)) {
     add("error", identity$code, identity$message)
+  }
+  # A "warning", not an "error": a creation template's patch may still supply
+  # the file, so a body without one is not by itself unusable. The singular
+  # `file:` is read as well because DTADataSetFactory() accepts it (R's partial
+  # argument matching), so a template that spells it that way does build a file.
+  if (length(dta_lint_file_entries(ds_body[["files"]] %||% ds_body[["file"]])) == 0L) {
+    # The body's own id when it is one usable text, else the template's: an
+    # `id: []` gets here too (dataset_field_invalid reports that one) and must
+    # not abort the run on the way to naming itself. `%||%` here is rlang's, so
+    # it only replaces NULL, never an empty list.
+    body_id <- ds_body[["id"]]
+    shown <- if (is.character(body_id) && length(body_id) == 1L && !is.na(body_id) && nzchar(body_id)) body_id else id
+    add("warning", "dataset_no_files", .dta_template_no_files_message(shown))
   }
   # A dataset template is never instantiated on its own, so a column the
   # DTAColumnSpec constructor rejects (an example longer than its length, a
@@ -1684,6 +1716,9 @@
 #' `format_narrower_than_length`, plus `kind_unknown`, `id_missing`, `version_missing`,
 #' `version_unparseable`, `target_invalid`, `party_slot_invalid`,
 #' `vocab_slot_unresolved`, `dataset_template_unresolved`, `patch_incoherent`,
+#' `dataset_no_files` (a dataset template body, or a dataset built by a
+#' non-abstract creation template, that declares no files, so nothing can be
+#' loaded into it; a patch may still supply them, hence a warning),
 #' `extends_unresolved`, `extends_cycle`, `mixin_unresolved` (a `mixins:`
 #' reference that does not resolve within the directory; a warning for the
 #' same reason as `extends_unresolved`), `sealed_violation`,

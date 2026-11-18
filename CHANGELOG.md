@@ -95,6 +95,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   values edited under Matrix layout, and its rules edited on the row label
   columns. The format is documented key by key in `DTA_YAML_GUIDE.md` section 6
   and in the README. Example data: `inst/extdata/matrix_dta.yaml`.
+- **`validate_template()` warns about a dataset that declares no files**
+  (`dataset_no_files`). A template dataset with no `files:` entry used to
+  validate clean and create a dataset nothing could be loaded into, whose Edit
+  files list in the app read "No files declared yet". It is reported for a
+  dataset template whose body declares none (`files: []` included; the singular
+  `file:` counts) and for each dataset a non-abstract creation template builds,
+  so a creation template that gets its files from a patch or a mixin is not
+  reported itself; a dataset template that declares none still is, wherever it
+  is imported. A warning only: `strict = TRUE` aborts on errors alone, but a
+  pipeline that runs `lint_template_repo(fail_on = "warning")` will now fail on
+  a library with such a dataset template.
 
 ### Changed
 

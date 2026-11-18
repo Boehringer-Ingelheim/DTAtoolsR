@@ -6,6 +6,7 @@ label: Layout qualification dataset
 dataset:
   id: records
   type: tabular
+  files: {filename: records.tsv, type: tsv}
   columns:
     - id: SUBJECT
       type: SAS Char
