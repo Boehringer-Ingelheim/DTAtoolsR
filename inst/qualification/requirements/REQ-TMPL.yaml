@@ -1303,3 +1303,27 @@ requirements:
       be written with set:, and a seal or required: path that runs through a
       datasets[].template import resolves to nothing in the definition. Pinned
       in OQ-TMPL-124 to OQ-TMPL-127, OQ-TMPL-129, OQ-TMPL-130 and OQ-TMPL-131.
+
+  - id: REQ-TMPL-057
+    text: >
+      validate_template() shall report a dataset that declares no files as
+      dataset_no_files at severity "warning", the message naming the dataset id
+      (the template's own id when a dataset template's body has no usable id of
+      its own, which shall not stop the other findings being reported), because
+      nothing can be loaded into such a dataset. It shall report it for
+      a dataset template whose dataset body has no files entry or an empty one,
+      and for each dataset that a non-abstract creation template builds, with
+      the variant's value in square brackets before the message when the
+      template has variants. A files entry written as a mapping, as a sequence
+      or as the singular file shall not be reported; an abstract creation
+      template shall not be judged; a creation template whose patch supplies
+      the files shall not be reported for them; and strict validation shall not
+      abort on the warning.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R (.dta_template_check_dataset_tpl,
+      .dta_template_check_creation); a template dataset with no files is
+      otherwise silent, and the app's Edit files list for it reads "No files
+      declared yet"

@@ -2451,3 +2451,241 @@ test_that("a patch that adds a spaced row label to an imported matrix is instant
   expect_false("adds_headed" %in% result$id)
   expect_false("plain_matrix" %in% result$id)
 })
+
+# ---- dataset_no_files: a dataset nothing can ever be loaded into -------------
+
+# A dataset template whose body carries `files_lines` (already indented to sit
+# under `dataset:`), or no file declaration at all when it is empty.
+write_files_dataset_tpl <- function(dir, files_lines = character(0), id = "gf_files") {
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      sprintf("id: %s", id),
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: gf_data",
+      "  type: tabular",
+      files_lines,
+      "  columns:",
+      "    - {id: C1, type: SAS Char}"
+    ),
+    lib_file(dir, paste0(id, ".dta-dataset-template.yaml"))
+  )
+}
+
+# A creation template whose lone dataset is the inline body `dataset_lines`.
+write_creation_with_dataset <- function(dir, dataset_lines, abstract = FALSE) {
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: files_tpl",
+      "version: \"1.0\"",
+      if (abstract) "abstract: true",
+      "base:",
+      "  metadata:",
+      "    title: Files Template",
+      "datasets:",
+      dataset_lines
+    ),
+    lib_file(dir, "files_tpl.dta-template.yaml")
+  )
+}
+
+test_that("a dataset template that declares no files is a dataset_no_files warning naming the dataset", {
+  dir <- withr::local_tempdir()
+  write_files_dataset_tpl(dir)
+
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "dataset_no_files", "warning")
+  expect_equal(nrow(rows), 1L)
+  expect_match(rows$message, "'gf_data'", fixed = TRUE)
+  # Only a warning is raised: nothing else is wrong with the file, and strict
+  # mode (which aborts on errors only) must not stop a pipeline over it.
+  expect_identical(result$code, "dataset_no_files")
+  expect_no_error(validate_template(dir, strict = TRUE))
+})
+
+test_that("an empty files: list is reported the same as an absent one", {
+  dir <- withr::local_tempdir()
+  write_files_dataset_tpl(dir, "  files: []")
+  expect_code_row(validate_template(dir), "dataset_no_files", "warning")
+})
+
+test_that("a dataset template declaring its files, as a mapping, a sequence or the singular file:, is clean", {
+  # `file:` still builds a dataset with one file (DTADataSetFactory() takes it
+  # by partial argument matching), so reporting it would be a false alarm.
+  shapes <- list(
+    mapping = "  files: {filename: one.tsv, type: tsv}",
+    sequence = c("  files:", "    - {filename: one.tsv, type: tsv}", "    - {filename: two.tsv, type: tsv}"),
+    singular = "  file: {filename: one.tsv, type: tsv}"
+  )
+  for (shape in names(shapes)) {
+    dir <- withr::local_tempdir()
+    write_files_dataset_tpl(dir, shapes[[shape]])
+    # No rows AT ALL, so a fixture that stopped parsing cannot pass by merely
+    # lacking the one code under test.
+    expect_equal(nrow(validate_template(dir)), 0L, info = shape)
+  }
+})
+
+test_that("a dataset template with no usable id is still reported, naming the template, and never aborts the run", {
+  # An id that is a list is dataset_field_invalid's to report; the new check
+  # must not trip over it while naming the dataset, or one malformed file
+  # would hide every finding in the library.
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template", "id: odd_id", "version: \"1.0\"",
+      "dataset:", "  id: []", "  type: tabular",
+      "  columns:", "    - {id: C1, type: SAS Char}"
+    ),
+    lib_file(dir, "odd_id.dta-dataset-template.yaml")
+  )
+  expect_no_error(result <- validate_template(dir))
+  expect_true("dataset_field_invalid" %in% result$code)
+  rows <- expect_code_row(result, "dataset_no_files", "warning")
+  expect_match(rows$message, "'odd_id'", fixed = TRUE)
+
+  # No id at all: dataset_id_missing is the error, the template names itself.
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template", "id: nameless", "version: \"1.0\"",
+      "dataset:", "  type: tabular",
+      "  columns:", "    - {id: C1, type: SAS Char}"
+    ),
+    lib_file(dir, "nameless.dta-dataset-template.yaml")
+  )
+  result <- validate_template(dir)
+  expect_true("dataset_id_missing" %in% result$code)
+  rows <- expect_code_row(result, "dataset_no_files", "warning")
+  expect_match(rows$message, "'nameless'", fixed = TRUE)
+})
+
+test_that("a dataset template with no dataset body reports dataset_missing and no dataset_no_files", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c("kind: dta_dataset_template", "id: empty_body", "version: \"1.0\""),
+    lib_file(dir, "empty_body.dta-dataset-template.yaml")
+  )
+  result <- validate_template(dir)
+  expect_identical(result$code, "dataset_missing")
+})
+
+test_that("an inline dataset of a creation template without files is reported once, with files it is clean", {
+  no_files <- c(
+    "  - id: ds1",
+    "    type: tabular",
+    "    columns:",
+    "      - {id: COL1, type: SAS Char}"
+  )
+  dir <- withr::local_tempdir()
+  write_creation_with_dataset(dir, no_files)
+  rows <- expect_code_row(validate_template(dir), "dataset_no_files", "warning")
+  expect_equal(nrow(rows), 1L)
+  expect_match(rows$message, "'ds1'", fixed = TRUE)
+
+  dir <- withr::local_tempdir()
+  write_creation_with_dataset(dir, append(no_files, "    files: {filename: x.csv, type: csv}", after = 2L))
+  expect_equal(nrow(validate_template(dir)), 0L)
+})
+
+test_that("an abstract creation template is not judged, since it is never instantiated", {
+  dir <- withr::local_tempdir()
+  write_creation_with_dataset(
+    dir,
+    c("  - id: ds1", "    type: tabular", "    columns:", "      - {id: COL1, type: SAS Char}"),
+    abstract = TRUE
+  )
+  expect_equal(nrow(validate_template(dir)), 0L)
+})
+
+test_that("a creation template whose patch supplies the files adds no row of its own", {
+  # The dataset template is files-less and is itself reported, but the
+  # document the creation template builds has a file, so that file is clean.
+  dir <- withr::local_tempdir()
+  write_files_dataset_tpl(dir, id = "bare_ds")
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: patched_tpl",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Patched",
+      "datasets:",
+      "  - template: bare_ds@1.0",
+      "    patch:",
+      "      set:",
+      "        files: {filename: x.tsv, type: tsv}"
+    ),
+    lib_file(dir, "patched_tpl.dta-template.yaml")
+  )
+
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "dataset_no_files", "warning")
+  expect_equal(basename(rows$file), "bare_ds.dta-dataset-template.yaml")
+  # That one row is ALL there is: had the patch been rejected, the creation
+  # template would have carried an instantiate_failed or patch_incoherent row
+  # and no dataset_no_files row, which the check above alone cannot tell apart.
+  expect_identical(result$code, "dataset_no_files")
+})
+
+test_that("a creation template importing a files-less dataset template is reported against the document it builds", {
+  dir <- withr::local_tempdir()
+  write_files_dataset_tpl(dir, id = "bare_ds")
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: bare_tpl",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Bare",
+      "datasets:",
+      "  - template: bare_ds@1.0"
+    ),
+    lib_file(dir, "bare_tpl.dta-template.yaml")
+  )
+
+  rows <- expect_code_row(validate_template(dir), "dataset_no_files", "warning")
+  expect_setequal(
+    basename(rows$file),
+    c("bare_ds.dta-dataset-template.yaml", "bare_tpl.dta-template.yaml")
+  )
+})
+
+test_that("dataset_no_files names the variant whose built dataset has no files", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: variant_tpl",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Variants",
+      "variants:",
+      "  id: platform",
+      "  choices:",
+      "    - value: with_file",
+      "      datasets:",
+      "        - id: ds1",
+      "          type: tabular",
+      "          files: {filename: x.csv, type: csv}",
+      "          columns:",
+      "            - {id: COL1, type: SAS Char}",
+      "    - value: without_file",
+      "      datasets:",
+      "        - id: ds1",
+      "          type: tabular",
+      "          columns:",
+      "            - {id: COL1, type: SAS Char}"
+    ),
+    lib_file(dir, "variant_tpl.dta-template.yaml")
+  )
+
+  rows <- expect_code_row(validate_template(dir), "dataset_no_files", "warning")
+  expect_equal(nrow(rows), 1L)
+  expect_match(rows$message, "^[[]without_file[]] ")
+})
