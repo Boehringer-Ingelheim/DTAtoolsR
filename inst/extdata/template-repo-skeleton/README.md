@@ -243,8 +243,9 @@ ordinary DTA definition. The template engine checks the top-level names; a missp
 ### Study identity and agreement sections
 
 `study` is an optional mapping with `id` and `protocol_id`. Supplied identifiers
-must be nonblank strings. They describe the agreement; setting them does not
-change a dataset's `STUDYID` values. `header` remains a presentation field.
+must be nonblank strings. They describe the agreement; a dataset reuses them
+only where its body says so, with the `${study.id}` and `${study.protocol_id}`
+tokens (see the expression tokens below). `header` remains a presentation field.
 
 `sections` is an ordered mapping with stable identifiers as keys, not an
 unnamed sequence. Keys start with a letter and contain only letters, digits
@@ -336,8 +337,53 @@ base:
 nothing about the template's own versions: those are listed in the template picker, computed from the library (see "Template version
 history" below). Do not record template changes here.
 
-`${today}` and `${version}` are not general-purpose environment-variable substitution. Do not invent other `${...}` tokens and expect the app to
-resolve them.
+Two more tokens reuse the study identity, in a **dataset body** (a dataset template's `dataset:`, or an inline entry of a creation template's
+`datasets:`) and in the document metadata (a title, a clause):
+
+- `${study.id}` becomes the document's `metadata.study.id`.
+- `${study.protocol_id}` becomes the document's `metadata.study.protocol_id`.
+
+`${version}` is filled in only in the document metadata, not in a dataset.
+
+The value is the one the document ends up with once base metadata, carry-over, party slots and options have been applied, so the usual way
+to ask for it is an option such as `target: metadata.study.id`. With the study identifier `1001_0190` entered, this dataset template body
+accepts only files named like `s1001_0190_202611181200.csv` and only `1001_0190` in its `STUDYID` column:
+
+```yaml
+dataset:
+  id: lab_results
+  type: tabular
+  files:
+    filename: ^s${study.id}_[0-9]{12}\.csv$
+    pattern: true
+    pattern_description: s${study.id}_YYYYMMDDHHMM.csv
+    type: csv
+  columns:
+    - id: STUDYID
+      label: Study Identifier
+      type: SAS Char
+      format: SAS $9.
+      nullable: No
+      values: ${study.id}
+```
+
+- Where the token sits in a regular expression -- a `filename` whose entry says `pattern: true`, a column's `pattern:`, or a rule's
+  `pattern` condition -- the identifier is escaped, so it is matched literally: `1199.187` does not also accept `1199x187`. Everywhere else
+  (`values`, `example`, `equals`, `pattern_description`, ...) it is inserted as entered.
+- Creating a document fails, naming the dataset, when its body uses a study token the document has no value for. An empty value would
+  otherwise silently mean "STUDYID must be empty".
+- The value is copied in when the document is created. Changing the study identity in the Metadata tab later does not update the datasets.
+- Use the token in `example:` too when the column has a `pattern:` built from it; a literal example cannot match every study.
+- `path:`/`source:` dataset entries are finished specification files and are not substituted.
+- `validate_template()`, the template guide and the template history build a template without anyone entering a study identity. They use
+  the first `choices:` suggestion of the option that asks for the field, else the stand-ins `STUDY-ID` and `PROT-ID`, and a guide shows
+  that value where a dataset uses a study token. If a dataset constrains the identifier's shape (a numeric or narrow column, a pattern),
+  give the option a realistic first suggestion: a suggestion is never filled in for the person creating a document, unlike a `default:`.
+- `validate_template()` warns with `study_token_unanswered` when a template uses a study token but neither an option nor its base metadata
+  supplies that field: a new document could never be created from it.
+
+These tokens are not general-purpose environment-variable substitution. `validate_template()` reports any other `${...}` token in a creation
+or dataset template, and a `${version}` inside a dataset, as `token_unknown` (a warning), because it would reach the document as literal text.
 
 ### `options:`
 

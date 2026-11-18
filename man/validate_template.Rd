@@ -122,6 +122,13 @@ Warnings: the linter's \code{rules_without_columns}, \code{rule_not_checkable} a
 \code{dataset_no_files} (a dataset template body, or a dataset built by a
 non-abstract creation template, that declares no files, so nothing can be
 loaded into it; a patch may still supply them, hence a warning),
+\code{token_unknown} (a \verb{$\{...\}} placeholder in a creation or dataset template
+other than \verb{$\{today\}}, \verb{$\{version\}}, \verb{$\{study.id\}} and
+\verb{$\{study.protocol_id\}}, or a \verb{$\{version\}} inside a dataset, either of which
+is left in the document as literal text), \code{study_token_unanswered} (a
+dataset or metadata value uses \verb{$\{study.id\}} / \verb{$\{study.protocol_id\}} but no
+option and no base metadata of the template supplies that study field, so a
+new document cannot be created),
 \code{extends_unresolved}, \code{extends_cycle}, \code{mixin_unresolved} (a \verb{mixins:}
 reference that does not resolve within the directory; a warning for the
 same reason as \code{extends_unresolved}), \code{sealed_violation},

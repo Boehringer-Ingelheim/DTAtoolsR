@@ -57,7 +57,11 @@ template_history_build <- function(ref, index) {
       built <- create_dta_from_template(
         def, loaded$value$path,
         selections = selections, index = index,
-        vocab_selections = template_history_vocab_selections(def, index)
+        vocab_selections = template_history_vocab_selections(def, index),
+        # Both sides get a stand-in study identity, the same one whenever the
+        # study option's first suggestion is, so a study token never shows up
+        # as a change either.
+        study_fallback = dta_template_dry_study(def)
       )
       if (!isTRUE(built$ok)) {
         stop(built$error)

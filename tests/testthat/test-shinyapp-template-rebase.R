@@ -751,3 +751,60 @@ test_that("a document without mixins rebases to one without a mixins key", {
   expect_true(applied$ok)
   expect_false("mixins" %in% names(DTAtools::metadata(applied$value)@template))
 })
+
+test_that("rebase_plan() answers a study token from the document's own study identity", {
+  root <- withr::local_tempdir()
+  # No option asks for the study identity: the document got it by carry-over,
+  # so the target version can only resolve ${study.id} from the document.
+  for (v in c("1.0", "1.1")) {
+    writeLines(c(
+      "kind: dta_creation_template",
+      "id: stu_ct",
+      sprintf('version: "%s"', v),
+      "base:",
+      "  metadata:",
+      '    title: "T"',
+      sprintf('    header: "Header %s"', v),
+      "datasets:",
+      "  - id: stu_ds",
+      "    type: tabular",
+      "    files: { filename: '^s${study.id}_[0-9]+\\.csv$', pattern: true, type: csv }",
+      "    columns:",
+      "      - { id: STUDYID, type: SAS Char, values: '${study.id}' }"
+    ), lib_path(root, paste0("stu_ct_", sub(".", "_", v, fixed = TRUE), ".dta-template.yaml")))
+  }
+  idx <- index_over(root)
+
+  loaded <- app_fn("load_template_definition")("stu_ct@1.0", index = idx)
+  expect_true(loaded$ok, info = loaded$error)
+  source_md <- DTAtools::DTAMetaData(study = list(id = "1199.187", protocol_id = "P-1"))
+  built <- app_fn("create_dta_from_template")(
+    loaded$value$def, loaded$value$path,
+    selections = list(), index = idx,
+    carry_over = list(metadata = source_md, fields = "study"),
+    provenance = app_fn("template_provenance")(loaded$value$def, loaded$value)
+  )
+  expect_true(built$ok, info = built$error)
+  expect_identical(DTAtools::metadata(built$value)@study$id, "1199.187")
+
+  # Without the document's identity the target cannot be built at all.
+  bare <- app_fn("materialise_template")("stu_ct@1.1", idx, list())
+  expect_false(bare$ok)
+
+  plan <- app_fn("rebase_plan")(built$value, "1.1", index = idx)
+  expect_true(plan$ok, info = plan$error)
+  # The dataset is identical on all three sides, so nothing is a conflict; the
+  # template's header moves, and the carried study identity stays the user's.
+  expect_identical(nrow(plan$conflicts), 0L)
+  res <- stats::setNames(plan$changes$resolution, plan$changes$key)
+  expect_identical(
+    res[order(names(res))],
+    c(header = "take_template", study.id = "keep_user", study.protocol_id = "keep_user")
+  )
+
+  applied <- app_fn("rebase_apply")(built$value, plan, resolutions = list())
+  expect_true(applied$ok, info = applied$error)
+  expect_identical(DTAtools::metadata(applied$value)@header, "Header 1.1")
+  f <- DTAtools::datasets(applied$value)[["stu_ds"]]@files[[1]]
+  expect_identical(f@filename, "^s1199\\.187_[0-9]+\\.csv$")
+})
