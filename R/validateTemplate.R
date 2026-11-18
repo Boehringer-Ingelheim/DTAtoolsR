@@ -1880,7 +1880,10 @@
 #' `rule_id_duplicate`, `rule_column_undeclared`, `rule_range_non_numeric`,
 #' `rule_condition_operator_invalid`, `rule_condition_numeric_on_text`,
 #' `rule_condition_value_unfit`, `rule_condition_value_outside_values` (only for `equals`/`in`; the negated
-#' operators raise no finding), `group_constraint_unknown_condition`.
+#' operators raise no finding), `group_constraint_unknown_condition`, and
+#' `file_name_conflict` (file entries of two datasets could take the same file
+#' name; the linter's warning is an error here). Any other [lint_dta()] code
+#' (see its Codes section) is passed on with the linter's severity.
 #' The linter codes come from the columns and rules of a dataset template's
 #' body, and from every instantiated variant of a creation template.
 #' Warnings: the linter's `rules_without_columns`, `rule_not_checkable` and

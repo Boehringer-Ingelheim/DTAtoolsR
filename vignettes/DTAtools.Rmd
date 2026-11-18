@@ -86,6 +86,9 @@ DTA                              ← top-level agreement container
 ├── metadata                     ← title, version, receiver/supplier
 |   (DTAMetaData)                     contacts, transmission schedule, ..
 │
+├── containers                   ← delivery archives named once, which
+|   (list of DTAContainer)            file entries refer to by id
+│
 └── datasets (named list of DTADataSet)  ← one or more datasets per DTS
     │
     ├── DTADataSetTabular        ← tabular data: for tables with
@@ -226,7 +229,7 @@ directly to a column entry in a YAML specification.
 
 | Field         | Required | Description                                               |
 |---------------|----------|-----------------------------------------------------------|
-| `id`          | ✔        | Column name (must match the data frame header exactly)    |
+| `id`          | ✔        | Column name (must match the data frame header exactly, case and inner spaces included; may contain spaces and punctuation) |
 | `label`       |          | Human-readable label for documentation                   |
 | `type`        |          | SAS-style type: `SAS Char`, `SAS Num`, `SAS Int`, `SAS Date`, `SAS Time`, `SAS DateTime` |
 | `format`      |          | SAS format string, e.g. `SAS $10.`, `SAS 8.`            |
@@ -780,7 +783,7 @@ Four reasons are reported:
 | `reason` / `keyword` | Meaning                                                                 |
 |----------------------|-------------------------------------------------------------------------|
 | `not_convertible`    | No part of the value fits the declared type, e.g. `"unknown"` as a number |
-| `trailing_residue`   | A prefix of the value fits and the remainder would be dropped, e.g. `"2026-12-31 at the earliest"` as a date |
+| `trailing_residue`   | A prefix of the value fits and the remainder would be dropped, e.g. `"2026-12-31 at the earliest"` in a metadata date field |
 | `not_whole`          | A number in a declared integer column is fractional or not finite, e.g. `"8.5"` |
 | `out_of_range`       | A whole number in a declared integer column lies outside the 32-bit integer range, e.g. `"5000000000"` |
 
@@ -1267,7 +1270,7 @@ is a verdict of its own, reported by `container_findings()` and by `check()`
 (see below). The reference is one of three things:
 
 - a **file name** (it contains a dot): `sdtm.zip`. `*` and `?` are wildcards
-  (`sdtm_*.zip`) and letter case must match;
+  (`sdtm_*.zip`, at most three `*`) and letter case must match;
 - a container **id** (no dot): `sdtm`, naming a container the document defines;
 - `none`: this entry needs no container, whatever the document's default says.
 
@@ -1932,7 +1935,8 @@ A matrix dataset has two blocks instead of `columns:`:
 
 - `row_labels:` lists the leading columns, matched to the file by position.
   They are ordinary column specs with one more key, `header`: the text the
-  header line holds above the column. The first row label is the row key unless
+  header line holds above the column. A row label's `id` cannot contain
+  whitespace; the exact header text goes under `header`. The first row label is the row key unless
   `matrix.rows.key` says otherwise; further ones describe the row, such as a
   gene name.
 - `matrix:` describes the rest in three blocks.
@@ -2158,9 +2162,11 @@ additional transmission text fields: `extent`, `scope`, `packaging`, `security`,
 transmission entries are retained. These fields describe agreed procedures;
 they do not execute transfers, security checks, redaction or approvals.
 
-Default Word and Markdown layouts include study and narrative sections.
+Default Word and Markdown layouts include study and narrative sections, and a
+Containers section when the specification declares containers.
 Custom Word templates can place `{STUDY_ID}` / `{PROTOCOL_ID}` inline and
-`{STUDY_TABLE}` / `{AGREEMENT_SECTIONS}` as standalone block paragraphs.
+`{STUDY_TABLE}` / `{AGREEMENT_SECTIONS}` / `{CONTAINERS_TABLE}` as standalone
+block paragraphs.
 Absent fields do not add empty sections to legacy exports.
 
 ### Constructing a `DTA` Object
@@ -2834,8 +2840,9 @@ datasets:
 
 | Class                     | Purpose                                                     |
 |---------------------------|-------------------------------------------------------------|
-| `DTA`                     | Top-level container: metadata + multiple datasets           |
+| `DTA`                     | Top-level container: metadata + datasets + containers       |
 | `DTAMetaData`             | Agreement metadata (title, version, contacts, transmission) |
+| `DTAContainer`            | A delivery archive named once in the specification (`id`, `filename`, `description`, `default`) |
 | `DTADataSet`              | Abstract base class for all dataset types                   |
 | `DTADataSetTabular`       | Dataset with column specs, rules, and data tables           |
 | `DTADataSetMatrix`        | Omics matrix: row labels + column-label, row, cell checks   |
@@ -2860,9 +2867,13 @@ datasets:
 | `read_dta_from_yaml(file)`  | Load a full DTA (metadata + datasets) from YAML              |
 | `read_dataset_from_yaml(file)` | Load a single, self-contained dataset definition from YAML |
 | `import_specs_from_yaml(file)` | Load bare column specs + rules from a standalone YAML     |
-| `columns_specs_from_word(file)` | Import column specs from a Word table                   |
+| `columns_specs_from_word(file)` | Import column specs from a Word table (spaces inside an id are kept since 0.28.0) |
 | `load_file(dta, dataset, file)` | Read a data file into a dataset using its YAML-defined handler |
-| `load_delivery(x, files, stream, on_error, exdir)` | Load loose files, `.zip` archives and SAS transport libraries into the datasets whose entries match them |
+| `load_delivery(x, files, stream, on_error, exdir, route, datasets)` | Load loose files, `.zip` archives and SAS transport libraries into the datasets whose entries match them; `route` settles an ambiguous file, `datasets` restricts the load to chosen datasets |
+| `container_assignments(x)` | List where every file entry must arrive: its container, or none |
+| `container_findings(x)` | List the files not verified inside their container            |
+| `file_name_conflicts(x)` | Find file entries of different datasets that could match the same file |
+| `upgrade_dta(x)` | Re-stamp a `DTA` or dataset saved by an older version with the current classes |
 | `read_file(handler, file)`  | Read a file using a file handler (`DTAFileCSV`, etc.)        |
 | `check(x, force, persist, quiet, …)` | Validate all datasets / tables; returns updated object |
 | `validate_file_stream(specs, path, …)` | Validate a delimited file by scanning it, without loading it |
@@ -2888,8 +2899,8 @@ datasets:
 | `write_dta(x, file, format)` | Write the whole DTA as a document (`docx`, `pdf`, `md`)     |
 | `write_validation_report(x, file, max_repeats, …)` | Write a standalone, self-contained HTML validation report |
 | `dta_pdf_backend()` | Report the DOCX-to-PDF backend this machine will use, or `NULL` |
-| `export_with_template(x, template, file)` | Fill a user-authored Word template from a DTA  |
-| `dta_template_placeholders(x)` | List the `{PLACEHOLDER}` tokens a Word template can use, or resolve them for a DTA |
+| `export_with_template(dta, template, output)` | Fill a user-authored Word template from a DTA  |
+| `dta_template_placeholders(dta)` | List the `{PLACEHOLDER}` tokens a Word template can use, or resolve them for a DTA |
 | `export_specs_table(x, file)` | Export spec table to Word                               |
 | `export_column_value_table(x, file, id)` | Export value list for a column to Word         |
 | `as_json_schema(x)`         | Convert specs to JSON Schema string                         |
