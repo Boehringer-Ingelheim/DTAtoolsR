@@ -613,3 +613,72 @@ test_that("the rule reading guide goes with the first rules table in the documen
     expect_true(all(between %in% c(guide, "")), info = info)
   }
 })
+
+test_that("a bare {COLUMN_SPECS} in a region prints spaced ids exactly, even when an id spells a placeholder", {
+  # {DATASET_ID} is both the region's own placeholder and, here, a column id:
+  # the id in the generated table must stay text, the paragraph must resolve.
+  ids <- c("Subject ID", "Dose mg/kg", "{DATASET_ID}")
+  cols <- stats::setNames(
+    lapply(ids, function(id) DTAColumnSpec(id = id, label = paste("Label", id), type = "SAS Char", nullable = TRUE)),
+    ids
+  )
+  ds <- DTADataSetTabular(
+    id = "spaced", specs = DTAColumnSpecCollection(columns = cols),
+    files = list(DTAFileCSV(filename = "x.csv"))
+  )
+  dta <- DTA(datasets = list(ds), metadata = create_example_DTAMetaData())
+  template <- .make_template(c("{#DATASETS}", "Dataset {DATASET_ID}", "{COLUMN_SPECS}", "{/DATASETS}"))
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  expect_no_warning(export_with_template(dta, template, out, quiet = TRUE))
+
+  summary <- .region_docx_summary(out)
+  cells <- .region_table_cells(summary)
+  expect_identical(cells[cells %in% ids], ids)
+  paras <- summary$text[summary$content_type == "paragraph"]
+  expect_identical(paras[nzchar(paras)], "Dataset spaced")
+})
+
+test_that("two datasets with spaced ids each repeat their own ids in a region", {
+  make <- function(id, col_ids) {
+    cols <- stats::setNames(
+      lapply(col_ids, function(x) DTAColumnSpec(id = x, label = paste("Label", x), type = "SAS Char")),
+      col_ids
+    )
+    DTADataSetTabular(
+      id = id, specs = DTAColumnSpecCollection(columns = cols),
+      files = list(DTAFileCSV(filename = paste0(id, ".csv")))
+    )
+  }
+  dta <- DTA(
+    datasets = list(
+      make("first", c("Subject ID", "Visit Date (UTC)")),
+      make("second", c("Dose mg/kg", "Wt. (kg)"))
+    ),
+    metadata = create_example_DTAMetaData()
+  )
+  template <- .make_template(c("{#DATASETS}", "{DATASET_ID}", "{COLUMN_SPECS}", "{/DATASETS}"))
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  expect_no_warning(export_with_template(dta, template, out, quiet = TRUE))
+
+  summary <- .region_docx_summary(out)
+  idx_of <- function(type, text) summary$doc_index[summary$content_type == type & summary$text == text]
+  first <- idx_of("paragraph", "first")
+  second <- idx_of("paragraph", "second")
+  # each id sits after its own dataset's heading and before the next one's
+  for (id in c("Subject ID", "Visit Date (UTC)")) {
+    at <- idx_of("table cell", id)
+    expect_length(at, 1)
+    expect_true(at > first && at < second, info = id)
+  }
+  for (id in c("Dose mg/kg", "Wt. (kg)")) {
+    at <- idx_of("table cell", id)
+    expect_length(at, 1)
+    expect_true(at > second, info = id)
+  }
+})

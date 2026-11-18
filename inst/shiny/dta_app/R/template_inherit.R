@@ -543,25 +543,103 @@ dta_template_entry_key <- function(entry) {
 # names exactly what `modify:` would name. Any miss at any depth is NULL, which
 # is what makes a path that matches nothing a silently dead seal -- the case
 # validate_template() warns about.
+#
+# A key may itself contain a dot -- a column `Subject.ID` or `Wt. (kg)`, a
+# rule `chk.1`, a dataset `v2.1` -- so at a sequence a RUN of segments may spell
+# one entry key. Every earlier release took exactly the FIRST segment as the key,
+# and a path that reading could address keeps its meaning -- with one deliberate
+# exception, a path that ENDS WITH A DOT. It is read whole now, so that an id like
+# `Dose No.` resolves: an old `version.` read '1.0' and is NULL now, `required:
+# [options.]` fails and `sealed: [options.]` warns as dead -- loud, not silent.
+# So:
+#
+# In a dataset's `columns` / `row_labels`:
+#   1. the LONGEST run that is a declared key AND is followed by a column field
+#      (the known names, see dta_template_column_fields());
+#   2. only if there is none, the longest run that is a declared key, which may
+#      end the path at the entry itself: that is how a whole column is sealed.
+#   A column field name is the one thing that tells a column's field from the
+#   rest of a longer id, so with columns `X` and `X.values` both declared,
+#   `columns.X.values` is the field `values` of `X`, and lint_dta() warns about
+#   the pair (column_id_shadows_field).
+#
+# In every other sequence (datasets, options, rules, ...), which have no list of
+# field names to tell a field from the rest of an id:
+#   1. the one-segment key, when it is declared and a segment remains after it
+#      -- exactly what every earlier release read;
+#   2. otherwise the longest declared run that leaves a segment, so that a dotted
+#      key with no declared shorter prefix (`age.range`, `vit.v2`) resolves;
+#   3. otherwise the declared run that ends the path at the entry.
+#   So with rules `chk` and `chk.description` declared, `rules.chk.description`
+#   is ALWAYS the field `description` of `chk`, present or not: when `chk` lacks
+#   it a `required:` on the path fails and a seal on it is dead, rather than
+#   either one silently reading the sibling rule. The accepted limitation: a
+#   dotted key whose first segment is itself a declared key of the same list
+#   cannot be reached by a path at all, with or without a field behind it: the
+#   one-segment key is read first and the path is dead when that leads nowhere.
+#
+# A mapping takes one segment per key. There is no backtracking: when the chosen
+# reading leads to nothing, the path is dead.
 dta_template_path_get <- function(def, path) {
-  keys <- strsplit(as.character(path), ".", fixed = TRUE)[[1]]
+  path <- as.character(path)
+  keys <- strsplit(path, ".", fixed = TRUE)[[1]]
+  # strsplit() drops ONE trailing empty piece, which would turn the id
+  # `Dose No.` into `Dose No`; put it back.
+  # isTRUE(): a `sealed: [.na]` entry arrives as NA, which is no path and must
+  # stay a dead seal rather than abort the reader.
+  if (isTRUE(endsWith(path, "."))) {
+    keys <- c(keys, "")
+  }
   current <- def
-  for (key in keys) {
+  i <- 1L
+  holder <- NA_character_ # the mapping key whose value `current` is
+  while (i <= length(keys)) {
     if (!is.list(current) || length(current) == 0) {
       return(NULL)
     }
     if (dta_template_is_mapping(current)) {
-      current <- current[[key]]
+      holder <- keys[[i]]
+      current <- current[[holder]]
+      i <- i + 1L
       next
     }
+    # Every run of the remaining segments that spells an entry key, longest first.
     entry_keys <- vapply(current, dta_template_entry_key, character(1))
-    hit <- which(!is.na(entry_keys) & entry_keys == key)
+    remaining <- length(keys) - i + 1L
+    runs <- rev(seq_len(remaining))
+    run_key <- vapply(runs, function(run) paste(keys[i:(i + run - 1L)], collapse = "."), character(1))
+    hit <- which(run_key %in% entry_keys)
+    if (holder %in% c("columns", "row_labels")) {
+      before_field <- hit[keys[i + runs[hit]] %in% dta_template_column_fields()]
+      if (length(before_field) > 0) {
+        hit <- before_field
+      }
+    } else {
+      one_key <- hit[runs[hit] == 1L]
+      leaves_segment <- hit[runs[hit] < remaining]
+      if (remaining > 1L && length(one_key) > 0) {
+        hit <- one_key
+      } else if (length(leaves_segment) > 0) {
+        hit <- leaves_segment
+      }
+    }
     if (length(hit) == 0) {
       return(NULL)
     }
-    current <- current[[hit[[1]]]]
+    current <- current[[match(run_key[[hit[[1]]]], entry_keys)]]
+    i <- i + runs[[hit[[1]]]]
+    holder <- NA_character_
   }
   current
+}
+
+# The keys a column (or row label) spec can carry besides its `id`:
+# dta_column_field_names() in the package. The app files are not part of the
+# package namespace, so it is fetched from there -- the same way utils_dta.R
+# reaches dta_dataset_spec_key() -- which keeps ONE list of what a column field
+# is, shared with lint_dta() and with this path reader.
+dta_template_column_fields <- function() {
+  get("dta_column_field_names", envir = asNamespace("DTAtools"))()
 }
 
 # The union of a chain-accumulated path list, with an empty result normalised

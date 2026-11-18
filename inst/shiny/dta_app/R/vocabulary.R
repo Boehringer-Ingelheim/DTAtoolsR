@@ -656,28 +656,25 @@ normalise_values_from <- function(x, column_id = "<column>") {
 # reason party_slot_target_valid() checks its own: a malformed target would
 # otherwise fail somewhere far from the YAML that caused it.
 #
-# Splitting on "." caps the parts at five, so a dataset or column whose name
-# CONTAINS a dot is not addressable. That is a real restriction and it is the
-# right trade: the alternative -- a quoting or escaping grammar in a YAML
-# target string -- buys an unusual naming choice at the cost of a parser
-# nobody can read at a glance.
+# The column id is everything between "<columns|row_labels>." and the fixed
+# closing ".values", so it may contain dots and spaces (`Wt. (kg)`, `Dose No.`):
+# no quoting or escaping grammar is needed, because the one field the target
+# ends in is a constant. The DATASET name is still one segment, so a dataset
+# whose name contains a dot is not addressable here -- the column id has to be
+# checked against the dataset's declared ids afterwards (see
+# apply_vocabulary_slot_overrides()), as it always was.
 vocabulary_slot_target_parts <- function(target) {
   if (!is.character(target) || length(target) != 1 || is.na(target)) {
     return(NULL)
   }
-  parts <- strsplit(target, ".", fixed = TRUE)[[1]]
-  if (length(parts) != 5) {
+  m <- regmatches(
+    target,
+    regexec("^datasets\\.([^.]+)\\.(columns|row_labels)\\.(.+)\\.values$", target)
+  )[[1]]
+  if (length(m) != 4) {
     return(NULL)
   }
-  if (!identical(parts[[1]], "datasets") ||
-    !(parts[[3]] %in% c("columns", "row_labels")) ||
-    !identical(parts[[5]], "values")) {
-    return(NULL)
-  }
-  if (!nzchar(parts[[2]]) || !nzchar(parts[[4]])) {
-    return(NULL)
-  }
-  list(dataset = parts[[2]], column = parts[[4]], segment = parts[[3]])
+  list(dataset = m[[2]], column = m[[4]], segment = m[[3]])
 }
 
 # Normalise a template's `vocabulary_slots:`, filling in defaults and rejecting

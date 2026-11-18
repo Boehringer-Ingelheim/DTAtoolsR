@@ -1018,3 +1018,91 @@ test_that("{DATASETS} shows the dataset facts of the built-in layout instead of 
   # The first table is the fact table: ID, then the type in title case.
   expect_identical(cells[1:4], c("ID", "demographics", "Type", "Tabular"))
 })
+
+# ---- column ids with spaces and punctuation ------------------------------------
+#
+# A column id is the exact header text. The blocks print it in the column table
+# and name it in the rule wording; no template token carries a column id, so the
+# text has to come out as written and nothing in it may be read as a token again.
+
+# A DTA with one tabular dataset whose column ids hold spaces, a double space and
+# punctuation, two of them spelling a placeholder. Each label is "Label <id>", so
+# no label cell can be mistaken for an id cell.
+.block_spaced_ids <- c(
+  "Subject ID", "Visit Date (UTC)", "Dose mg/kg", "Subject  ID", "{id}", "{DATASET_ID}"
+)
+.block_spaced_rules <- function() {
+  list(
+    DTARuleColUnique(id = "ukey", columns = c("Subject ID", "Visit Date (UTC)")),
+    DTARuleColRange(id = "rg_dose", columns = "Dose mg/kg", min = 0, max = 100)
+  )
+}
+.block_spaced_dta <- function() {
+  ids <- .block_spaced_ids
+  cols <- stats::setNames(lapply(ids, function(id) {
+    if (identical(id, "Dose mg/kg")) {
+      DTAColumnSpec(id = id, type = "SAS Num", nullable = TRUE)
+    } else {
+      DTAColumnSpec(id = id, label = paste("Label", id), type = "SAS Char", nullable = TRUE)
+    }
+  }), ids)
+  ds <- DTADataSetTabular(
+    id = "spaced",
+    specs = DTAColumnSpecCollection(columns = cols, rules = .block_spaced_rules()),
+    files = list(DTAFileCSV(filename = "x.csv"))
+  )
+  DTA(datasets = list(ds), metadata = create_example_DTAMetaData())
+}
+
+.block_export_spaced <- function(lines) {
+  template <- .make_template(lines)
+  out <- tempfile(fileext = ".docx")
+  expect_no_warning(export_with_template(.block_spaced_dta(), template, out, quiet = TRUE))
+  unlink(template, force = TRUE)
+  out
+}
+
+test_that("{COLUMN_SPECS} prints every spaced column id exactly, once and in order", {
+  out <- .block_export_spaced("{COLUMN_SPECS}")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  cells <- .block_table_cells(.block_docx_summary(out))
+
+  expect_identical(cells[cells %in% .block_spaced_ids], .block_spaced_ids)
+  # nothing was read as a placeholder: the tokens that are ids are still text
+  txt <- .docx_text(out)
+  expect_true(grepl("{DATASET_ID}", txt, fixed = TRUE))
+  expect_true(grepl("{id}", txt, fixed = TRUE))
+  expect_false(grepl("{COLUMN_SPECS}", txt, fixed = TRUE))
+  # and the labels (which hold the ids too) came out as written
+  expect_true(all(paste("Label", .block_spaced_ids[-3]) %in% cells))
+})
+
+test_that("{VALIDATION_RULES} words a rule over spaced columns with each id exactly as declared", {
+  out <- .block_export_spaced("{VALIDATION_RULES}")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  descriptions <- .block_all_rule_descriptions(.block_docx_summary(out))
+
+  rules <- .block_spaced_rules()
+  expect_identical(names(descriptions), c("ukey", "rg_dose"))
+  # the cell is the shared wording line for line, and that wording names the ids
+  expect_identical(unname(descriptions[["ukey"]]), .rule_text(rules[[1]]))
+  expect_identical(unname(descriptions[["rg_dose"]]), .rule_text(rules[[2]]))
+  expect_true(grepl("Subject ID", descriptions[["ukey"]], fixed = TRUE))
+  expect_true(grepl("Visit Date (UTC)", descriptions[["ukey"]], fixed = TRUE))
+  expect_true(grepl("Dose mg/kg", descriptions[["rg_dose"]], fixed = TRUE))
+})
+
+test_that("{DATASETS} prints the spaced ids in its column table and its rule wording", {
+  out <- .block_export_spaced("{DATASETS}")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  summary <- .block_docx_summary(out)
+  cells <- .block_table_cells(summary)
+  descriptions <- .block_all_rule_descriptions(summary)
+
+  expect_identical(cells[cells %in% .block_spaced_ids], .block_spaced_ids)
+  expect_true(grepl("Visit Date (UTC)", descriptions[["ukey"]], fixed = TRUE))
+  expect_true(grepl("{DATASET_ID}", .docx_text(out), fixed = TRUE))
+})

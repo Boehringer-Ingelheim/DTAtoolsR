@@ -347,15 +347,21 @@ dta_normalize_column_names <- function(table_obj) {
 
 #' @title The Column-Name Cleaning Rule
 #' @description
-#' Strips surrounding quotes and whitespace from header names. Applied once, by
-#' [dta_delim_reader_plan()], to the names both readers are then given -- so the
-#' identical file cannot present different column names depending on how it
-#' happened to be loaded, and cannot match the specs on only one path.
+#' Strips surrounding whitespace and one pair of surrounding double quotes from
+#' header names. A quote is stripped only as a matched pair: a header such as
+#' `Length 5"` (inches) keeps its closing quote, because nothing opens it.
+#' Applied once, by [dta_delim_reader_plan()], to the names both readers are then
+#' given -- so the identical file cannot present different column names
+#' depending on how it happened to be loaded, and cannot match the specs on only
+#' one path.
 #' @param x Character vector of raw column names.
 #' @return The cleaned character vector.
 #' @keywords internal
 dta_clean_column_names <- function(x) {
-  trimws(gsub('^\\s*"|"\\s*$', "", x))
+  x <- trimws(x)
+  paired <- which(nchar(x) >= 2L & startsWith(x, '"') & endsWith(x, '"'))
+  x[paired] <- trimws(substr(x[paired], 2L, nchar(x[paired]) - 1L))
+  x
 }
 
 #' @title Parse Settings Declared by a File Handler

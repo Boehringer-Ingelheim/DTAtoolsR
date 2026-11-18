@@ -187,6 +187,88 @@ dataset_item_index_by_id <- function(items, id, kind, ds_name) {
   idx[[1]]
 }
 
+# Resolve the id at the head of a path tail against the ids that are declared.
+#
+# `segs` is what follows `columns` / `row_labels` / `rules` in a dotted path,
+# already split on ".", and at least one segment must remain for the field. An
+# id may itself contain a dot (`Subject.ID`, `Wt. (kg)`, `Dose No.`), so the id
+# is not simply the first segment. This is the writer's half of the rule
+# dta_template_path_get() reads by, and for a well-formed path the two agree. (A
+# path with an empty piece -- a trailing dot, or ".." inside -- is not one: the
+# reader keeps the piece as part of an id like `Dose No.`, while the writer's
+# own split of the path on dots, which is older than this, drops a trailing one.)
+#
+# * columns and row labels: the LONGEST run of leading segments that spells a
+#   declared id AND is followed by a column FIELD (dta_template_column_fields()).
+#   A shorter id is tried only when the longer ones do not qualify, so a dataset
+#   that declares both `X` and `X.values` reads `columns.X.values` as the field
+#   `values` of column `X`, and reaches the column `X.values` through one of its
+#   own fields (the author is warned about that pair by lint_dta()).
+# * rules: the one-segment id, when it is declared -- what every earlier release
+#   read -- and otherwise the longest declared run, so a dotted rule id with no
+#   declared shorter prefix (`age.range`) resolves. A dotted id whose first
+#   segment is also a declared id cannot be reached by a path with a field
+#   behind it: the one-segment id is read first. That is the accepted
+#   limitation (earlier releases could not address a dotted id at all).
+#
+# "Everything between the first segment and the last" is NOT the id: a column
+# field is not flat (`values_from` is a mapping, rule fields are nested).
+# `columns.Wt. (kg)` with columns `Wt` and `Wt. (kg)` declared is therefore not
+# the field " (kg)" of the column `Wt` -- it is a path with no field at all, and
+# refusing it here is what keeps it from being written into `Wt` and failing
+# later, somewhere else, as an unused argument.
+#
+# Returns list(idx = <position of the item>, rest = <the field path segments>),
+# or aborts. When no declared id fits, with the message dataset_item_index_by_id()
+# gives, naming the whole leading text as the id; when a column id is there but
+# no field follows it, saying so. Values are interpolated, never pasted into the
+# format string: an id may contain braces.
+dataset_item_split_path <- function(items, segs, kind, ds_name) {
+  ids <- vapply(items %||% list(), function(it) as.character(it$id %||% ""), character(1))
+  is_column <- kind %in% c("column", "row label")
+  fields <- if (is_column) dta_template_column_fields()
+  ks <- rev(seq_len(length(segs) - 1L))
+  if (!is_column) {
+    ks <- c(1L, ks[ks != 1L])
+  }
+  for (k in ks) {
+    hit <- which(ids == paste(segs[seq_len(k)], collapse = "."))
+    if (length(hit) > 0 && (!is_column || segs[[k + 1L]] %in% fields)) {
+      return(list(idx = hit[[1]], rest = segs[-seq_len(k)]))
+    }
+  }
+  if (is_column) {
+    # A declared id is there, but no field after it: not an unknown id.
+    whole <- paste(segs, collapse = ".")
+    if (whole %in% ids) {
+      cli::cli_abort(
+        c(
+          "'{whole}' is a {kind} id of dataset '{ds_name}'; a path into a {kind} must end in one of its fields.",
+          i = "Fields: {paste(fields, collapse = ', ')}."
+        ),
+        class = "dta_template_path_no_field"
+      )
+    }
+    for (k in rev(seq_len(length(segs) - 1L))) {
+      if (paste(segs[seq_len(k)], collapse = ".") %in% ids) {
+        id <- paste(segs[seq_len(k)], collapse = ".")
+        next_segment <- segs[[k + 1L]]
+        cli::cli_abort(
+          c(
+            "'{id}' is a {kind} id of dataset '{ds_name}', but '{next_segment}' is not one of its fields.",
+            i = "Fields: {paste(fields, collapse = ', ')}."
+          ),
+          class = "dta_template_path_no_field"
+        )
+      }
+    }
+  }
+  id <- paste(segs[-length(segs)], collapse = ".")
+  cli::cli_abort(
+    "Unknown {kind} id '{id}' in dataset '{ds_name}'. Known ids: {paste(ids, collapse = ', ')}."
+  )
+}
+
 # Apply one dotted-path update to a PLAIN LIST dataset spec, returning the
 # (also plain list) result. `ds` is never an S7 object here: this operates on
 # the same list shape read_dataset_from_yaml() reads and dta_dataset_from_
@@ -200,6 +282,9 @@ dataset_item_index_by_id <- function(items, id, kind, ds_name) {
 #   dataset.columns.<id>.<field>        -- column located by id, not position
 #                                          (`row_labels` for a matrix dataset)
 #   dataset.rules.<id>.<field>          -- rule located by id, not position
+#
+# <id> is the whole declared id, dots and spaces included, the longest declared
+# one winning (see dataset_item_split_path()).
 apply_dataset_template_path <- function(ds, path, value) {
   parts <- dataset_template_path_parts(path)
   ds_name <- as.character(ds$id %||% "?")
@@ -237,8 +322,8 @@ apply_dataset_template_path <- function(ds, path, value) {
     if (length(parts) < 3) {
       cli::cli_abort("Column path must be 'dataset.{key}.<id>.<field>', got '{path}'.")
     }
-    idx <- dataset_item_index_by_id(ds[[key]], parts[[2]], if (identical(key, "row_labels")) "row label" else "column", ds_name)
-    ds[[key]][[idx]] <- list_set_path(ds[[key]][[idx]], parts[-c(1, 2)], value)
+    hit <- dataset_item_split_path(ds[[key]], parts[-1], if (identical(key, "row_labels")) "row label" else "column", ds_name)
+    ds[[key]][[hit$idx]] <- list_set_path(ds[[key]][[hit$idx]], hit$rest, value)
     return(ds)
   }
 
@@ -246,8 +331,8 @@ apply_dataset_template_path <- function(ds, path, value) {
     if (length(parts) < 3) {
       cli::cli_abort("Rule path must be 'dataset.rules.<id>.<field>', got '{path}'.")
     }
-    idx <- dataset_item_index_by_id(ds$rules, parts[[2]], "rule", ds_name)
-    ds$rules[[idx]] <- list_set_path(ds$rules[[idx]], parts[-c(1, 2)], value)
+    hit <- dataset_item_split_path(ds$rules, parts[-1], "rule", ds_name)
+    ds$rules[[hit$idx]] <- list_set_path(ds$rules[[hit$idx]], hit$rest, value)
     return(ds)
   }
 

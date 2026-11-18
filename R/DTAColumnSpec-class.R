@@ -55,14 +55,63 @@ dta_normalise_spec_values <- function(values) {
   result
 }
 
-# One id per column or rule: a single, non-missing, non-empty string without
-# whitespace. Returns NULL when valid, else the reason (for validators).
-dta_id_problem <- function(id) {
+# What every id has in common: a single, non-missing, non-empty string.
+# Returns NULL when it is one, else the reason (for validators).
+dta_id_shape_problem <- function(id) {
   if (!is.character(id) || length(id) != 1L || is.na(id) || !nzchar(id)) {
     return("@id must be a single, non-missing, non-empty string.")
   }
+  NULL
+}
+
+# One id per rule or matrix row label: a single, non-missing, non-empty string
+# without whitespace. Returns NULL when valid, else the reason (for validators).
+dta_id_problem <- function(id) {
+  shape <- dta_id_shape_problem(id)
+  if (!is.null(shape)) {
+    return(shape)
+  }
   if (grepl("\\s", id)) {
     return("@id cannot have whitespaces.")
+  }
+  NULL
+}
+
+# The field names a column entry carries in a specification or a template path
+# (`columns.<id>.<field>`): the properties of DTAColumnSpec except `id`, the
+# vocabulary key `values_from` a template reads, and `header`, a matrix row
+# label's own key. Shared by lint (a column `X.<field>` beside a column `X`) and
+# by the template path reader, so the two cannot disagree about what a field is.
+dta_column_field_names <- function() {
+  c(setdiff(names(formals(DTAColumnSpec)), "id"), "values_from", "header")
+}
+
+# One id per column. A column id is the exact text of a data header, so spaces
+# and punctuation are part of the name ("Subject ID", "Dose mg/kg"). A plain
+# space between other characters is the only whitespace allowed beyond what
+# dta_id_problem() allows: the readers trim a header's edges
+# (dta_clean_column_names()), so an id that starts or ends with a space could
+# never match a header, and a tab or line break cannot be written in a header
+# or a YAML key. Every id valid under dta_id_problem() stays valid here (for a
+# string R can scan: an id with bytes that are invalid in the locale and a
+# space at its edge is refused, which it was not before).
+# Returns NULL when valid, else the reason (for validators).
+dta_column_id_problem <- function(id) {
+  shape <- dta_id_shape_problem(id)
+  if (!is.null(shape)) {
+    return(shape)
+  }
+  # A string R cannot scan (bytes that are not valid in this locale) is judged as
+  # it always was: grepl() warns and finds no whitespace.
+  other_whitespace <- tryCatch(
+    grepl("\\s", gsub(" ", "", id, fixed = TRUE)),
+    error = function(e) FALSE
+  )
+  if (other_whitespace) {
+    return("@id cannot contain whitespace other than spaces between characters (no tabs or line breaks).")
+  }
+  if (startsWith(id, " ") || endsWith(id, " ")) {
+    return("@id cannot start or end with a space.")
   }
   NULL
 }
@@ -75,7 +124,11 @@ dta_id_problem <- function(id) {
 #' @import S7
 #' @export
 #'
-#' @param id Character. The id of the column.
+#' @param id Character. The id of the column: the exact text of its header in
+#'   the data, so spaces and punctuation are allowed (\code{"Subject ID"},
+#'   \code{"Dose mg/kg"}). It cannot start or end with a space, and it cannot
+#'   contain whitespace other than spaces between characters (no tab or line
+#'   break).
 #' @param label Character or NULL. The label of the column.
 #' @param type Character or NULL. The type of the column.
 #' @param format Character or NULL. The format of the column.
@@ -150,7 +203,7 @@ DTAColumnSpec <- S7::new_class(
     colclass = class_character_or_null
   ),
   validator = function(self) {
-    id_problem <- dta_id_problem(self@id)
+    id_problem <- dta_column_id_problem(self@id)
     if (!is.null(id_problem)) {
       cli_abort(id_problem, class = "dta_spec_invalid_id")
     }

@@ -384,13 +384,97 @@ test_that("dta_set_column refuses a non-numeric length instead of dropping it", 
   expect_match(res$error, "Length must be a whole number", fixed = TRUE)
 })
 
-test_that("dta_set_column returns ok=FALSE without throwing for an id containing whitespace", {
+test_that("dta_set_column accepts a spaced id for a tabular dataset and keeps it verbatim", {
   fn <- app_fn("dta_set_column")
+  ids_fn <- app_fn("dta_column_ids")
+  dta <- app_fixture_dta()
+  before <- ids_fn(dta, "clinical_data")
 
-  res <- fn(app_fixture_dta(), "clinical_data", id = "bad id")
+  res <- fn(dta, "clinical_data", id = "Subject ID", label = "Subject", type = "Char", nullable = TRUE)
 
+  expect_true(res$ok)
+  expect_identical(ids_fn(res$value, "clinical_data"), c(before, "Subject ID"))
+  col <- datasets(res$value, "clinical_data")@specs@columns[["Subject ID"]]
+  expect_identical(col@id, "Subject ID")
+  expect_identical(col@label, "Subject")
+})
+
+test_that("dta_set_column saves a column whose id has spaces and renames onto a spaced id", {
+  fn <- app_fn("dta_set_column")
+  ids_fn <- app_fn("dta_column_ids")
+  dta <- app_fixture_dta()
+  added <- fn(dta, "clinical_data", id = "Visit Date (UTC)", type = "Char", nullable = TRUE)$value
+
+  # a label change on the spaced column saves it in place
+  res <- fn(added, "clinical_data", id = "Visit Date (UTC)", label = "Visit date", type = "Char", nullable = TRUE)
+  expect_true(res$ok)
+  expect_identical(
+    datasets(res$value, "clinical_data")@specs@columns[["Visit Date (UTC)"]]@label,
+    "Visit date"
+  )
+  expect_identical(ids_fn(res$value, "clinical_data"), ids_fn(added, "clinical_data"))
+
+  # renaming an unspaced column to a spaced id keeps its place in the order
+  ids <- ids_fn(dta, "clinical_data")
+  renamed <- fn(dta, "clinical_data", id = "Study ID", old_id = "STUDYID", type = "Char", nullable = FALSE)
+  expect_true(renamed$ok)
+  expect_identical(
+    ids_fn(renamed$value, "clinical_data"),
+    replace(ids, ids == "STUDYID", "Study ID")
+  )
+})
+
+test_that("dta_set_column refuses a tab in a tabular id and trims the edges of a spaced one", {
+  fn <- app_fn("dta_set_column")
+  dta <- app_fixture_dta()
+
+  # the ends are trimmed before the constructor sees the id, so only a tab inside is refused
+  res <- fn(dta, "clinical_data", id = "bad\tid", type = "Char")
   expect_false(res$ok)
   expect_true(nzchar(res$error))
+  # a surrounding space is trimmed, not refused
+  trimmed <- fn(dta, "clinical_data", id = "  padded id  ", type = "Char", nullable = TRUE)
+  expect_true(trimmed$ok)
+  expect_true("padded id" %in% app_fn("dta_column_ids")(trimmed$value, "clinical_data"))
+})
+
+test_that("dta_set_column still refuses a whitespace id for a matrix row label", {
+  fn <- app_fn("dta_set_column")
+  yaml_lines <- c(
+    "datasets:",
+    "  - id: m",
+    "    type: matrix",
+    "    files: { filename: \"m.tsv\", type: tsv }",
+    "    row_labels:",
+    "      - id: SAMPLE_ID",
+    "        header: \"Sample ID\"",
+    "        type: SAS Char",
+    "        nullable: No",
+    "    matrix:",
+    "      cells: { type: SAS Int, nullable: No }"
+  )
+  path <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(yaml_lines, path)
+  dta <- suppressMessages(read_dta_from_yaml(path))
+
+  # the app's own guard speaks, in text the app writes (not a translated R message)
+  add <- fn(dta, "m", id = "Sample Name", type = "Char", nullable = TRUE)
+  expect_false(add$ok)
+  expect_match(add$error, "Row-label column ID", fixed = TRUE)
+
+  # renaming an existing row label onto a spaced id is refused too, with no result
+  rename <- fn(dta, "m", id = "Sample ID", old_id = "SAMPLE_ID", type = "Char", nullable = FALSE)
+  expect_false(rename$ok)
+  expect_match(rename$error, "Row-label column ID", fixed = TRUE)
+  expect_null(rename$value)
+
+  # the unspaced id with the exact header text in `header` is the way to write it
+  ok <- fn(dta, "m", id = "SAMPLE_NAME", type = "Char", nullable = TRUE, header_mode = "text", header_text = "Sample Name")
+  expect_true(ok$ok)
+  expect_identical(
+    datasets(ok$value, "m")@specs@columns[["SAMPLE_NAME"]]@header,
+    "Sample Name"
+  )
 })
 
 test_that("dta_set_column refuses a rename onto an id another column already holds", {

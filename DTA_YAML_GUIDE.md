@@ -384,7 +384,7 @@ column and an undeclared extra column are both errors. Declare every column.
 
 | Key | Notes |
 | --- | --- |
-| `id` | **required**, exact header text, no whitespace, unique. |
+| `id` | **required**, exact header text, unique. Spaces and punctuation are allowed between characters (`Subject ID`, `Visit Date (UTC)`, `Dose mg/kg`); no space at the start or end, and no whitespace other than spaces between characters (tabs, line breaks and other whitespace such as an ideographic space are refused). See *Column ids* below. |
 | `label` | Short human label (≤ 40 chars, SAS-label style). |
 | `description` | What the value means, its unit, origin, derivation, and when it may be blank. |
 | `type` | `SAS Char`, `SAS Num` (decimal), `SAS Int` (whole number), `SAS Date`, `SAS Time`, `SAS DateTime`. Always prefixed `SAS `. |
@@ -395,6 +395,38 @@ column and an undeclared extra column are both errors. Declare every column.
 | `pattern` | Regex every non-missing value must match (Perl syntax). **Unanchored by default — always wrap in `^…$`.** |
 | `examples` | Example values; must match `pattern` if one is given. |
 | `colclass` | Optional category: `patient_info`, `measurement_patient`, `measurement`, `visit_related`, `date_related`, `study_info`, `wide_format`, `long_format`, `wide_and_long_format`. |
+
+**Column ids.** An `id` is compared with the header of the delivered file
+character for character. The match is case-sensitive and codepoint-exact:
+`Subject  ID` (two spaces) is not `Subject ID`, and a no-break space is not a
+space. Write the id exactly as the header reads; a tabular dataset has no
+separate key for the header text. Before the comparison the reader trims the
+whitespace around a header and removes one pair of double quotes wrapped around it
+(`"Subject ID"` becomes `Subject ID`); a quote at only one edge belongs to the
+name, so `Length 5"` stays `Length 5"`. (A matrix row-label `id` may not
+contain whitespace, section 6, and neither may a rule `id`: a space in one is
+written as an underscore when the file is read.)
+
+A plain id needs no quotes: `id: Subject ID`. Quote an id (`id: "Y"`) when YAML
+would read it as something other than text. Unquoted, these fail or change:
+
+- **Words and numbers.** A YAML 1.1 reader turns plain `Y`, `N`, `yes`, `no`,
+  `true`, `false`, `on`, `off`, `null` and `~`, and number-like text (`007`,
+  `1.10`, `0.5`, `0x1F`, `.inf`), into something that is not a string.
+  Numeric headers such as the time points of a PK table are realistic, so quote
+  them (`id: "0.5"`). The specification is then refused with `column_spec_invalid`.
+  So is `{id}`, which is read as a mapping, and `[a, b]`, which is read as a list.
+- **A first character YAML reserves.** An id that starts with `%`, `|`, `>`, `'`,
+  `"`, `@`, a backtick, `- ` or `? `, or contains `: `, makes the file unreadable
+  (`yaml_unreadable`). One that starts with `&` or `!` or `#` ends up with no
+  id and is refused as well.
+- **Changed without a word.** An id that starts with `*` becomes the placeholder
+  `_yaml.bad-anchor_`, ` #` cuts an id at the `#`, and `[a]` is read as `a`.
+  Nothing reports these, so quote any id that holds one of those characters.
+
+Inside an inline list such as `columns: [A, B]`, quote an id that contains `,`,
+`[`, `]`, `{` or `}` as well. The same holds wherever a rule names a column:
+`columns:` lists, the keys under `condition:` and `then:`, and `group_by:`.
 
 Constraints between keys:
 
@@ -609,7 +641,11 @@ must stay `true`); the file may arrive loose or in a container like any other.
 A list with at least one entry. Entry *i* is column *i* of the file: row labels
 are matched **by position**, not by name. An entry takes every key of a
 tabular column (section 4: `id`, `label`, `description`, `type`, `format`,
-`length`, `nullable`, `values`, `pattern`, `examples`) and one more:
+`length`, `nullable`, `values`, `pattern`, `examples`) and one more. There is
+one exception: a row-label `id` **may not contain whitespace**, unlike a column
+`id`. Put the exact header text under `header` instead (`id: SAMPLE_ID` with
+`header: "Sample ID"`); `lint_dta()` reports the whitespace as
+`matrix_row_label_id_invalid`, and the dataset is refused.
 
 | Key | Notes |
 | --- | --- |
@@ -629,8 +665,9 @@ Which `header` to write depends on what wrote the file:
 | pandas `to_csv()`, index named `protein_id` | `protein_id,S1,S2` | `id: protein_id`, or another `id` and `header: protein_id` |
 | any writer that names the column like your `id` | `GENE_ID<TAB>S1` | nothing |
 
-A header text is compared after surrounding quotes and spaces are removed, and
-is case-sensitive.
+A header text is compared after the whitespace around it and one pair of double
+quotes wrapped around it are removed (a quote at only one edge stays part of the
+text), and is case-sensitive.
 
 ### `matrix.columns` — the data columns
 
@@ -730,6 +767,11 @@ header line or without a row label column; sparse and single-cell formats;
 - A value that starts with `*` is a YAML alias and stops the file from being
   read; one that contains ` #` is cut at the `#`. Quote both:
   `container: "*_SDTM.zip"`.
+- A column `id` is the header text and may hold spaces (`id: Subject ID`), but
+  quote one that YAML would read as something else: `"Y"`, `"No"`, `"null"`,
+  `"007"`, `"0.5"` (a number-like or boolean-like header), `"%Change"`,
+  `"{id}"`, `"*x"`. Three groups, and which of them fail loudly, are under
+  *Column ids* in section 4.
 
 ---
 

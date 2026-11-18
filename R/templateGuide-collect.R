@@ -514,10 +514,26 @@
 }
 
 # "metadata.transmission.frequency" -> "Transmission \u203a Frequency".
+#
+# A column or row-label id may contain dots and spaces (`Wt. (kg)`), so the id
+# is not a path segment. This is display text and has no declared ids to check
+# against (the call sites hold only a path), so it reads the path with the same
+# test the template engine uses to tell a field from the rest of an id: the id
+# is everything after "columns." up to the FIRST later segment that is a column
+# field (dta_column_field_names()), and the field path is what follows -- shown
+# as the breadcrumb of the field names, "Values from \u203a Vocabulary of column X",
+# with a lone `values` worded "Allowed values of column X". A path with no such
+# segment -- `columns.Wt. (kg)`, `columns.Subject.ID`, `columns.Dose No.` --
+# names the WHOLE column, which is how a whole-column seal reads.
+#
+# The limit of that: an id that itself ends in a field name is read as that
+# field of the shorter id. With only `Dose.length` declared, `columns.Dose.length`
+# reads "Length of column Dose" -- the engine, which knows the declared ids, reads
+# it as the column `Dose.length`.
 .tgc_path_text <- function(path, ds_titles = character(0)) {
   path <- sub("^base\\.", "", as.character(path))
   parts <- strsplit(path, ".", fixed = TRUE)[[1]]
-  m <- regmatches(path, regexec("^datasets?\\.(?:([^.]+)\\.)?(columns|row_labels)\\.([^.]+)\\.values$", path, perl = TRUE))[[1]]
+  m <- regmatches(path, regexec("^datasets?\\.(?:([^.]+)\\.)?(columns|row_labels)\\.(.+)$", path, perl = TRUE))[[1]]
   if (length(m) == 4) {
     where <- if (nzchar(m[[2]])) {
       title <- if (m[[2]] %in% names(ds_titles)) ds_titles[[m[[2]]]] else m[[2]]
@@ -525,7 +541,21 @@
     } else {
       ""
     }
-    return(paste0("Allowed values of ", if (identical(m[[3]], "row_labels")) "row label " else "column ", m[[4]], where))
+    what <- if (identical(m[[3]], "row_labels")) "row label " else "column "
+    # the sentinel keeps the empty piece after the final dot of an id like `Dose No.`
+    segs <- strsplit(paste0(m[[4]], "."), ".", fixed = TRUE)[[1]]
+    first_field <- which(segs %in% dta_column_field_names() & seq_along(segs) >= 2L)[1]
+    if (is.na(first_field)) {
+      return(paste0(.tgc_humanise(what), m[[4]], where))
+    }
+    id <- paste(segs[seq_len(first_field - 1L)], collapse = ".")
+    field <- segs[first_field:length(segs)]
+    field_text <- if (identical(field, "values")) {
+      "Allowed values"
+    } else {
+      paste(.tgc_humanise(field), collapse = " \u203a ")
+    }
+    return(paste0(field_text, " of ", what, id, where))
   }
   if (length(parts) > 1 && identical(parts[[1]], "metadata")) {
     parts <- parts[-1]
@@ -818,7 +848,14 @@
   filled <- g("dta_template_path_is_filled")
   overlap <- g("dta_template_paths_overlap")
   if (!startsWith(path, "options.")) {
-    base_value <- g("list_get_path")(def[["base"]], strsplit(path, ".", fixed = TRUE)[[1]])
+    # A dataset path is looked up in the definition itself, the way
+    # dta_template_check_required() does (and with its handling of a column id
+    # that contains a dot); anything else is read from the metadata seed.
+    base_value <- if (startsWith(path, "datasets.")) {
+      g("dta_template_path_get")(def, path)
+    } else {
+      g("list_get_path")(def[["base"]], strsplit(path, ".", fixed = TRUE)[[1]])
+    }
     if (filled(base_value)) {
       return(FALSE)
     }
@@ -1243,7 +1280,10 @@
     kind <- c(Option = "Question", `Party slot` = "Party", `Vocabulary slot` = "Term choice")[[m[[2]]]]
     return(c(paste0(kind, ": ", nm), detail(m[[4]])))
   }
-  m <- regmatches(what, regexec("^Dataset '([^']*)', column '([^']*)'(?:: (.*))?$", what, perl = TRUE))[[1]]
+  # The column id runs up to the LAST quote before the field (or the end), so an
+  # id that contains an apostrophe (`O'Brien`) reads whole. A field path never
+  # contains a quote, which is what makes the split unambiguous.
+  m <- regmatches(what, regexec("^Dataset '([^']*)', column '(.*)'(?:: ([^']*))?$", what, perl = TRUE))[[1]]
   if (length(m) == 4) {
     where <- if (m[[2]] %in% names(ds_titles)) ds_titles[[m[[2]]]] else m[[2]]
     return(c(sprintf("Column %s in %s", m[[3]], where), detail(m[[4]])))

@@ -1109,6 +1109,547 @@ test_that("a required list field is unfilled when everything inside it is blank"
   expect_true(fn(0))
 })
 
+# ---- paths through column ids that contain spaces or dots ----------------------
+#
+# A column id is the header text, so `Subject ID`, `Subject.ID`, `Wt. (kg)` and
+# `Dose No.` are legal. dta_template_path_get() reads a sealed/required path, and
+# at a sequence it takes the LONGEST run of segments that spells an entry key
+# (the same rule as dataset_item_split_path()); a path may end at the entry.
+
+dotted_column_def <- function() {
+  list(
+    id = "t", version = "1.0",
+    base = list(metadata = list(title = "T")),
+    datasets = list(
+      list(id = "inl", type = "tabular", columns = list(
+        list(id = "Subject ID", description = "space", values = c("s1", "s2")),
+        list(id = "Subject.ID", description = "dot", values = c("v1", "v2")),
+        list(id = "Wt. (kg)", description = "weight", values = "w"),
+        list(id = "a", b = "field b of a", values = "a-values"),
+        list(id = "a.b", values = "ab-values"),
+        list(id = "Dose No.", description = "dose", values = "dn")
+      )),
+      list(id = "vit.v2", columns = list(list(id = "X", values = "x")))
+    )
+  )
+}
+
+test_that("dta_template_path_get() resolves column ids with spaces and dots", {
+  fn <- app_fn("dta_template_path_get")
+  def <- dotted_column_def()
+
+  expect_identical(fn(def, "datasets.inl.columns.Subject ID.values"), c("s1", "s2"))
+  expect_identical(fn(def, "datasets.inl.columns.Subject.ID.values"), c("v1", "v2"))
+  expect_identical(fn(def, "datasets.inl.columns.Wt. (kg).description"), "weight")
+  # an id that ends in a dot survives the split, with and without a field behind it
+  expect_identical(fn(def, "datasets.inl.columns.Dose No..description"), "dose")
+  expect_identical(fn(def, "datasets.inl.columns.Dose No.")$id, "Dose No.")
+  # a dotted DATASET key too
+  expect_identical(fn(def, "datasets.vit.v2.columns.X.values"), "x")
+})
+
+test_that("dta_template_path_get() takes the longest declared id, and may end at the entry", {
+  fn <- app_fn("dta_template_path_get")
+  def <- dotted_column_def()
+
+  # `a` and `a.b` are both declared: `columns.a.b` is the column `a.b`, not the
+  # field `b` of the column `a` ...
+  expect_identical(fn(def, "datasets.inl.columns.a.b")$id, "a.b")
+  expect_identical(fn(def, "datasets.inl.columns.a.b.values"), "ab-values")
+  # ... and the shorter id still answers for itself.
+  expect_identical(fn(def, "datasets.inl.columns.a")$id, "a")
+  expect_identical(fn(def, "datasets.inl.columns.a.values"), "a-values")
+  # a field that is not there is a miss, with no fallback to another reading
+  expect_null(fn(def, "datasets.inl.columns.a.nope"))
+  expect_null(fn(def, "datasets.inl.columns.Wt.nope"))
+  expect_null(fn(def, "datasets.inl.columns.Wt. (kg).nope"))
+  expect_null(fn(def, "datasets.inl.columns.Wt. (kg).values.deeper"))
+})
+
+test_that("a seal on a dotted column id is enforced, and is not reported dead", {
+  # Before the longest-id rule a seal on `Wt. (kg)` resolved to NULL on both
+  # sides of the merge, so every descendant compared equal and passed.
+  check <- app_fn("dta_template_check_sealed")
+  parent <- dotted_column_def()
+  parent$sealed <- list("datasets.inl.columns.Wt. (kg).values", "datasets.inl.columns.Dose No.")
+
+  untouched <- parent
+  untouched$datasets[[1]]$columns[[1]]$description <- "changed elsewhere"
+  expect_no_error(check(parent, untouched, "child"))
+
+  values_changed <- parent
+  values_changed$datasets[[1]]$columns[[3]]$values <- "other"
+  expect_error(check(parent, values_changed, "child"), class = "dta_template_sealed_violation")
+
+  # a whole-column seal on an id that ends in a dot guards every field of it
+  dose_changed <- parent
+  dose_changed$datasets[[1]]$columns[[6]]$description <- "new text"
+  expect_error(check(parent, dose_changed, "child"), class = "dta_template_sealed_violation")
+
+  # and so does one on a dotted id that no shorter declared id shadows
+  whole <- parent
+  whole$sealed <- list("datasets.inl.columns.Wt. (kg)")
+  weight_changed <- whole
+  weight_changed$datasets[[1]]$columns[[3]]$description <- "new text"
+  expect_error(check(whole, weight_changed, "child"), class = "dta_template_sealed_violation")
+  expect_no_error(check(whole, untouched, "child"))
+
+  expect_no_warning(app_fn("dta_template_warn_dead_seals")(parent))
+  parent$sealed <- list("datasets.inl.columns.Wt.nope.values")
+  expect_warning(
+    app_fn("dta_template_warn_dead_seals")(parent),
+    regexp = "nothing", fixed = TRUE
+  )
+})
+
+test_that("a required path through a dotted column id is satisfiable and enforced", {
+  check <- app_fn("dta_template_check_required")
+  def <- dotted_column_def()
+  def$required <- list("datasets.inl.columns.Wt. (kg).description", "datasets.inl.columns.Subject.ID.values")
+  expect_no_error(check(NULL, def))
+
+  def$datasets[[1]]$columns[[3]]$description <- ""
+  err <- tryCatch(check(NULL, def), error = function(e) e)
+  expect_s3_class(err, "rlang_error")
+  # cli wraps the message at the console width, so compare with the line breaks folded
+  expect_match(
+    gsub("\\s+", " ", conditionMessage(err)),
+    "datasets.inl.columns.Wt. (kg).description",
+    fixed = TRUE
+  )
+})
+
+test_that("a column `X.<field>` beside `X` never takes over a path to the field <field> of `X`", {
+  # `columns.Specimen.type` has two readings once a column `Specimen.type`
+  # exists: the field `type` of the column `Specimen`, or the whole column
+  # `Specimen.type`. It is the FIELD -- as in every earlier release, and as the
+  # writers read it (dataset_item_split_path(), the vocabulary target) -- so
+  # that adding the column neither changes what the seal guards nor lets a
+  # change to the sealed field through. (lint_dta() warns about the pair:
+  # column_id_shadows_field.)
+  parent <- list(
+    id = "parent", version = "1.0", sealed = list("datasets.inl.columns.Specimen.type"),
+    datasets = list(list(id = "inl", type = "tabular", columns = list(
+      list(id = "Specimen", label = "S", type = "SAS Char")
+    )))
+  )
+  resolve <- function(columns) {
+    child <- list(
+      id = "child", version = "1.0", extends = "parent",
+      datasets = list(list(id = "inl", columns = columns))
+    )
+    app_fn("resolve_template_inheritance")(child, make_resolver(list(parent = parent)))
+  }
+  specimen <- list(id = "Specimen", label = "S", type = "SAS Char")
+
+  # adding the column does not touch the sealed field: the child resolves ...
+  expect_no_error(resolve(list(specimen, list(id = "Specimen.type", label = "T", type = "SAS Num"))))
+  # ... and changing the sealed field itself is still the sealed violation.
+  err <- tryCatch(
+    resolve(list(utils::modifyList(specimen, list(type = "SAS Num")))),
+    error = function(e) e
+  )
+  expect_s3_class(err, "dta_template_sealed_violation")
+})
+
+test_that("with columns `X`, `X.values` and `X.description`, the path names the field of `X`", {
+  # The reproducer of the regression this rule closes: the seal and the
+  # required path are meant for column X, and the longest-id reading handed
+  # them to the columns `X.values` / `X.description` instead -- so a child
+  # changed X's values, or blanked X's description, without a word.
+  fn <- app_fn("dta_template_path_get")
+  inl <- function(x_values = c("v1", "v2"), x_description = "x-desc", dotted_values = "w1") {
+    list(list(id = "inl", type = "tabular", columns = list(
+      list(id = "X", values = x_values, description = x_description),
+      list(id = "X.values", values = dotted_values, description = "of X.values"),
+      list(id = "X.description", description = "of X.description")
+    )))
+  }
+  parent <- list(
+    id = "par", version = "1.0",
+    sealed = list("datasets.inl.columns.X.values"),
+    required = list("datasets.inl.columns.X.description"),
+    datasets = inl()
+  )
+
+  expect_identical(fn(parent, "datasets.inl.columns.X.values"), c("v1", "v2"))
+  expect_identical(fn(parent, "datasets.inl.columns.X.description"), "x-desc")
+  # a field OF the longer id is still reachable, through that id
+  expect_identical(fn(parent, "datasets.inl.columns.X.values.values"), "w1")
+  expect_identical(fn(parent, "datasets.inl.columns.X.values.description"), "of X.values")
+  expect_identical(fn(parent, "datasets.inl.columns.X.description.description"), "of X.description")
+
+  # the seal: changing X's values is the violation; changing the values of the
+  # column that merely shares X's name as a prefix is not
+  check_sealed <- app_fn("dta_template_check_sealed")
+  merged <- function(...) {
+    out <- parent
+    out$datasets <- inl(...)
+    out
+  }
+  err <- tryCatch(check_sealed(parent, merged(x_values = c("v1", "CHANGED")), "child"), error = function(e) e)
+  expect_s3_class(err, "dta_template_sealed_violation")
+  expect_no_error(check_sealed(parent, merged(dotted_values = "CHANGED"), "child"))
+  # and through a whole inheritance chain, not just the check
+  child <- function(...) {
+    list(id = "child", version = "1.0", extends = "par", datasets = inl(...))
+  }
+  resolve <- function(child) {
+    app_fn("resolve_template_inheritance")(child, make_resolver(list(par = parent)))
+  }
+  err <- tryCatch(resolve(child(x_values = "CHANGED")), error = function(e) e)
+  expect_s3_class(err, "dta_template_sealed_violation")
+  expect_no_error(resolve(child(dotted_values = "CHANGED")))
+
+  # the requirement: blanking X's description is the failure; blanking the
+  # description of the column `X.description` is not
+  check_required <- app_fn("dta_template_check_required")
+  expect_no_error(check_required(NULL, parent))
+  x_blank <- parent
+  x_blank$datasets[[1]]$columns[[1]]$description <- ""
+  expect_error(check_required(NULL, x_blank), class = "rlang_error")
+  dotted_blank <- parent
+  dotted_blank$datasets[[1]]$columns[[3]]$description <- ""
+  expect_no_error(check_required(NULL, dotted_blank))
+})
+
+test_that("an id that is a field name, with no shorter id behind it, is the whole column", {
+  # Without a column `Y` there is no field `values` of `Y` for `Y.values` to be
+  # confused with, so the entry itself can be sealed.
+  fn <- app_fn("dta_template_path_get")
+  def <- list(datasets = list(list(id = "inl", columns = list(
+    list(id = "Y.values", values = "yv"), list(id = "Wt. (kg)", values = "w")
+  ))))
+
+  expect_identical(fn(def, "datasets.inl.columns.Y.values")$id, "Y.values")
+  expect_identical(fn(def, "datasets.inl.columns.Y.values.values"), "yv")
+  expect_identical(fn(def, "datasets.inl.columns.Wt. (kg)")$id, "Wt. (kg)")
+})
+
+# Outside a dataset's columns / row labels there is no list of field names, so
+# the first segment is the key whenever it is declared and something follows it
+# -- what every earlier release read -- and a dotted key is reached only when
+# its first segment is NOT a declared key of the same list (`age.range`,
+# `vit.v2`). Rules and options are keyed by ids that may contain dots, and a seal
+# on `rules.chk.description` must keep guarding the description of the rule
+# `chk` when a rule called `chk.description` is added: also when `chk` has NO
+# description, when a `required:` on it must fail and a seal on it is dead
+# instead of either one silently reading the sibling.
+
+test_that("a rule `chk.<field>` beside `chk` never takes over a path to the field of `chk`", {
+  fn <- app_fn("dta_template_path_get")
+  rules <- function(chk = "chk text", dotted = "dotted text") {
+    list(
+      list(id = "chk", description = chk, severity = "error"),
+      list(id = "chk.description", description = dotted, severity = "warning")
+    )
+  }
+  parent <- list(
+    id = "par", version = "1.0",
+    sealed = list("datasets.inl.rules.chk.description"),
+    datasets = list(list(id = "inl", type = "tabular", rules = rules()))
+  )
+
+  expect_identical(fn(parent, "datasets.inl.rules.chk.description"), "chk text")
+  expect_identical(fn(parent, "datasets.inl.rules.chk.severity"), "error")
+  # The accepted limitation: with `chk` declared, a field of the rule
+  # `chk.description` cannot be named (this reads chk's description, then a
+  # key below a string).
+  expect_null(fn(parent, "datasets.inl.rules.chk.description.severity"))
+
+  check <- app_fn("dta_template_check_sealed")
+  child <- function(...) {
+    out <- parent
+    out$datasets[[1]]$rules <- rules(...)
+    out
+  }
+  err <- tryCatch(check(parent, child(chk = "changed"), "child"), error = function(e) e)
+  expect_s3_class(err, "dta_template_sealed_violation")
+  expect_no_error(check(parent, child(dotted = "changed"), "child"))
+
+  # through a whole inheritance chain, as a template author meets it
+  resolve <- function(rules) {
+    ch <- list(
+      id = "child", version = "1.0", extends = "par",
+      datasets = list(list(id = "inl", rules = rules))
+    )
+    app_fn("resolve_template_inheritance")(ch, make_resolver(list(par = parent)))
+  }
+  err <- tryCatch(resolve(rules(chk = "changed")), error = function(e) e)
+  expect_s3_class(err, "dta_template_sealed_violation")
+  expect_no_error(resolve(rules(dotted = "changed")))
+})
+
+test_that("an option `hdr.<field>` beside `hdr` never takes over a path to the field of `hdr`", {
+  fn <- app_fn("dta_template_path_get")
+  parent <- list(
+    id = "par", version = "1.0", sealed = list("options.hdr.default"),
+    options = list(
+      list(id = "hdr", label = "Header", default = "H1"),
+      list(id = "hdr.default", label = "Header default", default = "H2")
+    )
+  )
+  expect_identical(fn(parent, "options.hdr.default"), "H1")
+  expect_identical(fn(parent, "options.hdr.label"), "Header")
+  # the accepted limitation: no field of the option `hdr.default` can be named
+  expect_null(fn(parent, "options.hdr.default.default"))
+
+  resolve <- function(id) {
+    ch <- list(
+      id = "child", version = "1.0", extends = "par",
+      options = list(modify = list(list(id = id, default = "CHANGED")))
+    )
+    app_fn("resolve_template_inheritance")(ch, make_resolver(list(par = parent)))
+  }
+  err <- tryCatch(resolve("hdr"), error = function(e) e)
+  expect_s3_class(err, "dta_template_sealed_violation")
+  # the option that merely shares the prefix is not what is sealed
+  expect_no_error(resolve("hdr.default"))
+})
+
+test_that("a dataset `d.columns` beside `d` does not take the columns of `d` away", {
+  fn <- app_fn("dta_template_path_get")
+  def <- list(datasets = list(
+    list(id = "d", columns = list(list(id = "X", values = "dx"))),
+    list(id = "d.columns", columns = list(list(id = "X", values = "dcx")))
+  ))
+
+  expect_identical(fn(def, "datasets.d.columns.X.values"), "dx")
+})
+
+lacking_field_cases <- function() {
+  # an entry `k` that LACKS the field `f`, beside a sibling entry `k.f` that has it
+  list(
+    rule = list(
+      path = "datasets.inl.rules.chk.description",
+      def = function() {
+        list(datasets = list(list(id = "inl", rules = list(
+          list(id = "chk", severity = "error"),
+          list(id = "chk.description", description = "the sibling", severity = "warning")
+        ))))
+      }
+    ),
+    option = list(
+      path = "options.hdr.default",
+      def = function() {
+        list(options = list(
+          list(id = "hdr", label = "Header"),
+          list(id = "hdr.default", label = "Header default", default = "the sibling")
+        ))
+      }
+    ),
+    dataset = list(
+      path = "datasets.inl.description",
+      def = function() {
+        list(datasets = list(
+          list(id = "inl", type = "tabular"),
+          list(id = "inl.description", type = "tabular", description = "the sibling")
+        ))
+      }
+    )
+  )
+}
+
+test_that("an entry that lacks a field is not replaced by a longer sibling `<id>.<field>`", {
+  # A sibling is a whole entry and never empty, so reading the path as that
+  # entry made a `required:` on the field pass and a seal on it guard the
+  # wrong thing, silently. The path is the field of the entry named by its
+  # first segment, present or not.
+  fn <- app_fn("dta_template_path_get")
+  check_required <- app_fn("dta_template_check_required")
+  warn_dead <- app_fn("dta_template_warn_dead_seals")
+
+  for (case in lacking_field_cases()) {
+    def <- case$def()
+    expect_null(fn(def, case$path))
+
+    needs <- def
+    needs$required <- list(case$path)
+    expect_error(check_required(NULL, needs), class = "rlang_error")
+
+    sealed <- def
+    sealed$sealed <- list(case$path)
+    expect_warning(warn_dead(sealed), regexp = "nothing", fixed = TRUE)
+  }
+})
+
+test_that("a seal on a field its entry lacks watches that entry, not the sibling", {
+  check <- app_fn("dta_template_check_sealed")
+  rules <- function(chk_description = NULL, sibling = "the sibling") {
+    list(
+      c(list(id = "chk", severity = "error"), if (!is.null(chk_description)) list(description = chk_description)),
+      list(id = "chk.description", description = sibling, severity = "warning")
+    )
+  }
+  parent <- list(
+    id = "par", version = "1.0", sealed = list("datasets.inl.rules.chk.description"),
+    datasets = list(list(id = "inl", type = "tabular", rules = rules()))
+  )
+  resolve <- function(rules) {
+    ch <- list(
+      id = "child", version = "1.0", extends = "par",
+      datasets = list(list(id = "inl", rules = rules))
+    )
+    app_fn("resolve_template_inheritance")(ch, make_resolver(list(par = parent)))
+  }
+
+  # changing only the sibling rule does not touch the sealed field of `chk` ...
+  expect_no_error(resolve(rules(sibling = "changed")))
+  # ... and giving `chk` the description is a change of the sealed field.
+  err <- tryCatch(resolve(rules(chk_description = "now set")), error = function(e) e)
+  expect_s3_class(err, "dta_template_sealed_violation")
+})
+
+test_that("validate_template reports an unfilled requirement and a dead seal behind a dotted sibling", {
+  dir <- withr::local_tempdir()
+  dir.create(file.path(dir, "templates"))
+  write_yaml <- function(name, x) {
+    writeLines(yaml::as.yaml(x, indent = 2, line.sep = "\n"), file.path(dir, "templates", name))
+  }
+  rule <- function(id, description = NULL) {
+    c(list(id = id, type = "col_unique", columns = list("X")), if (!is.null(description)) list(description = description))
+  }
+  option <- function(id, default = NULL) {
+    c(list(id = id, label = id, type = "text", target = "metadata.header"), if (!is.null(default)) list(default = default))
+  }
+  write_yaml("par.dta-template.yaml", list(
+    kind = "dta_creation_template", id = "par", version = "1.0", label = "par", abstract = TRUE,
+    base = list(metadata = list(title = "T", version = "1.0", date = "${today}", header = "H")),
+    sealed = list("datasets.inl.rules.chk.description"),
+    required = list("datasets.inl.rules.chk.description", "options.hdr.default"),
+    options = list(option("hdr"), option("hdr.default", "the sibling")),
+    datasets = list(list(
+      id = "inl", name = "inl", type = "tabular", files = list(filename = "inl.csv", type = "csv"),
+      columns = list(list(id = "X", label = "X", type = "SAS Char")),
+      rules = list(rule("chk"), rule("chk.description", "the sibling"))
+    ))
+  ))
+  write_yaml("kid.dta-template.yaml", list(
+    kind = "dta_creation_template", id = "kid", version = "1.0", label = "kid", extends = "par@1.0"
+  ))
+
+  res <- validate_template(dir)
+  # the child cannot be created: nothing fills the two required fields
+  expect_true("instantiate_failed" %in% res$code[res$id == "kid"])
+  # and the seal on the field `chk` lacks is reported as dead
+  expect_true("sealed_path_unknown" %in% res$code[res$id == "par"])
+})
+
+test_that("a dotted key with no declared shorter prefix is reached before a longer key that ends the path", {
+  # Rule 2 of the reader for sequences outside a dataset's columns: when the
+  # one-segment key is not declared, the LONGEST declared run that still leaves
+  # a segment wins over a longer run that ends the path at the entry. With
+  # options `a.b` and `a.b.c` and no `a`, `options.a.b.c` is the field `c` of
+  # `a.b`, and only a field behind `a.b.c` reaches that option.
+  fn <- app_fn("dta_template_path_get")
+  def <- list(options = list(
+    list(id = "a.b", c = "c of a.b", default = "AB"),
+    list(id = "a.b.c", default = "ABC")
+  ))
+
+  expect_identical(fn(def, "options.a.b.c"), "c of a.b")
+  expect_identical(fn(def, "options.a.b.c.default"), "ABC")
+  expect_identical(fn(def, "options.a.b.default"), "AB")
+  # a path that ends at a key reads the whole entry
+  expect_identical(fn(def, "options.a.b")$id, "a.b")
+  expect_null(fn(def, "options.a"))
+})
+
+test_that("a sealed entry that is NA is a dead seal, never a plain R error", {
+  # `sealed: [.na]` reaches the engine as NA_character_. endsWith() of it is NA,
+  # and `if (NA)` aborted the reader with "missing value where TRUE/FALSE needed"
+  # -- from the dead-seal warning, from the sealed check, from validate_template().
+  fn <- app_fn("dta_template_path_get")
+  expect_null(fn(list(a = 1), NA_character_))
+
+  warn_dead <- app_fn("dta_template_warn_dead_seals")
+  base <- list(
+    id = "par", version = "1.0",
+    datasets = list(list(id = "inl", type = "tabular", columns = list(list(id = "X", values = "v"))))
+  )
+  for (sealed in list(
+    list(NA_character_),
+    list("datasets.inl.columns.X.values", NA_character_)
+  )) {
+    parent <- c(base, list(sealed = sealed))
+    expect_warning(warn_dead(parent), regexp = "nothing", fixed = TRUE)
+
+    child <- list(id = "child", version = "1.0", extends = "par")
+    expect_no_error(
+      app_fn("resolve_template_inheritance")(child, make_resolver(list(par = parent)))
+    )
+  }
+})
+
+test_that("validate_template reports a `sealed: [.na]` as an unknown sealed path", {
+  for (sealed in c("sealed: [.na]", "sealed: [base.metadata.title, .na]")) {
+    dir <- withr::local_tempdir()
+    dir.create(file.path(dir, "templates"))
+    writeLines(
+      c(
+        "kind: dta_creation_template", "id: par", "version: \"1.0\"", "label: par", "abstract: true",
+        "base: {metadata: {title: T, version: '1.0', date: '${today}', header: H}}",
+        sealed
+      ),
+      file.path(dir, "templates", "par.dta-template.yaml")
+    )
+    writeLines(
+      c("kind: dta_creation_template", "id: kid", "version: \"1.0\"", "label: kid", "extends: par@1.0"),
+      file.path(dir, "templates", "kid.dta-template.yaml")
+    )
+
+    res <- expect_no_error(validate_template(dir))
+    expect_true("sealed_path_unknown" %in% res$code[res$id == "par"], info = sealed)
+  }
+})
+
+test_that("a seal and a requirement through row_labels follow the same rule", {
+  # `G` and `G.header` are both row labels; `row_labels.G.header` is the field
+  # `header` of `G`, as the writer and the vocabulary target read it.
+  fn <- app_fn("dta_template_path_get")
+  matrix_ds <- function(g_header = "gene", dotted_header = "gh") {
+    list(list(id = "m", type = "matrix", row_labels = list(
+      list(id = "G", header = g_header, values = c("a", "b")),
+      list(id = "G.header", header = dotted_header, values = "x"),
+      list(id = "GENE.ID", header = "gene_id")
+    )))
+  }
+  parent <- list(
+    id = "par", version = "1.0",
+    sealed = list("datasets.m.row_labels.G.header", "datasets.m.row_labels.GENE.ID"),
+    required = list("datasets.m.row_labels.G.header"),
+    datasets = matrix_ds()
+  )
+
+  expect_identical(fn(parent, "datasets.m.row_labels.G.header"), "gene")
+  expect_identical(fn(parent, "datasets.m.row_labels.G.values"), c("a", "b"))
+  expect_identical(fn(parent, "datasets.m.row_labels.G.header.header"), "gh")
+  expect_identical(fn(parent, "datasets.m.row_labels.GENE.ID")$header, "gene_id")
+
+  check_sealed <- app_fn("dta_template_check_sealed")
+  merged <- function(...) {
+    out <- parent
+    out$datasets <- matrix_ds(...)
+    out
+  }
+  err <- tryCatch(check_sealed(parent, merged(g_header = "other"), "child"), error = function(e) e)
+  expect_s3_class(err, "dta_template_sealed_violation")
+  expect_no_error(check_sealed(parent, merged(dotted_header = "other"), "child"))
+  whole <- merged()
+  whole$datasets[[1]]$row_labels[[3]]$header <- "renamed"
+  err <- tryCatch(check_sealed(parent, whole, "child"), error = function(e) e)
+  expect_s3_class(err, "dta_template_sealed_violation")
+
+  check_required <- app_fn("dta_template_check_required")
+  expect_no_error(check_required(NULL, parent))
+  blank <- merged(g_header = "")
+  blank$required <- parent$required
+  expect_error(check_required(NULL, blank), class = "rlang_error")
+  blank_dotted <- merged(dotted_header = "")
+  blank_dotted$required <- parent$required
+  expect_no_error(check_required(NULL, blank_dotted))
+})
+
 # ---- mixins ------------------------------------------------------------------
 #
 # Spec rules M1-M11. Mixins are abstract, flat and add-only: folded into the

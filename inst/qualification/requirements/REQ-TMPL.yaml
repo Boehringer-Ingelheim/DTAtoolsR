@@ -76,8 +76,8 @@ requirements:
     covers: [validate_template]
     source: >
       R/validateTemplate.R:273-286 (.dta_template_version_plain_is_exact), 491-499;
-      inst/shiny/dta_app/R/template_core.R:146-172 (dta_template_yaml_handlers),
-      258-260 (dta_template_version_is_exact)
+      inst/shiny/dta_app/R/template_core.R:259-265 (dta_template_yaml_handlers),
+      351-353 (dta_template_version_is_exact)
     notes: >
       This is the most important code this file emits. yaml::read_yaml()
       parses an unquoted 1.10 as the double 1.1 -- verified directly:
@@ -216,13 +216,26 @@ requirements:
       metadata.import_issues) shall be reported target_machine_owned at
       severity "error"; one that resolves to no known metadata field at all,
       or -- for a dataset template -- is not rooted at "dataset.", shall be
-      reported target_invalid at severity "warning".
+      reported target_invalid at severity "warning". For a dataset template
+      an option target that is rooted at "dataset." but does not resolve
+      within the dataset shall be reported target_invalid at severity
+      "warning" too, with a message naming the id the path asks for exactly as
+      written (a column, row label or rule the dataset does not declare, an id
+      that may contain spaces and dots, REQ-TMPL-056), and a target that
+      resolves to a declared one shall not be reported.
     risk: high
     category: functional
     covers: [validate_template]
     source: >
-      R/validateTemplate.R:542-558, 981-1009;
-      inst/shiny/dta_app/R/template_core.R:267-285 (dta_metadata_machine_fields, dta_template_metadata_fields)
+      R/validateTemplate.R (.dta_template_check_creation, target_invalid;
+      .dta_template_check_dataset_tpl, option targets);
+      inst/shiny/dta_app/R/template_core.R:366-378 (dta_metadata_machine_fields, dta_template_metadata_fields)
+    notes: >
+      Until this sentence the requirement covered only a target outside
+      "dataset."; validate_template() has always reported the unresolvable id
+      as well, by running the target through the engine's own path resolver
+      (apply_dataset_template_path()), and the dotted-id rule of REQ-TMPL-056
+      is observed through exactly that call.
 
   - id: REQ-TMPL-013
     text: >
@@ -248,8 +261,9 @@ requirements:
     category: functional
     covers: [validate_template]
     source: >
-      R/validateTemplate.R:728-792;
-      inst/shiny/dta_app/R/vocabulary.R:536-565, 573-620 (vocabulary_slot_target_parts, normalise_vocabulary_slots)
+      R/validateTemplate.R (.dta_template_check_vocab_slots, vocab_slot_invalid and
+      vocab_slot_unresolved);
+      inst/shiny/dta_app/R/vocabulary.R:666-678, 686-762 (vocabulary_slot_target_parts, normalise_vocabulary_slots)
 
   - id: REQ-TMPL-015
     text: >
@@ -261,7 +275,9 @@ requirements:
     risk: high
     category: functional
     covers: [validate_template]
-    source: R/validateTemplate.R:583-630; inst/shiny/dta_app/R/dataset_template.R:276 (apply_dataset_patch)
+    source: >
+      R/validateTemplate.R (.dta_template_check_creation, dataset_template_unresolved
+      and patch_incoherent); inst/shiny/dta_app/R/dataset_template.R:368-481 (apply_dataset_patch)
 
   - id: REQ-TMPL-016
     text: >
@@ -308,7 +324,7 @@ requirements:
     covers: [validate_template]
     source: >
       R/validateTemplate.R:846-941;
-      inst/shiny/dta_app/R/vocabulary.R:449-505 (normalise_values_from), 362-420 (vocabulary_terms)
+      inst/shiny/dta_app/R/vocabulary.R:584-620 (normalise_values_from), 423-466 (vocabulary_terms)
 
   # ---- extends resolution, the instantiate dry-run, and sealed ---------------
 
@@ -325,7 +341,7 @@ requirements:
     covers: [validate_template]
     source: >
       R/validateTemplate.R:632-671;
-      inst/shiny/dta_app/R/template_inherit.R:1087-1274 (resolve_template_inheritance)
+      inst/shiny/dta_app/R/template_inherit.R:1158-1345 (resolve_template_inheritance)
 
   - id: REQ-TMPL-020
     text: >
@@ -382,9 +398,14 @@ requirements:
     covers: [validate_template]
     source: >
       R/validateTemplate.R:672-694;
-      inst/shiny/dta_app/R/template_inherit.R:690-749 (dta_template_check_sealed),
-      546-565 (dta_template_path_get), 592-665 (dta_template_entry_metadata_paths,
+      inst/shiny/dta_app/R/template_inherit.R:761-820 (dta_template_check_sealed),
+      578-627 (dta_template_path_get), 663-736 (dta_template_entry_metadata_paths,
       dta_template_entry_seal_paths, dta_template_paths_overlap)
+    notes: >
+      A sealed path into a column whose id contains spaces or dots reads that
+      id whole (REQ-TMPL-056): a seal on such a column is enforced, a
+      descendant that changes it is a sealed_violation, and the path is not
+      reported sealed_path_unknown while it resolves. Pinned in OQ-TMPL-127.
 
   - id: REQ-TMPL-022
     text: >
@@ -402,7 +423,7 @@ requirements:
     covers: [validate_template]
     source: >
       inst/shiny/dta_app/R/template_inherit.R:285-297 (dta_template_section_state),
-      814-828 (dta_template_merge_collection_section)
+      885-899 (dta_template_merge_collection_section)
     notes: >
       PINNED, not endorsed: for a collection section, validate_template() and
       the dry-run build it drives currently cannot tell "explicit null" apart
@@ -429,7 +450,7 @@ requirements:
     risk: medium
     category: functional
     covers: [validate_template]
-    source: inst/shiny/dta_app/R/template_inherit.R:1087-1274 (resolve_template_inheritance)
+    source: inst/shiny/dta_app/R/template_inherit.R:1158-1345 (resolve_template_inheritance)
 
   # ---- controlled vocabulary: extends, cycles, term algebra ------------------
 
@@ -447,7 +468,7 @@ requirements:
     covers: [validate_template]
     source: >
       R/validateTemplate.R:1014-1068;
-      inst/shiny/dta_app/R/vocabulary.R:200-260 (read_vocabulary), 284-313 (resolve_vocabulary_inheritance)
+      inst/shiny/dta_app/R/vocabulary.R:245-306 (read_vocabulary), 330-406 (resolve_vocabulary_inheritance)
 
   - id: REQ-TMPL-025
     text: >
@@ -461,7 +482,7 @@ requirements:
     risk: high
     category: functional
     covers: [validate_template]
-    source: inst/shiny/dta_app/R/vocabulary.R:314-349 (the term algebra inside resolve_vocabulary_inheritance)
+    source: inst/shiny/dta_app/R/vocabulary.R:355-405 (the term algebra inside resolve_vocabulary_inheritance)
 
   # ---- create_template_repo() -------------------------------------------------
 
@@ -757,10 +778,10 @@ requirements:
     category: functional
     covers: [validate_template]
     source: >
-      inst/shiny/dta_app/R/template_inherit.R:849-878 (dta_template_mixin_refs),
-      890-938 (dta_template_check_mixin_shape), 954-974
-      (dta_template_merge_disjoint), 984-1078 (dta_template_fold_mixins),
-      1087-1274 (resolve_template_inheritance)
+      inst/shiny/dta_app/R/template_inherit.R:920-949 (dta_template_mixin_refs),
+      961-1009 (dta_template_check_mixin_shape), 1025-1045
+      (dta_template_merge_disjoint), 1055-1149 (dta_template_fold_mixins),
+      1158-1345 (resolve_template_inheritance)
     notes: >
       Observable through validate_template() as: a composed template that is
       concrete is valid only if the fold supplied everything it needs (the
@@ -791,8 +812,8 @@ requirements:
     covers: [validate_template]
     source: >
       R/validateTemplate.R (.dta_template_check_creation);
-      inst/shiny/dta_app/R/template_inherit.R:984-1078
-      (dta_template_fold_mixins), 1087-1274 (resolve_template_inheritance);
+      inst/shiny/dta_app/R/template_inherit.R:1055-1149
+      (dta_template_fold_mixins), 1158-1345 (resolve_template_inheritance);
       inst/extdata/template-repo-skeleton/README.md (issue-code table)
     notes: >
       The condition is classified by its class, before any text test, so an
@@ -826,6 +847,10 @@ requirements:
       Added with the single-file rule: the library root of one template file is
       the parent of the folder it sits in, found only when that folder is the
       folder of the file's kind (REQ-TMPL-002). Pinned in OQ-TMPL-099.
+      A column whose id contains spaces or dots is listed in the column table
+      by its whole id, and named by its whole id wherever the guide names a
+      column (the fixed-fields list, the list of what differs from the parent
+      template), as REQ-TMPL-056 reads such an id whole. Pinned in OQ-TMPL-129.
 
   # ---- app: Word templates, layout reporting at run time --------------------
 
@@ -1032,7 +1057,9 @@ requirements:
       apply_dataset_template_path); R/validateTemplate.R
     notes: >
       A site that still read columns would see a matrix as having none, and
-      "nothing to do" is indistinguishable from success.
+      "nothing to do" is indistinguishable from success. A row label whose id
+      contains a dot (GENE.ID) is addressed whole, as REQ-TMPL-056 reads every
+      id; it is checked there (OQ-TMPL-124).
 
   - id: REQ-TMPL-049
     text: >
@@ -1053,6 +1080,9 @@ requirements:
       PLAN-matrix-dataset.md 4.6, T27;
       inst/shiny/dta_app/R/vocabulary.R (vocabulary_slot_target_parts,
       apply_vocabulary_slot_overrides)
+    notes: >
+      The target grammar for a column id that contains spaces or dots, and for
+      a dataset id that contains a dot, is REQ-TMPL-056 (OQ-TMPL-126).
 
   - id: REQ-TMPL-050
     text: >
@@ -1082,27 +1112,46 @@ requirements:
       appear as added or removed rows keyed by its id; a row label that did not
       change shall not appear. A change to the header of a row label (absent,
       a text, No) shall be one changed row keyed
-      <dataset>.row_labels.<id>.header, and an unchanged header none.
+      <dataset>.row_labels.<id>.header, and an unchanged header none. A
+      tabular dataset's columns are keyed the same way, as
+      <dataset>.columns.<id>.<field>, with an id that contains spaces or dots
+      written whole in the key (REQ-TMPL-056), and two columns whose ids start
+      alike (a and a.b) are two entries whose changes are never mixed up.
     risk: medium
     category: integrity
     covers: [run_dta_app]
     source: >
       PLAN-matrix-dataset.md 4.6, T27;
       inst/shiny/dta_app/R/template_diff.R (dta_dataset_leaves, .dta_leaf_flatten)
+    notes: >
+      The sentence on tabular columns was added with REQ-TMPL-056; it is
+      pinned in OQ-TMPL-128.
 
   - id: REQ-TMPL-052
     text: >
       The application's template history shall word a change to a matrix
       dataset's row label as a row label, naming its id ("row label 'ID'") and
       not as a column, report a row label that is new or gone as one line, and
-      keep the wording "column" for a tabular dataset's columns.
+      keep the wording "column" for a tabular dataset's columns. It shall name
+      a column or row label by its whole id when the id contains spaces or dots
+      ("column 'Wt. (kg)'"), and shall attribute a changed field to the entry
+      whose id is the longest that fits the field's key, so that a change to a
+      column `a.b` is not reported as a change to a column `a` that is
+      declared beside it, nor the reverse. A dataset that is new or gone is one
+      line, not one line for the dataset and one for each of its columns, and a
+      new column of an existing dataset is one line.
     risk: low
     category: functional
     covers: [run_dta_app]
     source: >
       PLAN-matrix-dataset.md 4.6;
-      inst/shiny/dta_app/R/template_history.R (template_history_label,
-      template_history_compare)
+      inst/shiny/dta_app/R/template_history.R (template_history_entities,
+      template_history_owner, template_history_label, template_history_compare)
+    notes: >
+      The second half of the text (whole ids, longest id, one line per new
+      dataset) was added with REQ-TMPL-056: the history used to split a key at
+      every dot, which read column `Wt. (kg)` as `Wt` and let a column `a`
+      swallow the changes of a column `a.b`. Pinned in OQ-TMPL-128.
 
   - id: REQ-TMPL-053
     text: >
@@ -1147,7 +1196,115 @@ requirements:
     source: >
       PLAN-matrix-dataset.md 4.6, T27; R/templateGuide-collect.R
 
+  # ---- ids that contain spaces or dots, in template paths ---------------------
+
   - id: REQ-TMPL-056
+    text: >
+      A template path that names a column, a row label, a rule, an option or a
+      dataset shall take the id whole, with the spaces and dots it contains (a
+      column "Subject ID", "Wt. (kg)", "Dose No." or "a.b", a rule
+      "age.range"). In a dataset path (dataset.columns.<id>.<field>,
+      dataset.row_labels.<id>.<field> and dataset.rules.<id>.<field>, as
+      written by an option target, by the set: of a patch and by its column
+      verbs) a column or row label id is the longest declared id that is
+      followed by a column field name (label, type, format, length, nullable,
+      values, values_from, pattern, examples, description, colclass or header);
+      a rule id is the one-segment id when it is declared, and otherwise the
+      longest declared id that leaves a segment for the field. A path with no
+      such reading shall be refused and shall write to no other entry
+      (target_invalid for the option of a dataset template, patch_incoherent
+      for a patch): a path whose id is not declared, naming the id as written;
+      a column path that stops at a declared column id, or continues with a
+      segment that is not a field of it, with a condition of class
+      dta_template_path_no_field naming that id, so that with columns Wt and
+      "Wt. (kg)" declared columns.Wt. (kg) is refused and is not written into
+      Wt as a field. In a vocabulary slot target
+      (datasets.<dataset>.columns.<id>.values, with row_labels for a matrix)
+      the id is everything between the segment and the closing .values, and
+      the dataset is one segment, so a target through a dataset whose id
+      contains a dot is malformed (vocab_slot_invalid); applying a selection
+      through a target whose id the dataset does not declare is refused,
+      naming that id. A sealed: or required: path resolves against the
+      template's own definition. In the columns or row_labels of a dataset it
+      reads the longest declared id that is followed by a column field name,
+      and only when there is none the longest declared id, which may then end
+      the path at the entry and covers the whole column. In every other list
+      (datasets, options, rules) it reads the one-segment id when it is
+      declared and a segment remains after it, otherwise the longest declared
+      id that leaves a segment, otherwise the id that ends the path at the
+      entry. So with a column X declared, columns.X.values is always the field
+      values of X, even when a column X.values is declared too, and with rules
+      chk and chk.description, rules.chk.description is always the field
+      description of chk: when chk lacks it, a required: path fails
+      (instantiate_failed) and a seal on it is reported sealed_path_unknown,
+      and a dotted key whose first segment is also a declared key of the same
+      list cannot be named by a seal or required: path at all. A seal on a path
+      that resolves shall be enforced: a descendant that changes the sealed
+      value is reported sealed_violation, which fails its build, and the seal
+      is not reported sealed_path_unknown. A required: path is satisfied by a
+      value that is present and is instantiate_failed when it is not.
+      lint_dta() warns with column_id_shadows_field when a dataset declares
+      both a column X and a column X.<field> (REQ-SPEC-028). The template guide
+      names a column or row label with such an id in every list in which it
+      names one: the id is everything after columns. up to the first later
+      segment that is a column field name, and a path with no such segment is
+      the whole column ("Column Wt. (kg) in inl").
+    risk: high
+    category: functional
+    covers: [validate_template, lint_dta, write_template_guide]
+    source: >
+      inst/shiny/dta_app/R/dataset_template.R:222-339 (dataset_item_split_path,
+      apply_dataset_template_path); inst/shiny/dta_app/R/template_inherit.R:578-636
+      (dta_template_path_get, dta_template_column_fields);
+      inst/shiny/dta_app/R/vocabulary.R:666-678 (vocabulary_slot_target_parts);
+      R/DTAColumnSpec-class.R (dta_column_field_names); R/lintDTA.R
+      (column_id_shadows_field); R/templateGuide-collect.R (.tgc_path_text)
+    notes: >
+      A column id is the text of a header (REQ-SPEC-033), and real headers
+      contain both spaces and dots ("Wt. (kg)", "No. of Doses"). Every path
+      used to be split at each dot, so a seal on such a column resolved to
+      nothing on both sides of an inheritance merge and was silently ignored:
+      a descendant could change what its parent had sealed. The same grammar
+      serves tabular columns, matrix row labels (REQ-TMPL-048, REQ-TMPL-049),
+      rules, options and datasets. The history and the guide read ids the same
+      way (REQ-TMPL-052, REQ-TMPL-040). Which sentence holds where: the
+      dataset path (the writer) reads the column and the rule as the first
+      sentence says; the vocabulary target as the second; the reader of a seal
+      or a required field as the third; the guide as the last, with no
+      declared ids to consult. For a well-formed path (one with no trailing
+      dot and no empty segment other than the dot that closes an id such as
+      Dose No.; the writer does not read the others as the reader does), the
+      reader and the writer name the same entry when the path ends in a field
+      of it, for columns (X and X.values, X and X.values_from, a and a.b, Wt
+      and Wt. (kg)) and for rules (age.range; chk and chk.description, where
+      both read chk); they differ where a seal path ends at the entry, because
+      a dataset path always ends in a field (OQ-TMPL-131). For columns and row
+      labels a longer id is read whole unless a column field name follows it
+      (Wt and Wt. (kg), a and a.b: the longer id; X and X.values: the field of
+      X); for rules, options and datasets the shorter id wins whenever it is
+      declared and a segment remains after it. Every path that a release before
+      this one could address keeps its meaning, except a path that ends with a
+      dot (version., options.): that was changed on purpose so that an id such
+      as Dose No. resolves, and such a path now reads nothing, so a required:
+      on it fails and a sealed: on it is reported sealed_path_unknown, loudly.
+      That is why the shorter id comes first, and the cost is a limitation: a
+      dotted key whose first segment is also a declared key
+      of the same list (rules chk and chk.description, options hdr and
+      hdr.default, datasets vit and vit.v2) cannot be reached by a seal or
+      required: path at all, neither with a field nor as a whole entry, and for
+      rules the writer cannot reach the sibling with a field either. For
+      columns the longer column can still be sealed through one of its own
+      fields, and column_id_shadows_field warns about the pair. Display
+      limitation of the guide, which the reader does not share: an id that
+      itself ends in a column field name is read as that field of a shorter id,
+      so with only a column Dose.length declared the guide words columns.Dose.length
+      as "Length of column Dose". Stated limits, not pinned here: a path to the
+      condition or then key of a rule on a column whose id contains a dot cannot
+      be written with set:, and a seal or required: path that runs through a
+      datasets[].template import resolves to nothing in the definition. Pinned
+      in OQ-TMPL-124 to OQ-TMPL-127, OQ-TMPL-129, OQ-TMPL-130 and OQ-TMPL-131.
+
+  - id: REQ-TMPL-057
     text: >
       validate_template() shall report a dataset that declares no files as
       dataset_no_files at severity "warning", the message naming the dataset id

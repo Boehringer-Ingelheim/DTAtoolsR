@@ -1,6 +1,6 @@
 # validate_template(): the codes it emits, and its strict/kinds/path arguments.
 # REQ-TMPL-001 .. REQ-TMPL-018, REQ-TMPL-031, REQ-TMPL-033, REQ-TMPL-034 and
-# REQ-TMPL-056.
+# REQ-TMPL-057.
 #
 # Every fixture below lives under fx/t/ and is built to trigger
 # EXACTLY the one code its test names -- verified by running validate_template()
@@ -1121,7 +1121,7 @@ test_that("OQ-TMPL-106 | a .docx in export-templates/ without a {PLACEHOLDER} ma
   )
 })
 
-# ---- REQ-TMPL-056: a template dataset that declares no files ------------------
+# ---- REQ-TMPL-057: a template dataset that declares no files ------------------
 
 # A dataset template whose body carries `files_lines`, or no file declaration.
 tmpl_files_dataset_text <- function(files_lines = character(0), id = "no_files_ds") {
@@ -1152,7 +1152,7 @@ tmpl_files_creation_text <- function(dataset_lines, id = "files_tpl", extra = ch
   )
 }
 
-test_that("OQ-TMPL-124 | a dataset template that declares no files is dataset_no_files, a warning naming the dataset; one that declares files is not | REQ-TMPL-056", {
+test_that("OQ-TMPL-132 | a dataset template that declares no files is dataset_no_files, a warning naming the dataset; one that declares files is not | REQ-TMPL-057", {
   root <- qa_tempdir()
   tmpl_put(root, "templates/no_files_ds.dta-dataset-template.yaml", tmpl_files_dataset_text())
   result <- validate_template(root)
@@ -1214,7 +1214,7 @@ test_that("OQ-TMPL-124 | a dataset template that declares no files is dataset_no
   }
 })
 
-test_that("OQ-TMPL-125 | a creation template is judged on the datasets it builds: reported, named by variant, unless abstract or its patch supplies the files | REQ-TMPL-056", {
+test_that("OQ-TMPL-133 | a creation template is judged on the datasets it builds: reported, named by variant, unless abstract or its patch supplies the files | REQ-TMPL-057", {
   bare <- c("datasets:", "  - id: ds1", "    type: tabular", "    columns:", "      - {id: COL1, type: SAS Char}")
   root <- qa_tempdir()
   tmpl_put(root, "templates/files_tpl.dta-template.yaml", tmpl_files_creation_text(bare))

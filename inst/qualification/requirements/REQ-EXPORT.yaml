@@ -270,11 +270,27 @@ requirements:
       cells match the collection it is given, arriving at the same column
       identifiers and types, and shall read the permitted values and the
       pattern written on #@values: and #@pattern: lines of a Description
-      cell, each up to the end of its own line.
+      cell, each up to the end of its own line. An id cell shall be read as
+      typed: the spaces between characters are kept (STUDY ID stays STUDY ID,
+      and two consecutive spaces stay two), whitespace at the start or end of
+      the cell is dropped, and any other whitespace inside the cell (a line
+      break, a tab, a vertical tab or form feed, a thin or ideographic space)
+      is deleted rather than read as a space (a cell holding SUB, a line break
+      and JID reads as SUBJID).
     risk: high
     category: functional
     covers: [columns_specs_from_word]
     source: R/DTAColumnSpecCollection-class.R
+    notes: >
+      A column id is the exact text of a header (REQ-SPEC-033), so a space the
+      author typed in the id cell belongs to the id. Earlier versions removed
+      every space (STUDY ID became STUDYID), which made a header with a space
+      impossible to import. Whitespace other than the plain space cannot be
+      part of an id, and a cell that wraps a long id onto a second line must
+      still read as the one id it was written as. Only the line break and the
+      tab are asserted: which non-ASCII characters are whitespace (a thin or
+      ideographic space) is the platform's, and a no-break space is not treated
+      as a space on every platform.
 
   - id: REQ-EXPORT-019
     text: >
@@ -291,7 +307,9 @@ requirements:
       columns_specs_from_word() reads a blank or NA cell as "no format", and
       for a document written by an older version, whose Format cell carried no
       prefix, takes the backend from the same row's Type cell. A blank Length
-      cell reads back as no length. Closes DEV-014.
+      cell reads back as no length. Closes DEV-014. A column id with spaces
+      ("Subject ID") is written in its id cell as it is and read back as it
+      was written.
 
   # ---- write_table_to_file() --------------------------------------------------
 
