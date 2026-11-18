@@ -118,30 +118,72 @@ test_that("wildcards match whole names, every other character literally", {
   }
 })
 
-test_that("container matching ignores pattern and a compression suffix", {
-  h <- DTAFileCSV("ae.csv", container = "sdtm_*.zip")
-  expect_true(dta_matches_container(h, "sdtm_20251101.zip"))
-  expect_false(dta_matches_container(h, "sdtm.zip"))
-  expect_true(dta_matches_container(h, c("lib.zip", "sdtm_1.zip")))
+test_that("glob matching ignores pattern and a compression suffix", {
+  expect_true(dta_glob_matches("sdtm_*.zip", "sdtm_20251101.zip"))
+  expect_false(dta_glob_matches("sdtm_*.zip", "sdtm.zip"))
+  expect_true(dta_glob_matches("sdtm_*.zip", c("lib.zip", "sdtm_1.zip")))
+  expect_true(dta_glob_matches("sdtm.xpt", "sdtm.xpt.gz"))
 
-  expect_true(dta_matches_container(
-    DTAFileXPT("ae.xpt", container = "sdtm.xpt"),
-    "sdtm.xpt.gz"
-  ))
+  # Letter case must match, unless asked otherwise.
+  expect_false(dta_glob_matches("sdtm.zip", "SDTM.zip"))
+  expect_true(dta_glob_matches("sdtm.zip", "SDTM.zip", ignore.case = TRUE))
 
-  # `pattern` describes the file name; the container is matched on its own.
-  hp <- DTAFileCSV("^ae", pattern = TRUE, container = "sdtm.zip")
-  expect_true(dta_matches_container(hp, "sdtm.zip"))
-  expect_false(dta_matches_container(hp, "sdtmXzip"))
+  # Nothing to match against.
+  expect_false(dta_glob_matches("sdtm.zip", character()))
+  expect_false(dta_glob_matches(NULL, "sdtm.zip"))
 
-  # Letter case must match.
-  expect_false(dta_matches_container(
-    DTAFileCSV("ae.csv", container = "sdtm.zip"),
-    "SDTM.zip"
-  ))
+  # The regex of a glob is built once.
+  testthat::local_mocked_bindings(
+    dta_container_regex = function(glob) stop("rebuilt")
+  )
+  expect_true(dta_glob_matches("sdtm_*.zip", "sdtm_9.zip"))
+})
 
-  # A handler without a container matches no name.
-  expect_false(dta_matches_container(DTAFileCSV("ae.csv"), c("sdtm.zip", "lib.xpt")))
+test_that("references are disjoint by syntax", {
+  # ids
+  for (ok in c("sdtm", "S_d-1", "a")) {
+    expect_identical(DTAFileCSV("x.csv", container = ok)@container, ok)
+  }
+  expect_identical(DTAFileCSV("x.csv", container = "none")@container, "none")
+  for (bad in list("1a", "a/b", "a b", "-a", "_a")) {
+    e <- expect_error(DTAFileCSV("x.csv", container = bad), class = "dta_container_invalid")
+    expect_match(conditionMessage(e), "must be a .zip/.xpt file name or a container id", fixed = TRUE)
+  }
+  expect_error(DTAFileCSV("x.csv", container = 3), class = "dta_container_invalid")
+  # a dotted value is a file name and keeps its 0.27.0 judge
+  expect_identical(
+    dta_container_ref_problem("sdtm.tar"),
+    dta_container_value_problem("sdtm.tar")
+  )
+  expect_null(dta_container_ref_problem(NULL))
+  # assignment is refused too
+  h <- DTAFileCSV("x.csv")
+  expect_error(h@container <- "a/b", class = "dta_container_invalid")
+  h@container <- "sdtm"
+  expect_identical(h@container, "sdtm")
+})
+
+test_that("an entry takes a container kind by its type", {
+  csv <- DTAFileCSV("a.csv")
+  xpt <- DTAFileXPT("a.xpt")
+  any <- DTAFileAny("a.pdf")
+  expect_identical(dta_entry_takes_kind(csv, c("zip", "xpt", NA)), c(FALSE, FALSE, TRUE))
+  expect_identical(dta_entry_takes_kind(xpt, c("zip", "xpt", NA)), c(FALSE, TRUE, TRUE))
+  expect_identical(dta_entry_takes_kind(any, c("zip", "xpt", NA)), c(TRUE, TRUE, TRUE))
+})
+
+test_that("load_file refuses a container, naming the delivery route", {
+  ds <- tab_ds("ae", list(DTAFileCSV("^.*$", pattern = TRUE)))
+  p <- cont_write("deliveries.zip", "x")
+  e <- expect_error(load_file(ds, file = p), class = "dta_load_file_container")
+  expect_match(conditionMessage(e), "load_delivery(", fixed = TRUE)
+  expect_match(conditionMessage(e), "'deliveries.zip'", fixed = TRUE)
+  expect_no_match(conditionMessage(e), dirname(p), fixed = TRUE)
+
+  # A .xpt into a transport-file entry loads.
+  fx <- cont_fx("adverse.xpt")
+  ds2 <- tab_ds("ae", list(DTAFileXPT("adverse.xpt")))
+  expect_gt(nrow(as.data.frame(tables(load_file(ds2, file = fx))[["adverse"]])), 0L)
 })
 
 test_that("a handler restored without the property reads as NULL", {
@@ -199,4 +241,12 @@ test_that("type: zip points to container", {
     regexp = "container:",
     fixed = TRUE
   )
+})
+
+test_that("a missing file names the resolved glob when check() is given one", {
+  ds <- DTADataSetFile(id = "d", files = list(DTAFileAny("define.xml", container = "sdtm")))
+  named <- check(ds, quiet = TRUE, persist = FALSE, .container_globs = c("1" = "STUDY_*.zip"))
+  expect_match(messages(named)$message, "was not delivered inside 'STUDY_*.zip'", fixed = TRUE)
+  none <- check(ds, quiet = TRUE, persist = FALSE, .container_globs = c("1" = ""))
+  expect_no_match(messages(none)$message, "delivered inside", fixed = TRUE)
 })

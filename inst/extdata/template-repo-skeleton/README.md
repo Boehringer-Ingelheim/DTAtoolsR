@@ -243,8 +243,9 @@ ordinary DTA definition. The template engine checks the top-level names; a missp
 ### Study identity and agreement sections
 
 `study` is an optional mapping with `id` and `protocol_id`. Supplied identifiers
-must be nonblank strings. They describe the agreement; setting them does not
-change a dataset's `STUDYID` values. `header` remains a presentation field.
+must be nonblank strings. They describe the agreement; a dataset reuses them
+only where its body says so, with the `${study.id}` and `${study.protocol_id}`
+tokens (see the expression tokens below). `header` remains a presentation field.
 
 `sections` is an ordered mapping with stable identifiers as keys, not an
 unnamed sequence. Keys start with a letter and contain only letters, digits
@@ -307,7 +308,8 @@ redact data. Unspecified test-upload/blinding flags remain unspecified.
 
 Default Word/Markdown exports include study information and ordered sections.
 For a custom Word layout, use inline `{STUDY_ID}` and `{PROTOCOL_ID}` or
-standalone `{STUDY_TABLE}` and `{AGREEMENT_SECTIONS}` block paragraphs.
+standalone `{STUDY_TABLE}`, `{AGREEMENT_SECTIONS}` and `{CONTAINERS_TABLE}` block paragraphs (the last renders the delivery containers
+of the document, and is omitted when it has none).
 The library does not alter user-supplied Word templates automatically.
 
 The machine-owned fields `template` and `import_issues` cannot be set by a template. The validator reports a template attempting to target either
@@ -335,8 +337,53 @@ base:
 nothing about the template's own versions: those are listed in the template picker, computed from the library (see "Template version
 history" below). Do not record template changes here.
 
-`${today}` and `${version}` are not general-purpose environment-variable substitution. Do not invent other `${...}` tokens and expect the app to
-resolve them.
+Two more tokens reuse the study identity, in a **dataset body** (a dataset template's `dataset:`, or an inline entry of a creation template's
+`datasets:`) and in the document metadata (a title, a clause):
+
+- `${study.id}` becomes the document's `metadata.study.id`.
+- `${study.protocol_id}` becomes the document's `metadata.study.protocol_id`.
+
+`${version}` is filled in only in the document metadata, not in a dataset.
+
+The value is the one the document ends up with once base metadata, carry-over, party slots and options have been applied, so the usual way
+to ask for it is an option such as `target: metadata.study.id`. With the study identifier `1001_0190` entered, this dataset template body
+accepts only files named like `s1001_0190_202611181200.csv` and only `1001_0190` in its `STUDYID` column:
+
+```yaml
+dataset:
+  id: lab_results
+  type: tabular
+  files:
+    filename: ^s${study.id}_[0-9]{12}\.csv$
+    pattern: true
+    pattern_description: s${study.id}_YYYYMMDDHHMM.csv
+    type: csv
+  columns:
+    - id: STUDYID
+      label: Study Identifier
+      type: SAS Char
+      format: SAS $9.
+      nullable: No
+      values: ${study.id}
+```
+
+- Where the token sits in a regular expression -- a `filename` whose entry says `pattern: true`, a column's `pattern:`, or a rule's
+  `pattern` condition -- the identifier is escaped, so it is matched literally: `1199.187` does not also accept `1199x187`. Everywhere else
+  (`values`, `examples`, `equals`, `pattern_description`, ...) it is inserted as entered.
+- Creating a document fails, naming the dataset, when its body uses a study token the document has no value for. An empty value would
+  otherwise silently mean "STUDYID must be empty".
+- The value is copied in when the document is created. Changing the study identity in the Metadata tab later does not update the datasets.
+- Use the token in `examples:` too when the column has a `pattern:` built from it; a literal example cannot match every study.
+- `path:`/`source:` dataset entries are finished specification files and are not substituted.
+- `validate_template()`, the template guide and the template history build a template without anyone entering a study identity. They use
+  the first `choices:` suggestion of the option that asks for the field, else the stand-ins `STUDY-ID` and `PROT-ID`, and a guide shows
+  that value where a dataset uses a study token. If a dataset constrains the identifier's shape (a numeric or narrow column, a pattern),
+  give the option a realistic first suggestion: a suggestion is never filled in for the person creating a document, unlike a `default:`.
+- `validate_template()` warns with `study_token_unanswered` when a template uses a study token but neither an option nor its base metadata
+  supplies that field: a new document could never be created from it.
+
+These tokens are not general-purpose environment-variable substitution. `validate_template()` reports any other `${...}` token in a creation
+or dataset template, and a `${version}` inside a dataset, as `token_unknown` (a warning), because it would reach the document as literal text.
 
 ### `options:`
 
@@ -504,7 +551,12 @@ vocabulary_slots:
 ```
 
 The supported target form is `datasets.<dataset id>.columns.<column id>.values`. The dataset and column ids must refer to objects the
-template actually builds.
+template actually builds. For a `type: matrix` dataset, whose column specs are its row labels, write `row_labels` in place of `columns`:
+`datasets.<dataset id>.row_labels.<row label id>.values`. The segment must match the dataset's own key.
+
+A column id may contain spaces and dots, and the target names it whole: the id is everything between `columns.` (or `row_labels.`) and the closing
+`.values`, and it must be one the dataset declares. The dataset id in a slot target is a single segment, so a dataset whose id contains a dot is not
+addressable there; such a target is reported as `vocab_slot_invalid`.
 
 `mode` is `closed` or `open`. `closed` only offers vocabulary terms; `open` also permits the author to type additional terms. The final document
 still receives the selected values as its permitted-value list. `include` and `exclude` narrow the terms offered by the vocabulary, and
@@ -522,7 +574,8 @@ an existing DTA.
 The body key is singular: `dataset:`. It contains the dataset definition accepted by the package's dataset reader. A top-level `datasets:` list
 is not an equivalent spelling; it belongs to a creation template. A dataset template without the `dataset:` body is reported as
 `dataset_missing`. The body needs an `id`, even when every import renames the dataset with `as:`; without one it is reported as
-`dataset_id_missing`.
+`dataset_id_missing`. A body that declares no `files:` is reported as the warning `dataset_no_files`, because nothing can be loaded into a
+dataset with no expected file; a creation template's `patch:` can still supply one.
 
 ```yaml
 kind: dta_dataset_template
@@ -549,8 +602,9 @@ dataset:
       examples: [SUBJ0001]
 ```
 
-Supported dataset `type` values are `tabular` and `file`. A tabular dataset contains column specifications and may contain `rules`. A file
-dataset specifies deliverable files rather than a tabular column schema.
+Supported dataset `type` values are `tabular`, `file` and `matrix`. A tabular dataset contains column specifications and may contain `rules`. A file
+dataset specifies deliverable files rather than a tabular column schema. A matrix dataset has `row_labels:` and a `matrix:` block instead of
+`columns:` (see "Patches" for its paths).
 
 ### Column fields
 
@@ -558,7 +612,7 @@ A column specification is passed into `DTAColumnSpec`. Supported fields are:
 
 | Field | Purpose |
 | --- | --- |
-| `id` | Required column identifier; it must not contain whitespace. |
+| `id` | Required column identifier: the exact text of the column's header. Spaces and punctuation are allowed between characters (`Subject ID`, `Wt. (kg)`); no space at the start or end, and no whitespace other than spaces between characters (tabs, line breaks and other whitespace such as an ideographic space are refused). A matrix row label is the exception, see below. |
 | `label` | Human-readable column label. |
 | `type` | Data type, including the supported SAS-prefixed types below. |
 | `format` | Format string, such as a SAS format. |
@@ -570,6 +624,16 @@ A column specification is passed into `DTAColumnSpec`. Supported fields are:
 | `examples` | Example value or values displayed with the specification. |
 | `description` | Explanation of the column. |
 | `colclass` | Supported R/SAS storage-class hint. |
+
+The id is compared with the delivered file's header character for character: case-sensitive and codepoint-exact, so `Subject  ID` (two spaces) is
+not `Subject ID`, and a no-break space is not a space. A plain id needs no quotes (`id: Subject ID`). Quote an id that YAML would read as something
+other than text (`id: "Y"`): a word or number YAML reads as a non-string (`Y`, `N`, `yes`, `no`, `true`, `false`, `on`, `off`, `null`, `~`, `007`, `1.10`, `0.5`,
+`0x1F`, `.inf`; numeric headers such as `0.5` are realistic) is refused with `column_spec_invalid`, as are `{id}` and `[a, b]`; an id that starts with `%`,
+`|`, `>`, `'`, `"`, `@`, a backtick, `- ` or `? `, or contains `: `, makes the file unreadable; and an id that starts with `*`, contains ` #`, or is `[a]`
+is changed without a word (`_yaml.bad-anchor_`, cut at the `#`, `a`). Inside an inline list such as `columns: [A, B]` also quote an id that contains
+`,`, `[`, `]`, `{` or `}`. The `id` of a matrix row label may not contain whitespace
+(its header text has its own key, `header:`): write `id: SAMPLE_ID` with `header: "Sample ID"`. `lint_dta()` reports such a row-label id as
+`matrix_row_label_id_invalid`, and a dataset built from it is refused.
 
 Use `examples` (plural), matching the column-specification field. Do not use `example` as a synonym. `values` and `pattern` are mutually
 exclusive. When a column uses `values_from`, do not also set `pattern`; that is an error. A literal `values` list combined with `values_from` is
@@ -611,8 +675,13 @@ files:
 ```
 
 A file entry may also say which `.zip` archive or SAS transport library (`.xpt`) its file arrives inside, with `container:`. It is optional: leave it
-out and the file is accepted loose or inside any container. `*` matches any run of characters and `?` one character (`sdtm_*.zip`), and letter case
-must match. Quote a value that starts with `*` or contains ` #`. Only `load_delivery()` consults it.
+out and the file is accepted loose or inside any container. In a template, name the container by its **file name** (`sdtm.zip`): a template has no
+`containers:` section, so an id would not resolve, and the file name declares the container for the documents created from it. `*` matches any run of
+characters and `?` one character (`sdtm_*.zip`), and letter case must match. Quote a value that starts with `*` or contains ` #`. `container: none` exempts
+an entry. A file that arrives outside its container is still loaded and validated, and `check()` reports the packaging separately.
+
+Pattern entries of different datasets must not be able to take the same file name (`^lb.*[.]csv$` next to `^lb_supp.*[.]csv$`): `validate_template()`
+fails a template whose datasets overlap that way (`file_name_conflict`), and the `lint_dta()` of a document created from it warns.
 
 ```yaml
 files:
@@ -653,9 +722,26 @@ options:
     help: Name of the organisation supplying this dataset.
 ```
 
-Dataset paths address columns and rules by their `id`, not by list position. The specific path grammar is implemented by the dataset-template
+Dataset paths address columns and rules by their `id`, not by list position. A `type: matrix` dataset keeps its column specs under
+`row_labels:` instead of `columns:`, so its paths read `dataset.row_labels.<id>.<field>`; a path that names the other one fails with a hint. The specific path grammar is implemented by the dataset-template
 engine; validate the target rather than assuming any dotted string is valid. Dataset-template options are supplied by the importing creation template entry's `options:` mapping, or by the dataset-template caller. They are not prompted as creation-template options merely because they
 exist in the imported file.
+
+A column, row-label or rule id may contain dots, and a column id spaces too (`Subject ID`, `Wt. (kg)`). A dataset path (`set:` paths and option targets
+always end in a field) reads an id whole. For a column or a row label it is the longest declared id that is followed by a column field name (`values`,
+`description`, `type`, `label`, ...). For a rule it is the one-segment id when that is declared, and otherwise the longest declared id that leaves a
+segment for the field (`rules.age.range.description`). A path with no such reading is refused. A column path that stops at a declared column id, or runs
+on with something that is not one of its fields, is refused with a message that says so (the condition class is `dta_template_path_no_field`, and
+`validate_template()` reports `target_invalid` for an option): with columns `Wt` and `Wt. (kg)` both declared, `columns.Wt. (kg)` is refused and is not
+written into `Wt` as a field called ` (kg)`. A path whose id is not declared is refused naming that id. So with a column `X` and a column `X.values`
+both declared, `columns.X.values` is the field `values` of `X`, and the column `X.values` is reached through one of its own fields
+(`columns.X.values.label`); with rules `chk` and `chk.description`, `rules.chk.description` is the field `description` of the rule `chk`, and the rule
+`chk.description` cannot be reached with a field. Avoid such pairs: a column `X.<field>` beside a column `X`, where `<field>` is a column field name (for
+example `Specimen` and `Specimen.type`), is warned about by `lint_dta()` as `column_id_shadows_field`. Three limits remain. The keys under a rule's
+`condition:` and `then:` are column ids, and a `set:` path cannot address such a key when the id contains a dot. A dotted dataset id is not addressable in
+a vocabulary slot target. And the template guide, which has no declared ids to consult, reads a column path as everything before the first later segment
+that is a column field name: with only a column `Dose.length` declared (and no `Dose`) it words `columns.Dose.length` as "Length of column Dose" (display
+only; the engine resolves the whole column `Dose.length`).
 
 ### Dataset rules
 
@@ -763,6 +849,26 @@ datasets:
 
 `set` paths are relative to the dataset body. Examples include `name`, `description`, `files.filename`, and `columns.SOURCE.values`. Column and rule
 paths are addressed by ID. Do not use a positional index in a patch path.
+
+For a `type: matrix` dataset the same operations act on its `row_labels:` list (the operation names do not change), and `set` paths use
+`row_labels.<id>.<field>`; the `matrix:` block is reached with `matrix.<key>` paths. A short example:
+
+```yaml
+dataset:
+  id: gene_counts
+  type: matrix
+  files: { filename: counts.tsv, type: tsv }
+  row_labels:
+    - id: GENE_ID
+      header: gene_id
+      type: SAS Char
+      nullable: No
+  matrix:
+    columns: { pattern: '^S[0-9]{4}$' }
+    cells: { type: SAS Num, range: { min: 0 } }
+```
+
+with, in a creation template, `patch: { modify_columns: [{ id: GENE_ID, pattern: '^ENSG' }], set: { matrix.cells.type: SAS Int } }`. The header text above a row label is that row label's `header` field (`row_labels.GENE_ID.header`).
 
 The generic collection form is also accepted under `patch.columns:`. It supports the collection verbs `inherit`, `remove`, `add`, `modify`, and
 `order`:
@@ -982,6 +1088,21 @@ sealed:
   - base.metadata.title
   - options.header
 ```
+
+A path into a column, a rule, an option or a dataset uses the whole id, spaces and dots included. In the `columns` (or `row_labels`) of a dataset a
+`sealed:` or `required:` path reads the longest declared id that is followed by a column field name, and only when there is none the longest declared
+id, which may then end the path at the column itself and covers the whole column (`columns.Wt. (kg)`, `columns.Dose No.`). With a column `X` and a column
+`X.values` both declared, `columns.X.values` is always the field `values` of `X`; the longer column can be sealed through one of its own fields. In every
+other list (datasets, options, rules) it reads the one-segment id when that is declared and a segment remains after it (what every earlier release did,
+except that a path ending in a dot such as `options.` now reads nothing, so that an id like `Dose No.` resolves; a `required:` on it fails and a `sealed:`
+on it is reported dead),
+otherwise the longest declared id that leaves a segment (`rules.age.range.description`, or `datasets.inl.v2.columns.A.label` for a dataset `inl.v2` when no dataset `inl` is declared), otherwise the id that ends the
+path at the entry. So with rules `chk` and `chk.description` declared, `rules.chk.description` is always the field `description` of `chk`: when `chk` has
+no `description`, a `required:` on the path fails and a seal on it is reported dead (`sealed_path_unknown`), and the rule `chk.description` cannot be
+named by such a path. The same holds for options `hdr` and `hdr.default` and for datasets `vit` and `vit.v2`: a dotted key whose first segment is also a
+declared key of the same list cannot be reached by a `sealed:` or `required:` path, with or without a field. Avoid such pairs. A dataset name that
+contains a dot resolves when its first segment is not itself a declared dataset. A `sealed:` or `required:` path resolves only against what the template
+itself declares: a column that comes in through a `datasets[].template` import is not in the template's own definition, so a path into it matches nothing.
 
 A seal on a parent constrains descendants, not the parent itself. An unknown sealed path protects nothing and is reported as
 `sealed_path_unknown` with warning severity. A descendant that changes a sealed value is reported as `sealed_violation`; the validator also
@@ -1445,8 +1566,10 @@ configuration focused on the same command and avoid maintaining different rules 
 
 ### Validator codes
 
-This table lists every code emitted by `validate_template()` in the current validator, including the library-layout codes. Severity is the
-literal severity reported in the result. A concrete template can receive `instantiate_failed` in addition to a more specific inheritance code.
+This table lists every template-specific code emitted by `validate_template()` in the current validator, including the library-layout codes.
+It also passes on the `lint_dta()` codes of the columns and rules it builds (`?validate_template` lists them), with their severity, except
+`file_name_conflict`, which is an error here. Severity is the literal severity reported in the result. A concrete template can receive
+`instantiate_failed` in addition to a more specific inheritance code.
 
 | Code | Severity | Meaning | Typical fix |
 | --- | --- | --- | --- |
@@ -1474,6 +1597,11 @@ literal severity reported in the result. A concrete template can receive `instan
 | `dataset_missing` | error | A dataset template lacks its required singular `dataset:` body. | Add a dataset body; do not use creation-template `datasets:` here. |
 | `dataset_id_missing` | error | A dataset template's body, or an inline dataset in a creation template, has no `id` (absent, null or empty). | Add an `id`; `as:` on an import does not replace it. |
 | `dataset_field_invalid` | error | A dataset's `id`, `name` or `description` is a list, a sequence or a missing value. | Write a single text value. |
+| `dataset_no_files` | warning | A dataset template's body, or a dataset a non-abstract creation template builds, declares no files (no `files:` entry, or an empty one), so nothing can be loaded into it. A patch may still supply them. | Add a `files:` entry with a `filename` and a `type`. |
+| `column_spec_invalid` | error | A column of a dataset template is rejected by the column specification, for example an example longer than its declared length. | Correct the column as the message says. |
+| `file_name_conflict` | error | File entries of different datasets can take the same file name. | Make the file names or patterns distinct; see "File handlers and non-tabular deliverables". |
+| `token_unknown` | warning | A `${...}` placeholder other than `${today}`, `${version}`, `${study.id}` and `${study.protocol_id}`, or a `${version}` inside a dataset; it is left in the document as literal text. | Correct the spelling, or move `${version}` out of the dataset. |
+| `study_token_unanswered` | warning | A dataset or metadata value uses `${study.id}` or `${study.protocol_id}`, but no option and no base metadata supplies that study field, so a new document cannot be created. | Add an option or a base value for `metadata.study.id` / `metadata.study.protocol_id`. |
 | `values_and_values_from` | warning | One column defines both literal values and a vocabulary binding. | Remove one; the vocabulary binding takes precedence. |
 | `values_from_pattern` | error | A column combines `values_from` and `pattern`. | Choose a vocabulary-backed permitted-value list or a pattern. |
 | `values_from_invalid` | error | The vocabulary binding is malformed or cannot be read. | Use a valid reference or mapping and a supported field. |

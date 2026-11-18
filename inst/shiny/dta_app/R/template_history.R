@@ -57,7 +57,11 @@ template_history_build <- function(ref, index) {
       built <- create_dta_from_template(
         def, loaded$value$path,
         selections = selections, index = index,
-        vocab_selections = template_history_vocab_selections(def, index)
+        vocab_selections = template_history_vocab_selections(def, index),
+        # Both sides get a stand-in study identity, the same one whenever the
+        # study option's first suggestion is, so a study token never shows up
+        # as a change either.
+        study_fallback = dta_template_dry_study(def)
       )
       if (!isTRUE(built$ok)) {
         stop(built$error)
@@ -158,30 +162,96 @@ template_history_leaves <- function(b) {
   )
 }
 
-# The leaf-key prefixes, per area, of things that can be wholly new or gone --
-# a dataset, a column, an option, a slot -- so that adding a column reads as
-# one line rather than as one "added" line per field of it. Read off the
-# built objects rather than parsed out of the keys, because a dataset name or
-# an id may itself contain a dot.
+# The things, per area, that can be wholly new or gone -- a dataset, a column,
+# an option, a slot -- so that adding a column reads as one line rather than as
+# one "added" line per field of it. One row per thing: `prefix` is the leaf-key
+# prefix its fields share, `kind` what it is ("dataset", "columns",
+# "row_labels", or the template section), `dataset` and `id` what to call it in
+# a label, `parent` the prefix of the dataset a column belongs to.
+#
+# Read off the built objects rather than parsed out of the keys, because a
+# dataset name or an id may itself contain a dot -- and every later step (which
+# thing a leaf belongs to, what to call it) reads this table instead of
+# splitting the key again.
 template_history_entities <- function(b) {
-  slot_ids <- function(section) {
-    paste0(section, ".", names(template_history_by_id(b$def[[section]])))
+  # NB paste() of a zero-length id vector still yields one string ("ds.columns."),
+  # so every caller below skips an empty id set instead of calling this.
+  rows <- function(prefix, kind, dataset = NA_character_, id = NA_character_, parent = NA_character_) {
+    data.frame(
+      prefix = prefix, kind = kind, dataset = dataset, id = id, parent = parent,
+      stringsAsFactors = FALSE
+    )
+  }
+  none <- rows(character(0), character(0), character(0), character(0), character(0))
+  slot_rows <- function(section) {
+    ids <- names(template_history_by_id(b$def[[section]]))
+    if (length(ids) > 0) rows(paste0(section, ".", ids), section, id = ids)
   }
   ds <- dta_dataset_names(b$dta)
-  cols <- unlist(lapply(ds, function(nm) {
-    cl <- dta_dataset_to_list(dta_get_dataset(b$dta, nm))$columns
-    ids <- vapply(cl, function(col) as.character(col$id %||% ""), character(1))
-    paste(nm, "columns", ids[nzchar(ids)], sep = ".")
-  }))
+  col_rows <- lapply(ds, function(nm) {
+    lst <- dta_dataset_to_list(dta_get_dataset(b$dta, nm))
+    key <- dta_dataset_spec_key(lst)
+    ids <- vapply(lst[[key]], function(col) as.character(col$id %||% ""), character(1))
+    ids <- ids[nzchar(ids)]
+    if (length(ids) > 0) rows(paste(nm, key, ids, sep = "."), key, dataset = nm, id = ids, parent = nm)
+  })
   list(
-    Template = c(slot_ids("options"), slot_ids("party_slots"), slot_ids("vocabulary_slots")),
-    Metadata = character(0),
-    Datasets = c(ds, cols)
+    Template = do.call(rbind, c(list(none), lapply(c("options", "party_slots", "vocabulary_slots"), slot_rows))),
+    Metadata = none,
+    Datasets = do.call(rbind, c(
+      list(none),
+      if (length(ds) > 0) list(rows(ds, "dataset", dataset = ds)),
+      col_rows
+    ))
   )
 }
 
-# One human-readable phrase for a leaf key or entity prefix.
-template_history_label <- function(area, key) {
+# The row of `entities` a leaf key belongs to, or NA: the LONGEST prefix, and
+# only a strict one (`prefix` + "."), so that a leaf is never mistaken for the
+# thing itself. Longest, because `a` and `a.b` may both be columns and `a.b`'s
+# field `type` must not be read as a field `b.type` of `a`.
+template_history_owner <- function(key, entities) {
+  if (nrow(entities) == 0) {
+    return(NA_integer_)
+  }
+  hit <- which(startsWith(key, paste0(entities$prefix, ".")))
+  if (length(hit) == 0) {
+    return(NA_integer_)
+  }
+  hit[[which.max(nchar(entities$prefix[hit]))]]
+}
+
+# What a thing is called in a history line, from its row of the entity table;
+# `rest` is the field path below it, if any.
+template_history_entity_label <- function(entity, rest = character(0)) {
+  tail <- if (length(rest) > 0) paste0(": ", paste(rest, collapse = " > ")) else ""
+  thing <- c(
+    options = "Option", party_slots = "Party slot", vocabulary_slots = "Vocabulary slot"
+  )
+  switch(entity$kind,
+    dataset = sprintf("Dataset '%s'%s", entity$dataset, tail),
+    columns = sprintf("Dataset '%s', column '%s'%s", entity$dataset, entity$id, tail),
+    row_labels = sprintf("Dataset '%s', row label '%s'%s", entity$dataset, entity$id, tail),
+    sprintf("%s '%s'%s", thing[[entity$kind]], entity$id, tail)
+  )
+}
+
+# One human-readable phrase for a leaf key.
+#
+# With `entities` (the area's table, see template_history_entities()) the
+# thing the leaf belongs to is looked up, so a column id that contains a dot
+# reads whole. Without it -- or for a key that belongs to no thing, such as
+# `label` or `based_on` -- the key is split on its dots, which is only right
+# while no id contains one.
+template_history_label <- function(area, key, entities = NULL) {
+  if (!is.null(entities)) {
+    owner <- template_history_owner(key, entities)
+    if (!is.na(owner)) {
+      prefix <- entities$prefix[[owner]]
+      rest <- strsplit(substring(key, nchar(prefix) + 2L), ".", fixed = TRUE)[[1]]
+      return(template_history_entity_label(entities[owner, , drop = FALSE], rest))
+    }
+  }
   parts <- strsplit(key, ".", fixed = TRUE)[[1]]
   rest <- function(from) {
     if (length(parts) >= from) paste0(": ", paste(parts[from:length(parts)], collapse = " > ")) else ""
@@ -190,8 +260,9 @@ template_history_label <- function(area, key) {
     options = "Option", party_slots = "Party slot", vocabulary_slots = "Vocabulary slot"
   )
   if (area == "Datasets") {
-    if (length(parts) >= 3 && parts[[2]] == "columns") {
-      return(sprintf("Dataset '%s', column '%s'%s", parts[[1]], parts[[3]], rest(4)))
+    if (length(parts) >= 3 && parts[[2]] %in% c("columns", "row_labels")) {
+      what <- if (parts[[2]] == "row_labels") "row label" else "column"
+      return(sprintf("Dataset '%s', %s '%s'%s", parts[[1]], what, parts[[3]], rest(4)))
     }
     return(sprintf("Dataset '%s'%s", parts[[1]], rest(2)))
   }
@@ -202,6 +273,15 @@ template_history_label <- function(area, key) {
     return("Based on")
   }
   paste(parts, collapse = " > ")
+}
+
+# The zero-change frame template_history_compare() and its variants branch
+# both promise, so a comparison that finds nothing is never NULL.
+.template_history_empty_changes <- function() {
+  data.frame(
+    area = character(0), what = character(0), change = character(0),
+    from = character(0), to = character(0), stringsAsFactors = FALSE
+  )
 }
 
 # Compare two builds. Returns a data frame with one row per change:
@@ -223,35 +303,44 @@ template_history_compare <- function(a, b) {
     }
     ea <- ea_all[[area]]
     eb <- eb_all[[area]]
-    # Shortest first, so a new dataset swallows its new columns too.
-    whole <- c(setdiff(eb, ea), setdiff(ea, eb))
-    whole <- whole[order(nchar(whole))]
-    d$entity <- NA_character_
-    for (e in whole) {
-      hit <- is.na(d$entity) & startsWith(d$key, paste0(e, "."))
-      d$entity[hit] <- e
-    }
+    entities <- unique(rbind(ea, eb))
+    whole <- c(setdiff(eb$prefix, ea$prefix), setdiff(ea$prefix, eb$prefix))
+    # A leaf belongs to its owner (the longest thing whose prefix it carries).
+    # It is folded into a wholly new or gone thing -- the owner's dataset first,
+    # so that a new dataset is one line and not one per column, then the owner
+    # itself -- and is otherwise reported on its own.
+    d$entity <- vapply(d$key, function(k) {
+      owner <- template_history_owner(k, entities)
+      if (is.na(owner)) {
+        return(NA_character_)
+      }
+      parent <- entities$parent[[owner]]
+      if (!is.na(parent) && parent %in% whole) {
+        parent
+      } else if (entities$prefix[[owner]] %in% whole) {
+        entities$prefix[[owner]]
+      } else {
+        NA_character_
+      }
+    }, character(1), USE.NAMES = FALSE)
     single <- d[is.na(d$entity), , drop = FALSE]
     rows[[length(rows) + 1L]] <- data.frame(
       area = rep(area, nrow(single)),
-      what = vapply(single$key, function(k) template_history_label(area, k), character(1)),
+      what = vapply(single$key, function(k) template_history_label(area, k, entities), character(1)),
       change = single$change, from = single$from, to = single$to,
       stringsAsFactors = FALSE
     )
     for (e in unique(d$entity[!is.na(d$entity)])) {
       rows[[length(rows) + 1L]] <- data.frame(
-        area = area, what = template_history_label(area, e),
-        change = if (e %in% eb) "added" else "removed",
+        area = area, what = template_history_entity_label(entities[match(e, entities$prefix), , drop = FALSE]),
+        change = if (e %in% eb$prefix) "added" else "removed",
         from = NA_character_, to = NA_character_,
         stringsAsFactors = FALSE
       )
     }
   }
   if (length(rows) == 0) {
-    return(data.frame(
-      area = character(0), what = character(0), change = character(0),
-      from = character(0), to = character(0), stringsAsFactors = FALSE
-    ))
+    return(.template_history_empty_changes())
   }
   out <- do.call(rbind, rows)
   out <- out[order(match(out$area, names(la)), out$what, method = "radix"), , drop = FALSE]
@@ -289,6 +378,11 @@ template_history_compare_variants <- function(a, b) {
       }
       rows[[length(rows) + 1L]] <- changes
     }
+  }
+  # No choice on either side: do.call(rbind, list()) is NULL, which order()
+  # rejects. template_core.R requires >= 1 choice, so this is defensive only.
+  if (length(rows) == 0) {
+    return(.template_history_empty_changes())
   }
   out <- do.call(rbind, rows)
   out <- out[order(match(out$area, c("Template", "Metadata", "Datasets")), out$what,

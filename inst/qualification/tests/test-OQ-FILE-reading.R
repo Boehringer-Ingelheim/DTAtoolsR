@@ -392,3 +392,115 @@ test_that("OQ-FILE-056 | a UTF-16 file is refused with the same advice in every 
     )
   }
 })
+
+test_that("OQ-FILE-067 | a header row over 1 MiB of quoted labels is read whole, not aborted as a quoted line break | REQ-FILE-043", {
+  dir <- qa_tempdir()
+  labels <- paste0("\"label number ", seq_len(60000L), "\"", collapse = ",")
+  path <- file.path(dir, "wide.csv")
+  writeBin(charToRaw(paste0(labels, "\n", strrep("1,", 59999L), "1\n")), path)
+  qa_check("the header row is longer than 1 MiB", file.size(path) > 1048576)
+
+  handler <- DTAFileCSV(filename = "wide.csv")
+  read <- read_file(handler, path)
+  qa_step("read_file(): one row of 60000 columns", c(1L, 60000L), dim(as.data.frame(read)))
+  qa_step(
+    "the last column is named by the last label",
+    "label number 60000", utils::tail(names(as.data.frame(read)), 1)
+  )
+
+  opened <- open_file(handler, path)
+  qa_step("open_file(): the same 60000 columns", 60000L, length(names(opened)))
+  qa_step("and the first and last labels", c("label number 1", "label number 60000"), names(opened)[c(1, 60000)])
+})
+
+test_that("OQ-FILE-068 | read_file(), open_file() and load_file() refuse a directory with class dta_file_is_directory and read nothing below it | REQ-FILE-044", {
+  dir <- qa_tempdir()
+  # A directory whose own name satisfies the handler, holding a member that is
+  # a perfectly good file: the refusal must be about the directory, not about
+  # a name or the content.
+  target <- file.path(dir, "delivery.csv")
+  dir.create(target)
+  member <- "member_of_the_directory_7731.csv"
+  writeLines(c("A,B", "1,2"), file.path(target, member))
+  # A regular file beside it, which must still read.
+  regular <- file.path(dir, "regular.csv")
+  writeLines(c("A,B", "1,2"), regular)
+
+  handler <- DTAFileCSV(filename = "delivery.csv")
+  err_read <- tryCatch(read_file(handler, target), error = function(e) e)
+  qa_check("read_file() raises dta_file_is_directory", inherits(err_read, "dta_file_is_directory"))
+  qa_check("read_file()'s message names no file below the directory", !grepl(member, conditionMessage(err_read), fixed = TRUE))
+
+  err_open <- tryCatch(open_file(handler, target), error = function(e) e)
+  qa_check("open_file() raises dta_file_is_directory", inherits(err_open, "dta_file_is_directory"))
+  qa_check("open_file()'s message names no file below the directory", !grepl(member, conditionMessage(err_open), fixed = TRUE))
+
+  ds <- DTADataSetFile(id = "delivery", files = list(DTAFileAny(filename = ".*", pattern = TRUE)))
+  err_load <- tryCatch(load_file(ds, file = target, handler_index = 1), error = function(e) e)
+  qa_check("load_file() raises dta_file_is_directory", inherits(err_load, "dta_file_is_directory"))
+  qa_check("load_file()'s message names no file below the directory", !grepl(member, conditionMessage(err_load), fixed = TRUE))
+
+  # The same functions accept an ordinary file, so the refusal above is about
+  # the directory.
+  read <- read_file(DTAFileCSV(filename = "regular.csv"), regular)
+  qa_step("a regular file still reads: one row", 1L, nrow(as.data.frame(read)))
+  opened <- open_file(DTAFileCSV(filename = "regular.csv"), regular)
+  qa_step("and opens with its two columns", c("A", "B"), names(opened))
+  bound <- load_file(ds, file = regular, handler_index = 1)
+  qa_step("and a regular file binds to the dataset", 1L, length(bound@file_paths))
+
+  # A matrix dataset refuses a directory the same way.
+  mx_dir <- file.path(dir, "m.tsv")
+  dir.create(mx_dir)
+  writeLines("a\tb", file.path(mx_dir, member))
+  err_matrix <- tryCatch(load_file(mx_ds(), file = mx_dir), error = function(e) e)
+  qa_check("load_file() on a matrix dataset raises dta_file_is_directory", inherits(err_matrix, "dta_file_is_directory"))
+  qa_check("and its message names no file below the directory", !grepl(member, conditionMessage(err_matrix), fixed = TRUE))
+})
+
+test_that("OQ-FILE-069 | a quote at only one edge of a header name is kept, a matched pair around the whole name is removed, and Length 5\" checks clean in memory and streamed | REQ-FILE-045", {
+  dir <- qa_tempdir()
+
+  # `field` is what is written in the header line of the file; `name` is the
+  # column name REQ-FILE-045 says it reads as. A doubled quote inside a quoted
+  # CSV field stands for one quote, so "Length 5""" is the name Length 5" and
+  # """Subject ID""" is the name "Subject ID" with its quotes in the text.
+  cases <- list(
+    list(field = "\"Length 5\"\"\"", name = "Length 5\""),
+    list(field = "\"\"\"lead\"", name = "\"lead"),
+    list(field = "\"trail\"\"\"", name = "trail\""),
+    list(field = "\"\"\"Subject ID\"\"\"", name = "Subject ID"),
+    list(field = "\"\"\"  padded  \"\"\"", name = "padded")
+  )
+  for (i in seq_along(cases)) {
+    p <- fr_write_raw(c(paste0("ID,", cases[[i]]$field), "A1,5"), file.path(dir, sprintf("quote_%d.csv", i)))
+    t <- read_file(DTAFileCSV(filename = basename(p)), p)
+    qa_step(
+      sprintf("the header field %s reads as the column name %s", cases[[i]]$field, cases[[i]]$name),
+      c("ID", cases[[i]]$name), names(t)
+    )
+  }
+
+  # The same name written without CSV quoting at all.
+  bare <- fr_write_raw(c("ID,Length 5\"", "A1,5"), file.path(dir, "bare.csv"))
+  qa_step(
+    "a bare header field Length 5\" reads as the name Length 5\"",
+    c("ID", "Length 5\""), names(read_file(DTAFileCSV(filename = "bare.csv"), bare))
+  )
+
+  specs <- DTAColumnSpecCollection(columns = stats::setNames(
+    list(
+      DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
+      DTAColumnSpec(id = "Length 5\"", type = "SAS Char", length = 8, nullable = FALSE)
+    ),
+    c("ID", "Length 5\"")
+  ))
+  path <- fr_write_raw(c("ID,\"Length 5\"\"\"", "A1,x1"), file.path(dir, "inches.csv"))
+  for (mode in c("never", "always")) {
+    qa_step(
+      sprintf("stream = \"%s\": a file headed Length 5\" is valid against the column Length 5\"", mode),
+      list(ok = TRUE, columnspec = 0L, import = 0L),
+      fr_verdict_fields(fr_verdict(path, specs = specs, stream = mode))
+    )
+  }
+})

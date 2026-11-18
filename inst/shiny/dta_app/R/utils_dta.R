@@ -209,6 +209,58 @@ dta_check_yaml_size <- function(x, max_leaves = 1e6) {
     }
   }
   walk(x)
+  dta_check_spec_cardinality(x)
+  invisible(TRUE)
+}
+
+# Reject a spec that declares an absurd NUMBER of columns and rules. The leaf
+# count above does not bound it: a column or rule costs a few milliseconds to
+# build and lint, and the app lints a loaded document several times on the one
+# synchronous worker, so ~1e5 objects (a few MB of YAML, well inside the leaf
+# limit) would hold every other session for many minutes. Counts the
+# `columns:`/`rules:` entries of every dataset (or of a bare dataset YAML) and
+# refuses past `max_objects`, so a bomb costs one pass over the dataset list.
+dta_max_spec_objects <- function() {
+  n <- suppressWarnings(as.numeric(getOption("dta_app.max_spec_objects", 10000)))
+  if (length(n) != 1L || is.na(n) || n < 1) 10000 else n
+}
+
+dta_check_spec_cardinality <- function(x, max_objects = dta_max_spec_objects()) {
+  if (!is.list(x)) {
+    return(invisible(TRUE))
+  }
+  count <- function(ds) {
+    if (!is.list(ds)) {
+      return(0)
+    }
+    n <- 0
+    for (k in c("columns", "rules", "files")) {
+      # `files:` is one mapping or a list of entries; only the list is a count.
+      if (is.list(ds[[k]]) && (k != "files" || is.null(names(ds[[k]])))) n <- n + length(ds[[k]])
+    }
+    n
+  }
+  # A document (`datasets:`), a bare dataset, or a bare list of datasets.
+  datasets <- if (is.list(x[["datasets"]])) {
+    x[["datasets"]]
+  } else if (is.null(names(x))) {
+    x
+  } else {
+    list(x)
+  }
+  total <- 0
+  for (ds in datasets) {
+    total <- total + count(ds)
+    if (total > max_objects) {
+      stop(
+        "The specification declares more than ",
+        format(max_objects, scientific = FALSE, big.mark = ""),
+        " columns and rules in total, which is too many to check in a shared ",
+        "session. Split it into several documents.",
+        call. = FALSE
+      )
+    }
+  }
   invisible(TRUE)
 }
 
@@ -459,20 +511,150 @@ handler_matches <- function(h, filename) {
 # upload name. Shiny stores uploads as "0.csv", "1.csv", ... (input$file$datapath);
 # matches_filename() / read_file() key off basename(file), so passing the raw
 # datapath makes the package see "0.csv" -- which matches no handler pattern and
-# a valid file is wrongly rejected inside load_file(). Returns the staged path
-# (or the original datapath on any copy failure).
-dta_stage_upload <- function(datapath, filename) {
+# a valid file is wrongly rejected inside load_file(). Returns the staged copy,
+# or NA when there is none: it never returns the client's datapath, so what a
+# caller opens is always a copy this function made.
+#
+# Two rules keep the staged copy inside its own fresh directory. A datapath that
+# is not a single existing file that is not a directory yields NA (it used to be returned
+# unchanged on a failed copy, so a directory reached the reader). And a client
+# name that would resolve onto the directory or outside it used to make the
+# target the shared temporary directory of every session, so such a name is
+# replaced by the basename of the datapath. On Windows basename() already turns
+# "a\.." into "..", so the literal "." / ".." test catches it; the
+# normalizePath() comparison catches names Windows resolves to the folder itself
+# or its parent (e.g. "...", ". ."). On POSIX such names are ordinary file
+# names. The folder is normalised first because normalizePath() only
+# canonicalises paths that exist (8.3 names, junctions, symlinks such as macOS
+# /var), so a non-canonical tempdir() spelling would otherwise fail the
+# comparison for every upload. No folder is left behind when NA is returned.
+dta_stage_upload <- function(datapath, filename, tmpdir = tempdir()) {
+  if (length(datapath) != 1L || is.na(datapath) || !file.exists(datapath) ||
+    dir.exists(datapath)) {
+    return(NA_character_)
+  }
   base <- basename(filename %||% "")
-  if (!nzchar(base)) base <- basename(datapath)
-  target_dir <- tempfile("dta_upload_")
-  tryCatch(
+  target_dir <- tempfile("dta_upload_", tmpdir = tmpdir)
+  if (!dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)) {
+    return(NA_character_)
+  }
+  res <- tryCatch(
     {
-      dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)
+      target_dir <- normalizePath(target_dir, winslash = "/", mustWork = TRUE)
       target <- file.path(target_dir, base)
-      if (isTRUE(file.copy(datapath, target, overwrite = TRUE))) target else datapath
+      usable <- nzchar(base) && !base %in% c(".", "..") &&
+        identical(
+          dirname(normalizePath(target, winslash = "/", mustWork = FALSE)),
+          target_dir
+        )
+      if (!usable) {
+        target <- file.path(target_dir, basename(datapath))
+      }
+      if (isTRUE(file.copy(datapath, target, overwrite = FALSE))) target else NA_character_
     },
-    error = function(e) datapath
+    error = function(e) NA_character_
   )
+  if (is.na(res)) {
+    unlink(target_dir, recursive = TRUE)
+  }
+  res
+}
+
+# Is this the id of a file input? The ids are fixed (dta_file, tmpl_carry_file,
+# delivery_files) or built per dataset slot as up_<dataset>_<slot>.
+dta_is_file_input_id <- function(id) {
+  if (!is.character(id)) {
+    return(rep(FALSE, length(id)))
+  }
+  id %in% c("dta_file", "tmpl_carry_file", "delivery_files") |
+    (!is.na(id) & grepl("^up_[0-9]+_[0-9]+$", id))
+}
+
+# Tell client-supplied file-input values from real uploads. Only client messages
+# reach the callback that feeds note(): a real upload is written by Shiny's
+# upload machinery and never does, so a marked id means the current value of that
+# input was supplied by the client and must not be used as a server path. A mark
+# is consumed by the observer that handles the value, so a later genuine upload
+# is accepted; every interleaving fails closed (a genuine upload racing a forged
+# value is refused, never the reverse).
+dta_upload_guard <- function() {
+  marks <- new.env(parent = emptyenv())
+  list(
+    note = function(data) {
+      if (is.list(data) && length(data) > 0L && !is.null(names(data))) {
+        for (i in seq_along(data)) {
+          id <- sub(":.*$", "", names(data)[i])
+          if (!is.na(id) && dta_is_file_input_id(id) && !is.null(data[[i]])) {
+            assign(id, TRUE, envir = marks)
+          }
+        }
+      }
+      invisible(NULL)
+    },
+    take = function(id) {
+      hit <- exists(id, envir = marks, inherits = FALSE)
+      if (hit) rm(list = id, envir = marks)
+      hit
+    }
+  )
+}
+
+# Connect the guard to a session. A browser can set the value of a file input
+# itself (Shiny.setInputValue), so the datapath in such a value is not a server
+# path this session may open. The guard learns which file inputs the client
+# wrote: the first note() covers values delivered in the client's init message,
+# which Shiny applies before the server function runs, and the callback covers
+# every later message (a real upload never passes through it). A Shiny without
+# the callback must fail loudly rather than run unguarded; the mock session of
+# the tests has none and delivers no client messages.
+dta_upload_guard_install <- function(guard, session, inputs) {
+  guard$note(inputs)
+  if (is.function(session$onInputReceived)) {
+    session$onInputReceived(guard$note)
+  } else if (!inherits(session, "MockShinySession")) {
+    stop("This Shiny version does not report client input messages; the upload guard cannot run.", call. = FALSE)
+  }
+  invisible(guard)
+}
+
+# Why a file-input value is not what Shiny's own upload would have delivered, or
+# NULL when it is. A real upload is a data frame whose datapath is
+# <tempdir()>/<24 hex characters>/<index><.ext>, the layout Shiny's upload
+# context creates. This is a second, version-independent check that closes the
+# arbitrary-path read even if a future Shiny delivered client values by another
+# route. It is NOT by itself a session binding (another session's upload has the
+# same shape): the guard above is the binding. The reason is for tests and
+# comments and is never shown to users.
+dta_upload_value_problem <- function(value, tmp = tempdir()) {
+  if (!is.data.frame(value)) {
+    return("not a data frame")
+  }
+  if (nrow(value) < 1L) {
+    return("no rows")
+  }
+  for (col in c("name", "datapath")) {
+    x <- value[[col]]
+    if (!is.character(x) || anyNA(x) || any(!nzchar(x))) {
+      return(sprintf("column '%s' is missing or not a usable character column", col))
+    }
+  }
+  nt <- sub("/+$", "", normalizePath(tmp, winslash = "/", mustWork = FALSE))
+  for (p in value$datapath) {
+    if (!file.exists(p) || dir.exists(p)) {
+      return("not a file that exists and is not a directory")
+    }
+    np <- normalizePath(p, winslash = "/", mustWork = FALSE)
+    if (!identical(dirname(dirname(np)), nt)) {
+      return("not directly inside an upload directory of the temporary directory")
+    }
+    if (!grepl("^[0-9a-f]{24}$", basename(dirname(np)))) {
+      return("upload directory name has the wrong shape")
+    }
+    if (!grepl("^[0-9]+([.][[:alnum:]]+)?$", basename(np))) {
+      return("file name has the wrong shape")
+    }
+  }
+  NULL
 }
 
 # Is a dropped file a delivery container? A .zip archive, or a SAS transport
@@ -523,7 +705,8 @@ dta_example_yaml_preferred_order <- c(
   "clinical_dta.yaml",
   "clinical_dta_multiple_files.yaml",
   "clinical_dta_with_file_dataset.yaml",
-  "gf_dataset.yaml"
+  "gf_dataset.yaml",
+  "matrix_dta.yaml"
 )
 
 # Applies that order to a set of basenames: the preferred names that are
@@ -582,7 +765,17 @@ dta_example_yaml_path <- function(filename) {
 # one in batches. Asking the user to choose put a storage-strategy question in
 # front of someone who came to validate a file, and the answer is one the size
 # of the file already determines.
-dta_load_file <- function(dta, dataset, file, handler_index, name = NULL) {
+#
+# The load runs with cli.width = Inf so a failure reads as sentences broken only
+# between cli bullets, not wrapped at 80 columns. `display_name` replaces the
+# (temporary) upload path in the failure text with the name the user delivered.
+#
+# It runs under the app's container limits too (dta_app_container_options()), for
+# this call only: a loose upload reaches load_file() directly, so without them a
+# gzip file would be judged only by its size on disk.
+dta_load_file <- function(dta, dataset, file, handler_index, name = NULL, display_name = NULL) {
+  op <- options(c(list(cli.width = Inf), dta_app_container_options()))
+  on.exit(options(op), add = TRUE)
   # The default key belongs to the DATASET TYPE, not to this helper. A tabular
   # dataset names a table after the file with its extension stripped; a file
   # dataset keys by the delivered name, extension kept, which is what
@@ -599,28 +792,45 @@ dta_load_file <- function(dta, dataset, file, handler_index, name = NULL) {
     error = function(e) NA_character_
   )
   nm <- name %||% dta_bound_item_name(ds_type, file)
-  dta_try(DTAtools::load_file(
+  r <- dta_try(DTAtools::load_file(
     dta,
     dataset = dataset,
     file = file,
     handler_index = handler_index,
     name = nm
   ))
+  # A refusal for size names an R option; the user gets the app's wording.
+  if (!isTRUE(r$ok) && is.character(r$error) && length(r$error) == 1L) {
+    r$error <- dta_app_reason(r$error)
+  }
+  if (!isTRUE(r$ok) && !is.null(display_name) && nzchar(display_name) && !is.null(r$error)) {
+    paths <- unique(c(
+      file,
+      normalizePath(file, winslash = "/", mustWork = FALSE),
+      normalizePath(file, winslash = "\\", mustWork = FALSE)
+    ))
+    for (p in paths[nzchar(paths)]) {
+      r$error <- gsub(p, display_name, r$error, fixed = TRUE)
+    }
+  }
+  r
 }
 
 # Run validation for all datasets or one named dataset. Returns dta_try()
 # result whose value (on success) is the UPDATED dta object.
 dta_check <- function(dta, dataset = NULL) {
+  op <- options(dta_scratch_options())
+  on.exit(options(op), add = TRUE)
   # check(datasets = ) keeps the file-count findings of the datasets it does
   # not check (re-judged on the datasets as they are now), so the attribute it
   # returns is already complete; merging the prior rows in here as well would
   # count them twice and keep rows a fix has made stale.
   out <- dta_try({
-    # check() warns (class `dta_file_count_mismatch`) when a dataset's file
-    # count is outside its declared bounds. Muffling that one class is safe:
-    # the same finding rides on the returned object's
-    # `last_file_count_findings` attribute, which the status map and the
-    # report read. Every other warning still propagates.
+    # check() warns (class `dta_validation_finding`) for a finding that rides
+    # on the returned object instead: a file count outside its declared bounds
+    # (`last_file_count_findings`) or a file not verified inside its container
+    # (`last_container_findings`); the status map and the report read those.
+    # Muffling that one class is safe. Every other warning still propagates.
     withCallingHandlers(
       if (is.null(dataset)) {
         DTAtools::check(dta, quiet = TRUE, persist = FALSE)
@@ -628,7 +838,7 @@ dta_check <- function(dta, dataset = NULL) {
         DTAtools::check(dta, datasets = dataset, quiet = TRUE, persist = FALSE)
       },
       warning = function(w) {
-        if (inherits(w, "dta_file_count_mismatch")) invokeRestart("muffleWarning")
+        if (inherits(w, "dta_validation_finding")) invokeRestart("muffleWarning")
       }
     )
   })
@@ -656,6 +866,32 @@ dta_file_count_findings <- function(dta) {
 # `datasets` restricts them to the datasets of the current run.
 dta_file_count_messages <- function(dta, datasets = NULL) {
   f <- dta_file_count_findings(dta)
+  if (is.null(f)) {
+    return(character(0))
+  }
+  if (!is.null(datasets)) f <- f[f$dataset %in% datasets, , drop = FALSE]
+  as.character(f$message)
+}
+
+# Container findings recorded by the last check(), or NULL when there are none.
+# Never throws: the attribute may be absent or malformed.
+dta_container_findings <- function(dta) {
+  f <- tryCatch(
+    attr(dta, "last_container_findings", exact = TRUE),
+    error = function(e) NULL
+  )
+  if (!is.data.frame(f) || nrow(f) == 0 || !all(c("dataset", "status", "message") %in% names(f))) {
+    return(NULL)
+  }
+  live <- tryCatch(dta_dataset_names(dta), error = function(e) NULL)
+  if (!is.null(live)) f <- f[f$dataset %in% live, , drop = FALSE]
+  if (nrow(f) == 0) NULL else f
+}
+
+# The human-readable reasons behind those findings (character(0) when none).
+# `datasets` restricts them to the datasets of the current run.
+dta_container_messages <- function(dta, datasets = NULL) {
+  f <- dta_container_findings(dta)
   if (is.null(f)) {
     return(character(0))
   }
@@ -1212,6 +1448,17 @@ dta_has_import_issues <- function(ds) {
   isTRUE("import_issues" %in% tryCatch(S7::prop_names(ds), error = function(e) character(0)))
 }
 
+# `ds` without the provenance records of `keys` (an object that predates the
+# property is returned as it is).
+dta_drop_provenance <- function(ds, keys) {
+  prov <- tryCatch(ds@provenance, error = function(e) NULL)
+  if (length(prov) > 0) try(ds@provenance <- prov[setdiff(names(prov), keys)], silent = TRUE)
+  # A matrix's raw heads are keyed by table name just the same.
+  heads <- tryCatch(ds@heads, error = function(e) NULL)
+  if (length(heads) > 0) try(ds@heads <- heads[setdiff(names(heads), keys)], silent = TRUE)
+  ds
+}
+
 # Remove ONE bound file/table (and its validation state) from a dataset.
 # ORDER MATTERS: the table's per-table state (validation_index, validation_store
 # AND import_issues) is cleared BEFORE the table/file itself is dropped. The
@@ -1248,10 +1495,13 @@ dta_unload_table <- function(dta, dataset, table) {
       # The recorded handler of each file moves with it; a record that is not in
       # step with the paths is dropped (the package then matches by name).
       ds@file_handlers <- if (length(fh) == length(fp)) fh[keep] else integer(0)
+      # Provenance of a file dataset is keyed by the bound path.
+      ds <- dta_drop_provenance(ds, fp[!keep])
     } else {
       tabs <- tryCatch(ds@tables, error = function(e) list()) %||% list()
       tabs[[table]] <- NULL
       ds@tables <- tabs
+      ds <- dta_drop_provenance(ds, table)
     }
     dta@datasets[[dataset]] <- ds
     dta
@@ -1276,6 +1526,8 @@ dta_unload_all <- function(dta, dataset) {
     } else {
       ds@tables <- list()
     }
+    try(ds@provenance <- list(), silent = TRUE)
+    if (length(tryCatch(ds@heads, error = function(e) NULL)) > 0) try(ds@heads <- list(), silent = TRUE)
     dta@datasets[[dataset]] <- ds
     dta
   })
@@ -1292,6 +1544,94 @@ dta_dataset_messages <- function(dta, dataset) {
     return(data.frame())
   }
   res$value
+}
+
+# ---- Load-error log -------------------------------------------------------
+# A file that failed to load leaves no table behind, so messages() cannot
+# report it. The app keeps one row per (dataset, table) here and shows it with
+# the dataset's messages. All helpers are pure.
+#
+# `slot` is the file entry a file was refused BY NAME, else NA. Such a file was
+# never a candidate for any table of that entry, so its row would otherwise
+# outlive the right file loading there: it is cleared by any load into the slot.
+
+dta_load_errors_empty <- function() {
+  data.frame(
+    dataset = character(0), table = character(0), file = character(0),
+    message = character(0), slot = integer(0), stringsAsFactors = FALSE
+  )
+}
+
+dta_load_errors_add <- function(le, dataset, table, file, message, slot = NA_integer_) {
+  le <- dta_load_errors_clear(le, dataset, table)
+  rbind(le, data.frame(
+    dataset = as.character(dataset), table = as.character(table),
+    file = as.character(file), message = as.character(message),
+    slot = as.integer(slot), stringsAsFactors = FALSE
+  ))
+}
+
+# Drop the rows of `dataset`: those of one `table` when given, and with `slot`
+# also the rows refused by name through that file entry.
+dta_load_errors_clear <- function(le, dataset, table = NULL, slot = NULL) {
+  hit <- le$dataset == dataset
+  if (!is.null(table) || !is.null(slot)) {
+    by_table <- if (is.null(table)) FALSE else le$table == table
+    by_slot <- if (is.null(slot)) FALSE else !is.na(le$slot) & le$slot == as.integer(slot)
+    hit <- hit & (by_table | by_slot)
+  }
+  le[!hit, , drop = FALSE]
+}
+
+# Follow a file entry that moved: `map` is old index -> new index
+# (dta_handler_index_map()). Rows of `dataset` whose slot is gone are dropped;
+# NA slots and other datasets are untouched.
+dta_load_errors_remap <- function(le, dataset, map) {
+  mine <- le$dataset == dataset & !is.na(le$slot)
+  new <- rep(NA_integer_, nrow(le))
+  new[mine] <- as.integer(unlist(map))[le$slot[mine]]
+  le$slot[mine] <- new[mine]
+  le[!(mine & is.na(new)), , drop = FALSE]
+}
+
+dta_load_errors_rename <- function(le, old, new) {
+  le$dataset[le$dataset == old] <- new
+  le
+}
+
+dta_load_errors_keep <- function(le, datasets) {
+  le[le$dataset %in% datasets, , drop = FALSE]
+}
+
+# The rows of `dataset` shaped like messages(), so they list with them.
+dta_load_error_rows <- function(le, dataset) {
+  r <- le[le$dataset == dataset, , drop = FALSE]
+  n <- nrow(r)
+  data.frame(
+    id = rep(NA_integer_, n), dataset = as.character(r$dataset),
+    target = as.character(r$table), source = rep("load", n),
+    row = rep(NA_integer_, n), column = rep(NA_character_, n),
+    rule_id = rep(NA_character_, n), message = as.character(r$message),
+    stringsAsFactors = FALSE
+  )
+}
+
+# Stack two message data.frames on the union of their columns (a first, then b);
+# a column one of them lacks is NA. Either may be empty or have no columns.
+dta_bind_message_rows <- function(a, b) {
+  a <- as.data.frame(a)
+  b <- as.data.frame(b)
+  cols <- union(names(a), names(b))
+  fill <- function(x) {
+    for (cn in setdiff(cols, names(x))) x[[cn]] <- rep(NA, nrow(x))
+    x[, cols, drop = FALSE]
+  }
+  if (length(cols) == 0L) {
+    return(data.frame())
+  }
+  out <- rbind(fill(a), fill(b))
+  rownames(out) <- NULL
+  out
 }
 
 # Metadata import errors, as message rows (data.frame; empty df if none).
@@ -2087,8 +2427,14 @@ dta_export_pdf <- function(dta, file, signature_list = NULL, doc_args = list()) 
 # Distinct from DTAtools::write_validation_report(), which the Validation
 # messages dock offers as "Report": that one lists the individual validation
 # messages, this one certifies the overall per-dataset outcome.
+#
+# `findings` are the container findings (DTAtools::container_findings() rows);
+# NULL computes them from `dta`. A file outside its required container fails the
+# banner, a file whose packaging is unverified (checked on its own, or no record
+# of how it arrived) leaves it incomplete.
 dta_build_validation_report <- function(dta, status = NULL, document_name = NULL,
-                                        organisation = NULL, organisation_unit = NULL) {
+                                        organisation = NULL, organisation_unit = NULL,
+                                        findings = NULL) {
   esc <- function(x) htmltools::htmlEscape(as.character(x %||% ""))
   ts <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
 
@@ -2176,9 +2522,19 @@ dta_build_validation_report <- function(dta, status = NULL, document_name = NULL
   count_msgs <- dta_file_count_messages(dta)
   count_failed <- isFALSE(attr(dta, "last_validation_ok", exact = TRUE)) &&
     !is.null(dta_file_count_findings(dta))
-  banner_cls <- if (n_fail > 0 || count_failed) {
+  if (is.null(findings)) {
+    findings <- tryCatch(DTAtools::container_findings(dta), error = function(e) NULL)
+  }
+  findings <- if (is.data.frame(findings) && all(c("status", "message") %in% names(findings))) {
+    findings
+  } else {
+    data.frame(status = character(0), message = character(0), stringsAsFactors = FALSE)
+  }
+  n_outside <- sum(findings$status == "outside")
+  n_unverified <- sum(findings$status %in% c("unverified", "unrecorded"))
+  banner_cls <- if (n_fail > 0 || count_failed || n_outside > 0) {
     "warn"
-  } else if (n_pass > 0 && n_unvalidated == 0) {
+  } else if (n_pass > 0 && n_unvalidated == 0 && n_unverified == 0) {
     "pass"
   } else {
     "incomplete"
@@ -2192,26 +2548,62 @@ dta_build_validation_report <- function(dta, status = NULL, document_name = NULL
     n_pass, " passed, ", n_fail, " failed, ",
     n_nodata, " without data",
     if (n_pending > 0) paste0(", ", n_pending, " not validated") else "",
+    if (nrow(findings) > 0) {
+      paste0(", ", nrow(findings), if (nrow(findings) == 1) " packaging finding" else " packaging findings")
+    } else {
+      ""
+    },
     "."
   )
   # The caveat points at the table below it, so it is only worth printing when
   # that table actually has rows to point at.
-  caveat <- if (identical(banner_cls, "incomplete") && length(st) > 0) {
-    paste0(
-      "<div class='caveat'>Not every dataset was validated, so this DTA ",
-      "cannot be reported as passed. Load the missing data and re-check the ",
-      "datasets listed below as &ldquo;No data&rdquo; or &ldquo;Not ",
-      "validated&rdquo;.</div>"
-    )
-  } else {
-    ""
-  }
+  caveat <- paste0(
+    if (identical(banner_cls, "warn") && n_outside > 0) {
+      paste0(
+        "<div class='caveat'>Files arrived outside the container the agreement ",
+        "requires, so this DTA fails. See &ldquo;Delivery&rdquo; below.</div>"
+      )
+    } else {
+      ""
+    },
+    if (identical(banner_cls, "incomplete") && n_unvalidated > 0) {
+      paste0(
+        "<div class='caveat'>Not every dataset was validated, so this DTA ",
+        "cannot be reported as passed. Load the missing data and re-check the ",
+        "datasets listed below as &ldquo;No data&rdquo; or &ldquo;Not ",
+        "validated&rdquo;.</div>"
+      )
+    } else {
+      ""
+    },
+    if (identical(banner_cls, "incomplete") && n_unverified > 0) {
+      paste0(
+        "<div class='caveat'>Some files were not verified inside their ",
+        "container, so this DTA cannot be reported as passed. See ",
+        "&ldquo;Delivery&rdquo; below.</div>"
+      )
+    } else {
+      ""
+    }
+  )
   # Why a dataset failed on file count: the per-target table below cannot show
   # it because every table may be individually valid. Messages are escaped.
   count_html <- if (length(count_msgs) > 0) {
     paste0(
       "<h2>File count</h2><ul>",
       paste0("<li>", vapply(count_msgs, esc, character(1)), "</li>", collapse = ""),
+      "</ul>"
+    )
+  } else {
+    ""
+  }
+  # Packaging, judged on the document as a whole: the same findings that set the
+  # banner, so nothing says passed while one is listed. Messages are escaped.
+  delivery_html <- if (nrow(findings) > 0) {
+    lead <- ifelse(findings$status == "outside", "Not inside its container: ", "Not verified: ")
+    paste0(
+      "<h2>Delivery</h2><ul>",
+      paste0("<li>", vapply(paste0(lead, findings$message), esc, character(1)), "</li>", collapse = ""),
       "</ul>"
     )
   } else {
@@ -2254,7 +2646,7 @@ dta_build_validation_report <- function(dta, status = NULL, document_name = NULL
     "<div class='banner ", banner_cls, "'>", banner_txt, "</div>",
     "<div class='summary'>", esc(summary_line), "</div>", caveat,
     "<h2>Datasets</h2><table><thead><tr><th>Dataset</th><th>Name</th><th>Status</th></tr>",
-    "</thead><tbody>", ds_rows, "</tbody></table>", count_html, detail_html,
+    "</thead><tbody>", ds_rows, "</tbody></table>", count_html, delivery_html, detail_html,
     "</body></html>"
   )
 }
@@ -2265,7 +2657,47 @@ dta_supported_types <- function() {
     get("__DTAtools_supported_dataset_types__", envir = asNamespace("DTAtools")),
     error = function(e) NULL
   )
-  types %||% c("tabular", "file")
+  types %||% c("tabular", "file", "matrix")
+}
+
+# The YAML key a dataset body keeps its column specs under: "row_labels" for a
+# matrix, "columns" otherwise. The helper is unexported, so it is reached by
+# namespace (the app's helpers are sourced into an environment that cannot see
+# unexported package functions).
+dta_dataset_spec_key <- function(body) {
+  get("dta_dataset_spec_key", envir = asNamespace("DTAtools"))(body)
+}
+
+# More unexported package helpers the matrix editor needs, reached the same way.
+dta_pkg_matrix_spec_from_list <- function(x) {
+  get("dta_matrix_spec_from_list", envir = asNamespace("DTAtools"))(x)
+}
+dta_pkg_find_rule_def <- function(x, dataset_name, rule_id) {
+  get("dta_find_rule_def", envir = asNamespace("DTAtools"))(x, dataset_name, rule_id)
+}
+
+# ---- Matrix datasets: small readers --------------------------------------
+
+dta_is_matrix_ds <- function(ds) inherits(ds, "DTAtools::DTADataSetMatrix")
+
+# The row key ids of a matrix dataset; character(0) for anything else.
+dta_matrix_key_ids <- function(dta, dataset) {
+  ds <- dta_get_dataset(dta, dataset)
+  if (!dta_is_matrix_ds(ds)) {
+    return(character(0))
+  }
+  as.character(ds@matrix@row_key)
+}
+
+# What the header line holds above a row-label column: NULL (its ID), a text
+# ("" = an empty field) or FALSE (no field). The package's own reader.
+dta_row_label_header <- function(col) {
+  get("dta_row_label_header", envir = asNamespace("DTAtools"))(col)
+}
+
+# A column spec as a row label with that header.
+dta_pkg_row_label <- function(spec, header = NULL) {
+  get("DTAColumnSpecRowLabel", envir = asNamespace("DTAtools"))(spec, header = header)
 }
 
 # Supported column-structure backends (drives the Edit-columns backend dropdown).
@@ -2625,7 +3057,8 @@ dta_handler_type <- function(h) {
 }
 
 # One file handler -> plain list (mirrors the `files:` block of the examples).
-dta_handler_to_list <- function(h) {
+# `container` is the reference written ("" = none); by default the one stored.
+dta_handler_to_list <- function(h, container = handler_container(h)) {
   out <- list()
   fn <- tryCatch(h@filename, error = function(e) NULL)
   if (!is.null(fn) && length(fn) > 0) {
@@ -2645,8 +3078,7 @@ dta_handler_to_list <- function(h) {
   if (!is.null(pd) && length(pd) > 0 && any(nzchar(pd))) out$pattern_description <- pd
   info <- tryCatch(h@info, error = function(e) NULL)
   if (!is.null(info) && length(info) > 0) out$info <- info
-  ct <- handler_container(h)
-  if (nzchar(ct)) out$container <- ct
+  if (nzchar(container)) out$container <- container
   ext <- tryCatch(h@extensions, error = function(e) NULL)
   if (!is.null(ext) && length(ext) > 0) {
     out$extensions <- if (length(ext) == 1) ext else as.list(ext)
@@ -2668,6 +3100,10 @@ dta_column_to_list <- function(col) {
   st <- tryCatch(col@structure, error = function(e) NULL)
   out <- list()
   out$id <- g("id")
+  # A row label of a matrix: the header line's text above it ("" = an empty
+  # field, FALSE = no field), written only when it is not the ID.
+  hdr <- tryCatch(dta_row_label_header(col), error = function(e) NULL)
+  if (!is.null(hdr)) out$header <- hdr
   lbl <- g("label")
   if (!is.null(lbl) && nzchar(lbl)) out$label <- lbl
   if (!is.null(st)) {
@@ -2735,8 +3171,33 @@ dta_rule_type_label <- function(type) {
   )
 }
 
-# One DTADataSet -> plain list (standalone-dataset shape).
-dta_dataset_to_list <- function(ds) {
+# The reference an entry is written with when the dataset leaves its document:
+# its own container reference with an id replaced by the container's file name
+# (`none` stays `none`), else -- `apply_default` -- the default container's file
+# name, so the standalone file keeps the requirement. "" = none written.
+.dta_handler_ref_outside <- function(h, containers, apply_default = TRUE) {
+  own <- handler_container(h)
+  if (nzchar(own)) {
+    if (identical(own, "none") || grepl(".", own, fixed = TRUE)) {
+      return(own)
+    }
+    hit <- containers[[own]]
+    return(if (is.null(hit)) own else hit@filename)
+  }
+  if (apply_default) {
+    for (ct in containers) {
+      if (isTRUE(ct@default)) {
+        return(ct@filename)
+      }
+    }
+  }
+  ""
+}
+
+# One DTADataSet -> plain list (standalone-dataset shape). Without `dta` the
+# entries keep their references as stored (the shape inside a document); with
+# it they are written for use outside it (see .dta_handler_ref_outside()).
+dta_dataset_to_list <- function(ds, dta = NULL, apply_default = TRUE) {
   if (is.null(ds)) {
     return(list())
   }
@@ -2754,14 +3215,26 @@ dta_dataset_to_list <- function(ds) {
   td <- tryCatch(ds@template_date, error = function(e) NULL)
   if (!is.null(td) && length(td) > 0) out$template_date <- .dta_stringify_dates(td)
   handlers <- dta_handlers(ds)
+  entry <- function(h) {
+    if (is.null(dta)) {
+      dta_handler_to_list(h)
+    } else {
+      dta_handler_to_list(h, container = .dta_handler_ref_outside(h, .ctr_list(dta), apply_default))
+    }
+  }
   if (length(handlers) == 1) {
-    out$files <- dta_handler_to_list(handlers[[1]])
+    out$files <- entry(handlers[[1]])
   } else if (length(handlers) > 1) {
-    out$files <- unname(lapply(handlers, dta_handler_to_list))
+    out$files <- unname(lapply(handlers, entry))
   }
   cols <- tryCatch(ds@specs@columns, error = function(e) NULL)
   if (!is.null(cols) && length(cols) > 0) {
-    out$columns <- unname(lapply(cols, dta_column_to_list))
+    out[[if (identical(out$type, "matrix")) "row_labels" else "columns"]] <-
+      unname(lapply(cols, dta_column_to_list))
+  }
+  if (identical(out$type, "matrix")) {
+    mx <- tryCatch(as.list(ds@matrix), error = function(e) NULL)
+    if (!is.null(mx)) out$matrix <- mx
   }
   rules <- tryCatch(ds@specs@rules, error = function(e) NULL)
   if (!is.null(rules) && length(rules) > 0) {
@@ -2770,7 +3243,7 @@ dta_dataset_to_list <- function(ds) {
   out
 }
 
-# Whole DTA -> plain list (metadata + datasets array).
+# Whole DTA -> plain list (metadata, containers, datasets array).
 dta_to_list <- function(dta) {
   out <- list()
   md <- tryCatch(DTAtools::metadata(dta), error = function(e) NULL)
@@ -2778,6 +3251,16 @@ dta_to_list <- function(dta) {
     ml <- tryCatch(as.list(md), error = function(e) NULL)
     ml <- .dta_compact(.dta_stringify_dates(ml))
     if (!is.null(ml) && length(ml) > 0) out$metadata <- ml
+  }
+  # Explicit containers only (an implied one is just a file name in an entry).
+  cs <- .ctr_list(dta)
+  if (length(cs) > 0) {
+    out$containers <- unname(lapply(cs, function(ct) {
+      el <- list(id = ct@id, filename = ct@filename)
+      if (!is.null(ct@description)) el$description <- ct@description
+      if (isTRUE(ct@default)) el$default <- TRUE
+      el
+    }))
   }
   names_ds <- dta_dataset_names(dta)
   if (length(names_ds) > 0) {
@@ -2820,7 +3303,7 @@ dta_dataset_to_yaml_text <- function(dta, dataset) {
   dta_try({
     ds <- dta_get_dataset(dta, dataset)
     if (is.null(ds)) stop(sprintf("Dataset '%s' not found.", dataset))
-    lst <- .dta_compact(dta_dataset_to_list(ds))
+    lst <- .dta_compact(dta_dataset_to_list(ds, dta))
     # max_depth 1, not 3: this document is a `datasets:` entry hoisted to the
     # root, so the same keys sit two levels shallower than in the full document.
     dta_yaml_blank_lines(
@@ -2953,7 +3436,14 @@ dta_set_dataset_meta <- function(dta, dataset, id, name = NULL, description = NU
 # reasoning as the in-place re-key in dta_set_dataset_meta() above; there it
 # holds ONE index steady across a rename, here it holds every OTHER index
 # steady across the list's growth.
-dta_add_dataset <- function(dta, id, type = "tabular", name = NULL, description = NULL) {
+#
+# The matrix arguments (`row_label`, `header_mode`, `header_text`, `cell_type`) are
+# used for type "matrix" only and ignored otherwise: a hidden conditional input
+# still reports its value, so a user who switched back to Tabular must not
+# get them.
+dta_add_dataset <- function(dta, id, type = "tabular", name = NULL, description = NULL,
+                            row_label = NULL, header_mode = NULL, header_text = NULL,
+                            cell_type = NULL) {
   dta_try({
     nm <- trimws(as.character(id %||% "")[1])
     if (is.na(nm) || !nzchar(nm)) stop("A dataset ID is required.")
@@ -2964,17 +3454,36 @@ dta_add_dataset <- function(dta, id, type = "tabular", name = NULL, description 
     }
 
     type <- tolower(trimws(as.character(type %||% "")[1]))
-    if (!type %in% c("tabular", "file")) {
+    if (!type %in% dta_supported_types()) {
       stop(sprintf(
         "Dataset type must be one of: %s.",
-        paste(c("tabular", "file"), collapse = ", ")
+        paste(dta_supported_types(), collapse = ", ")
       ))
     }
 
     label <- dta_blank_to_null(name)
     desc <- dta_blank_to_null(description)
 
-    ds <- if (identical(type, "tabular")) {
+    ds <- if (identical(type, "matrix")) {
+      lbl <- trimws(as.character(row_label %||% "")[1])
+      if (is.na(lbl) || !nzchar(lbl)) stop("A row-label column ID is required.")
+      if (grepl("\\s", lbl)) stop("Row-label column ID cannot contain whitespace.")
+      hdr <- dta_row_label_header_value(header_mode, header_text)
+      ct <- as.character(cell_type %||% "")[1]
+      if (is.na(ct) || !ct %in% c("SAS Num", "SAS Int", "SAS Char")) {
+        stop("Choose the cell type.")
+      }
+      DTAtools::DTADataSetMatrix(
+        id = nm,
+        specs = DTAtools::DTAColumnSpecCollection(columns = stats::setNames(
+          list(dta_pkg_row_label(
+            DTAtools::DTAColumnSpec(id = lbl, type = "SAS Char", nullable = FALSE), hdr
+          )), lbl
+        )),
+        matrix = list(cells = list(type = ct, nullable = FALSE)),
+        name = label, description = desc
+      )
+    } else if (identical(type, "tabular")) {
       DTAtools::DTADataSetTabular(
         id = nm,
         specs = DTAtools::DTAColumnSpecCollection(columns = list()),
@@ -3028,6 +3537,19 @@ dta_columns_overview <- function(dta, dataset) {
   if (length(cols) == 0) {
     return(data.frame())
   }
+  ov <- dta_columns_overview_rows(cols)
+  if (dta_is_matrix_ds(ds)) {
+    # A row label also shows what the header line must hold above it.
+    header <- vapply(cols, function(c) {
+      h <- dta_row_label_header(c)
+      if (identical(h, FALSE)) "(no field)" else if (is.null(h)) c@id else if (nzchar(trimws(h))) h else "(empty)"
+    }, character(1))
+    ov <- cbind(ov["id"], header = unname(header), ov[setdiff(names(ov), "id")], stringsAsFactors = FALSE)
+  }
+  ov
+}
+
+dta_columns_overview_rows <- function(cols) {
   do.call(rbind, lapply(cols, function(c) {
     l <- dta_column_to_list(c)
     constraint <- if (!is.null(l$values)) {
@@ -3080,7 +3602,52 @@ dta_column_fields <- function(dta, dataset, id) {
     values = if (!is.null(l$values)) paste(unlist(l$values), collapse = "\n") else "",
     pattern = l$pattern %||% "",
     examples = if (!is.null(l$examples)) paste(unlist(l$examples), collapse = "\n") else "",
-    description = l$description %||% ""
+    description = l$description %||% "",
+    header_mode = dta_row_label_header_mode(col),
+    header_text = {
+      h <- dta_row_label_header(col)
+      if (is.character(h)) h else ""
+    }
+  )
+}
+
+# ---- Header text of a row label (matrix datasets) -------------------------
+# What the header line holds above a row-label column, as the form's two
+# fields: a mode ("id": the row label's ID; "empty": an empty field; "text":
+# `header_text`; "none": no field at all, first row label only) and the text.
+
+dta_row_label_header_modes <- function() c("id", "empty", "text", "none")
+
+dta_row_label_header_mode <- function(col) {
+  h <- dta_row_label_header(col)
+  if (is.null(h)) {
+    "id"
+  } else if (identical(h, FALSE)) {
+    "none"
+  } else if (nzchar(trimws(h))) {
+    "text"
+  } else {
+    "empty"
+  }
+}
+
+# The `header` value of a row label for a mode and text: NULL, "", a text or
+# FALSE. Stops with a plain sentence on a missing choice or an empty text.
+dta_row_label_header_value <- function(mode, text = NULL) {
+  mode <- as.character(mode %||% "")[1]
+  if (is.na(mode) || !mode %in% dta_row_label_header_modes()) {
+    stop("Choose the header text above the row label.")
+  }
+  switch(mode,
+    id = NULL,
+    empty = "",
+    none = FALSE,
+    text = {
+      # Kept as typed; the comparison with the file ignores surrounding spaces.
+      txt <- as.character(text %||% "")[1]
+      if (is.na(txt) || !nzchar(trimws(txt))) stop("Enter the header text, or choose Empty.")
+      txt
+    }
   )
 }
 
@@ -3100,19 +3667,24 @@ dta_column_fields <- function(dta, dataset, id) {
 dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
                            type = NULL, format = NULL, length = NULL,
                            nullable = NULL, values = NULL, pattern = NULL,
-                           description = NULL, old_id = NULL, examples = NULL) {
+                           description = NULL, old_id = NULL, examples = NULL,
+                           header_mode = NULL, header_text = NULL) {
   dta_try({
     id <- trimws(as.character(id)[1] %||% "")
     if (!nzchar(id)) stop("A column id is required.")
-    if (grepl("\\s", id)) stop("Column id cannot contain whitespace.")
-
     ds <- DTAtools::datasets(dta, dataset)
+    # A column id is the exact header text and may hold spaces ("Subject ID"); the
+    # constructor below judges it. A matrix row-label id may not (its header text
+    # has its own field), so that one is refused here, as it always was.
+    if (dta_is_matrix_ds(ds) && grepl("\\s", id)) {
+      stop("Row-label column ID cannot contain whitespace.")
+    }
     specs <- ds@specs
     cols <- specs@columns %||% list()
 
     renaming <- !is.null(old_id) && nzchar(old_id) && !identical(old_id, id)
     if (renaming && id %in% names(cols)) {
-      stop(sprintf("A column named '%s' already exists.", id))
+      stop(sprintf("A %s named '%s' already exists.", if (dta_is_matrix_ds(ds)) "row label" else "column", id))
     }
     existing <- cols[[if (renaming) old_id else id]]
 
@@ -3152,6 +3724,22 @@ dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
       examples = ex,
       colclass = if (!is.null(existing)) existing@colclass else NULL
     )
+    if (dta_is_matrix_ds(ds)) {
+      # A row label also says what the header line holds above it. `header_mode`
+      # NULL (a caller without the field) keeps what the label had.
+      hdr <- if (is.null(header_mode)) {
+        if (!is.null(existing)) dta_row_label_header(existing) else NULL
+      } else {
+        dta_row_label_header_value(header_mode, header_text)
+      }
+      if (identical(hdr, FALSE)) {
+        at <- if (!is.null(existing)) match(if (renaming) old_id else id, names(cols)) else length(cols) + 1L
+        if (at != 1L) {
+          stop("Only the first row label can have no field above it in the header line; choose Empty for an empty field.")
+        }
+      }
+      spec <- dta_pkg_row_label(spec, hdr)
+    }
     if (renaming) {
       # A rename carries the column's name into the dataset's rules in the same
       # save. The new column is added next to the old one first, so every
@@ -3180,7 +3768,19 @@ dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
       cols[[id]] <- spec
       specs@columns <- cols
     }
-    ds@specs <- specs
+    if (dta_is_matrix_ds(ds)) {
+      # Row-label invariant: the row key follows a renamed label.
+      m <- ds@matrix
+      if (renaming && old_id %in% m@row_key) {
+        m@row_key[m@row_key == old_id] <- id
+      }
+      if (id %in% m@row_key && isTRUE(nullable)) {
+        stop(sprintf("Row key column '%s' cannot be nullable: a row needs an identity.", id))
+      }
+      ds <- S7::set_props(ds, specs = specs, matrix = m)
+    } else {
+      ds@specs <- specs
+    }
     dta@datasets[[dataset]] <- ds
     dta
   })
@@ -3200,6 +3800,12 @@ dta_remove_column <- function(dta, dataset, id) {
     ds <- DTAtools::datasets(dta, dataset)
     specs <- ds@specs
     cols <- specs@columns %||% list()
+    if (dta_is_matrix_ds(ds)) {
+      if (id %in% ds@matrix@row_key) {
+        stop(sprintf("'%s' is the row key; choose another key under Matrix layout first.", id))
+      }
+      if (length(cols) == 1L) stop("A matrix dataset needs at least one row label.")
+    }
     cols[[id]] <- NULL
     specs@columns <- cols
     ds@specs <- specs
@@ -3224,11 +3830,318 @@ dta_move_column <- function(dta, dataset, id, direction) {
       ord <- seq_len(n)
       ord[c(pos, target)] <- ord[c(target, pos)]
       specs@columns <- cols[ord]
+      if (dta_is_matrix_ds(ds) && identical(dta_row_label_header(cols[[1L]]), FALSE) && 1L %in% c(pos, target)) {
+        stop(paste(
+          "The first row label has no field above it in the header line, so it must stay first.",
+          "Change its header text first."
+        ))
+      }
       ds@specs <- specs
       dta@datasets[[dataset]] <- ds
     }
     dta
   })
+}
+
+# TRUE when an edit of the row labels makes the loaded tables of a matrix
+# dataset stale: a table is read under the row-label IDs, in order, and the
+# header line's layout (whether it has a field above the first row label), so a
+# rename, an added, removed or moved row label, or "No field" switched on or
+# off asks for the file to be loaded again. FALSE with no table loaded.
+dta_matrix_needs_reload <- function(before, after, dataset) {
+  ds <- dta_get_dataset(after, dataset)
+  if (!dta_is_matrix_ds(ds) || length(ds@tables) == 0L) {
+    return(FALSE)
+  }
+  layout <- function(dta) {
+    cols <- dta_get_dataset(dta, dataset)@specs@columns
+    list(names(cols), length(cols) > 0L && identical(dta_row_label_header(cols[[1L]]), FALSE))
+  }
+  !identical(layout(before), layout(after))
+}
+
+# ---- Matrix layout form --------------------------------------------------
+
+# A two-line sketch of the file a matrix dataset describes -- its header line
+# and one data row, the row-label columns first -- as fixed-width text. Each
+# header text stands above its column: an empty field is drawn as "", and a
+# field the header line does not have (`header: No`) is left blank and named
+# in the note, because drawing anything there would show a field.
+# character(0) for any other dataset.
+dta_matrix_sketch <- function(dta, dataset) {
+  ds <- dta_get_dataset(dta, dataset)
+  if (!dta_is_matrix_ds(ds)) {
+    return(character(0))
+  }
+  cols <- ds@specs@columns
+  ids <- names(cols)
+  none <- vapply(cols, function(c) identical(dta_row_label_header(c), FALSE), logical(1))
+  head <- vapply(cols, function(c) {
+    h <- dta_row_label_header(c)
+    if (identical(h, FALSE)) "" else if (is.null(h)) c@id else if (nzchar(trimws(h))) h else "\"\""
+  }, character(1))
+  w <- pmax(nchar(ids), nchar(head))
+  pad <- function(x, width) paste0(x, strrep(" ", width - nchar(x)))
+  note <- if (any(none)) sprintf("header line (no field above %s)", ids[none][[1L]]) else "header line"
+  c(
+    paste(c(pad(head, w), "label  ", "label  ", "\u2026", paste("  \u2190", note)), collapse = "  "),
+    paste(c(pad(ids, w), "cell   ", "cell   ", "\u2026", "  \u2190 one line per row"), collapse = "  ")
+  )
+}
+
+# The Matrix layout form's values for one matrix dataset (NULL for any other
+# type). The names are the form's input names: the editor reads and writes
+# exactly these.
+dta_matrix_fields <- function(dta, dataset) {
+  ds <- dta_get_dataset(dta, dataset)
+  if (!dta_is_matrix_ds(ds)) {
+    return(NULL)
+  }
+  m <- ds@matrix
+  l <- as.list(m)
+  ids <- names(ds@specs@columns) %||% character(0)
+  hd <- l[["columns"]] %||% list()
+  rw <- l[["rows"]] %||% list()
+  cl <- l[["cells"]] %||% list()
+  txt <- function(x) {
+    x <- as.character(x %||% "")[1]
+    if (is.na(x)) "" else x
+  }
+  num <- function(x) if (is.null(x) || length(x) == 0L) NA_real_ else as.numeric(x)[1]
+  max_or_na <- function(v) if (is.infinite(v)) NA_real_ else as.numeric(v)
+  ctype <- txt(cl[["type"]])
+  ctype <- paste("SAS", sub("^SAS\\s+", "", ctype, ignore.case = TRUE))
+  cfmt <- txt(cl[["format"]])
+  list(
+    row_labels = ids,
+    columns_label = txt(hd[["label"]]),
+    columns_description = txt(hd[["description"]]),
+    columns_pattern = txt(hd[["pattern"]]),
+    columns_values = paste(unlist(hd[["values"]]), collapse = "\n"),
+    columns_length = txt(hd[["length"]]),
+    n_columns_min = as.numeric(m@n_columns[[1L]]),
+    n_columns_max = max_or_na(m@n_columns[[2L]]),
+    row_key = as.character(m@row_key %||% ids[1L]),
+    n_rows_min = as.numeric(m@n_rows[[1L]]),
+    n_rows_max = max_or_na(m@n_rows[[2L]]),
+    cell_type = ctype,
+    cell_nullable = isTRUE(cl[["nullable"]]),
+    range_min = num(cl[["range"]][["min"]]),
+    range_max = num(cl[["range"]][["max"]]),
+    infinite = isTRUE(cl[["infinite"]]),
+    cell_values = paste(unlist(cl[["values"]]), collapse = "\n"),
+    cell_pattern = txt(cl[["pattern"]]),
+    cell_length = txt(cl[["length"]]),
+    cell_format = if (nzchar(cfmt) && grepl(" ", cfmt)) sub("^\\S+\\s+", "", cfmt) else cfmt,
+    cell_label = txt(cl[["label"]]),
+    cell_description = txt(cl[["description"]])
+  )
+}
+
+# Apply the Matrix layout form to a matrix dataset. Returns
+# list(ok, value = <dta>, error, dropped): `dropped` names the settings the new
+# cell type cannot carry ("Inf allowed", "range"), which were removed.
+#
+# The ORIGINAL settings are patched, field by field, for the fields the form
+# changed only: rebuilding the settings from the form would rewrite every
+# value the form cannot show faithfully (a scalar count, a number that
+# was written as text).
+dta_set_matrix <- function(dta, dataset, form) {
+  op <- options(cli.width = Inf)
+  on.exit(options(op), add = TRUE)
+  dropped <- character(0)
+  r <- dta_try({
+    ds <- DTAtools::datasets(dta, dataset)
+    if (!dta_is_matrix_ds(ds)) stop("This dataset is not a matrix dataset.")
+    orig <- as.list(ds@matrix)
+    pf <- dta_matrix_fields(dta, dataset)
+
+    fm <- function(n) if (is.null(form[[n]])) pf[[n]] else form[[n]]
+    txt <- function(x) {
+      x <- as.character(x %||% "")[1]
+      if (is.na(x)) "" else trimws(x)
+    }
+    lines_of <- function(x) {
+      x <- as.character(x %||% "")[1]
+      if (is.na(x)) {
+        return(character(0))
+      }
+      v <- trimws(strsplit(x, "\n", fixed = TRUE)[[1L]])
+      v[nzchar(v)]
+    }
+    nnum <- function(x) if (is.null(x) || length(x) == 0L) NA_real_ else suppressWarnings(as.numeric(x)[1])
+    same_num <- function(a, b) {
+      a <- nnum(a)
+      b <- nnum(b)
+      # numericInput hands back 15 significant digits, so compare at that precision.
+      (is.na(a) && is.na(b)) || (!is.na(a) && !is.na(b) && signif(a, 15) == signif(b, 15))
+    }
+    # A count (data columns / rows) must be whole numbers, the maximum not below the minimum.
+    check_count <- function(lo, hi, floor, who) {
+      lo <- nnum(lo)
+      hi <- nnum(hi)
+      whole <- function(v) is.finite(v) && v == trunc(v)
+      if (!is.na(lo) && !(whole(lo) && lo >= floor)) {
+        stop(sprintf("%s: the minimum must be a whole number of at least %d.", who, floor))
+      }
+      if (!is.na(hi) && !(whole(hi) && hi >= (if (is.na(lo)) floor else lo))) {
+        stop(sprintf("%s: the maximum must be a whole number not below the minimum.", who))
+      }
+    }
+    chg <- function(n) {
+      a <- fm(n)
+      b <- pf[[n]]
+      if (n %in% c("columns_values", "cell_values")) {
+        return(!identical(lines_of(a), lines_of(b)))
+      }
+      if (n == "row_key") {
+        return(!setequal(as.character(a), as.character(b)))
+      }
+      if (is.logical(b)) {
+        return(!identical(isTRUE(a), isTRUE(b)))
+      }
+      if (is.numeric(b)) {
+        return(!same_num(a, b))
+      }
+      !identical(txt(a), txt(b))
+    }
+    put <- function(sec, key, val) {
+      if (is.null(val)) {
+        orig[[sec]][[key]] <<- NULL
+      } else {
+        orig[[sec]][[key]] <<- val
+      }
+    }
+    whole_or <- function(v) if (is.finite(v) && v == trunc(v) && abs(v) < .Machine$integer.max) as.integer(v) else v
+    text_or_null <- function(s) if (nzchar(s)) s else NULL
+    length_val <- function(s, who) {
+      if (!nzchar(s)) {
+        return(NULL)
+      }
+      if (!grepl("^[0-9]+$", s) || as.numeric(s) < 1) {
+        stop(sprintf("%s length must be a whole number of at least 1.", who))
+      }
+      as.integer(s)
+    }
+    count_val <- function(lo, hi, default_min) {
+      lo <- nnum(lo)
+      hi <- nnum(hi)
+      if (is.na(lo)) lo <- default_min
+      if (is.na(hi)) hi <- Inf
+      if (!is.na(hi) && lo == hi) {
+        whole_or(lo)
+      } else {
+        out <- list(min = whole_or(lo))
+        if (is.finite(hi)) out$max <- whole_or(hi)
+        out
+      }
+    }
+
+    if (chg("columns_label")) put("columns", "label", text_or_null(txt(fm("columns_label"))))
+    if (chg("columns_description")) put("columns", "description", text_or_null(txt(fm("columns_description"))))
+    if (chg("columns_pattern")) put("columns", "pattern", text_or_null(txt(fm("columns_pattern"))))
+    if (chg("columns_values")) {
+      v <- lines_of(fm("columns_values"))
+      put("columns", "values", if (length(v) > 0L) v else NULL)
+    }
+    if (chg("columns_length")) put("columns", "length", length_val(txt(fm("columns_length")), "Label"))
+    if (chg("n_columns_min") || chg("n_columns_max")) {
+      check_count(fm("n_columns_min"), fm("n_columns_max"), 1L, "Data columns")
+      put("columns", "count", count_val(fm("n_columns_min"), fm("n_columns_max"), 1))
+    }
+
+    if (chg("row_key")) {
+      rk <- as.character(fm("row_key"))
+      rk <- rk[!is.na(rk) & nzchar(rk)]
+      if (length(rk) == 0L) stop("Choose at least one row key column.")
+      for (kid in rk) {
+        if (isTRUE(ds@specs@columns[[kid]]@nullable)) {
+          stop(sprintf(
+            "Row label '%s' may be missing, so it cannot be part of the row key; make it non-nullable under Row labels first.",
+            kid
+          ))
+        }
+      }
+      put("rows", "key", rk)
+    }
+    if (chg("n_rows_min") || chg("n_rows_max")) {
+      check_count(fm("n_rows_min"), fm("n_rows_max"), 0L, "Data rows")
+      put("rows", "count", count_val(fm("n_rows_min"), fm("n_rows_max"), 1))
+    }
+
+    if (chg("cell_type")) {
+      ty <- trimws(as.character(fm("cell_type"))[1])
+      ty <- paste("SAS", sub("^SAS\\s+", "", ty, ignore.case = TRUE))
+      if (!ty %in% c("SAS Num", "SAS Int", "SAS Char")) stop("Choose the cell type.")
+      put("cells", "type", ty)
+    }
+    rt <- sub("^SAS\\s+", "", trimws(as.character(orig[["cells"]][["type"]])[1]), ignore.case = TRUE)
+    if (chg("cell_nullable")) put("cells", "nullable", isTRUE(fm("cell_nullable")))
+    if (chg("range_min") || chg("range_max")) {
+      lo <- nnum(fm("range_min"))
+      hi <- nnum(fm("range_max"))
+      if (!is.na(lo) && !is.na(hi) && lo > hi) {
+        stop("Cell range: the lowest allowed value must not exceed the highest.")
+      }
+      rng <- list()
+      if (!is.na(lo)) rng$min <- whole_or(lo)
+      if (!is.na(hi)) rng$max <- whole_or(hi)
+      put("cells", "range", if (length(rng) > 0L) rng else NULL)
+    }
+    if (chg("infinite")) put("cells", "infinite", isTRUE(fm("infinite")))
+    if (chg("cell_values")) {
+      v <- lines_of(fm("cell_values"))
+      if (length(v) > 0L && rt %in% c("Num", "Int")) {
+        nv <- suppressWarnings(as.numeric(v))
+        if (anyNA(nv)) stop("Allowed cell values must be numbers for SAS Num and SAS Int cells.")
+        v <- lapply(nv, whole_or)
+      }
+      put("cells", "values", if (length(v) > 0L) v else NULL)
+    } else if (chg("cell_type") && length(orig$cells[["values"]]) > 0L) {
+      # Untouched allowed values follow the new cell type.
+      v <- unlist(orig$cells[["values"]])
+      if (identical(rt, "Char")) {
+        put("cells", "values", as.list(as.character(v)))
+      } else if (rt %in% c("Num", "Int")) {
+        nv <- suppressWarnings(as.numeric(v))
+        if (anyNA(nv)) stop("Allowed cell values must be numbers for SAS Num and SAS Int cells.")
+        put("cells", "values", lapply(nv, whole_or))
+      }
+    }
+    if (chg("cell_pattern")) put("cells", "pattern", text_or_null(txt(fm("cell_pattern"))))
+    if (chg("cell_length")) put("cells", "length", length_val(txt(fm("cell_length")), "Cell"))
+    if (chg("cell_format")) {
+      f <- txt(fm("cell_format"))
+      put("cells", "format", if (!nzchar(f)) NULL else if (grepl(" ", f)) f else paste("SAS", f))
+    }
+    if (chg("cell_label")) put("cells", "label", text_or_null(txt(fm("cell_label"))))
+    if (chg("cell_description")) put("cells", "description", text_or_null(txt(fm("cell_description"))))
+
+    if (!is.null(orig$columns[["pattern"]]) && length(orig$columns[["values"]]) > 0L) {
+      stop("Give the data labels a pattern or a list of allowed labels, not both.")
+    }
+    if (!is.null(orig$cells[["pattern"]]) && length(orig$cells[["values"]]) > 0L) {
+      stop("Give the cells a pattern or a list of allowed values, not both.")
+    }
+
+    # What the RESULTING cell type cannot carry is removed, not refused.
+    if (!identical(rt, "Num") && !is.null(orig$cells[["infinite"]])) {
+      if (isTRUE(orig$cells[["infinite"]])) dropped <- c(dropped, "Inf allowed")
+      orig$cells[["infinite"]] <- NULL
+    }
+    if (identical(rt, "Char") && length(orig$cells[["range"]]) > 0L) {
+      dropped <- c(dropped, "range")
+    }
+    if (identical(rt, "Char")) orig$cells[["range"]] <- NULL
+
+    ds <- S7::set_props(ds, matrix = dta_pkg_matrix_spec_from_list(orig))
+    dta@datasets[[dataset]] <- ds
+    dta
+  })
+  list(
+    ok = isTRUE(r$ok), value = if (isTRUE(r$ok)) r$value else NULL,
+    error = r$error, dropped = if (isTRUE(r$ok)) dropped else character(0)
+  )
 }
 
 # ---- Rule editing --------------------------------------------------------
@@ -3319,6 +4232,10 @@ dta_set_rule <- function(dta, dataset, index = NULL, id, type, description = NUL
                          min = NULL, max = NULL,
                          group_by = NULL, conditions = NULL, constraints = NULL) {
   dta_try({
+    if (dta_is_matrix_ds(dta_get_dataset(dta, dataset)) &&
+      startsWith(trimws(as.character(id %||% "")[1]), ".matrix:")) {
+      stop("Rule IDs starting with '.matrix:' are reserved for the checks the matrix layout generates.")
+    }
     rule <- dta_build_rule(
       id = id, type = type, description = description,
       condition = condition, then = then, columns = columns,
@@ -3397,6 +4314,8 @@ dta_move_rule <- function(dta, dataset, index, direction) {
 dta_handler_types <- function(dataset_type = "tabular") {
   if (identical(dataset_type, "file")) {
     "any"
+  } else if (identical(dataset_type, "matrix")) {
+    c("csv", "tsv")
   } else {
     c("csv", "tsv", "sas7bdat", "xpt")
   }
@@ -3418,11 +4337,15 @@ dta_handlers_overview <- function(dta, dataset) {
   if (length(hs) == 0) {
     return(data.frame())
   }
-  do.call(rbind, lapply(hs, function(h) {
+  ca <- tryCatch(DTAtools::container_assignments(dta), error = function(e) NULL)
+  do.call(rbind, lapply(seq_along(hs), function(i) {
+    h <- hs[[i]]
     data.frame(
       filename = handler_expected(h),
       type = dta_handler_type(h),
-      container = handler_container(h),
+      # Where the file must arrive: the effective file name (an id or the
+      # default container resolved), not the stored reference.
+      container = dta_effective_glob(dta, dataset, i, ca),
       pattern = if (handler_is_pattern(h)) "yes" else "no",
       files = handler_count_label(h),
       endings = handler_endings(h),
@@ -3660,6 +4583,20 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
 # NA, or an entry the map has no row for, leaves the file unknown, which the
 # package resolves by name. A record out of step with the paths is dropped.
 dta_remap_file_handlers <- function(ds, map) {
+  if (dta_is_matrix_ds(ds)) {
+    # A matrix keeps the handler index of each bound table inside its raw head.
+    heads <- ds@heads
+    for (nm in names(heads)) {
+      idx <- suppressWarnings(as.integer(heads[[nm]][["handler"]]))[1]
+      heads[[nm]][["handler"]] <- if (!is.na(idx) && idx >= 1L && idx <= length(map)) {
+        as.integer(unname(map)[idx])
+      } else {
+        NA_integer_
+      }
+    }
+    ds@heads <- heads
+    return(ds)
+  }
   if (!identical(tryCatch(ds@type, error = function(e) NA_character_), "file")) {
     return(ds)
   }
@@ -3888,7 +4825,12 @@ dta_specs_signature <- function(ds) {
       dta_rule_to_list
     )
   )
-  tryCatch(yaml::as.yaml(list(columns = unname(cols), rules = unname(rules))),
+  mx <- if (identical(tryCatch(ds@type, error = function(e) NULL), "matrix")) {
+    tryCatch(as.list(ds@matrix), error = function(e) NULL)
+  }
+  sig <- list(columns = unname(cols), rules = unname(rules))
+  if (!is.null(mx)) sig$matrix <- mx
+  tryCatch(yaml::as.yaml(sig),
     error = function(e) ""
   )
 }
@@ -3908,6 +4850,19 @@ dta_transfer_bound_data <- function(dta, dataset, old_ds, keep_validation = TRUE
       new_ds <- dta_remap_file_handlers(new_ds, dta_match_handlers(old_ds, new_ds))
     } else {
       new_ds@tables <- tryCatch(old_ds@tables, error = function(e) list()) %||% list()
+    }
+    # How each bound item arrived (delivered file, container chain) travels with
+    # it; an object that predates the property has nothing to carry.
+    prov <- tryCatch(old_ds@provenance, error = function(e) list()) %||% list()
+    bound <- if (identical(ty, "file")) new_ds@file_paths else names(new_ds@tables)
+    try(new_ds@provenance <- prov[intersect(names(prov), bound)], silent = TRUE)
+    # Raw heads (matrix only) travel with their tables the same way.
+    old_heads <- tryCatch(old_ds@heads, error = function(e) NULL)
+    if (!is.null(old_heads) && "heads" %in% S7::prop_names(new_ds)) {
+      new_ds@heads <- old_heads[intersect(names(old_heads), bound)]
+      if (dta_is_matrix_ds(new_ds)) {
+        new_ds <- dta_remap_file_handlers(new_ds, dta_match_handlers(old_ds, new_ds))
+      }
     }
     if (isTRUE(keep_validation)) {
       new_ds@validation_index <- tryCatch(old_ds@validation_index, error = function(e) list()) %||% list()
@@ -4129,9 +5084,15 @@ dta_session_ttl_seconds <- function() {
 
 dta_sweep_session_files <- function(dir = tempdir(), ttl = dta_session_ttl_seconds(),
                                     keep = unlist(as.list(.dta_live_session_paths), use.names = FALSE),
-                                    now = Sys.time()) {
+                                    now = Sys.time(), package_copies = FALSE) {
+  # The package's own copies (a transcoded file, an error spill) belong to
+  # whichever object still streams from them, and this process cannot tell
+  # which; they are swept only for a worker known to be dead. Inside a session
+  # they sit in a dta_scratch_* directory, which is swept whole.
+  prefixes <- c("dtatools_app_session_", "dta_upload_", "dta-export-", "dta_scratch_")
+  if (isTRUE(package_copies)) prefixes <- c(prefixes, "dta_transcode_", "dta_error_spill_")
   paths <- list.files(dir,
-    pattern = "^(dtatools_app_session_|dta_upload_|dta-export-)",
+    pattern = paste0("^(", paste(prefixes, collapse = "|"), ")"),
     full.names = TRUE, all.files = TRUE
   )
   norm <- function(p) normalizePath(p, winslash = "/", mustWork = FALSE)
@@ -4140,6 +5101,70 @@ dta_sweep_session_files <- function(dir = tempdir(), ttl = dta_session_ttl_secon
   old <- paths[!is.na(age) & age > ttl]
   unlink(old, recursive = TRUE, force = TRUE)
   invisible(old)
+}
+
+# The sweep above only sees the temp directory of the process that runs it, and
+# a worker that is killed (or recycled, or loses its host) never runs it again:
+# its temp directory, with the autosave, staged uploads and extractions in it,
+# stays behind. So every worker that runs this app leaves a heartbeat file in
+# its temp directory, touched when a session starts and hourly while one is
+# open, and the sweep also visits the sibling temp directories (`Rtmp*` next to
+# this one) that hold such a file. A sibling whose heartbeat is older than the
+# retention window belongs to a worker that has not been serving a session for
+# that long, and is swept like this process's own: whatever carries the app's
+# prefixes and is older than the window goes; a directory left with nothing but
+# the heartbeat goes too. A running process, or one the platform cannot tell
+# about, is never touched, and neither are directories without the heartbeat.
+dta_worker_heartbeat_name <- "dtatools_worker.heartbeat"
+
+dta_worker_heartbeat <- function(dir = tempdir()) {
+  f <- file.path(dir, dta_worker_heartbeat_name)
+  if (file.exists(f)) {
+    Sys.setFileTime(f, Sys.time())
+  } else {
+    writeLines(as.character(Sys.getpid()), f)
+  }
+  invisible(f)
+}
+
+# TRUE/FALSE when the platform can say whether process `pid` is running (a
+# /proc file system), NA when it cannot.
+dta_pid_alive <- function(pid) {
+  pid <- suppressWarnings(as.integer(pid))
+  if (length(pid) != 1L || is.na(pid) || !dir.exists("/proc/self")) {
+    return(NA)
+  }
+  dir.exists(file.path("/proc", pid))
+}
+
+# How often a session refreshes the heartbeat: hourly, and at least four times
+# per retention window, so a short window cannot outrun it.
+dta_heartbeat_interval_ms <- function(ttl = dta_session_ttl_seconds()) {
+  max(1, min(3600, ttl / 4)) * 1000
+}
+
+dta_sweep_dead_workers <- function(root = dirname(tempdir()), self = tempdir(),
+                                   ttl = dta_session_ttl_seconds(), now = Sys.time(),
+                                   alive = dta_pid_alive) {
+  norm <- function(p) normalizePath(p, winslash = "/", mustWork = FALSE)
+  dirs <- list.dirs(root, recursive = FALSE, full.names = TRUE)
+  dirs <- dirs[grepl("^Rtmp", basename(dirs)) & norm(dirs) != norm(self)]
+  swept <- character(0)
+  for (d in dirs) {
+    hb <- file.path(d, dta_worker_heartbeat_name)
+    age <- as.numeric(difftime(now, file.mtime(hb), units = "secs"))
+    if (!file.exists(hb) || is.na(age) || age <= ttl) next
+    # A process that is still running is idle, not dead, and one the platform
+    # cannot tell about (NA) may be too: only a positively dead one is swept.
+    pid <- tryCatch(readLines(hb, n = 1L, warn = FALSE), error = function(e) NA_character_)
+    if (!identical(alive(pid), FALSE)) next
+    dta_sweep_session_files(dir = d, ttl = ttl, keep = character(0), now = now, package_copies = TRUE)
+    if (!length(setdiff(list.files(d, all.files = TRUE, no.. = TRUE), dta_worker_heartbeat_name))) {
+      unlink(d, recursive = TRUE, force = TRUE)
+    }
+    swept <- c(swept, d)
+  }
+  invisible(swept)
 }
 
 # Format the date/time suffix of an export file name as "%Y-%m-%d_%H-%M".
@@ -4205,31 +5230,75 @@ dta_export_stem <- function(dta, when = Sys.time()) {
 # keep the app's limits, the extracted files on disk and the wording around
 # that one call.
 
+# The limits the app puts on what one load may inflate, for the call that sets
+# them (options() with on.exit, never the R session). An operator's value for
+# either option wins. `bytes_left` is the room the caller has for bytes written.
+# Without them a gzip file the package judged only by size on disk -- a
+# transport library read in place, a .csv.gz or .sas7bdat.gz read whole, a
+# non-UTF-8 text copy -- runs under the package defaults (1e13 bytes: off).
+dta_app_container_options <- function(bytes_left = Inf) {
+  c(
+    list(
+      DTAtools.container_max_bytes = min(getOption("DTAtools.container_max_bytes", 1e10), bytes_left),
+      DTAtools.container_max_member_bytes = getOption("DTAtools.container_max_member_bytes", 2e9)
+    ),
+    dta_scratch_options()
+  )
+}
+
+# The directory the package writes its large working copies to for this
+# session (the UTF-8 copy of a non-UTF-8 file, spilled error rows): one per
+# session, named so that the retention sweep ages it out, and registered with
+# the session's owned paths so that "Start over" deletes it and the sweep spares
+# it while the session lives. Outside a session (tests, scripts) there is none
+# and the package uses tempdir().
+dta_session_scratch_path <- function(token, base = tempdir()) {
+  file.path(base, paste0("dta_scratch_", substr(token, 1L, 16L)))
+}
+
+dta_scratch_options <- function() {
+  token <- tryCatch(shiny::getDefaultReactiveDomain()$token, error = function(e) NULL)
+  if (!is.character(token) || length(token) != 1L || !nzchar(token)) {
+    return(list())
+  }
+  dir <- dta_session_scratch_path(token)
+  dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+  list(DTAtools.temp_dir = dir)
+}
+
 # Load a delivery into a copy of `dta`, under the app's own limits, for this
 # call only: they are never set for the R session, so a run_dta_app() inside a
 # user's session leaves its options alone. `bytes_left` is the session's room
 # for extracted files, `held` the bytes of extracted files it already holds.
-dta_load_delivery <- function(dta, paths, exdir, bytes_left, held = 0) {
+# `route` (named list: file name -> dataset id, or character(0) for "do not load")
+# answers the files that match several datasets; `datasets` limits the delivery to
+# those datasets. Both are passed on to load_delivery() as they are.
+dta_load_delivery <- function(dta, paths, exdir, bytes_left, held = 0, route = NULL, datasets = NULL) {
   # TRUE when the session's remaining room, not the app's cap, is the byte
   # limit of this call AND the session holds extracted files it could free:
   # dta_app_reason() then names the remedy the user has. With nothing held (a
   # small session budget set by the administrator) neither remedy exists, so
   # the refusal names the administrator's limit instead.
   budget_limited <- held > 0 && bytes_left < getOption("DTAtools.container_max_bytes", 1e10)
-  op <- options(
-    DTAtools.container_max_bytes = min(getOption("DTAtools.container_max_bytes", 1e10), bytes_left),
-    DTAtools.container_max_member_bytes = getOption("DTAtools.container_max_member_bytes", 2e9)
-  )
+  op <- options(c(list(cli.width = Inf), dta_app_container_options(bytes_left)))
   on.exit(options(op), add = TRUE)
   missing <- character(0)
+  # A delivery that binds nothing aborts with its routing table attached; a
+  # table with `ambiguous` rows is a question for the user, not a failure.
+  failed_plan <- NULL
   res <- dta_try(withCallingHandlers(
-    DTAtools::load_delivery(dta, files = paths, exdir = exdir, on_error = "skip"),
+    DTAtools::load_delivery(dta,
+      files = paths, exdir = exdir, on_error = "skip",
+      route = route, datasets = datasets
+    ),
     warning = function(w) if (inherits(w, "dta_delivery_refused")) invokeRestart("muffleWarning"),
     message = function(m) {
       if (inherits(m, "dta_delivery_summary")) missing <<- m$missing %||% character(0)
       if (inherits(m, c("dta_delivery_summary", "dta_sas7bdat_in_memory"))) invokeRestart("muffleMessage")
-    }
+    },
+    dta_delivery_nothing_loaded = function(e) failed_plan <<- e$plan
   ))
+  res$plan <- failed_plan
   res$missing <- missing
   res$budget_limited <- budget_limited
   res
@@ -4339,6 +5408,9 @@ dta_delivery_note <- function(plan, n_replaced = 0L, missing = character(0), bud
   why <- function(rows) {
     paste0(rows$name, " (", vapply(rows$reason, dta_app_reason, character(1), budget_limited = budget_limited, USE.NAMES = FALSE), ")")
   }
+  # A plan from before the routing columns (or a hand-made one) lacks them: the
+  # rows are then read as having none of what they describe.
+  if (!"conformant" %in% names(plan)) plan$conformant <- rep(NA, nrow(plan))
   loaded <- plan[plan$status == "loaded", , drop = FALSE]
   text <- sprintf(
     "%s: loaded %d file(s) into %d dataset(s)",
@@ -4348,12 +5420,30 @@ dta_delivery_note <- function(plan, n_replaced = 0L, missing = character(0), bud
   text <- paste0(text, ".")
   if (length(missing) > 0) text <- paste0(text, " Not in the delivery: ", cap(missing), ".")
   unused <- plan[plan$status == "unused", , drop = FALSE]
+  # A file the route sent to no dataset was left out because the user chose so:
+  # it is listed with the files not loaded, not as "Not used".
+  unrouted <- !is.na(unused$reason) & unused$reason == "route sends it to no dataset"
+  chosen_none <- unused$name[unrouted]
+  unused <- unused[!unrouted, , drop = FALSE]
   if (nrow(unused) > 0) {
     shown <- ifelse(
       is.na(unused$reason) | unused$reason == "matches no file entry of the specification",
       unused$name, paste0(unused$name, " (", unused$reason, ")")
     )
     text <- paste0(text, " Not used: ", cap(shown), ".")
+  }
+  # Matches several datasets and the user chose none of them (or the call
+  # carried no answer): the file was not loaded.
+  ambiguous <- plan[plan$status == "ambiguous", , drop = FALSE]
+  not_chosen <- unique(c(ambiguous$name, chosen_none))
+  if (length(not_chosen) > 0) {
+    text <- paste0(text, " Not loaded (no dataset chosen): ", cap(not_chosen), ".")
+  }
+  # Loaded, but not inside the container its entry requires; the finding is on
+  # the document (check() reports it).
+  misfit <- loaded[!is.na(loaded$conformant) & !loaded$conformant, , drop = FALSE]
+  if (nrow(misfit) > 0) {
+    text <- paste0(text, " Not inside its required container: ", cap(unique(misfit$name)), ".")
   }
   refused <- plan[plan$status == "refused", , drop = FALSE]
   if (nrow(refused) > 0) text <- paste0(text, " Refused: ", cap(why(refused), "; "), ".")
@@ -4370,7 +5460,10 @@ dta_delivery_note <- function(plan, n_replaced = 0L, missing = character(0), bud
   }
   if (length(over) > 0) text <- paste0(text, " More files than a slot accepts: ", cap(over), ".")
   text <- paste0(text, " Run Check to validate.")
-  list(type = if (nrow(refused) + nrow(failed) + length(over) > 0) "warning" else "message", text = text)
+  list(
+    type = if (nrow(refused) + nrow(failed) + nrow(ambiguous) + nrow(misfit) + length(over) > 0) "warning" else "message",
+    text = text
+  )
 }
 
 # The one place a package message that names an R option is turned into app

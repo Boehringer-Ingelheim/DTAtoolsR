@@ -11,13 +11,7 @@ skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
 
-lint_input <- function(filename) {
-  path <- app_fixture_path(filename)
-  data.frame(
-    name = filename, size = file.size(path), type = "",
-    datapath = path, stringsAsFactors = FALSE
-  )
-}
+lint_input <- function(filename) app_upload_value(app_fixture_path(filename), filename)
 
 lint_clean_session <- function() {
   unlink(
@@ -389,10 +383,7 @@ lint_bad_file <- function() {
   writeLines(bad, path)
   list(
     txt = txt, bad = bad,
-    input = data.frame(
-      name = "bad.yaml", size = file.size(path), type = "", datapath = path,
-      stringsAsFactors = FALSE
-    )
+    input = app_upload_value(path, "bad.yaml")
   )
 }
 

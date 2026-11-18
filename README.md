@@ -44,6 +44,8 @@ once installed).
   allowed values, and regex patterns
 - Cross-column rule validation (`col_condition`, `col_range`,
   `col_unique`, `group_condition`)
+- Matrix validation (`type: matrix`, `DTADataSetMatrix`) for omics count and
+  genotype matrices: row labels, column labels, dimensions and every cell
 - File-presence validation (`DTADataSetFile`) for non-tabular deliverables
 - Detailed, queryable validation results (`results()`, `messages()`,
   `inspect()`, `explain_messages()`)
@@ -163,8 +165,8 @@ section](vignettes/DTAtools.Rmd) for the full treatment.
 `DTAtools` organises objects into a layered hierarchy that maps directly to
 how a Data Transmission Specification (DTS) is structured — a top-level `DTA`
 holding metadata and one or more datasets, each either fully-validated
-tabular data (`DTADataSetTabular`) or a simple file-presence check
-(`DTADataSetFile`):
+tabular data (`DTADataSetTabular`), an omics matrix (`DTADataSetMatrix`) or a
+simple file-presence check (`DTADataSetFile`):
 
 <p align="center">
   <img src="img/DTAtools_architecture.svg" alt="DTAtools package architecture diagram" width="100%" />
@@ -205,6 +207,10 @@ DTA                              ← top-level agreement container
     |   |
     │   └── tables (named list)  ← actual data as Arrow Tables
     │       └── <table_name>     ← populated via load_file() or constructor
+    │
+    ├── DTADataSetMatrix         ← omics matrix (DTADataSetTabular subclass):
+    |                                row_labels + columns/rows/cells, no
+    |                                per-column specs
     │
     └── DTADataSetFile           ← non-tabular: file presence/readability check
         ├── file_paths           ← bound file paths (via load_file() or paths=)
@@ -391,16 +397,103 @@ match it, exactly as if the files had been delivered loose:
 ```r
 dta <- load_delivery(dta, "sdtm.zip")
 dta <- load_delivery(dta, "sdtm.xpt")
-attr(dta, "last_delivery") # what was loaded, opened, unused, ignored or refused
+attr(dta, "last_delivery") # what was loaded, opened, unused, ignored, refused or ambiguous
 ```
 
 A library is split into one file per member, named after the member in lower
 case: member `AE` is offered as `ae.xpt`, which an entry `filename: ae.xpt`
-with `type: xpt` takes. A file entry may say where its file must come from,
-in one line: `container: sdtm.zip` (`*` and `?` are wildcards; letter case
-must match). A `.zip` or `.xpt` that a `type: any` entry takes as a deliverable,
-by its name or because its `extensions` list `zip` or `xpt`, stays one file and
-is not opened, unless an entry declares it as its `container`.
+with `type: xpt` takes. A `.zip` or `.xpt` that a `type: any` entry takes as a
+deliverable, by its name or because its `extensions` list `zip` or `xpt`, stays
+one file and is not opened, unless an entry declares it as its container.
+
+**The `containers:` section.** An agreement names its containers once, at
+document level, and file entries refer to them:
+
+```yaml
+containers:
+  - id: sdtm
+    filename: "STUDY_SDTM_*.zip"   # * and ? are wildcards; letter case must match
+    description: All SDTM domains as SAS transport files.   # shown in exported agreements
+    default: true                  # every entry without a container of its own belongs here
+  - id: adam
+    filename: adam.zip
+datasets:
+  - id: adsl
+    files:
+      filename: adsl.xpt
+      type: xpt
+      container: adam              # a container id
+  - id: define
+    files:
+      filename: define.pdf
+      type: any
+      container: none              # needs no container: exempt from the default
+```
+
+In R the section is `DTA(containers = list(DTAContainer("sdtm", "STUDY_SDTM_*.zip")))`.
+`container_assignments(dta)` lists where every file entry must arrive.
+
+- **Ids and file names.** A reference without a dot is a container id and must
+  name a container of the document. A reference with a dot is a file name
+  (`container: sdtm.zip`, as in 0.27.0): it resolves to the container with that
+  file name, otherwise it declares one, so a specification without a
+  `containers:` section works unchanged. Prefer the id: renaming the archive is
+  then one edit, in the container.
+- **The default container.** `default: true` (at most one container) makes every
+  entry without its own reference belong to that container, datasets added
+  later included: "everything arrives in the zip". `container: none` exempts
+  an entry, e.g. a `define.pdf` sent separately.
+- An entry belongs to at most one container.
+
+**Individual checks.** Every dataset and every file can be checked on its own,
+while the supplier is still producing the rest. A file that is not inside its
+container is still loaded and its content validated. Packaging is a verdict of
+its own: `container_findings(dta)` lists every file that is not known to be
+inside the container its entry requires, and `check()` shows it beside the
+content verdict:
+
+| Finding | When | Verdict |
+| --- | --- | --- |
+| `outside` | delivered with `load_delivery()` loose, or inside another container | Validation FAILED |
+| `unverified` | loaded on its own with `load_file()` (the individual check) | Validation INCOMPLETE |
+| `unrecorded` | no record of how it arrived (a table assigned to `@tables`) | Validation INCOMPLETE |
+
+So `ae.xpt` checked alone reports "content passed, packaging not verified",
+while loose files delivered where the agreement requires a zip fail. Nothing
+says PASSED while a finding exists. `check()` can therefore fail or be
+incomplete on packaging alone; `validation_status()` of a dataset still judges
+content only. `load_file()` refuses a `.zip` (or an `.xpt` the dataset's entry
+does not read) and points to `load_delivery(x, files, datasets = "<id>")`.
+
+**Ambiguity and `route`.** Containers rank an entry instead of excluding it: a
+file that fits an entry's container wins over one that does not, and a misfit
+is taken only when nothing ranks higher. When the same-rank candidates are
+pattern entries of several datasets, the file is not guessed: it is not loaded,
+`last_delivery` has the status `ambiguous` with the `candidates`, and you
+choose with `route`, a named list from file name to dataset id
+(`character(0)` loads it nowhere). The app asks with a table instead. Two
+datasets that name the same file literally both get it.
+
+```r
+dta <- load_delivery(dta, files, route = list("lb_supp.csv" = "lb_supp"))
+```
+
+**`datasets`.** `load_delivery(dta, "sdtm.zip", datasets = c("ae", "dm"))` loads
+only those datasets' files from the delivery (the rest are `unused`, and only
+the chosen files are extracted). This is what dropping an archive on one
+dataset's upload zone in the app does.
+
+**File names must not overlap across datasets.** An agreement in which one file
+name could belong to two datasets is ambiguous. `file_name_conflicts(dta)` lists
+pattern entries of different datasets that take the same file, with an example
+file name; `lint_dta()` reports `file_name_conflict` as a warning,
+`validate_template()` fails a template that has one, and the app refuses an
+edit that introduces one. For `^lb.*[.]csv$` and `^lb_supp.*[.]csv$` use distinct
+prefixes (`^lb_main.*`, `^lb_supp.*`) or exclude the other
+(`^lb([^_].*)?[.]csv$`).
+
+Objects saved by an older version are upgraded when they are used;
+`upgrade_dta()` does it explicitly.
 
 An archive is inspected before anything is extracted, and refused as a whole
 when an entry name would escape its folder (absolute, `..`, a drive letter),
@@ -418,7 +511,15 @@ default `tempdir()`), also when its table is then streamed.
 
 Validation results name the dataset and the table. For a table read into
 memory the validation report does not name the zip or library it came from;
-the summary `load_delivery()` prints and its `last_delivery` table do.
+the summary `load_delivery()` prints and its `last_delivery` table do, and the
+report's inputs table has a Container column. The exported agreement gets a
+Containers section (container, description, files) after Process Information.
+
+**In the app**, a Delivery zone in the sidebar takes containers and loose
+files for the whole document and opens a Delivery view; ambiguous files are
+asked in a dialog. A container manager (Metadata tab, or the sidebar) edits
+containers and assigns files, and the file editor's "Delivered inside" is a
+select. A dataset's own upload zone takes only that dataset's files.
 
 ### Validating a file too large to load
 
@@ -610,10 +711,88 @@ refused as it is offered, rather than at validation time. To validate the
 dataset instead (see [SAS datasets](#sas-datasets-sas7bdat)). To validate a
 `.xpt`, use `type: xpt`.
 
+### Validate an omics matrix (`type: matrix`)
+
+A count or expression matrix has one or a few leading **row label columns**
+and then hundreds or thousands of **data columns** that all mean the same
+thing — one per sample, say. Their names change with every delivery, so they
+cannot be listed as `columns:`. A `type: matrix` dataset describes them by
+rule instead:
+
+```yaml
+datasets:
+  - id: gene_counts
+    type: matrix
+    files: { filename: "matrix_gene_counts.tsv", type: tsv }
+    row_labels:                 # the leading columns, in file order
+      - id: GENE_ID
+        header: gene_id         # the header line's text above this column
+        type: SAS Char
+        nullable: No
+      - id: GENE_NAME
+        header: gene_name
+        type: SAS Char
+        nullable: Yes
+    matrix:
+      columns:                  # every column after the row labels
+        label: Sample ID
+        pattern: "^S[0-9]{4}$"  # what every column label must look like
+        count: { min: 1, max: 384 }
+      rows:
+        key: GENE_ID            # unique, never missing
+        count: { min: 1 }
+      cells:
+        type: SAS Num
+        nullable: No
+        range: { min: 0 }
+        infinite: No
+```
+
+| Block | Says | Keys |
+| --- | --- | --- |
+| `row_labels` | The leading columns, matched by position. Ordinary column specs, plus `header`. | every [column key](#yaml-column-format), `header` |
+| `matrix.columns` | What the labels of the data columns look like, and how many there may be. Optional. | `label`, `description`, `pattern`, `values`, `length`, `count` |
+| `matrix.rows` | Which row label identifies a row, and how many rows there may be. Optional. | `key` (default: the first row label), `count` |
+| `matrix.cells` | What every cell may hold. Required. | `type` (`SAS Num`, `SAS Int`, `SAS Char`), `nullable`, `range: {min, max}`, `infinite`, `values`, `pattern`, `length`, `format`, `label`, `description` |
+
+`header` is what the file's header line holds above a row label column. Left
+out, it is the row label's `id`, as for a tabular column. Otherwise:
+
+| File written by | Write on the row label |
+| --- | --- |
+| R `write.csv(x)`, or pandas `to_csv()` with an index that has no name: an empty field | `header: ""` |
+| R `write.table(x)` with row names: no field at all, the header is one field shorter than the rows | `header: No` (first row label only) |
+| a writer that names the column differently from your `id` | `header: gene_id` |
+
+A `count` is a whole number for exactly that many, or `{min, max}` with either
+side optional; the defaults require at least one data column and one row. A
+column label must always be present and unique.
+
+```r
+dta <- read_dta_from_yaml(system.file("extdata", "matrix_dta.yaml", package = "DTAtools"))
+dta <- load_file(
+  dta,
+  dataset = "gene_counts",
+  file = system.file("extdata", "matrix_gene_counts.tsv", package = "DTAtools")
+)
+dta <- check(dta)
+messages(dta)
+```
+
+`check()` reports a wrong header text, a column label that breaks the rule or
+is repeated, too many or too few data columns or rows, a repeated row key, and
+every cell that is missing, out of range, infinite or not of the declared
+type — with its row and the label of its column. A file that cannot be a matrix
+of the declared shape (a first data row with more or fewer fields than the
+header implies, a `#` preamble, another separator) is refused by `load_file()`
+with the reason. The full key reference, the table of how each raw cell is
+read and the list of what is not supported are in
+[`DTA_YAML_GUIDE.md`](DTA_YAML_GUIDE.md) section 6 and in the vignette.
+
 ### Building a full `DTA` object, mixing dataset types
 
-A single `DTA` object can hold **any mix** of `DTADataSetTabular` and
-`DTADataSetFile` datasets alongside its `metadata`, letting you validate an
+A single `DTA` object can hold **any mix** of `DTADataSetTabular`,
+`DTADataSetMatrix` and `DTADataSetFile` datasets alongside its `metadata`, letting you validate an
 entire delivery — column-level content *and* file presence — in one
 `check()` call. This is exactly what `read_dta_from_yaml()` builds for you
 under the hood when loading a full DTA YAML.
@@ -746,6 +925,7 @@ by the same renderers the built-in layout uses:
 | `{AUTHORIZED_CORRECTIONS_LIST}` | the authorized-for-corrections names |
 | `{STUDY_TABLE}` | structured study and protocol identifiers |
 | `{AGREEMENT_SECTIONS}` | titled narrative sections in their stored order |
+| `{CONTAINERS_TABLE}` | the delivery containers: an intro sentence and a table of container, description and files; omitted when there are none |
 
 The first four take an optional dataset id — `{COLUMN_SPECS:ADSL}` renders
 one dataset, the bare form renders every applicable one under its own heading.
@@ -778,7 +958,8 @@ Seven placeholders resolve inside a repetition to that one dataset's own values:
 `{DATASET_ID}`, `{DATASET_NAME}` (the id when the dataset has no name),
 `{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`, `{DATASET_FILE_COUNT}`,
 `{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}` (the last two are `0`
-for a non-tabular dataset). A dataset block marker
+for a non-tabular dataset; a matrix dataset counts its row-label columns, not
+its data columns). A dataset block marker
 written bare inside a region binds to the current dataset and contributes only
 its table, without the heading it would generate outside a region — the
 region's own paragraphs are what supply the heading. An explicit
@@ -825,7 +1006,10 @@ write_validation_report(dta, "validation_report.html")
 YAML, upload a data file per dataset, run validation, browse the errors, edit
 the metadata and export the document — including the HTML validation report,
 via a "Report" download button alongside the CSV/TSV/XLSX exports. It needs
-the suggested packages **shiny**, **bslib** and **DT**.
+the suggested packages **shiny**, **bslib** and **DT**. Datasets of every type
+— tabular, matrix and file — can be added and edited there; a matrix dataset
+gets a Row labels editor and a Matrix layout editor for its data columns, size
+and cell values.
 
 ```r
 run_dta_app()
@@ -1268,8 +1452,10 @@ row-level validation.
 |----------------------------|--------------------------------------------------------------|
 | `DTA`                     | Top-level container: metadata + multiple datasets           |
 | `DTAMetaData`             | Agreement metadata (title, version, contacts, transmission) |
+| `DTAContainer`            | A delivery archive named once at document level (`id`, `filename`, `description`, `default`) |
 | `DTADataSet`              | Abstract base class for all dataset types                   |
 | `DTADataSetTabular`       | Dataset with column specs, rules, and data tables            |
+| `DTADataSetMatrix`        | Omics matrix: row labels + column-label, row and cell checks |
 | `DTADataSetFile`          | Dataset that checks file presence and readability only       |
 | `DTAColumnSpecCollection` | Named list of column specs + optional list of rules           |
 | `DTAColumnSpec`           | Single column definition (type, nullable, values, pattern)   |
@@ -1293,7 +1479,7 @@ row-level validation.
 | `import_specs_from_yaml(file)`| Load bare column specs + rules from a standalone YAML      |
 | `columns_specs_from_word(file)`| Import column specs from a Word table                     |
 | `load_file(dta, dataset, file, stream)`| Read a data file into a dataset using its YAML-defined handler; `stream` keeps it lazy instead |
-| `load_delivery(x, files, stream, on_error, exdir)` | Load loose files, `.zip` archives and SAS transport libraries into the datasets whose entries match them |
+| `load_delivery(x, files, stream, on_error, exdir, route, datasets)` | Load loose files, `.zip` archives and SAS transport libraries into the datasets whose entries match them; `route` settles an ambiguous file, `datasets` restricts the load to chosen datasets |
 | `read_file(handler, file)`     | Read a file using a file handler (`DTAFileCSV`, etc.)       |
 | `open_file(handler, file)`     | Open a file lazily as an Arrow `Dataset` (the counterpart of `read_file()`) |
 | `check(x, force, persist, quiet, batch_rows, max_errors, …)` | Validate all datasets/tables; returns the updated object |

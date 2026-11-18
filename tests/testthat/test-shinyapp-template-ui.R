@@ -92,6 +92,40 @@ write_template_with_party_slot <- function(root, id = "party_tpl") {
   )
 }
 
+# A creation template whose datasets hold a tabular one with spaced column ids
+# and a matrix whose row label spells its header text under `header:`.
+write_spaced_template <- function(root, id = "spaced_tpl") {
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      paste0("id: ", id),
+      'version: "1.0"',
+      "label: Spaced Template",
+      "base:",
+      "  metadata:",
+      "    title: T",
+      '    version: "1.0"',
+      "datasets:",
+      "  - id: spaced_ds",
+      "    type: tabular",
+      "    files: { filename: spaced.csv, type: csv }",
+      "    columns:",
+      "      - { id: Subject ID, type: SAS Char, nullable: No }",
+      "      - { id: Visit Date, type: SAS Char, nullable: Yes }",
+      "      - { id: Dose mg/kg, type: SAS Num, nullable: Yes }",
+      "  - id: counts",
+      "    type: matrix",
+      "    files: { filename: counts.tsv, type: tsv }",
+      "    row_labels:",
+      "      - { id: SAMPLE_ID, header: Sample ID, type: SAS Char, nullable: No }",
+      "    matrix:",
+      "      cells: { type: SAS Num, nullable: No }",
+      "options: []"
+    ),
+    lib_path(root, paste0(id, ".dta-template.yaml"))
+  )
+}
+
 # Open the picker and force-read all THREE of its outputs (a renderUI is
 # never evaluated unless a test reads it, so a crash in any of them would
 # otherwise pass silently), then move to the options step by setting the
@@ -549,6 +583,120 @@ test_that("creating from a template sets rv$dta and stamps metadata.template", {
   })
 })
 
+test_that("a document created from a template can edit and rename its spaced columns, and a matrix still refuses a spaced row label", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+  write_spaced_template(root)
+
+  shiny::testServer(app_server_dir(), {
+    pick_template_step1(session, output, "spaced_tpl", "1.0")
+    session$setInputs(tmpl_carry_source = "none")
+    session$setInputs(template_create_confirm = 1)
+
+    expect_s3_class(rv$dta, "DTAtools::DTA")
+    ids <- function(dta, ds) names(DTAtools::datasets(dta, ds)@specs@columns)
+    # the template's ids reached the document exactly as written
+    expect_identical(ids(rv$dta, "spaced_ds"), c("Subject ID", "Visit Date", "Dose mg/kg"))
+
+    set_column <- app_fn("dta_set_column")
+
+    # a label change on a spaced column saves
+    saved <- set_column(
+      rv$dta, "spaced_ds",
+      id = "Subject ID", label = "Subject", type = "Char", nullable = FALSE
+    )
+    expect_true(saved$ok)
+    expect_identical(DTAtools::datasets(saved$value, "spaced_ds")@specs@columns[["Subject ID"]]@label, "Subject")
+    expect_identical(ids(saved$value, "spaced_ds"), c("Subject ID", "Visit Date", "Dose mg/kg"))
+
+    # renaming a column to a spaced id keeps its place
+    renamed <- set_column(
+      rv$dta, "spaced_ds",
+      id = "Visit Date (UTC)", old_id = "Visit Date", type = "Char", nullable = TRUE
+    )
+    expect_true(renamed$ok)
+    expect_identical(ids(renamed$value, "spaced_ds"), c("Subject ID", "Visit Date (UTC)", "Dose mg/kg"))
+
+    # a matrix row label may not: its header text goes under `header`
+    row_label <- set_column(rv$dta, "counts", id = "Sample Name", type = "Char", nullable = TRUE)
+    expect_false(row_label$ok)
+    expect_match(row_label$error, "Row-label column ID", fixed = TRUE)
+    expect_null(row_label$value)
+  })
+})
+
+test_that("an inline matrix with a spaced row-label id fails creation with ok = FALSE", {
+  def <- list(
+    id = "inline_matrix", label = "Inline matrix",
+    base = list(metadata = list(title = "T", version = "1.0")),
+    datasets = list(list(
+      id = "counts", type = "matrix",
+      files = list(filename = "c.tsv", type = "tsv"),
+      row_labels = list(list(id = "Sample ID", type = "SAS Char", nullable = FALSE)),
+      matrix = list(cells = list(type = "SAS Num", nullable = FALSE))
+    ))
+  )
+
+  res <- app_fn("create_dta_from_template")(def, file.path(tempdir(), "inline_matrix.dta-template.yaml"))
+
+  expect_false(res$ok)
+  expect_null(res$value)
+  # the lint finding that names the cause travels with the failure
+  expect_true("matrix_row_label_id_invalid" %in% res$findings$code)
+})
+
+test_that("a patch that adds a spaced row label to a matrix is refused by the dataset builder, by class", {
+  body <- list(
+    id = "counts", type = "matrix",
+    files = list(filename = "c.tsv", type = "tsv"),
+    row_labels = list(list(id = "GENE_ID", type = "SAS Char", nullable = FALSE)),
+    matrix = list(cells = list(type = "SAS Num", nullable = FALSE))
+  )
+  patch <- app_fn("apply_dataset_patch")
+  for (verb in list(
+    list(add_columns = list(list(id = "Gene Name", type = "SAS Char", nullable = TRUE))),
+    list(columns = list(add = list(list(id = "Gene Name", type = "SAS Char", nullable = TRUE))))
+  )) {
+    patched <- patch(body, verb)$dataset
+    # The patch itself only edits the list; the id is judged when the dataset is built.
+    expect_identical(
+      vapply(patched$row_labels, function(x) x$id, ""),
+      c("GENE_ID", "Gene Name"),
+      info = names(verb)
+    )
+    expect_error(
+      DTAtools::dta_dataset_from_list(patched),
+      class = "dta_spec_invalid_id",
+      info = names(verb)
+    )
+  }
+  # the same label under an unspaced id, the exact header text in `header`, builds
+  ok <- patch(body, list(add_columns = list(
+    list(id = "GENE_NAME", header = "Gene Name", type = "SAS Char", nullable = TRUE)
+  )))$dataset
+  built <- DTAtools::dta_dataset_from_list(ok)
+  expect_identical(names(built@specs@columns), c("GENE_ID", "GENE_NAME"))
+  expect_identical(built@specs@columns[["GENE_NAME"]]@header, "Gene Name")
+})
+
+test_that("a patch that adds a spaced column to a tabular dataset builds, ids as written", {
+  body <- list(
+    id = "tab", type = "tabular",
+    files = list(filename = "t.csv", type = "csv"),
+    columns = list(list(id = "Subject ID", type = "SAS Char", nullable = FALSE))
+  )
+  patched <- app_fn("apply_dataset_patch")(
+    body,
+    list(add_columns = list(list(id = "Visit Date (UTC)", type = "SAS Char", nullable = TRUE)))
+  )$dataset
+
+  built <- DTAtools::dta_dataset_from_list(patched)
+
+  expect_identical(names(built@specs@columns), c("Subject ID", "Visit Date (UTC)"))
+})
+
 test_that("a creation failure leaves the modal open instead of losing the user's choices", {
   local_clean_template_env()
   app_fn("dta_template_index_invalidate")()
@@ -687,10 +835,7 @@ test_that("carry-over 'From a file' reads the uploaded DTA's metadata", {
     ),
     anc_path
   )
-  anc_upload <- data.frame(
-    name = "ancestor.yaml", size = file.size(anc_path), type = "",
-    datapath = anc_path, stringsAsFactors = FALSE
-  )
+  anc_upload <- app_upload_value(anc_path, "ancestor.yaml")
 
   shiny::testServer(app_server_dir(), {
     pick_template_step1(session, output, "filecarry2_tpl", "1.0")
@@ -740,10 +885,7 @@ test_that("a carry-over file chosen in an earlier dialog is not silently reused 
     ),
     anc_path
   )
-  anc_upload <- data.frame(
-    name = "ancestor.yaml", size = file.size(anc_path), type = "",
-    datapath = anc_path, stringsAsFactors = FALSE
-  )
+  anc_upload <- app_upload_value(anc_path, "ancestor.yaml")
 
   shiny::testServer(app_server_dir(), {
     pick_template_step1(session, output, "stalecarry_tpl", "1.0")

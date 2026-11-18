@@ -4,6 +4,394 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] - 2026-11-18
+
+### Added
+
+- **Templates can reuse the study identity.** `${study.id}` and
+  `${study.protocol_id}` in a dataset body (a dataset template's `dataset:` or
+  an inline `datasets:` entry) or in the document metadata (a title, a clause)
+  become the document's `metadata.study.id` / `protocol_id` when it is
+  created, so one answer drives a file name pattern
+  (`filename: ^s${study.id}_[0-9]{12}\.csv$`) and a column's allowed value
+  (`values: ${study.id}`). Inside a regular expression -- a pattern
+  `filename`, a column `pattern:`, a rule `pattern` condition -- the identifier
+  is escaped, so `1199.187` does not also accept `1199x187`. Creating a
+  document that uses a study token it has no value for fails and names the
+  dataset or metadata field. The value is copied in at creation; editing the
+  study identity later does not update the datasets. `validate_template()`,
+  the template guide and the template history stand in the study option's
+  first `choices:` suggestion, else `STUDY-ID` / `PROT-ID`; a rebase uses the
+  document's own study identity.
+- **`validate_template()` warns about a placeholder that stays literal text**
+  (`token_unknown`): a `${...}` token other than `${today}`, `${version}`,
+  `${study.id}` and `${study.protocol_id}` in a creation or dataset template,
+  or a `${version}` inside a dataset, is never substituted, and a filename
+  pattern containing one matches nothing.
+- **`validate_template()` warns about a study token nothing can answer**
+  (`study_token_unanswered`): the template uses `${study.id}` /
+  `${study.protocol_id}` but neither an option nor its base metadata supplies
+  that field, so a new document cannot be created from it. Both new codes are
+  warnings: `strict = TRUE` aborts on errors alone, but a pipeline that runs
+  `lint_template_repo(fail_on = "warning")` will now fail on a library that
+  triggers either.
+- **A Copy button on the Raw YAML tab.** One click puts the editor's whole
+  text on the clipboard, including edits not yet applied. It is shown while the
+  document is read-only as well.
+- **Containers are a section of the specification.** A top-level `containers:`
+  list names the delivery archives once (`id`, `filename`, `description`,
+  `default`); file entries refer to a container by its id in `container:`, so
+  renaming an archive is one edit. In R, `DTAContainer()` builds one and
+  `DTA(containers = )` takes them. A reference with a dot is still a file name
+  (`container: sdtm.zip`, as in 0.27.0) and works without a `containers:`
+  section; `container: none` exempts an entry.
+- **A default container.** `default: true` on one container makes every file
+  entry without a container of its own belong to it, datasets added later
+  included: "everything arrives in the zip". `container_assignments()` lists
+  where every file entry must arrive.
+- **Individual checks.** A file that is not inside its container is still
+  loaded and its content validated, so a supplier can check a file while the
+  rest is still being produced. Packaging is a verdict of its own:
+  `container_findings()` lists every file that is `outside` its container
+  (delivered loose or in another container: "Validation FAILED"), `unverified`
+  (loaded on its own with `load_file()`) or `unrecorded` (no record of how it
+  arrived; both "Validation INCOMPLETE"). `check()` prints them under
+  "Containers", signals a warning of class `dta_container_mismatch`, and
+  returns them in the new `last_container_findings` attribute. A dataset's
+  `validation_status()` still judges content only. Every loaded file now carries
+  a provenance record (`DTADataSet@provenance`) of the file name and containers
+  it arrived in.
+- `load_delivery()` gains `route` and `datasets`. A file that fits the file
+  entries of several datasets equally well is no longer guessed: its row in
+  `last_delivery` has the status `ambiguous` and lists the `candidates`, and
+  `route = list("lb_supp.csv" = "lb_supp")` chooses (`character(0)` loads it
+  nowhere). `datasets` loads only those datasets' files from a delivery; files
+  meant for the others are `unused`, and only the chosen files are extracted.
+  `last_delivery` gains the columns `conformant` and `candidates`.
+- The validation report names the container of every input (a Container column
+  in the inputs table) and lists files outside their container in its rows and
+  messages.
+- Exported agreements (Word and Markdown) get a Containers section after
+  Process Information, with each container's file name, description and files;
+  the "Delivered In" column shows the container's file name, default included
+  (`Not required` for `none`). A new block marker `{CONTAINERS_TABLE}` renders
+  the same intro and table in a custom Word template.
+- `file_name_conflicts()` finds file entries of different datasets that could
+  take the same file name, with an example name both take. `lint_dta()` reports
+  such a pair as the warning `file_name_conflict`, `validate_template()` as an
+  error, and the app refuses an edit that introduces one (documents that are
+  opened or applied as raw YAML are accepted and show the conflict as a warning). The check
+  is sound but not complete: it reports only conflicts it can show with a real
+  file name, and does not analyse look-arounds or back-references.
+- New lint codes: `container_invalid`, `container_duplicate`,
+  `file_container_unknown` (errors), `container_unused`,
+  `container_reference_by_filename` and `document_field_unknown` (warnings).
+- `upgrade_dta()` re-stamps a `DTA` or dataset saved by an older version with
+  the current classes. It is also done automatically when such an object is
+  used, and when the app restores a session.
+- The app has a **Delivery** zone in the sidebar, under the datasets and shown
+  for every document (also one with a single dataset), that takes containers and
+  loose files for the whole document, routes the unambiguous files and opens a
+  **Delivery view** (containers, members, the routing table, "Check all"). Files
+  that match several datasets are asked in a dialog, one row per file with the
+  candidate datasets and "Don't load". A **container manager** (a Containers
+  section on the Metadata tab, or "Containers..." in the sidebar) edits
+  containers and assigns files to them, and the file editor's "Delivered inside"
+  is now a select of the document's containers. Findings appear wherever a
+  verdict is shown: the summary banner, the validation summary, the sidebar, the
+  Delivery view and the loaded-file chips.
+- **Matrix datasets (`type: matrix`, `DTADataSetMatrix`).** For omics-style
+  matrices (gene counts, miRNA counts, genotypes) where the data columns are
+  samples and are far too many, or too variable, to list one by one. A matrix
+  dataset lists its leading row label columns under `row_labels:` and describes
+  the data columns once under `matrix:`, in three blocks: `columns` (what every
+  column label must look like, and how many data columns there may be), `rows`
+  (the row key and the number of rows) and `cells` (type, range, missing,
+  infinite; `NaN` is never a value). A row label is an ordinary column
+  specification with one more key, `header`: the text the header line holds
+  above the column. Left out it is the row label's `id`, as for a tabular
+  column; `""` is an empty field (R `write.csv()`, a pandas index without a
+  name) and `No` says the header line has no field there at all (R
+  `write.table()` with row names; first row label only). A count is a whole
+  number or `min`/`max`. It works in memory and streamed, inside containers and
+  `load_delivery()`, in exported documents (a "Matrix layout" table that states
+  the file layout and the header line in words) and in the app, where a matrix
+  dataset can be added (Add dataset -> Matrix asks for the ID of the first
+  column, the header text above it and the cell type), its row labels edited
+  like columns, each with its header text, its data columns, size and cell
+  values edited under Matrix layout, and its rules edited on the row label
+  columns. The format is documented key by key in `DTA_YAML_GUIDE.md` section 6
+  and in the README. Example data: `inst/extdata/matrix_dta.yaml`.
+- **`validate_template()` warns about a dataset that declares no files**
+  (`dataset_no_files`). A template dataset with no `files:` entry used to
+  validate clean and create a dataset nothing could be loaded into, whose Edit
+  files list in the app read "No files declared yet". It is reported for a
+  dataset template whose body declares none (`files: []` included; the singular
+  `file:` counts) and for each dataset a non-abstract creation template builds,
+  so a creation template that gets its files from a patch or a mixin is not
+  reported itself; a dataset template that declares none still is, wherever it
+  is imported. A warning only: `strict = TRUE` aborts on errors alone, but a
+  pipeline that runs `lint_template_repo(fail_on = "warning")` will now fail on
+  a library with such a dataset template.
+- **Spaces and punctuation in column ids.** A column `id` is the exact text of
+  its header, so a header such as `Subject ID`, `Visit Date (UTC)` or
+  `Dose mg/kg` can now be declared and validated. The id is compared with the
+  header character for character: case-sensitive, so `Subject  ID` (two spaces)
+  is not `Subject ID`. An id cannot start or end with a space or contain
+  whitespace other than spaces between characters (a tab or a line break, say).
+  Matrix row-label ids still cannot contain any whitespace (a row label's exact
+  header text is its `header:`), and neither can rule ids (a space in one is
+  written as an underscore when a YAML file is read). The app's column editor
+  accepts spaced column ids as well. `DTA_YAML_GUIDE.md` lists the ids YAML
+  reads as something other than text and which need quotes: `Y`, `No`, `null`,
+  `007`, `0.5`, `%Change`, `{id}`, `*x` and more.
+- New lint codes: `matrix_row_label_id_invalid` (error: a matrix row-label `id`
+  contains whitespace; write the exact header text under `header`) and
+  `column_id_shadows_field` (warning: a column `X.<field>` beside a column `X`,
+  such as `Specimen` and `Specimen.type`, where a template path reads
+  `columns.Specimen.type` as the field of `Specimen`).
+
+### Changed
+
+- **`${today}` is now resolved in an inline dataset of a creation template.**
+  It always was in a dataset template's body; in a creation template's own
+  `datasets:` entries it was left as literal text.
+- **A creation template builds its datasets after its metadata.** The study
+  identity has to be settled before a dataset body can use it. Visible only in
+  which error a template with several faults reports first.
+- **Breaking:** a file that arrives outside the container its entry names is
+  now loaded (it was listed as unused), and `check()` reports it: a file `outside` its
+  container fails the run ("Validation FAILED") and an `unverified` or
+  `unrecorded` file leaves it incomplete, so a `DTA` can fail or be incomplete on
+  packaging alone. `last_validation_ok` is `FALSE` for either.
+- **Breaking:** pattern entries of different datasets that match the same file
+  no longer both take it: the file is `ambiguous` and is not loaded until
+  `route` (or the app) chooses. Containers now rank an entry instead of
+  excluding it, and an entry whose container fits the file outranks one of the
+  same kind with no container, within a dataset and across datasets.
+- **Breaking:** `load_file()` refuses a `.zip` (and an `.xpt` the dataset's entry
+  does not read) with class `dta_load_file_container`, pointing to
+  `load_delivery(datasets = )`.
+- **Breaking:** `validate_template()` fails a template whose datasets' patterns
+  overlap (`file_name_conflict`), so a template library that passed before can
+  fail.
+- **Breaking:** a dataset's own drop zone in the app takes only that dataset's
+  files; a dropped `.zip` or `.xpt` is opened for that dataset alone
+  (`load_delivery(datasets = )`) and no longer routes across all datasets. Use
+  the sidebar Delivery zone for a whole delivery.
+- `last_delivery` has 12 columns instead of 10 (`conformant` and `candidates`
+  added; the `status` `ambiguous` is new).
+- Exported agreements get a Containers section for implied containers too (a
+  `container: sdtm.zip` without a `containers:` section).
+- `DTAFile` accepts a container id as `container`, as well as a file name or
+  `none`.
+- Objects saved by an older version (autosaved sessions, `.rds` files) are
+  upgraded when used (see `upgrade_dta()`), which also fixes the failure of
+  restored objects that lacked newer properties such as `file_handlers`.
+- A dataset-only YAML no longer flags an undotted `container:` value at lint
+  time: it is a container id, which only the document can resolve, and it fails
+  at `load_delivery()` instead.
+- The app's sidebar dataset list scrolls in its own box once it is long, with
+  the "Datasets" label pinned, so what follows it stays in reach.
+- Validation of very wide files is faster: columns are coerced one by one, and
+  the reader is given a schema instead of inferring one.
+- **A file the app refuses to load says why, and keeps saying it.** The reason
+  (for a matrix, which header field is missing or which delimiter the file
+  seems to use) is shown with its line breaks, the notice stays until it is
+  closed, and the refusal is listed in that dataset's validation messages until
+  a file loads in its place. Before, the reason was run together into one line
+  and disappeared after ten seconds.
+- **Breaking:** the Word specification import
+  (`columns_specs_from_word()`) keeps the spaces typed in an id. A cell
+  `STUDY ID` now imports as `STUDY ID`, not `STUDYID`, so a specification
+  imported again from an unchanged Word file can come out with different column
+  ids. The ends of a cell are still trimmed, and any other whitespace inside it
+  (a line break, a tab, a thin or ideographic space) is still dropped (`CONSENT_` +
+  line break + `DATE` is `CONSENT_DATE`).
+
+### Fixed
+
+- **The app's pickers no longer stop working after the validation messages
+  have been shown.** Once the messages table had rendered, a picker opened
+  afterwards (the container of a file entry, the columns of a uniqueness rule,
+  the people authorized for corrections) stayed a plain list, and the fields of
+  its dialog could stop responding with it. The table's filter
+  row loaded an older copy of the picker library that lacks a component every
+  picker needs; the app now loads its own copy with the page.
+- On macOS arm64, the largest finite number, `1.7976931348623157e308`, is no
+  longer read as infinite. A numeric column holding it was reported as not
+  finite, and an integer column as not whole rather than out of range. R's own
+  parser rounds inexactly on that platform, so a value it reads as infinite is
+  now checked again with a correctly rounded reader.
+- A quoted header longer than 1 MiB no longer aborts as a "quoted line break"
+  when the file is read, for tabular files as well as matrices.
+- A numeric cell holding the text `NaN` (or `nan`, `-nan`) is now missing after
+  import, like every other value that cannot be converted. It used to stay `NaN`
+  in the loaded table, so a non-nullable column got no `type` finding when read
+  eagerly while the streamed scan reported one. Both now report the
+  `not_convertible` import finding, plus the `type` finding when the column is
+  not nullable.
+- `explain_messages()`, `inspect()` and the HTML validation report no longer
+  show "Actual: (missing / not present)" or duplicated empty rows for a finding
+  with no row number or no column (a matrix header or dimension finding) once
+  the table also has other findings. A missing field now selects only the
+  entries that are themselves missing it.
+- A `fail_fast` scan that stopped early no longer reports the unsettled import
+  check as "validation artifact predates import checking"; it says the scan
+  stopped before every value was read.
+- The `validate-templates` workflow written by `create_template_repo()` uses
+  `r-lib/actions` v2.14.0. With v2.12.1 it failed on Ubuntu 26.04 runners
+  (now `ubuntu-latest`) before installing anything, because `sudo-rs` ignores
+  `sudo -E`.
+- The app's template comparison no longer aborts with "argument 1 is not a
+  vector" when both sides have nothing to compare, for example two documents
+  with no datasets and no metadata fields. It now reports no differences.
+- **A header with an unpaired quote at its edge is no longer stripped.** A
+  header such as `Length 5"` (inches) was read as `Length 5`, because the header
+  cleaning removed a quote at either end of the name, so no specification could
+  declare the column under its real name. Only one matched pair of double quotes
+  around the whole header (`"Subject ID"`) is removed now; a quote at one edge
+  only stays part of the name. This changes which specification matches such a
+  file: a specification that declared the stripped name (`Length 5` for the
+  header `Length 5"`) used to match, and now reports one column missing and one
+  undeclared, because the header keeps its quote. If you declared the stripped
+  name, declare the real header.
+- **Template paths, seals, required fields, vocabulary targets, history labels
+  and the template guide now handle ids that contain a dot** (a column
+  `Wt. (kg)`, `No. of Doses`, a rule `age.range`). Every path was split at each
+  dot, so `columns.Wt. (kg).description` looked for a column `Wt`. A seal on such
+  a column was silently ignored, so a child template could change what its
+  parent had sealed without a `sealed_violation`, and `validate_template()`
+  reported a false `patch_incoherent` or `target_invalid` for the template. A
+  path now reads an id whole. For a column or a row label that is the longest
+  declared id followed by a column field name, then (in a `sealed:` or
+  `required:` path) the longest declared id, which may end the path at the
+  column itself. For a rule, an option or a dataset it is the one-segment id
+  when that is declared and a segment remains after it, as in every earlier
+  release, otherwise the longest declared id. So for columns and row labels a
+  longer id is read whole unless a column field name follows it (`Wt` and
+  `Wt. (kg)`, or `a` and `a.b`, read the longer id whole; `X` and `X.values`
+  reads the field `values` of `X`, and the column `X.values` can then be sealed
+  only through one of its own fields, which `lint_dta()` warns about). For rules,
+  options and datasets the shorter id always wins when it is declared: with rules
+  `chk` and `chk.description`, a longer rule, option or dataset cannot be named
+  by a seal or `required:` path at all. Every path that an earlier release could
+  address keeps its meaning except one that ends with a dot (`version.`,
+  `options.`): that was changed on purpose so that an id such as `Dose No.`
+  resolves, and such a path now reads nothing, so a `required:` on it fails and a
+  `sealed:` on it is reported as dead, loudly.
+  A path that writes, such as `set:`, refuses a column id that no field follows
+  (condition class `dta_template_path_no_field`, reported as `target_invalid`),
+  so `columns.Wt. (kg)` is not written into a column `Wt` as a field. The
+  template guide names such a column whole ("Column Wt. (kg) in inl"); having no
+  declared ids, it reads the id as everything before the first column field
+  name, so with only `Dose.length` declared it says "Length of column Dose".
+  Still not addressable: a `set:` path to the `condition` or `then` key of a
+  rule on a dotted column id, and a dotted dataset id in a vocabulary slot
+  target.
+
+### Security
+
+- **Compressed uploads are bounded by what they inflate to.** A loose `.csv.gz`
+  or `.sas7bdat.gz` dropped on a slot was read whole with no limit on its
+  inflated size, unlike the same file inside a delivery; `load_file()` now
+  refuses a gzip file that inflates past `DTAtools.container_max_member_bytes`
+  before an in-memory read, and the app runs every load under its own limits (2
+  GB per file, 10 GB written). The SAS transport scan applied
+  `DTAtools.container_max_bytes` to gzip streams only, so a bzip2 or xz `.xpt`
+  was uncapped; it now applies to any stream that inflates past its size on
+  disk. The UTF-8 conversion of a non-UTF-8 file stops at
+  `DTAtools.container_max_bytes` and removes its partial copy, and refuses a
+  single line longer than 64 conversion blocks (256 MiB by default) with a
+  condition of class `dta_transcode_line_too_long`.
+- **A specification cannot hold the shared worker with sheer size.** The app
+  refused an alias-expanded YAML past a million values but not one that simply
+  declares a very large number of columns and rules, each of which is built and
+  linted several times per load; it now refuses a document with more than
+  10,000 columns and rules in total (`dta_app.max_spec_objects` raises it).
+  File-name patterns and container globs were matched by a regular-expression
+  engine with no time or stack limit, so a short pattern such as `^(a+)+$` kept
+  the process busy for as long as a name was long; they are now matched under
+  a step and stack limit, and a pattern that hits it matches nothing and
+  warns (class `dta_regex_limit`). When one call matches many names, it stops
+  after five that hit the limit and warns once for the call, instead of
+  spending the full limit on every name. A container glob may use at most three `*`.
+  A matrix header whose labels chain through the generated `<column n>` names
+  was renamed with one pass over all labels per link; it is now one pass, and
+  a header or first row of more than 250,000 fields is refused (class
+  `dta_matrix_header_too_wide`) before a schema is built from it.
+- **A specification cannot bind server paths.** A `paths:` key in a dataset
+  of a specification YAML (also `tables:` and `specs:`) became the paths a file
+  dataset checks, so the check and the report revealed whether, and how large, any
+  file the server could see was. The linter now reports it as an error
+  (`dataset_invalid`) and building a dataset from a list refuses it (class
+  `dta_dataset_runtime_key`); `DTADataSetFile(paths = )` in R is unchanged.
+- **The app's working copies are removed with the session's other files.** The
+  UTF-8 copy of a non-UTF-8 file and the spilled rows of a check with more
+  than `max_errors` errors were written to the shared `tempdir()` and lived as
+  long as the R process, outside "Start over", the 24-hour sweep and the other
+  retention. The app now gives each session a scratch directory for them
+  (`DTAtools.temp_dir`, set for the duration of a load or check), which "Start
+  over" deletes, the sweep ages out and the sweep spares while the session
+  lives; `dta_transcode_` copies and `dta_error_spill_` directories left in the
+  `tempdir()` of a worker known to be dead are swept too (a running process's
+  own are not, since an object may still stream from them), and a copy that is
+  gone no longer leaves a cache entry behind.
+- **A worker that ended without cleaning up no longer leaves its files
+  forever.** The sweep only saw the temp directory of the process that ran it,
+  so the autosave, staged uploads and extractions of a worker that was killed or
+  recycled stayed for good. Every worker now leaves a heartbeat file in its temp
+  directory (touched at each session start and hourly while one is open), and
+  when a session starts the sweep also visits the `Rtmp*` directories beside its
+  own that hold such a file with a heartbeat older than the retention window,
+  removing what carries the app's prefixes and is older than the window, and the
+  directory itself once nothing else is left in it. Directories without the
+  heartbeat are never touched, and neither is one whose process is running or
+  cannot be checked (Windows, macOS), since it may be a live idle worker.
+- The **Bump version** workflow runs in a `release-bump` environment and only
+  from `dev`. The optional `BUMP_PAT` secret belongs in that environment (with
+  its deployment branches limited to `dev`), no longer at repository scope,
+  where any workflow a contributor pushes on their own branch could read it.
+- **A Word template from a template library can no longer write outside its
+  scratch directory on R older than 4.5.1.** The app scans every library
+  `.docx` when it builds its configuration, and an export extracts the chosen
+  one; R's `unzip()` only neutralises an archive member such as `../x` from
+  4.5.1 on, while the package supports R 4.1.0. Both places now read the member
+  names first and treat an archive with an absolute, drive-lettered or
+  `.`/`..` name as an unreadable template, whatever R version runs.
+- **The git token for a private template library is now sent only to the
+  library's own host.** `DTATOOLS_TEMPLATE_GIT_TOKEN` was handed to git as an
+  unscoped `http.extraHeader`, so every server git, or a helper git started
+  while checking out the repository (a git-lfs filter reading a `.lfsconfig`
+  from the cloned content, say), contacted received it. It is now scoped to the
+  scheme, host and port of the source's locator; a locator that is not
+  `http(s)://` (an ssh address, a local path) is cloned without the header.
+- **A template library can no longer redirect the app's refresh stamp.** The
+  stamp that dates a cached git library sat inside the checkout, so a library
+  that tracked a symlink named `.dta-last-refresh` made the app overwrite the
+  link's target with the time on every refresh. It now lives next to the
+  checkout (`<hash>.stamp`), where the repository cannot reach it. Existing
+  caches refresh once more on first use to create it.
+- **`read_file()`, `open_file()` and `load_file()` refuse a directory.** A path
+  that is a directory passed the existence check, so a delimited-text reader
+  was handed the directory and its error message named a file inside it and
+  quoted one of its rows, and a file dataset bound the directory as if it were
+  a delivered file. Such a path is now refused before any reader runs, and
+  aborts with a condition of class `dta_file_is_directory` when the handler
+  accepts the directory's name (for a tabular or file dataset, a name the
+  handler does not accept is still refused by the name check first).
+- **The app's upload controls only act on files that were uploaded in the current session.** A
+  browser can set the value of an upload control itself, and the app used the
+  file path in that value as given, so a user could make the server read a file
+  they had never uploaded and see its content. A value that did not arrive
+  through an upload of the session, or that does not point at a file in one of
+  Shiny's own upload folders, is now refused before anything is read.
+- **An uploaded file is always staged inside its own folder.** An upload whose
+  name was `..` was staged into the temporary directory shared by all sessions,
+  and a path that could not be copied was passed on unchanged; either way the
+  loader could be handed that directory. The staged copy now keeps to its own
+  folder under a safe name, and only a path to a file that exists and is not a directory is accepted.
+
 ## [0.27.0] - 2026-11-12
 
 ### Added
@@ -4685,7 +5073,6 @@ All of the following belong to the manifest verification work above.
 - `inspect()` (and the Shiny app's message inspector) no longer errors with `Can't find property <DTAtools::DTARuleColRange>@range` when highlighting the failing rows of a `check_range` rule. The failing-row helper now reads the rule's `min`/`max` properties directly instead of a non-existent `range` property.
 - `validate_table()` / `check()` no longer abort with `No method asJSON S3 class: vctrs_unspecified` when a table contains a fully-empty column. Arrow reads such columns as its `null` type (a `vctrs_unspecified` vector in R), which `jsonlite::toJSON()` cannot serialise; they are now coerced to all-`NA` and emitted as JSON `null`, so nullable empty columns validate correctly instead of crashing the whole validation run.
 
-
 ## [0.11.0] - 2026-07-27
 
 ### Added
@@ -4949,7 +5336,8 @@ All of the following belong to the manifest verification work above.
 
 - Initial internal release
 
-[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.27.0...HEAD
+[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.24.0...v0.25.0

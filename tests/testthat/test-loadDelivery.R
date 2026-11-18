@@ -4,30 +4,12 @@
 # builder) or the specification, never the code's own output.
 
 # --- Local helpers ------------------------------------------------------------
-
-# load_delivery() without its summary message.
-ld <- function(...) suppressMessages(load_delivery(...))
-
-# The last_delivery table of a result.
-plan_of <- function(d) attr(d, "last_delivery")
-
-# The rows of a plan with one status.
-rows_of <- function(plan, status) plan[plan$status == status, , drop = FALSE]
+# (ld, plan_of, rows_of, tab_ds, file_ds, dta_of live in helper-containers.R.)
 
 # The bytes of a committed fixture.
 cont_bytes <- function(fixture) readBin(cont_fx(fixture), "raw", file.size(cont_fx(fixture)))
 
 empty_specs <- function() DTAColumnSpecCollection(columns = list())
-
-# A tabular dataset; specs default to the domain's.
-tab_ds <- function(id, files, specs = cont_specs(id)) {
-  DTADataSetTabular(id = id, specs = specs, files = files)
-}
-
-# A file dataset.
-file_ds <- function(id, ...) DTADataSetFile(id = id, files = list(...))
-
-dta_of <- function(...) DTA(datasets = list(...))
 
 n_tables <- function(d, id) length(tables(datasets(d, id)))
 
@@ -300,46 +282,54 @@ test_that("a library inside a zip is split too, and only its members stay on dis
 # --- Routing ------------------------------------------------------------------
 
 # 18.
-test_that("a declared container takes only its own members", {
+test_that("a file outside its declared container is loaded and judged not conforming", {
   declared <- cont_dta("csv", container = "sdtm_csv.zip")
   loose_ae <- cont_write("ae.csv", CONT_AE_CSV)
-  reason <- "matches the file entry of dataset 'ae', which expects it inside sdtm_csv.zip"
 
-  e <- expect_error(ld(declared, loose_ae), class = "dta_delivery_nothing_loaded")
-  expect_true(any(grepl(reason, e$plan$reason, fixed = TRUE)))
+  # D4: content and packaging are separate verdicts; a loose copy still loads.
+  d <- ld(declared, loose_ae)
+  loaded <- rows_of(plan_of(d), "loaded")
+  expect_identical(loaded$dataset, "ae")
+  expect_identical(loaded$conformant, FALSE)
+  expect_match(loaded$reason, "requires it inside 'sdtm_csv.zip'", fixed = TRUE)
+  expect_identical(cont_table(d, "ae", "ae")$AETERM, c("HEADACHE", "NAUSEA"))
+  expect_identical(
+    dta_provenance(datasets(d, "ae"))$ae,
+    list(file = "ae.csv", container = character(), via = "delivery")
+  )
 
   d <- ld(declared, cont_fx("sdtm_csv.zip"))
   expect_setequal(rows_of(plan_of(d), "loaded")$dataset, c("ae", "dm"))
 
-  # A claim is remembered per name and container chain: in either order the
-  # loose ae.csv stays unused and the member of the zip is loaded.
+  # A conforming copy beats a misfit one, in either order: the loose ae.csv is
+  # unused and names where the other copy came from.
   for (files in list(c(loose_ae, cont_fx("sdtm_csv.zip")), c(cont_fx("sdtm_csv.zip"), loose_ae))) {
     d <- ld(declared, files)
     plan <- plan_of(d)
     loaded <- rows_of(plan, "loaded")
     expect_setequal(loaded$dataset, c("ae", "dm"))
     expect_identical(loaded$container, rep("sdtm_csv.zip", 2))
+    expect_identical(loaded$conformant, c(TRUE, TRUE))
     loose_row <- plan[is.na(plan$container) & plan$name == "ae.csv", ]
     expect_identical(nrow(loose_row), 1L)
     expect_identical(loose_row$status, "unused")
-    expect_true(grepl(reason, loose_row$reason, fixed = TRUE))
+    expect_identical(loose_row$reason, "another copy was loaded from sdtm_csv.zip > ae.csv")
   }
 })
 
 # 19.
-test_that("a member of another container is not taken", {
-  e <- expect_error(
-    ld(cont_dta("csv", container = "other.zip"), cont_fx("sdtm_csv.zip")),
-    class = "dta_delivery_nothing_loaded"
-  )
-  expect_false(any(grepl("letter case", e$plan$reason, fixed = TRUE)))
+test_that("a member of another container is loaded as a misfit, with the container it came in", {
+  d <- ld(cont_dta("csv", container = "other.zip"), cont_fx("sdtm_csv.zip"))
+  loaded <- rows_of(plan_of(d), "loaded")
+  expect_setequal(loaded$dataset, c("ae", "dm"))
+  expect_identical(loaded$conformant, c(FALSE, FALSE))
+  expect_match(loaded$reason, "it arrived inside 'sdtm_csv.zip' and the agreement requires it inside 'other.zip'", fixed = TRUE)
+  expect_false(any(grepl("letter case", loaded$reason, fixed = TRUE)))
 
+  # The case hint moves into the misfit reason (D8).
   shouting <- cont_zip(list(ae.csv = CONT_AE_CSV), name = "SDTM_CSV.ZIP")
-  e <- expect_error(
-    ld(cont_dta("csv", container = "sdtm_csv.zip"), shouting),
-    class = "dta_delivery_nothing_loaded"
-  )
-  reason <- e$plan$reason[e$plan$name == "ae.csv"]
+  d <- ld(cont_dta("csv", container = "sdtm_csv.zip"), shouting)
+  reason <- rows_of(plan_of(d), "loaded")$reason
   expect_identical(length(reason), 1L)
   expect_true(endsWith(reason, "(letter case must match)"))
 })
@@ -347,12 +337,15 @@ test_that("a member of another container is not taken", {
 # 20.
 test_that("a wildcard container matches dated archive names", {
   d <- ld(cont_dta("csv", container = "sdtm_*.zip"), cont_fx("sdtm_csv.zip"))
-  expect_setequal(rows_of(plan_of(d), "loaded")$dataset, c("ae", "dm"))
+  loaded <- rows_of(plan_of(d), "loaded")
+  expect_setequal(loaded$dataset, c("ae", "dm"))
+  expect_identical(loaded$conformant, c(TRUE, TRUE))
 
-  expect_error(
-    ld(cont_dta("csv", container = "sdtm_????.zip"), cont_fx("sdtm_csv.zip")),
-    class = "dta_delivery_nothing_loaded"
-  )
+  # `?` is one character: "csv" is three, so the members fit nothing.
+  d <- ld(cont_dta("csv", container = "sdtm_????.zip"), cont_fx("sdtm_csv.zip"))
+  loaded <- rows_of(plan_of(d), "loaded")
+  expect_setequal(loaded$dataset, c("ae", "dm"))
+  expect_identical(loaded$conformant, c(FALSE, FALSE))
 })
 
 # 21.
@@ -722,9 +715,14 @@ test_that("last_delivery has the documented columns", {
   plan <- plan_of(ld(cont_dta("csv"), cont_fx("sdtm_csv.zip")))
   expect_identical(
     names(plan),
-    c("delivered", "container", "member", "name", "dataset", "handler", "item", "status", "reason", "path")
+    c(
+      "delivered", "container", "member", "name", "dataset", "handler", "item", "status", "reason",
+      "conformant", "candidates", "path"
+    )
   )
   expect_true(is.integer(plan$handler))
+  expect_true(is.list(plan$candidates))
+  expect_true(is.logical(plan$conformant))
 })
 
 # 43.
@@ -1572,7 +1570,7 @@ test_that("names with control characters print as escapes in the messages", {
 
 # --- Review fixes (0.27.0) ------------------------------------------------------
 
-test_that("a loose file a literal entry holds back for its container is not taken by a pattern elsewhere", {
+test_that("a literal entry whose container the file missed still beats a free pattern elsewhere", {
   mk <- function() {
     dta_of(
       tab_ds("ae", list(DTAFileCSV("ae.csv", container = "sdtm.zip")), empty_specs()),
@@ -1580,14 +1578,20 @@ test_that("a loose file a literal entry holds back for its container is not take
     )
   }
   ae <- cont_write("ae.csv", CONT_AE_CSV)
-  lb <- cont_write("lb.csv", "USUBJID,LBTEST\nS-001,ALT\n")
+  lb <- cont_write("lb.csv", "USUBJID,LBTEST
+S-001,ALT
+")
   d <- ld(mk(), c(ae, lb))
   plan <- plan_of(d)
   row <- plan[plan$name == "ae.csv", ]
-  expect_identical(row$status, "unused")
-  expect_true(grepl("expects it inside sdtm.zip", row$reason, fixed = TRUE))
+  # Tier 3 (literal misfit) outranks tier 4 (pattern, free): ae takes it, loaded
+  # and not conforming; listings gets neither the file nor a row.
+  expect_identical(nrow(row), 1L)
+  expect_identical(row$status, "loaded")
+  expect_identical(row$dataset, "ae")
+  expect_identical(row$conformant, FALSE)
   expect_identical(names(tables(datasets(d, "listings"))), "lb")
-  expect_length(tables(datasets(d, "ae")), 0)
+  expect_identical(names(tables(datasets(d, "ae"))), "ae")
 
   # The same name inside the container still goes to its dataset.
   z <- cont_zip(list("ae.csv" = CONT_AE_CSV), name = "sdtm.zip")
@@ -1614,14 +1618,14 @@ test_that("a literal entry blocked by its container leaves a pattern entry of th
   expect_identical(nrow(rows_of(plan_of(d), "unused")), 0L)
   expect_true(attr(check(d, quiet = TRUE), "last_validation_ok"))
 
-  # A loose copy is still held back, and the reason names the container the
-  # literal entry expects.
+  # A loose copy is a misfit of the literal entry (tier 3) and the member of
+  # sdtm.zip fits it: the conforming copy is kept, the loose one says so.
   loose <- cont_write("define.xml", "<loose/>")
   d <- ld(mk(), c(sdtm, adam, loose))
   plan <- plan_of(d)
   row <- plan[plan$name == "define.xml" & plan$status == "unused", ]
   expect_identical(nrow(row), 1L)
-  expect_true(grepl("expects it inside sdtm.zip", row$reason, fixed = TRUE))
+  expect_identical(row$reason, "another copy was loaded from sdtm.zip > define.xml")
 })
 
 # Regression (round-3 review): the dataset's first matching entry, without a
@@ -1706,4 +1710,566 @@ test_that("a container name cut to a trailing dot or space still extracts", {
     expect_true(file.exists(loaded$path))
     expect_false(grepl("[. ]$", basename(dirname(dirname(loaded$path)))))
   }
+})
+
+# --- Containers as a ranking, ambiguity, route and datasets (container manager) ---
+
+# The default container of the document: every entry without a reference of its
+# own must arrive inside delivery.zip.
+delivery_default <- function() DTAContainer("main", "delivery.zip", default = TRUE)
+
+test_that("a default container is the requirement of every entry without its own", {
+  d0 <- cont_dta("csv", containers = list(delivery_default()))
+  loose <- cont_write("ae.csv", CONT_AE_CSV)
+  row <- rows_of(plan_of(ld(d0, loose)), "loaded")
+  expect_identical(row$conformant, FALSE)
+  expect_match(row$reason, "requires it inside 'delivery.zip'", fixed = TRUE)
+
+  inside <- cont_zip(list(ae.csv = CONT_AE_CSV), name = "delivery.zip")
+  row <- rows_of(plan_of(ld(d0, inside)), "loaded")
+  expect_identical(row$conformant, TRUE)
+
+  # `none` opts an entry out: no requirement, conformant is NA.
+  none <- dta_of(tab_ds("ae", list(DTAFileCSV("ae.csv", container = "none"))))
+  dd <- DTA(datasets = none@datasets, containers = list(delivery_default()))
+  expect_identical(rows_of(plan_of(ld(dd, loose)), "loaded")$conformant, NA)
+})
+
+test_that("a type: any entry that names the default container takes the archive as conforming", {
+  dta <- DTA(
+    datasets = list(tab_ds("ae", list(DTAFileCSV("ae.csv"))), file_ds("pkg", DTAFileAny("delivery.zip"))),
+    containers = list(delivery_default())
+  )
+  inside <- cont_zip(list(ae.csv = CONT_AE_CSV), name = "delivery.zip")
+  plan <- plan_of(ld(dta, inside))
+  zip_row <- plan[plan$name == "delivery.zip" & plan$status == "loaded", ]
+  expect_identical(zip_row$dataset, "pkg")
+  expect_identical(zip_row$conformant, TRUE)
+})
+
+test_that("an archive is never a misfit of a type: any entry (default container plus an ADaM container)", {
+  dta <- DTA(
+    datasets = list(
+      tab_ds("ae", list(DTAFileCSV("ae.csv"))),
+      tab_ds("adsl", list(DTAFileCSV("adsl.csv", container = "adam.zip")), empty_specs()),
+      file_ds("docs", DTAFileAny("[.]pdf$|[.]zip$", pattern = TRUE, min_number_of_files = 0, max_number_of_files = 10))
+    ),
+    containers = list(delivery_default())
+  )
+  main <- cont_zip(list(ae.csv = CONT_AE_CSV), name = "delivery.zip")
+  adam <- cont_zip(list(adsl.csv = "USUBJID\nS-001\n"), name = "adam.zip")
+  plan <- plan_of(ld(dta, c(main, adam)))
+  expect_false(any(plan$conformant %in% FALSE))
+  expect_setequal(rows_of(plan, "loaded")$dataset, c("ae", "adsl"))
+})
+
+# An old-shaped object: every DTAtools class without the newer properties.
+ld_old_class <- function(cls, drop) {
+  parent <- cls@parent
+  parent_old <- if (inherits(parent, "S7_class") && !identical(parent@name, "S7_object")) {
+    ld_old_class(parent, drop)
+  } else {
+    S7::S7_object
+  }
+  own <- setdiff(names(cls@properties), names(parent@properties))
+  S7::new_class(cls@name,
+    package = "DTAtools", parent = parent_old,
+    properties = cls@properties[setdiff(own, drop)], validator = function(self) NULL
+  )
+}
+ld_age <- function(obj, drop = c("containers", "provenance", "file_handlers")) {
+  if (is.environment(obj) || is.data.frame(obj)) {
+    return(obj)
+  }
+  if (inherits(obj, "S7_object")) {
+    cur <- attr(obj, "S7_class", exact = TRUE)
+    if (!identical(cur@package, "DTAtools")) {
+      return(obj)
+    }
+    for (p in setdiff(names(attributes(obj)), c("class", "S7_class"))) {
+      attr(obj, p) <- ld_age(attr(obj, p), drop)
+    }
+    for (p in intersect(drop, names(cur@properties))) attr(obj, p) <- NULL
+    attr(obj, "S7_class") <- ld_old_class(cur, drop)
+    return(obj)
+  }
+  if (is.list(obj)) {
+    for (i in seq_along(obj)) if (!is.null(obj[[i]])) obj[[i]] <- ld_age(obj[[i]], drop)
+  }
+  obj
+}
+ld_roundtrip <- function(x) {
+  f <- withr::local_tempfile(fileext = ".rds", .local_envir = parent.frame())
+  saveRDS(x, f)
+  readRDS(f)
+}
+
+test_that("a stale (old-shaped) DTA is upgraded by load_delivery()", {
+  old <- ld_roundtrip(ld_age(cont_dta("csv")))
+  expect_true(dta_is_stale(old))
+  d <- ld(old, cont_fx("sdtm_csv.zip"))
+  expect_setequal(rows_of(plan_of(d), "loaded")$dataset, c("ae", "dm"))
+  expect_identical(dta_provenance(datasets(d, "ae"))$ae$container, "sdtm_csv.zip")
+})
+
+# --- Tiers ---------------------------------------------------------------------
+
+test_that("tier 1 (literal, free) beats tier 2 (pattern, fits) in another dataset", {
+  dta <- dta_of(
+    tab_ds("ae", list(DTAFileCSV("ae.csv"))),
+    tab_ds("dm", list(DTAFileCSV("[.]csv$", pattern = TRUE, container = "sdtm_csv.zip")))
+  )
+  loaded <- rows_of(plan_of(ld(dta, cont_fx("sdtm_csv.zip"))), "loaded")
+  expect_identical(loaded$dataset[loaded$name == "ae.csv"], "ae")
+  expect_identical(loaded$dataset[loaded$name == "dm.csv"], "dm")
+})
+
+test_that("tier 1 beats tier 3 across datasets: the misfit dataset gets neither file nor row", {
+  dta <- dta_of(
+    tab_ds("ae", list(DTAFileCSV("ae.csv"))),
+    tab_ds("dm", list(DTAFileCSV("ae.csv", container = "other.zip")))
+  )
+  d <- ld(dta, cont_write("ae.csv", CONT_AE_CSV))
+  plan <- plan_of(d)
+  expect_identical(plan$dataset, "ae")
+  expect_identical(n_tables(d, "dm"), 0L)
+})
+
+test_that("literal entries of the same tier in two datasets both take the file", {
+  dta <- dta_of(
+    tab_ds("ae", list(DTAFileCSV("ae.csv", container = "other.zip"))),
+    tab_ds("dm", list(DTAFileCSV("ae.csv", container = "other.zip")), cont_specs("ae"))
+  )
+  loaded <- rows_of(plan_of(ld(dta, cont_write("ae.csv", CONT_AE_CSV))), "loaded")
+  expect_setequal(loaded$dataset, c("ae", "dm"))
+})
+
+test_that("a pattern that fits beats a free pattern elsewhere (S3): not ambiguous", {
+  dta <- dta_of(
+    tab_ds("ae", list(DTAFileCSV("^ae.*[.]csv$", pattern = TRUE, container = "sdtm_csv.zip"))),
+    tab_ds("dm", list(DTAFileCSV("^[a-d].*[.]csv$", pattern = TRUE)))
+  )
+  plan <- plan_of(ld(dta, cont_fx("sdtm_csv.zip")))
+  expect_identical(nrow(rows_of(plan, "ambiguous")), 0L)
+  loaded <- rows_of(plan, "loaded")
+  expect_identical(loaded$dataset[loaded$name == "ae.csv"], "ae")
+  expect_identical(loaded$dataset[loaded$name == "dm.csv"], "dm")
+})
+
+test_that("within one dataset a fitting literal entry beats a free one (Q1)", {
+  dta <- dta_of(tab_ds("ae", list(
+    DTAFileCSV("ae.csv"),
+    DTAFileCSV("ae.csv", container = "sdtm_csv.zip")
+  )))
+  loaded <- rows_of(plan_of(ld(dta, cont_fx("sdtm_csv.zip"))), "loaded")
+  expect_identical(loaded$handler, 2L)
+  expect_identical(loaded$conformant, TRUE)
+})
+
+# --- Misfit duplicates ----------------------------------------------------------
+
+test_that("several copies that all arrived outside the container are not loaded", {
+  declared <- cont_dta("csv", container = "sdtm_csv.zip")
+  loose <- cont_write("ae.csv", CONT_AE_CSV)
+  other <- cont_zip(list(ae.csv = CONT_AE_CSV, dm.csv = CONT_DM_CSV), name = "other.zip")
+  # Abort mode (the default): neither an abort nor a refusal.
+  d <- ld(declared, c(loose, other))
+  plan <- plan_of(d)
+  ae_rows <- plan[plan$name == "ae.csv", ]
+  expect_identical(ae_rows$status, c("unused", "unused"))
+  expect_identical(
+    ae_rows$reason,
+    rep("several copies arrived outside 'sdtm_csv.zip'; none was loaded", 2)
+  )
+  expect_identical(n_tables(d, "ae"), 0L)
+  expect_identical(rows_of(plan, "loaded")$dataset, "dm")
+})
+
+# --- Ambiguity ------------------------------------------------------------------
+
+# ae takes `^a.*[.]csv$`, dm takes `^.*e[.]csv$`: ae.csv is taken by both, de.csv
+# by dm only.
+tie_dta <- function() {
+  dta_of(
+    tab_ds("ae", list(DTAFileCSV("^a.*[.]csv$", pattern = TRUE))),
+    tab_ds("dm", list(DTAFileCSV("^.*e[.]csv$", pattern = TRUE)), cont_specs("ae"))
+  )
+}
+de_csv <- function(env = parent.frame()) cont_write("de.csv", CONT_AE_CSV, env = env)
+
+test_that("a pattern tie is ambiguous: not loaded, candidates listed, no path", {
+  e <- expect_error(ld(tie_dta(), cont_write("ae.csv", CONT_AE_CSV)), class = "dta_delivery_nothing_loaded")
+  row <- e$plan
+  expect_identical(row$status, "ambiguous")
+  expect_identical(row$candidates[[1]], c("ae", "dm"))
+  expect_identical(row$path, NA_character_)
+  expect_identical(
+    row$reason,
+    "matches the file entries of datasets 'ae' and 'dm'; pass route = list(\"ae.csv\" = \"<dataset>\") to choose"
+  )
+})
+
+test_that("ambiguity never aborts a delivery that loads something else", {
+  d <- ld(tie_dta(), c(cont_write("ae.csv", CONT_AE_CSV), de_csv()))
+  plan <- plan_of(d)
+  expect_identical(plan$status[plan$name == "ae.csv"], "ambiguous")
+  expect_identical(n_tables(d, "ae"), 0L)
+  expect_identical(names(tables(datasets(d, "dm"))), "de")
+  expect_identical(plan$candidates[plan$name == "de.csv"][[1]], character(0))
+})
+
+test_that("the summary names ambiguous and outside files", {
+  m <- expect_message(
+    load_delivery(tie_dta(), c(cont_write("ae.csv", CONT_AE_CSV), de_csv())),
+    class = "dta_delivery_summary"
+  )
+  expect_identical(m$ambiguous, "ae.csv")
+  expect_match(conditionMessage(m), "Matches several datasets, not loaded: ae.csv", fixed = TRUE)
+
+  m <- expect_message(
+    load_delivery(cont_dta("csv", container = "sdtm_csv.zip"), cont_write("ae.csv", CONT_AE_CSV)),
+    class = "dta_delivery_summary"
+  )
+  expect_identical(m$outside, "ae.csv")
+  expect_match(conditionMessage(m), "Not inside its required container: ae.csv (sdtm_csv.zip)", fixed = TRUE)
+})
+
+# --- route ----------------------------------------------------------------------
+
+test_that("route chooses among the ambiguous datasets", {
+  files <- c(cont_write("ae.csv", CONT_AE_CSV), de_csv())
+  d <- ld(tie_dta(), files, route = list("ae.csv" = "dm"))
+  expect_identical(n_tables(d, "ae"), 0L)
+  expect_setequal(names(tables(datasets(d, "dm"))), c("ae", "de"))
+  expect_identical(nrow(rows_of(plan_of(d), "ambiguous")), 0L)
+
+  # A named character vector is the same thing.
+  d <- ld(tie_dta(), files, route = c("ae.csv" = "ae"))
+  expect_identical(names(tables(datasets(d, "ae"))), "ae")
+})
+
+three_way_dta <- function() {
+  dta_of(
+    tab_ds("ae", list(DTAFileCSV("^a.*[.]csv$", pattern = TRUE))),
+    tab_ds("dm", list(DTAFileCSV("^.*e[.]csv$", pattern = TRUE)), cont_specs("ae")),
+    tab_ds("vs", list(DTAFileCSV("^v.*[.]csv$", pattern = TRUE)))
+  )
+}
+
+test_that("a route to a dataset the file is not ambiguous between refuses the whole file", {
+  files <- c(cont_write("ae.csv", CONT_AE_CSV), de_csv())
+  for (route in list(list("ae.csv" = "vs"), list("ae.csv" = c("dm", "vs")))) {
+    d <- suppressWarnings(ld(three_way_dta(), files, route = route, on_error = "skip"))
+    rows <- plan_of(d)[plan_of(d)$name == "ae.csv", ]
+    expect_identical(nrow(rows), 1L)
+    expect_identical(rows$status, "refused")
+    expect_match(rows$reason, "route sends it to dataset 'vs', which is not one of the datasets it is ambiguous between ('ae' and 'dm')", fixed = TRUE)
+    expect_identical(n_tables(d, "ae"), 0L)
+    expect_false("ae" %in% names(tables(datasets(d, "dm"))))
+    expect_error(ld(three_way_dta(), files, route = route), class = "dta_delivery_bad_input")
+  }
+})
+
+test_that("a route to no dataset leaves the file unused", {
+  d <- ld(tie_dta(), c(cont_write("ae.csv", CONT_AE_CSV), de_csv()), route = list("ae.csv" = character(0)))
+  plan <- plan_of(d)
+  rows <- plan[plan$name == "ae.csv", ]
+  expect_identical(rows$status, "unused")
+  expect_identical(rows$reason, "route sends it to no dataset")
+  expect_identical(n_tables(d, "ae"), 0L)
+})
+
+test_that("an ambiguous archive routed to no dataset is not opened", {
+  dta <- dta_of(
+    file_ds("docs1", DTAFileAny("[.]zip$", pattern = TRUE, extensions = "zip", number_of_files = 1)),
+    file_ds("docs2", DTAFileAny("[.]zip$", pattern = TRUE, extensions = "zip", number_of_files = 1)),
+    tab_ds("ae", list(DTAFileCSV("ae.csv")))
+  )
+  z <- cont_fx("sdtm_csv.zip")
+  ae <- cont_write("ae.csv", CONT_AE_CSV)
+  expect_identical(plan_of(ld(dta, c(z, ae)))$status[1], "ambiguous")
+  plan <- plan_of(ld(dta, c(z, ae), route = list("sdtm_csv.zip" = character(0))))
+  expect_identical(plan$status[plan$name == "sdtm_csv.zip"], "unused")
+  expect_false("opened" %in% plan$status)
+})
+
+test_that("a route for a file that was not ambiguous changes nothing and is listed", {
+  m <- expect_message(
+    d <- load_delivery(cont_dta("csv"), cont_write("ae.csv", CONT_AE_CSV), route = list("ae.csv" = "dm")),
+    class = "dta_delivery_summary"
+  )
+  expect_identical(names(tables(datasets(d, "ae"))), "ae")
+  expect_identical(n_tables(d, "dm"), 0L)
+  expect_match(conditionMessage(m), "route names files that were not ambiguous: ae.csv", fixed = TRUE)
+})
+
+test_that("a malformed route or datasets argument is refused before anything is read", {
+  f <- cont_write("ae.csv", CONT_AE_CSV)
+  expect_error(ld(cont_dta("csv"), f, route = list("dm")), class = "dta_delivery_bad_input")
+  expect_error(ld(cont_dta("csv"), f, route = list(a = "ae", a = "dm")), class = "dta_delivery_bad_input")
+  expect_error(ld(cont_dta("csv"), f, route = list("ae.csv" = "nope")), class = "dta_delivery_bad_input")
+  expect_error(ld(cont_dta("csv"), f, datasets = "nope"), class = "dta_delivery_bad_input")
+})
+
+test_that("a routed library is opened and its members are routed (S5r)", {
+  dta <- dta_of(
+    tab_ds("ae", list(DTAFileXPT("\\.xpt$", pattern = TRUE))),
+    file_ds("docs", DTAFileAny("\\.xpt$", pattern = TRUE, number_of_files = 1, extensions = "xpt"))
+  )
+  lib <- cont_fx("sdtm.xpt")
+  e <- expect_error(ld(dta, lib), class = "dta_delivery_nothing_loaded")
+  expect_identical(e$plan$status, "ambiguous")
+
+  # Nothing loads, so the members are reported through the error.
+  e <- expect_error(ld(dta, lib, route = list("sdtm.xpt" = "ae")), class = "dta_delivery_nothing_loaded")
+  plan <- e$plan
+  expect_identical(plan$status[plan$name == "sdtm.xpt"], "opened")
+  members <- rows_of(plan, "ambiguous")
+  expect_identical(members$name, c("ae.xpt", "dm.xpt", "vs.xpt"))
+  expect_identical(members$candidates[[1]], c("ae", "docs"))
+
+  # Routing the members as well loads them.
+  d <- ld(dta, lib, route = list("sdtm.xpt" = "ae", "ae.xpt" = "ae", "dm.xpt" = "ae", "vs.xpt" = "ae"))
+  expect_setequal(names(tables(datasets(d, "ae"))), c("ae", "dm", "vs"))
+})
+
+# --- datasets -------------------------------------------------------------------
+
+test_that("datasets limits what a call loads and extracts", {
+  ex <- withr::local_tempdir()
+  d <- ld(cont_dta("csv"), cont_fx("sdtm_csv.zip"), datasets = "ae", exdir = ex)
+  expect_identical(n_tables(d, "ae"), 1L)
+  expect_identical(n_tables(d, "dm"), 0L)
+  plan <- plan_of(d)
+  expect_identical(plan$reason[plan$name == "dm.csv"], "is for dataset 'dm', which this call does not load")
+  expect_identical(plan$status[plan$name == "dm.csv"], "unused")
+  expect_identical(basename(list.files(ex, recursive = TRUE)), "ae.csv")
+})
+
+test_that("a zip a type: any entry takes as a deliverable is still opened for the chosen datasets", {
+  dta <- dta_of(
+    tab_ds("ae", list(DTAFileCSV("ae.csv"))),
+    file_ds("docs", DTAFileAny("sdtm_csv.zip"))
+  )
+  d <- ld(dta, cont_fx("sdtm_csv.zip"), datasets = "ae")
+  expect_identical(plan_of(d)$status[plan_of(d)$name == "sdtm_csv.zip"], "opened")
+  expect_identical(names(tables(datasets(d, "ae"))), "ae")
+})
+
+test_that("datasets reduces an ambiguous file to the one dataset left, and a route outside it is unused", {
+  files <- c(cont_write("ae.csv", CONT_AE_CSV), de_csv())
+  d <- ld(tie_dta(), files, datasets = "ae")
+  expect_identical(names(tables(datasets(d, "ae"))), "ae")
+  expect_identical(nrow(rows_of(plan_of(d), "ambiguous")), 0L)
+
+  e <- expect_error(
+    ld(tie_dta(), files, datasets = "ae", route = list("ae.csv" = "dm")),
+    class = "dta_delivery_nothing_loaded"
+  )
+  row <- e$plan[e$plan$name == "ae.csv", ]
+  expect_identical(row$status, "unused")
+  expect_identical(row$reason, "is for dataset 'dm', which this call does not load")
+})
+
+test_that("of three ambiguous datasets, datasets keeps the chosen ones as candidates", {
+  dta <- dta_of(
+    tab_ds("ae", list(DTAFileCSV("^a.*[.]csv$", pattern = TRUE))),
+    tab_ds("dm", list(DTAFileCSV("^.*e[.]csv$", pattern = TRUE)), cont_specs("ae")),
+    tab_ds("vs", list(DTAFileCSV("^[a-z]+[.]csv$", pattern = TRUE)), cont_specs("ae"))
+  )
+  e <- expect_error(
+    ld(dta, cont_write("ae.csv", CONT_AE_CSV), datasets = c("dm", "vs")),
+    class = "dta_delivery_nothing_loaded"
+  )
+  row <- e$plan
+  expect_identical(row$status, "ambiguous")
+  expect_identical(row$candidates[[1]], c("dm", "vs"))
+})
+
+# --- Provenance -----------------------------------------------------------------
+
+test_that("a delivery records how each item arrived", {
+  d <- ld(cont_dta("csv"), cont_fx("sdtm_csv.zip"))
+  expect_identical(
+    dta_provenance(datasets(d, "ae"))$ae,
+    list(file = "ae.csv", container = "sdtm_csv.zip", via = "delivery")
+  )
+  d <- ld(cont_dta("xpt"), cont_fx("lib_in_zip.zip"))
+  expect_identical(dta_provenance(datasets(d, "ae"))$ae$container, c("lib_in_zip.zip", "sdtm.xpt"))
+  expect_identical(dta_provenance(datasets(d, "ae"))$ae$file, "ae.xpt")
+
+  # A file dataset is keyed by the path it was bound under.
+  dta <- dta_of(file_ds("docs", DTAFileAny("define.xml")))
+  d <- ld(dta, cont_fx("sdtm_csv.zip"))
+  docs <- datasets(d, "docs")
+  expect_identical(
+    dta_provenance(docs)[[docs@file_paths]],
+    list(file = "define.xml", container = "sdtm_csv.zip", via = "delivery")
+  )
+})
+
+# --- Archives under a default container (WP3 review) ---------------------------
+
+# N23: a loose deliverable archive of a type: any entry is a file, never a
+# container, when no entry declares it as one.
+n23_dta <- function() {
+  DTA(
+    datasets = list(file_ds("docs", DTAFileAny("report.zip")), tab_ds("ae", list(DTAFileCSV("ae.csv")))),
+    containers = list(delivery_default())
+  )
+}
+
+test_that("a loose deliverable archive stays closed under a default container (N23)", {
+  report <- cont_zip(list(ae.csv = CONT_AE_CSV, x.pdf = "%PDF"), name = "report.zip")
+  d <- ld(n23_dta(), report)
+  plan <- plan_of(d)
+  expect_false("opened" %in% plan$status)
+  loaded <- rows_of(plan, "loaded")
+  expect_identical(loaded$name, "report.zip")
+  expect_identical(loaded$dataset, "docs")
+  expect_identical(loaded$conformant, FALSE)
+  # The misfit sentence, then the kept sentence after "; ".
+  expect_match(loaded$reason, "requires it inside 'delivery.zip'", fixed = TRUE)
+  expect_true(endsWith(loaded$reason, paste0("; ", KEPT_SENTENCE)))
+  expect_identical(n_tables(d, "ae"), 0L)
+  expect_false("ae.csv" %in% plan$name)
+})
+
+test_that("a deliverable matching a wildcard default glob is closed when its entry says none (N3)", {
+  dta <- DTA(
+    datasets = list(
+      file_ds("docs", DTAFileAny("STUDY_define.zip", container = "none")),
+      tab_ds("ae", list(DTAFileCSV("ae.csv")))
+    ),
+    containers = list(DTAContainer("study", "STUDY_*.zip", default = TRUE))
+  )
+  define <- cont_zip(list(ae.csv = CONT_AE_CSV, d.pdf = "%PDF"), name = "STUDY_define.zip")
+  sdtm <- cont_zip(list(ae.csv = CONT_AE_CSV), name = "STUDY_sdtm.zip")
+  d <- ld(dta, c(define, sdtm))
+  plan <- plan_of(d)
+  expect_identical(plan$status[plan$name == "STUDY_define.zip"], "loaded")
+  expect_identical(plan$dataset[plan$name == "STUDY_define.zip"], "docs")
+  expect_identical(plan$status[plan$name == "STUDY_sdtm.zip"], "opened")
+  ae <- plan[plan$name == "ae.csv", ]
+  expect_identical(ae$status, "loaded")
+  expect_identical(ae$container, "STUDY_sdtm.zip")
+  expect_identical(n_tables(d, "ae"), 1L)
+})
+
+test_that("a type: any entry that names the default container itself still opens it", {
+  dta <- DTA(
+    datasets = list(tab_ds("ae", list(DTAFileCSV("ae.csv"))), file_ds("pkg", DTAFileAny("delivery.zip"))),
+    containers = list(delivery_default())
+  )
+  plan <- plan_of(ld(dta, cont_zip(list(ae.csv = CONT_AE_CSV), name = "delivery.zip")))
+  expect_true("opened" %in% plan$status[plan$name == "delivery.zip"])
+  expect_identical(plan$container[plan$name == "ae.csv" & plan$status == "loaded"], "delivery.zip")
+})
+
+test_that("an optional entry is never reported as not in the delivery (N8)", {
+  mk <- function(min) {
+    DTA(
+      datasets = list(
+        tab_ds("ae", list(DTAFileCSV("ae.csv"))),
+        file_ds("extra", DTAFileAny("^extra_.*[.]pdf$", pattern = TRUE, min_number_of_files = min, max_number_of_files = 5))
+      ),
+      containers = list(delivery_default())
+    )
+  }
+  z <- cont_zip(list(ae.csv = CONT_AE_CSV), name = "delivery.zip")
+  m <- expect_message(load_delivery(mk(0), z), class = "dta_delivery_summary")
+  expect_identical(m$missing, character(0))
+  # A required entry of the same kind is still reported.
+  m <- expect_message(load_delivery(mk(1), z), class = "dta_delivery_summary")
+  expect_length(m$missing, 1L)
+})
+
+test_that("when the copy that fits fails to load, the best misfit copy is loaded (DUP)", {
+  dta <- dta_of(
+    tab_ds("ae", list(DTAFileSAS7BDAT("ae.sas7bdat", container = "sdtm.zip")), empty_specs()),
+    tab_ds("dm", list(DTAFileCSV("dm.csv")), empty_specs())
+  )
+  sas <- readBin(
+    system.file("qualification", "fx", "sas", "iris.sas7bdat", package = "DTAtools"), "raw", 131072
+  )
+  expect_gt(length(sas), 0L)
+  good <- cont_write("ae.sas7bdat", sas)
+  bad_zip <- cont_zip(list(ae.sas7bdat = "not SAS", dm.csv = CONT_DM_CSV), name = "sdtm.zip")
+  d <- suppressWarnings(ld(dta, c(good, bad_zip), on_error = "skip"))
+  plan <- plan_of(d)
+  ae <- plan[plan$name == "ae.sas7bdat", ]
+  expect_identical(ae$status[is.na(ae$container)], "loaded")
+  expect_identical(ae$conformant[is.na(ae$container)], FALSE)
+  expect_identical(ae$status[!is.na(ae$container)], "refused")
+  expect_identical(n_tables(d, "ae"), 1L)
+  # No row claims another copy was loaded from the zip that failed.
+  expect_false(any(grepl("another copy was loaded from sdtm.zip", plan$reason, fixed = TRUE)))
+
+  # When the copy that fits loads, the misfit copy names it.
+  ok_zip <- cont_zip(list(ae.sas7bdat = sas, dm.csv = CONT_DM_CSV), name = "sdtm.zip")
+  plan <- plan_of(ld(dta, c(good, ok_zip), on_error = "skip"))
+  row <- plan[plan$name == "ae.sas7bdat" & plan$status == "unused", ]
+  expect_identical(row$reason, "another copy was loaded from sdtm.zip > ae.sas7bdat")
+})
+
+test_that("a refused route keeps the opening decision of the un-routed delivery (N21b)", {
+  dta <- dta_of(
+    file_ds("d1", DTAFileAny(".*", pattern = TRUE, min_number_of_files = 0, max_number_of_files = 10)),
+    file_ds("d2", DTAFileAny("[.]zip$", pattern = TRUE, min_number_of_files = 0, max_number_of_files = 10)),
+    tab_ds("ae", list(DTAFileCSV("ae.csv")))
+  )
+  z <- cont_fx("sdtm_csv.zip")
+  base <- plan_of(ld(dta, z, on_error = "skip"))
+  expect_true("opened" %in% base$status) # ambiguous, and opened all the same
+  plan <- plan_of(suppressWarnings(ld(dta, z, route = list("sdtm_csv.zip" = "ae"), on_error = "skip")))
+  expect_true("refused" %in% plan$status[plan$name == "sdtm_csv.zip"])
+  expect_true("opened" %in% plan$status[plan$name == "sdtm_csv.zip"])
+  expect_true("ae.csv" %in% plan$name)
+})
+
+test_that("an empty datasets argument is refused", {
+  expect_error(
+    ld(cont_dta("csv"), cont_fx("sdtm_csv.zip"), datasets = character(0)),
+    class = "dta_delivery_bad_input"
+  )
+})
+
+# --- Cost -----------------------------------------------------------------------
+
+test_that("container globs are compiled once per glob, not once per entry", {
+  glob <- paste0("perf_", basename(tempfile("g")), ".zip") # a glob no earlier test cached
+  ids <- sprintf("ds%02d", 1:60)
+  dta <- DTA(datasets = lapply(ids, function(id) {
+    tab_ds(id, list(DTAFileCSV(paste0(id, ".csv"), container = glob)), empty_specs())
+  }))
+  entries <- stats::setNames(
+    rep(list("USUBJID\nS-001\n"), 2000),
+    c(paste0(ids, ".csv"), sprintf("other%04d.txt", seq_len(1940)))
+  )
+  z <- cont_zip(entries, name = glob)
+  real_match <- dta_glob_matches
+  real_regex <- dta_container_regex
+  n_match <- 0L
+  n_regex <- 0L
+  testthat::local_mocked_bindings(
+    dta_glob_matches = function(...) {
+      n_match <<- n_match + 1L
+      real_match(...)
+    },
+    dta_container_regex = function(glob) {
+      n_regex <<- n_regex + 1L
+      real_regex(glob)
+    }
+  )
+  d <- ld(dta, z)
+  expect_identical(n_tables(d, "ds01"), 1L)
+  expect_identical(n_tables(d, "ds60"), 1L)
+  # About two tests per claimed name (its own and its chain), one per .xpt name
+  # (none here) and one per slot; testing every entry against every slot would
+  # be 2,000 x 60.
+  expect_gt(n_match, 0L)
+  expect_lte(n_match, 2L * 60L + 0L + 60L + 20L)
+  # One distinct glob; a few more builds are tolerated, 2,000 entries are not.
+  expect_gte(n_regex, 1L)
+  expect_lte(n_regex, 1L + 3L)
 })

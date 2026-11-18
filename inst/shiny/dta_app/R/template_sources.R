@@ -304,9 +304,18 @@ dta_template_git_available <- function() {
 # with "missing config value". dta_template_git_run() instead passes
 # `-c credential.helper=` on the command line, unconditionally, for every
 # invocation -- safe there precisely because it holds no secret.
+#
+# The header is scoped to the locator's own origin (`http.<scheme>://<host>/
+# .extraHeader`), never the bare `http.extraHeader`: an unscoped key applies to
+# every server git -- or a helper reading the inherited GIT_CONFIG_* variables,
+# such as a git-lfs filter steered by a `.lfsconfig` in the cloned repository --
+# talks to, so the credential would go wherever the repository's content points
+# it. A locator that is not http(s) (ssh, a local path) has no HTTP request to
+# authenticate, and a token with no locator to scope it to is not sent at all.
 dta_template_git_env <- function(token,
                                  user = dta_template_env("DTATOOLS_TEMPLATE_GIT_USER", "git"),
-                                 mode = dta_template_env("DTATOOLS_TEMPLATE_GIT_AUTH", "basic")) {
+                                 mode = dta_template_env("DTATOOLS_TEMPLATE_GIT_AUTH", "basic"),
+                                 locator = NULL) {
   hardening <- c(
     # A bad or expired token must fail the clone/fetch immediately, not block
     # the Shiny process on an interactive credential prompt it can never
@@ -322,6 +331,17 @@ dta_template_git_env <- function(token,
     return(hardening)
   }
 
+  # scheme://host[:port]/ of the locator, any user:pass@ dropped. Git matches a
+  # URL-scoped key by scheme, host, port and path prefix.
+  locator <- locator %||% ""
+  origin <- regmatches(
+    locator,
+    regexec("^(?i:(https?))://(?:[^/?#@]*@)?([^/?#]+)", locator, perl = TRUE)
+  )[[1]]
+  if (length(origin) != 3L) {
+    return(hardening)
+  }
+
   header_value <- if (identical(tolower(mode), "bearer")) {
     paste0("Authorization: Bearer ", token)
   } else {
@@ -332,7 +352,7 @@ dta_template_git_env <- function(token,
 
   c(
     GIT_CONFIG_COUNT = "1",
-    GIT_CONFIG_KEY_0 = "http.extraHeader",
+    GIT_CONFIG_KEY_0 = paste0("http.", tolower(origin[[2]]), "://", origin[[3]], "/.extraHeader"),
     GIT_CONFIG_VALUE_0 = header_value,
     hardening
   )
@@ -383,8 +403,8 @@ dta_template_git_env <- function(token,
 # Run one git command with the auth/hardening environment from
 # dta_template_git_env(), optionally inside `workdir`, and return a
 # redacted, structured result rather than a raw system2() capture.
-dta_template_git_run <- function(args, workdir = NULL, token = NULL) {
-  env_vars <- dta_template_git_env(token)
+dta_template_git_run <- function(args, workdir = NULL, token = NULL, locator = NULL) {
+  env_vars <- dta_template_git_env(token, locator = locator)
   # `-c credential.helper=` and `-c core.askPass=` unconditionally: neither
   # carries a secret, so the command line is fine (see the comment on
   # dta_template_git_env() for why these cannot be env vars on Windows), and
@@ -450,7 +470,11 @@ resolve_git_source <- function(src, refresh = FALSE) {
     dta_template_cache_dir(), "git",
     rlang::hash(paste0(src$locator, "#", src$ref))
   )
-  stamp_file <- file.path(root, ".dta-last-refresh")
+  # The stamp is a sibling of the checkout, never inside it: the checkout holds
+  # whatever the library repository tracks (a symlink named like the stamp
+  # would redirect the write below), while the sibling's name is a hash only
+  # this code produces.
+  stamp_file <- paste0(root, ".stamp")
   present <- dir.exists(file.path(root, ".git"))
 
   stamp_age <- function() {
@@ -492,11 +516,11 @@ resolve_git_source <- function(src, refresh = FALSE) {
       args <- c(args, "--branch", src$ref)
     }
     args <- c(args, "--", src$locator, root)
-    run_result <- dta_template_git_run(args, token = token)
+    run_result <- dta_template_git_run(args, token = token, locator = src$locator)
   } else {
     run_result <- dta_template_git_run(
       c("fetch", "--depth", "1", "--no-tags", "origin", src$ref),
-      workdir = root, token = token
+      workdir = root, token = token, locator = src$locator
     )
     if (isTRUE(run_result$ok)) {
       run_result <- dta_template_git_run(c("reset", "--hard", "FETCH_HEAD"), workdir = root)

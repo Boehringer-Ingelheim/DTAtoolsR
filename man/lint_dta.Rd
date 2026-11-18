@@ -38,13 +38,41 @@ Errors: \code{yaml_unreadable}, \code{metadata_invalid}, \code{dataset_invalid},
 \code{rule_column_undeclared}, \code{rule_range_non_numeric},
 \code{rule_condition_operator_invalid}, \code{rule_condition_numeric_on_text},
 \code{rule_condition_value_unfit}, \code{rule_condition_value_outside_values},
-\code{group_constraint_unknown_condition}, \code{file_container_invalid},
-\code{file_field_unknown}, \code{file_container_misplaced}, \code{file_count_bound_invalid}.
+\code{group_constraint_unknown_condition}, \code{matrix_row_label_id_invalid} (a matrix
+row-label id contains whitespace: write the exact header text under
+\code{header}), the other matrix errors \code{matrix_columns_key},
+\code{matrix_row_labels_missing}, \code{row_labels_key}, \code{matrix_key},
+\code{matrix_file_type}, \code{matrix_field_missing},
+\code{matrix_columns_count_unsatisfiable}, \code{matrix_row_key_invalid},
+\code{matrix_key_nullable}, \code{matrix_rule_id_reserved},
+\code{row_label_header_position} and \code{row_label_header_invalid}, a code named
+after the matrix reader's own condition for a \verb{matrix:} block it refuses
+(\code{matrix_field_unknown}, \code{matrix_header_invalid}, ...; \code{matrix_invalid} when
+it has none), \code{file_container_invalid},
+\code{file_field_unknown}, \code{file_container_misplaced}, \code{file_count_bound_invalid},
+\code{container_invalid} (the \code{containers} section is malformed, an element lacks
+an \code{id} or \code{filename}, has an unknown field or a value a container cannot
+hold), \code{container_duplicate} (an id or file name used twice, or more than one
+\code{default: true}) and \code{file_container_unknown} (a file entry's \code{container}
+names an id the document's \code{containers} do not define).
 
 Warnings: \code{rules_without_columns}, \code{rule_not_checkable},
-\code{format_narrower_than_length}, \code{metadata_import_issue}, \code{version_unquoted}
+\code{rule_condition_numeric_on_text} when the column is not \verb{SAS Char} but is
+read as text (a date), \code{rule_condition_value_unfit} when a number is written
+where the column holds text,
+\code{format_narrower_than_length}, \code{column_id_shadows_field} (a column \verb{X.<field>}
+beside a column \code{X}, where \verb{<field>} is a column field such as \code{values}: a
+template path \verb{columns.X.<field>} is read as that field of \code{X}, so a seal or
+\verb{required:} on it can never guard the column \verb{X.<field>}),
+\code{metadata_import_issue}, \code{version_unquoted}
 (an unquoted numeric \code{metadata.version} in a YAML file, which YAML reads
-as a number: \code{1.10} becomes \code{1.1}).
+as a number: \code{1.10} becomes \code{1.1}), \code{container_unused} (an explicit,
+non-default container no file entry refers to), \code{document_field_unknown} (a
+top-level key other than \code{metadata}, \code{containers} and \code{datasets}),
+\code{container_reference_by_filename} (a file entry names a container by its
+file name although the container has an id; refer to it by the id, which
+survives renaming the file) and \code{file_name_conflict} (file entries of two
+datasets could take the same file; see \code{\link[=file_name_conflicts]{file_name_conflicts()}}).
 }
 
 \examples{

@@ -816,23 +816,176 @@ resolve_template_expressions <- function(x, env) {
   x
 }
 
-# Resolve ${version} across the metadata of a freshly built DTA.
+# ---- Study identity tokens in dataset bodies --------------------------------
 #
-# This runs as a post-pass because ${version} is not knowable while base
-# metadata is being written -- an option may still change it. ${today} is
-# handled earlier, before base metadata is applied, since metadata.date is a
-# Date property and would reject an unresolved token outright.
-apply_template_expressions <- function(dta) {
+# ${study.id} and ${study.protocol_id} let a dataset body reuse the study
+# identity the person creating the document entered once (metadata.study), e.g.
+#
+#   files:   { filename: '^s${study.id}_[0-9]{12}\.csv$', pattern: true }
+#   columns: [{ id: STUDYID, values: '${study.id}' }]
+#
+# They are resolved on the PLAIN dataset list, never on the built S7 objects: a
+# DTAColumnSpec compiles its `pattern` and checks its examples and values
+# against it on construction, so a token still sitting in the body would be
+# judged (and usually rejected) before any later pass could replace it.
+
+# Every ${...} token a template may use, wherever it is resolved. The validator
+# reports any other one as token_unknown.
+dta_template_known_tokens <- function() {
+  c("${today}", "${version}", "${study.id}", "${study.protocol_id}")
+}
+
+# The study identity that builds which are not creating a real document (the
+# validator's dry run, template history, the template guide) resolve the study
+# tokens to when the template itself settles none.
+#
+# A generic stand-in cannot satisfy every dataset: a SAS Num column, a format
+# narrower than eight characters or a hand-written pattern each reject
+# "STUDY-ID". So the template's own example wins -- the first `choices:` entry
+# of the option that asks for that field. A suggestion, unlike a `default:`, is
+# never filled into a real document, so offering one costs the author nothing.
+# The generic stand-ins are short and free of regex, cli and markup
+# metacharacters.
+dta_template_dry_study <- function(def = NULL) {
+  out <- list(id = "STUDY-ID", protocol_id = "PROT-ID")
+  found <- character(0)
+  # What each suggestion WOULD write, asked of the engine's own effect
+  # expansion (collect_option_effects()), so `target:`, `effects:` keyed by
+  # value, `__selection__` and `set:` maps are all read the way creation reads
+  # them. The first suggestion that writes a field wins it.
+  for (opt in def[["options"]] %||% list()) {
+    if (!is.list(opt)) next
+    for (choice in tryCatch(unname(dta_template_choices(opt)), error = function(e) character(0))) {
+      for (op in tryCatch(collect_option_effects(opt, choice), error = function(e) list())) {
+        if (!is.list(op)) next
+        pairs <- if (is.list(op[["set"]])) {
+          op[["set"]]
+        } else {
+          stats::setNames(list(op[["value"]]), as.character(op[["path"]] %||% "")[1])
+        }
+        for (p in names(pairs)) {
+          key <- names(out)[paste0("metadata.study.", names(out)) == p]
+          if (length(key) != 1L || key %in% found) next
+          v <- pairs[[p]]
+          if (identical(v, "__selection__")) v <- choice
+          if (is.character(v) && length(v) == 1L && !is.na(v) && nzchar(trimws(v))) {
+            out[[key]] <- v
+            found <- c(found, key)
+          }
+        }
+      }
+    }
+  }
+  out
+}
+
+# Escape every PCRE metacharacter, so a study id is matched literally where it
+# is substituted into a regular expression: "1199.187" must not match
+# "1199x187".
+dta_template_regex_escape <- function(x) {
+  gsub("([.\\\\|()\\[\\]{}^$*+?])", "\\\\\\1", x, perl = TRUE)
+}
+
+# The tokens a dataset body is resolved with: ${today}, plus the study tokens
+# from `md`'s settled study identity, each falling back to `study_fallback`
+# (a list(id, protocol_id), or NULL). A study token with no value maps to NULL,
+# which resolve_dataset_tokens() turns into an error only if a body uses it.
+dta_template_dataset_env <- function(md = NULL, study_fallback = NULL) {
+  study <- if (is.null(md)) list() else tryCatch(S7::prop(md, "study"), error = function(e) NULL) %||% list()
+  pick <- function(key) {
+    for (v in list(study[[key]], study_fallback[[key]])) {
+      if (is.character(v) && length(v) == 1L && !is.na(v) && nzchar(trimws(v))) {
+        return(v)
+      }
+    }
+    NULL
+  }
+  c(
+    dta_template_today_env(),
+    list("${study.id}" = pick("id"), "${study.protocol_id}" = pick("protocol_id"))
+  )
+}
+
+# Resolve the `env` tokens through one plain dataset list (or, with `what`, any
+# other plain value -- the metadata post-pass reuses it).
+#
+# A string under a `pattern` key (a column's `pattern:`, a rule's `pattern`
+# operator) and a `filename` whose files entry says `pattern: true` is a
+# regular expression, so it gets the regex-escaped value; everything else
+# (`values`, `example`, `equals`, `pattern_description`, ...) gets it as
+# entered. A `pattern` key holding a NAMED map is not a regex but a column of
+# that name inside a rule condition (`{pattern: {equals: ...}}`), and is walked
+# like any other key. A token whose value is NULL is an error: substituting ""
+# would make "STUDYID must be empty" and a filename starting "^s_" out of an
+# unanswered question, silently.
+resolve_dataset_tokens <- function(ds, env, dataset_name = NULL, what = "Dataset") {
+  escaped <- lapply(env, function(v) if (is.character(v)) dta_template_regex_escape(v) else v)
+  sub_tokens <- function(s, values) {
+    for (tok in names(values)) {
+      if (!any(grepl(tok, s, fixed = TRUE))) next
+      v <- values[[tok]]
+      if (is.null(v)) {
+        # Interpolated, never pasted: `tok` itself is "${...}" and the name is
+        # the template author's text, and cli would evaluate either as glue.
+        name <- as.character(dataset_name %||% "")[1]
+        cli::cli_abort(
+          c(
+            "{what} {.val {name}} uses {.code {tok}}, but this document has no value for it.",
+            "i" = "Enter the study identity (study ID / protocol ID) before creating the document."
+          ),
+          class = "dta_template_token_missing"
+        )
+      }
+      # fixed = TRUE keeps the backslashes of an escaped value as they are.
+      s <- gsub(tok, v, s, fixed = TRUE)
+    }
+    s
+  }
+  walk <- function(node, regex) {
+    if (is.character(node)) {
+      return(sub_tokens(node, if (regex) escaped else env))
+    }
+    if (!is.list(node)) {
+      return(node)
+    }
+    keys <- names(node) %||% rep("", length(node))
+    # A files entry: its `filename` is a regex only when it says so.
+    filename_is_regex <- isTRUE(node[["pattern"]])
+    for (i in seq_along(node)) {
+      if (is.null(node[[i]])) next
+      named_map <- is.list(node[[i]]) && !is.null(names(node[[i]]))
+      child_regex <- regex || (identical(keys[[i]], "pattern") && !named_map) ||
+        (identical(keys[[i]], "filename") && filename_is_regex)
+      node[[i]] <- walk(node[[i]], child_regex)
+    }
+    node
+  }
+  walk(ds, FALSE)
+}
+
+# Resolve ${version}, ${study.id} and ${study.protocol_id} across the metadata
+# of a freshly built DTA, so a title or an agreement clause can name the study
+# as a dataset body can.
+#
+# This runs as a post-pass because none of them is knowable while base
+# metadata is being written -- an option may still change any of them. ${today}
+# is handled earlier, before base metadata is applied, since metadata.date is a
+# Date property and would reject an unresolved token outright. `study` itself is
+# the source of the study tokens, not a user of them, and is left alone.
+# `study_fallback` is create_dta_from_template()'s, with the same meaning.
+apply_template_expressions <- function(dta, study_fallback = NULL) {
   md <- DTAtools::metadata(dta)
   version <- tryCatch(S7::prop(md, "version"), error = function(e) NULL)
   env <- list("${version}" = as.character(version %||% ""))
+  study_env <- dta_template_dataset_env(md, study_fallback)[c("${study.id}", "${study.protocol_id}")]
 
-  for (nm in dta_template_metadata_fields()) {
+  for (nm in setdiff(dta_template_metadata_fields(), "study")) {
     cur <- tryCatch(S7::prop(md, nm), error = function(e) NULL)
     if (is.null(cur)) {
       next
     }
     new <- resolve_template_expressions(cur, env)
+    new <- resolve_dataset_tokens(new, study_env, nm, what = "Metadata field")
     if (!identical(new, cur)) {
       S7::prop(md, nm) <- new
     }
@@ -880,14 +1033,28 @@ apply_template_expressions <- function(dta) {
 #   vocab_selections named list, vocabulary slot id -> chosen vocabulary.
 #                    NULL (default) selects nothing, so every slot keeps its
 #                    declared default (see resolve_vocabulary_slot_overrides()).
+#   study_fallback   list(id, protocol_id) the ${study.id} /
+#                    ${study.protocol_id} tokens in a dataset body resolve to
+#                    when steps 2-5 settle no study identity. It is NEVER
+#                    written to the metadata. NULL (default) has no fallback,
+#                    so a body using a token the document has no value for is
+#                    an error -- what creating a real document wants. Builds
+#                    that are not creating one pass dta_template_dry_study(),
+#                    and a rebase passes the document's own study identity.
 #
 # The ORDER these steps run in is the contract, and is deliberately NOT
 # "whatever order was easiest to bolt on":
 #
-#   1. datasets   2. base.metadata   3. carry-over   4. party slots
-#   5. options    6. ${version}      7. provenance (LAST)
+#   2. base.metadata   3. carry-over   4. party slots   5. options
+#   1. datasets        6. ${version}   7. provenance (LAST)
 #
 # (a `required:` check on the selections also runs, as 6a, after ${version}.)
+#
+# Datasets keep the number 1 -- they come first in a template and in every
+# record of one -- but are BUILT after the metadata steps 2-5. A dataset body
+# may use ${study.id} / ${study.protocol_id}, which only 2-5 settle, and the
+# tokens have to be substituted into the plain dataset list before its column
+# objects exist (see resolve_dataset_tokens()). None of 2-5 reads a dataset.
 #
 # Carry-over (3) runs before party slots (4) and options (5) so that a value
 # THIS document's own author actively chooses always beats whatever an
@@ -900,7 +1067,7 @@ apply_template_expressions <- function(dta) {
 create_dta_from_template <- function(template_def, template_path, selections = list(),
                                      index = NULL, carry_over = NULL,
                                      party_selections = NULL, provenance = NULL,
-                                     vocab_selections = NULL) {
+                                     vocab_selections = NULL, study_fallback = NULL) {
   dta_try({
     if (!is.list(template_def)) stop("Template definition is invalid.")
     template_def <- resolve_template_variant(template_def, selections)
@@ -910,7 +1077,9 @@ create_dta_from_template <- function(template_def, template_path, selections = l
     today_env <- dta_template_today_env()
     base <- resolve_template_expressions(template_def$base %||% list(), today_env)
 
-    # 1) Build datasets from the template datasets section.
+    # Before any step: the index the dataset build (1) and the party slots (4)
+    # may need. It is settled here, ahead of 2-5, because 4 already read it
+    # from this point when the datasets were still built first.
     #
     # A `template:` dataset entry can only be resolved through the index, so a
     # caller that did not supply one gets it built on demand rather than an
@@ -957,68 +1126,10 @@ create_dta_from_template <- function(template_def, template_path, selections = l
       )
     }
 
-    if (!is.null(index)) {
-      # New path: routes a `template:` dataset entry through the dataset-
-      # template machinery, and reproduces the three legacy forms exactly (see
-      # build_template_datasets(), template_create.R). `source_label = NULL`:
-      # create_dta_from_template() has no notion of "this document was
-      # uploaded vs. drawn from a template" the way the standalone "add a
-      # dataset from a template" UI flow will -- that label is for THAT flow
-      # to supply when it exists, not something this function can infer.
-      built <- build_template_datasets(
-        template_def, index, selections,
-        source_label = NULL, template_path = template_path,
-        vocab_overrides = vocab_overrides
-      )
-      ds_list <- built$datasets
-      # Keep the provenance the ACTUAL build produced. Step 7 stamps this over
-      # whatever the caller precomputed, so the recorded dataset lineage and
-      # deviations can never describe a different build than the one that
-      # happened -- see the comment there.
-      built_ds_provenance <- built$provenance
-    } else {
-      # Original path, UNCHANGED: every pre-existing caller (none of which
-      # passes `index`) must keep taking exactly this code, not a
-      # reimplementation of it that merely intends to behave the same way.
-      ds_refs <- template_def$datasets %||% base$datasets %||% list()
-      ds_list <- list()
-      for (i in seq_along(ds_refs)) {
-        ref <- ds_refs[[i]]
-        ds <- NULL
-
-        # accepted forms:
-        # - "gf_dataset.yaml"
-        # - { source: "gf_dataset.yaml" }
-        # - full inline dataset object (name/type/columns/...)
-        if (is.character(ref)) {
-          src <- ref
-          p <- resolve_template_dataset_path(src, template_path)
-          if (!nzchar(p)) {
-            stop(sprintf("Could not resolve dataset source '%s' for template '%s'.", src, template_def$label %||% ""))
-          }
-          ds <- DTAtools::read_dataset_from_yaml(p)
-        } else if (is.list(ref) && nzchar(as.character(ref$source %||% ""))) {
-          src <- as.character(ref$source %||% "")
-          p <- resolve_template_dataset_path(src, template_path)
-          if (!nzchar(p)) {
-            stop(sprintf("Could not resolve dataset source '%s' for template '%s'.", src, template_def$label %||% ""))
-          }
-          ds <- DTAtools::read_dataset_from_yaml(p)
-        } else if (is.list(ref)) {
-          tf <- tempfile(fileext = ".yaml")
-          yaml_txt <- yaml::as.yaml(ref, indent = 2, line.sep = "\n")
-          writeLines(yaml_txt, tf, useBytes = TRUE)
-          ds <- DTAtools::read_dataset_from_yaml(tf)
-        }
-
-        if (is.null(ds)) {
-          stop(sprintf("Invalid dataset definition at index %s in template '%s'.", i, template_def$label %||% ""))
-        }
-        ds_list[[length(ds_list) + 1L]] <- ds
-      }
-    }
-
-    dta <- DTAtools::DTA(datasets = ds_list)
+    # Metadata first: steps 2-5 run on a DTA with no datasets yet (a legal,
+    # empty document), and step 1 rebuilds it with them through the
+    # constructor, which names them by id and normalises their containers.
+    dta <- DTAtools::DTA(datasets = list())
 
     # 2) Apply base metadata defaults.
     md_base <- base$metadata %||% list()
@@ -1093,8 +1204,78 @@ create_dta_from_template <- function(template_def, template_path, selections = l
       }
     }
 
-    # 6) Resolve ${version} now that the options have settled what it is.
-    dta <- apply_template_expressions(dta)
+    # 1) Build the datasets, now that 2-5 have settled the study identity their
+    # bodies may reference (see the order note above this function).
+    token_env <- dta_template_dataset_env(DTAtools::metadata(dta), study_fallback)
+    if (!is.null(index)) {
+      # New path: routes a `template:` dataset entry through the dataset-
+      # template machinery, and reproduces the three legacy forms exactly (see
+      # build_template_datasets(), template_create.R). `source_label = NULL`:
+      # create_dta_from_template() has no notion of "this document was
+      # uploaded vs. drawn from a template" the way the standalone "add a
+      # dataset from a template" UI flow will -- that label is for THAT flow
+      # to supply when it exists, not something this function can infer.
+      built <- build_template_datasets(
+        template_def, index, selections,
+        source_label = NULL, template_path = template_path,
+        vocab_overrides = vocab_overrides, token_env = token_env
+      )
+      ds_list <- built$datasets
+      # Keep the provenance the ACTUAL build produced. Step 7 stamps this over
+      # whatever the caller precomputed, so the recorded dataset lineage and
+      # deviations can never describe a different build than the one that
+      # happened -- see the comment there.
+      built_ds_provenance <- built$provenance
+    } else {
+      # Original path: every pre-existing caller (none of which passes
+      # `index`) must keep taking exactly this code, not a reimplementation of
+      # it that merely intends to behave the same way. Its one addition is the
+      # token pass over an inline body, the same one build_template_datasets()
+      # makes, so the two paths cannot disagree on what a body means.
+      ds_refs <- template_def$datasets %||% base$datasets %||% list()
+      ds_list <- list()
+      for (i in seq_along(ds_refs)) {
+        ref <- ds_refs[[i]]
+        ds <- NULL
+
+        # accepted forms:
+        # - "gf_dataset.yaml"
+        # - { source: "gf_dataset.yaml" }
+        # - full inline dataset object (name/type/columns/...)
+        if (is.character(ref)) {
+          src <- ref
+          p <- resolve_template_dataset_path(src, template_path)
+          if (!nzchar(p)) {
+            stop(sprintf("Could not resolve dataset source '%s' for template '%s'.", src, template_def$label %||% ""))
+          }
+          ds <- DTAtools::read_dataset_from_yaml(p)
+        } else if (is.list(ref) && nzchar(as.character(ref$source %||% ""))) {
+          src <- as.character(ref$source %||% "")
+          p <- resolve_template_dataset_path(src, template_path)
+          if (!nzchar(p)) {
+            stop(sprintf("Could not resolve dataset source '%s' for template '%s'.", src, template_def$label %||% ""))
+          }
+          ds <- DTAtools::read_dataset_from_yaml(p)
+        } else if (is.list(ref)) {
+          ref <- resolve_dataset_tokens(ref, token_env, ref$id)
+          tf <- tempfile(fileext = ".yaml")
+          yaml_txt <- yaml::as.yaml(ref, indent = 2, line.sep = "\n")
+          writeLines(yaml_txt, tf, useBytes = TRUE)
+          ds <- DTAtools::read_dataset_from_yaml(tf)
+        }
+
+        if (is.null(ds)) {
+          stop(sprintf("Invalid dataset definition at index %s in template '%s'.", i, template_def$label %||% ""))
+        }
+        ds_list[[length(ds_list) + 1L]] <- ds
+      }
+    }
+
+    dta <- DTAtools::DTA(datasets = ds_list, metadata = DTAtools::metadata(dta))
+
+    # 6) Resolve ${version} and the study tokens in the metadata, now that the
+    # options have settled what they are.
+    dta <- apply_template_expressions(dta, study_fallback)
 
     # 6a) `required:` -- checked HERE, after every selection has been applied
     # and before provenance records the result. This is the first moment the

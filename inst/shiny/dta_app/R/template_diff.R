@@ -157,7 +157,8 @@ dta_metadata_leaves <- function(md) {
 #                                             flattened generically.
 #   "<dataset>.columns.<COLUMN_ID>.<field>"  each column, keyed by its OWN
 #                                             `id`, never by its position in
-#                                             the list.
+#                                             the list (`row_labels` instead
+#                                             of `columns` for a matrix).
 #
 # Keying columns by id (not position) is the whole point: dta_column_to_list()
 # always includes `id`, so build the key from THAT rather than from the
@@ -175,10 +176,16 @@ dta_dataset_leaves <- function(dta) {
   out <- list()
   for (nm in dta_dataset_names(dta)) {
     ds <- dta_get_dataset(dta, nm)
-    lst <- dta_dataset_to_list(ds)
+    # An entry's OWN container reference, resolved to its file name (`none` as
+    # `none`), the default container NOT applied: ticking the default would
+    # otherwise mark every dataset changed, and an implied container made
+    # explicit (file name -> id) is no change at all.
+    lst <- dta_dataset_to_list(ds, dta, apply_default = FALSE)
 
-    cols <- lst$columns
-    lst$columns <- NULL
+    # A matrix keeps its row labels under `row_labels`; keyed by id the same way.
+    key <- dta_dataset_spec_key(lst)
+    cols <- lst[[key]]
+    lst[[key]] <- NULL
     out <- c(out, .dta_leaf_flatten(lst, nm))
 
     for (col in cols) {
@@ -187,8 +194,22 @@ dta_dataset_leaves <- function(dta) {
         next
       }
       col$id <- NULL
-      out <- c(out, .dta_leaf_flatten(col, paste(nm, "columns", cid, sep = ".")))
+      out <- c(out, .dta_leaf_flatten(col, paste(nm, key, cid, sep = ".")))
     }
+  }
+  out
+}
+
+# The document's explicit containers as leaves keyed by id:
+# "<id>.filename", "<id>.description" and "<id>.default" (each when set).
+dta_container_leaves <- function(dta) {
+  out <- stats::setNames(list(), character(0))
+  for (ct in .ctr_list(dta)) {
+    out[[paste0(ct@id, ".filename")]] <- ct@filename
+    if (!is.null(ct@description)) out[[paste0(ct@id, ".description")]] <- ct@description
+    # Only when set: an unset flag is the default, and a leaf for it would make
+    # every new container two changes.
+    if (isTRUE(ct@default)) out[[paste0(ct@id, ".default")]] <- TRUE
   }
   out
 }
@@ -244,8 +265,11 @@ dta_diff_display_value <- function(x) {
 # not, and a diff whose row order depends on which machine produced it would
 # be a needless, previously-bitten difference (see the locale-collation
 # lesson elsewhere in this codebase's history).
+#
+# as.character(): an empty leaf map has NULL names, so two of them union to
+# NULL, which sort(method = "radix") rejects ("not a vector").
 dta_diff_two_way <- function(a_leaves, b_leaves) {
-  keys <- sort(union(names(a_leaves), names(b_leaves)), method = "radix")
+  keys <- sort(as.character(union(names(a_leaves), names(b_leaves))), method = "radix")
 
   rows <- list()
   for (k in keys) {
@@ -285,14 +309,25 @@ dta_diff_two_way <- function(a_leaves, b_leaves) {
   out
 }
 
-# The full diff between two DTAs: metadata leaves and dataset leaves,
-# compared independently (a document can differ in either, or both).
+# The full diff between two DTAs: metadata, container and dataset leaves,
+# compared independently (a document can differ in any of them).
 dta_diff <- function(a, b) {
+  containers <- dta_diff_two_way(dta_container_leaves(a), dta_container_leaves(b))
+  # Leaves are compared by container id (a rename keeps its identity), but a
+  # change is named by the file name the user sees: the new one, else the old.
+  fns <- function(dta) vapply(.ctr_list(dta), function(ct) ct@filename, character(1))
+  fa <- fns(a)
+  fb <- fns(b)
+  fa[names(fb)] <- fb
+  id <- sub("[.](filename|description|default)$", "", containers$key)
+  prop <- substring(containers$key, nchar(id) + 2L)
+  if (nrow(containers) > 0) containers$key <- paste0(ifelse(id %in% names(fa), fa[id], id), ".", prop)
   list(
     metadata = dta_diff_two_way(
       dta_metadata_leaves(DTAtools::metadata(a)),
       dta_metadata_leaves(DTAtools::metadata(b))
     ),
+    containers = containers,
     datasets = dta_diff_two_way(
       dta_dataset_leaves(a),
       dta_dataset_leaves(b)
@@ -418,7 +453,7 @@ rebase_option_answer <- function(opt, md) {
 # no carry-over, because ancestor/target reconstruction must reproduce
 # exactly what the template alone would build, not a document blended with
 # something else.
-materialise_template <- function(ref, index, selections, carry_over = NULL) {
+materialise_template <- function(ref, index, selections, carry_over = NULL, study_fallback = NULL) {
   dta_try({
     loaded <- load_template_definition(ref, index = index)
     if (!isTRUE(loaded$ok)) {
@@ -429,7 +464,8 @@ materialise_template <- function(ref, index, selections, carry_over = NULL) {
       loaded$value$def, loaded$value$path,
       selections = selections %||% list(),
       index = index,
-      carry_over = carry_over
+      carry_over = carry_over,
+      study_fallback = study_fallback
     )
     if (!isTRUE(built$ok)) {
       stop(built$error)
@@ -519,8 +555,9 @@ dta_template_provenance <- function(dta) {
 # conflict identically to editing one -- there is no separate "removal" case
 # to special-case here.
 .rebase_classify_three_way <- function(ancestor_leaves, current_leaves, target_leaves) {
+  # as.character(): see dta_diff_two_way() -- all-empty maps have NULL names.
   keys <- sort(
-    union(union(names(ancestor_leaves), names(current_leaves)), names(target_leaves)),
+    as.character(union(union(names(ancestor_leaves), names(current_leaves)), names(target_leaves))),
     method = "radix"
   )
 
@@ -582,7 +619,8 @@ dta_template_provenance <- function(dta) {
 # `conflicts`, with `ancestor` reported as NA (genuinely unknown, not merely
 # absent) rather than guessed at from either side.
 .rebase_classify_two_way <- function(current_leaves, target_leaves) {
-  keys <- sort(union(names(current_leaves), names(target_leaves)), method = "radix")
+  # as.character(): see dta_diff_two_way() -- empty maps have NULL names.
+  keys <- sort(as.character(union(names(current_leaves), names(target_leaves))), method = "radix")
 
   conflict_rows <- list()
   for (k in keys) {
@@ -680,9 +718,17 @@ rebase_plan <- function(current, to_version, index = NULL) {
         if (isTRUE(ancestor_loaded$ok)) ancestor_loaded$value$def
       )
     )
+    # Ancestor and target resolve ${study.id} / ${study.protocol_id} to the
+    # document's OWN study identity when no option answers it (an option's
+    # answer is already read back from the document, above), so a dataset
+    # value or filename built from it is the same on all three sides and is
+    # never reported as a template change -- nor does the rebuild fail for a
+    # template that settled its study identity by carry-over.
+    current_study <- DTAtools::metadata(current)@study
     target_built <- create_dta_from_template(
       target_loaded$value$def, target_loaded$value$path,
-      selections = selections, index = index
+      selections = selections, index = index,
+      study_fallback = current_study
     )
     if (!isTRUE(target_built$ok)) {
       stop(sprintf("Could not build target template '%s': %s", target_ref, target_built$error))
@@ -709,7 +755,7 @@ rebase_plan <- function(current, to_version, index = NULL) {
     # document was created -- degrades to the two-way, everything-is-a-
     # conflict comparison; see .rebase_classify_two_way() for why silently
     # guessing is never acceptable here.
-    ancestor_res <- materialise_template(ancestor_ref, index, selections)
+    ancestor_res <- materialise_template(ancestor_ref, index, selections, study_fallback = current_study)
     ancestor_available <- isTRUE(ancestor_res$ok)
     ancestor <- if (ancestor_available) ancestor_res$value else NULL
 

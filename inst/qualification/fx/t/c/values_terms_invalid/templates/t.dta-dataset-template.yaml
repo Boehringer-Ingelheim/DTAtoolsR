@@ -3,6 +3,7 @@ id: vti1
 version: "1.0"
 dataset:
   id: ds1
+  files: {filename: x.tsv, type: tsv}
   columns:
     - id: COL1
       values_from:

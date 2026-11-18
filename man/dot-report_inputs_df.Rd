@@ -11,8 +11,12 @@
 }
 \value{
 A data frame with columns \code{Dataset}, \code{Table}, \code{Kind}, \verb{Source file},
-\code{Size (bytes)}, \code{Modified (UTC)} and \verb{Content hash}; zero rows when no
-dataset has data attached.
+\code{Size (bytes)}, \code{Modified (UTC)}, \verb{Content hash} and \code{Container} (the
+container chain the file arrived through, joined with " > "; "loose" when
+delivered with \code{load_delivery()} outside any container, "on its own" when
+read with \code{load_file()}, "not recorded" without a record; empty only for
+a dataset with no container entry); zero rows when no dataset has data
+attached.
 }
 \description{
 One row per input a checked DTA's verdict rests on, so a filed report can be

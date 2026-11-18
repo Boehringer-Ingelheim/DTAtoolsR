@@ -441,7 +441,7 @@ deviations:
 limitations:
   - id: LIM-001
     title: A row whose every field is empty is dropped by the CSV reader
-    affects: [REQ-FILE-001]
+    affects: [REQ-FILE-001, REQ-MATRIX-022]
     reference: tests/testthat/test-validation-oracle.R:296
     consequence: >
       A line with no content at all is treated as a record separator and
@@ -478,7 +478,7 @@ limitations:
   - id: LIM-006
     title: A ragged data row is reported as if the header were unreadable
     affects: [REQ-FILE-017]
-    reference: R/DTAFileTabular-class.R:1038
+    reference: R/DTAFileTabular-class.R:1066
     consequence: >
       Every failure of the underlying reader is wrapped as "Cannot read the
       column names of ... Is this a 'csv' file?", including a row with too few
@@ -528,7 +528,7 @@ limitations:
 
   - id: LIM-002
     title: '"NaN" in a text column is classified as unconvertible, not missing'
-    affects: [REQ-TYPE-003]
+    affects: [REQ-TYPE-003, REQ-MATRIX-033]
     reference: tests/testthat/helper-validation-corpus.R:338
     consequence: >
       The string "NaN" parses to NaN, and is.na(NaN) is TRUE, so the strict
@@ -632,7 +632,12 @@ limitations:
       at once, and at session end keeps only the files a file dataset uses,
       because "Restore previous session" re-reads file datasets from their
       files while tables come back from the autosave's own copies. Those, and
-      anything a crash leaves, are removed by the 24-hour sweep. The
+      anything a crash leaves, are removed by the 24-hour sweep (a worker that
+      is killed leaves its temp directory behind; the next session started by
+      a worker with the same parent temp directory removes it once the dead
+      worker's heartbeat file is older than the window; where each worker has
+      a private temp root nothing can, and the platform or an operator must).
+      The
       application's per-session budget (DTATOOLS_SESSION_DELIVERY_BYTES) bounds
       one session, not the server: one R process serving several sessions, or
       one user with several browser tabs, can hold that amount for each of them
@@ -695,3 +700,117 @@ limitations:
       column and the first row; it is never read with guessed characters. The
       sender should deliver the dataset as .sas7bdat, which records its
       encoding, or write the transport file from a UTF-8 session.
+
+  - id: LIM-019
+    title: A table bound by assigning tables is unrecorded, and a direct replacement keeps the old record
+    affects: [REQ-CONT-024, REQ-CONT-025]
+    reference: R/DTADataSetTabular-class.R (provenance); R/containerFindings.R; tests/test-OQ-CONT-model.R (OQ-CONT-045), tests/test-OQ-CONT-findings.R (OQ-CONT-050)
+    consequence: >
+      Where a file arrived is recorded by load_file() and load_delivery(), per
+      bound item. A table that is bound by assigning the tables property, or by
+      the constructor's tables argument, has no record: when its dataset has an
+      entry with an effective container, container_findings() reports it as
+      unrecorded and check() leaves the run incomplete until the file is loaded
+      with load_file() or load_delivery(). A table that replaces a recorded
+      table of the same name by assignment keeps the record of the table it
+      replaced, so it is judged by how the old table arrived, not the new one;
+      a content signal to detect the replacement was rejected as costly and
+      unstable for tables restored from disk. A caller who assigns tables
+      should load the files instead if the packaging verdict is to be about
+      them.
+
+  - id: LIM-020
+    title: A dataset outside its DTA resolves only file-name references and no default container
+    affects: [REQ-CONT-019, REQ-CONT-014]
+    reference: R/DTAFile-class.R (dta_resolve_container); tests/test-OQ-CONT-model.R (OQ-CONT-041), tests/test-OQ-CONT-documents.R (OQ-CONT-054)
+    consequence: >
+      Containers are defined by the document, so a dataset on its own does not
+      carry them. Used alone, its entries can resolve only a dotted file name
+      and none; a reference by container id cannot be resolved, and the default
+      container does not apply, so load_delivery() and check() on a dataset
+      judge only the file names its entries state. A dataset exported on its own
+      prints the reference as written, an id included. The id is resolved when
+      the dataset is in its DTA; load_delivery() on a dataset whose entry refers
+      to an id aborts with dta_container_unknown, and the message says to pass
+      the DTA.
+
+  - id: LIM-021
+    title: Templates have no containers section
+    affects: [REQ-CONT-019]
+    reference: R/validateTemplate.R; thoughts/shared/plans/PLAN-container-manager.md (D14)
+    consequence: >
+      A creation template can state where a dataset's files must arrive only by
+      the file name in its entries, which makes an implied container; it cannot
+      define a container with an id, a description or a default, and
+      validate_template() reports nothing about a containers section written in
+      one. The only packaging rule a template library is held to is that its
+      datasets' file names must not overlap (REQ-CONT-032). A document created
+      from a template can be given containers afterwards.
+
+  - id: LIM-022
+    title: File-name conflicts are found only when a generated example name shows them
+    affects: [REQ-CONT-032]
+    reference: R/fileNameConflicts.R; tests/test-OQ-CONT-model.R (OQ-CONT-048)
+    consequence: >
+      file_name_conflicts(), and the lint warning and template error built on
+      it, generate example file names from each pattern and report a pair only
+      when a real example is taken by both entries, so every reported conflict
+      is genuine and comes with a file name. An overlap that no generated
+      example shows is not reported: look-arounds, back-references and inline
+      flags are not analysed, containers nested in containers are not
+      analysed, and a prefix glob and a suffix glob for containers
+      (STUDY_*.zip and *_SDTM.zip) are never seen to name one archive although
+      STUDY_SDTM.zip is taken by both. Such an overlap is found only when a
+      delivery arrives and a file matches several datasets, which
+      load_delivery() reports as ambiguous (REQ-CONT-020) and the caller
+      resolves with route.
+
+  - id: LIM-023
+    title: A cell of blanks only is present text in a Char matrix cell
+    affects: [REQ-MATRIX-036]
+    reference: R/DTADataSetMatrix-class.R; tests/test-OQ-MATRIX-cells.R (OQ-MATRIX-034)
+    consequence: >
+      In a SAS Num or SAS Int matrix cell a field of blanks only is missing,
+      but in a SAS Char cell it is present text, as it is in a tabular Char
+      column. A Char cell spec that is not nullable therefore accepts a cell of
+      spaces without a finding, and a supplier's padded empty cell is not
+      reported as missing. A delivery that must have text in every cell
+      constrains the cell with a pattern that needs a non-blank character.
+
+  - id: LIM-024
+    title: The common spellings of "not available" are not missing values
+    affects: [REQ-MATRIX-034]
+    reference: R/DTADataSetMatrix-class.R; tests/test-OQ-MATRIX-cells.R (OQ-MATRIX-032)
+    consequence: >
+      A matrix cell is missing only when it is an empty field, the text NA, a
+      quoted empty string, a quoted NA, or a token declared in
+      files.missing_values (case-sensitive). N/A, NULL, null, n/a, #N/A and a
+      field written " NA " with surrounding blanks are not missing: in a SAS
+      Num or SAS Int cell each is reported on the import axis as not
+      convertible, and in a SAS Char cell each is kept as text. A supplier
+      who writes one of them must either be asked to write NA or have the
+      spelling declared in files.missing_values.
+
+  - id: LIM-025
+    title: Hexadecimal, signed and zero-padded numbers are accepted in a matrix cell
+    affects: [REQ-MATRIX-026, REQ-MATRIX-029]
+    reference: R/importConversion.R; tests/test-OQ-MATRIX-cells.R (OQ-MATRIX-024, OQ-MATRIX-027)
+    consequence: >
+      A matrix cell is typed exactly as a tabular column of the same type, and
+      the strict numeric conversion accepts 0x1F (as 31), +12 and 012 (both as
+      12). A supplier's leading plus sign, leading zero or hexadecimal text in
+      a numeric cell is therefore read as a number and never reported. A
+      delivery in which such text would be an error constrains the cell as SAS
+      Char with a pattern, or relies on the range to catch the value it
+      becomes.
+
+  - id: LIM-026
+    title: An empty cell and NA are not distinguished
+    affects: [REQ-MATRIX-036]
+    reference: R/DTADataSetMatrix-class.R; tests/test-OQ-MATRIX-cells.R (OQ-MATRIX-034)
+    consequence: >
+      There is one notion of a missing matrix cell: an empty field and the
+      text NA are both missing, and nullable decides whether either is
+      allowed. A specification cannot allow one and refuse the other, so a
+      delivery in which an empty cell means "not measured" and NA means "not
+      applicable" cannot have the two told apart by the validator.

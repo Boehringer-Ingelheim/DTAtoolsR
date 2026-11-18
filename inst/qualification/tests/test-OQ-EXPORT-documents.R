@@ -1009,6 +1009,35 @@ test_that("OQ-EXPORT-025 | columns_specs_from_word reconstructs id, type, length
     c("Unique study ID", "Age in years\nnot part of the pattern"),
     c(tagged_back@columns$STUDYID@description, tagged_back@columns$AGE@description)
   )
+
+  # REQ-EXPORT-018, last sentence: an id cell is read as typed. The two spaces
+  # of "Subject  ID" are two spaces; the padding around the third id is
+  # dropped; a line break inside the fourth is deleted, not read as a space.
+  # A tab cannot be typed into a Word cell as text, so the fifth id is written
+  # as a placeholder and the placeholder's text node is then given a tab.
+  typed <- fixture[rep(1L, 5L), ]
+  typed$id <- c("STUDY ID", "Subject  ID", "  Visit Date (UTC) ", "SUB\nJID", "CON@TAB@SENT")
+  typed_doc <- flextable::body_add_flextable(officer::read_docx(), flextable::flextable(typed))
+  text_nodes <- xml2::xml_find_all(typed_doc$doc_obj$get(), "//*[local-name()='t']")
+  tab_node <- text_nodes[xml2::xml_text(text_nodes) == "CON@TAB@SENT"]
+  qa_step("the fixture holds the tab placeholder exactly once", 1L, length(tab_node))
+  xml2::xml_text(tab_node[[1L]]) <- "CON\tSENT"
+  typed_path <- file.path(dir, "specs_table_typed_ids.docx")
+  print(typed_doc, target = typed_path)
+  typed_back <- columns_specs_from_word(
+    typed_path,
+    colnames = c("id", "label", "type", "length", "format", "nullable", "description")
+  )
+  qa_step(
+    "each id is read as typed: spaces kept, padding dropped, a line break or tab deleted",
+    c("STUDY ID", "Subject  ID", "Visit Date (UTC)", "SUBJID", "CONSENT"),
+    names(typed_back@columns)
+  )
+  qa_step(
+    "and each column carries that id",
+    c("STUDY ID", "Subject  ID", "Visit Date (UTC)", "SUBJID", "CONSENT"),
+    vapply(typed_back@columns, function(column) column@id, character(1), USE.NAMES = FALSE)
+  )
 })
 
 test_that("OQ-EXPORT-026 | columns_specs_from_word reads back the table export_specs_table just wrote | REQ-EXPORT-019", {
@@ -1047,6 +1076,20 @@ test_that("OQ-EXPORT-026 | columns_specs_from_word reads back the table export_s
   qa_step(
     "every column's type, format, length, nullability, values and pattern survive the round trip",
     facts(coll), facts(back)
+  )
+
+  # REQ-EXPORT-019, last sentence: an id with spaces is written as it is and
+  # read back as it was written (it used to come back with the spaces removed).
+  spaced <- DTAColumnSpecCollection(columns = list(
+    `Subject ID` = DTAColumnSpec(id = "Subject ID", label = "Subject", type = "SAS Char", length = 8, nullable = FALSE),
+    `Visit Date (UTC)` = DTAColumnSpec(id = "Visit Date (UTC)", label = "Visit date", type = "SAS Char", length = 10, nullable = TRUE)
+  ))
+  spaced_path <- file.path(dir, "roundtrip_spaced.docx")
+  export_specs_table(spaced, file = spaced_path, quiet = TRUE)
+  spaced_back <- columns_specs_from_word(spaced_path)
+  qa_step(
+    "ids with spaces come back as they were written",
+    c("Subject ID", "Visit Date (UTC)"), names(spaced_back@columns)
   )
 })
 
@@ -2597,4 +2640,232 @@ test_that("OQ-EXPORT-073 | a group condition used only as an IF is worded with t
     qa_check(sprintf("%s: an in/not_in test of an empty entry is not called unevaluable", id), !has(r, "cannot be evaluated") && !has(r, "Problem:"))
     qa_check(sprintf("%s: it is worded as a list that holds only a missing entry", id), has(r, "one of the entries of a list that holds only a missing entry"))
   }
+})
+
+# ---- a matrix dataset in the document ------------------------------------------
+
+# A matrix with header: No on its first row label, an at-least column count, a
+# minimum row count and a Num cell with an open-ended range, a second matrix
+# with an empty header text and exact counts, and a tabular dataset.
+ex_matrix_dta <- function() {
+  matrix <- dta_dataset_from_list(list(
+    id = "gene_counts", type = "matrix", files = list(filename = "g.tsv", type = "tsv"),
+    row_labels = list(
+      list(id = "GENE_ID", header = FALSE, type = "SAS Char", nullable = FALSE),
+      list(id = "GENE_NAME", header = "gene_name", type = "SAS Char", nullable = TRUE)
+    ),
+    matrix = list(
+      columns = list(count = list(min = 1)),
+      rows = list(key = "GENE_ID", count = list(min = 50000)),
+      cells = list(type = "SAS Num", nullable = FALSE, range = list(min = 0), infinite = FALSE)
+    )
+  ))
+  exact <- dta_dataset_from_list(list(
+    id = "geno", type = "matrix", files = list(filename = "geno.tsv", type = "tsv"),
+    row_labels = list(list(id = "SNP", header = "", type = "SAS Char", nullable = FALSE)),
+    matrix = list(
+      columns = list(count = 3),
+      rows = list(count = list(min = 0, max = 10)),
+      cells = list(type = "SAS Int", nullable = TRUE)
+    )
+  ))
+  DTA(datasets = list(matrix, exact, create_example_DTADataSetTabular(1)))
+}
+
+# The text of the md document with markdown escapes removed.
+ex_md_text <- function(dta, dir) {
+  md <- tempfile(tmpdir = dir, fileext = ".md")
+  write_dta(dta, file = md, format = "md", quiet = TRUE)
+  gsub("\\", "", paste(readLines(md, warn = FALSE), collapse = "\n"), fixed = TRUE)
+}
+
+# The lines of the layout block that start with `label`.
+ex_layout_lines <- function(text, label) {
+  lines <- strsplit(text, "\n", fixed = TRUE)[[1]]
+  lines[startsWith(lines, paste0("| ", label, " |"))]
+}
+
+# A one-matrix document whose layout is varied by the arguments, to compare what
+# the layout block says under different declarations.
+ex_layout_dta <- function(first_header = "", columns_extra = list(),
+                          rows = list(count = list(min = 1)), cells = list(type = "SAS Num", nullable = FALSE),
+                          count = list(min = 1)) {
+  dta_dataset_from_list(list(
+    id = "lay", type = "matrix", files = list(filename = "l.tsv", type = "tsv"),
+    row_labels = list(
+      list(id = "GENE_ID", header = first_header, type = "SAS Char", nullable = FALSE),
+      list(id = "GENE_NAME", header = "gene_name", type = "SAS Char", nullable = TRUE)
+    ),
+    matrix = list(
+      columns = c(list(count = count), columns_extra),
+      rows = c(list(key = "GENE_ID"), rows), cells = cells
+    )
+  ))
+}
+
+# The value text of the layout line `label` of a one-matrix document.
+ex_layout_value <- function(dataset, label, dir = qa_tempdir()) {
+  text <- ex_md_text(DTA(datasets = list(dataset)), dir)
+  ex_layout_lines(text, label)
+}
+
+test_that("OQ-EXPORT-074 | write_dta md renders a matrix's row-label table and one layout block per matrix, with the contract stated | REQ-EXPORT-046 REQ-EXPORT-003", {
+  dir <- qa_tempdir()
+  text <- ex_md_text(ex_matrix_dta(), dir)
+
+  qa_step("one row-label heading per matrix dataset", 2L, lengths(regmatches(text, gregexpr("Row label columns", text, fixed = TRUE))))
+  qa_step("one layout heading per matrix dataset", 2L, lengths(regmatches(text, gregexpr("Matrix layout", text, fixed = TRUE))))
+  qa_step(
+    "the row-label columns are in the table, in the order written",
+    TRUE, grepl("| GENE_ID | SAS Char | No |\n| GENE_NAME | SAS Char | Yes |", text, fixed = TRUE)
+  )
+
+  # First matrix: header: No then gene_name, key GENE_ID, rows at least 50000,
+  # Num cell, not nullable, range min 0 with the upper side open, infinite no.
+  first <- function(label) ex_layout_lines(text, label)[[1]]
+  qa_step("the header line names the declared header text", TRUE, grepl("gene_name", first("Header line"), fixed = TRUE))
+  qa_step("the layout states the file layout, with the row-label columns in file order", TRUE, grepl("GENE_ID, GENE_NAME", first("File layout"), fixed = TRUE))
+  qa_step("the row count is worded as a lower bound", "| Data rows | at least 50000 |", first("Data rows"))
+  qa_step("the row key is named", TRUE, grepl("GENE_ID", first("Row key"), fixed = TRUE))
+  qa_step("the cell type is stated", TRUE, grepl("SAS Num", first("Cell type"), fixed = TRUE))
+  qa_step("the range is worded as a lower bound", "| Cell range | at least 0 |", first("Cell range"))
+
+  # Second matrix: no range and no infinite setting are declared.
+  qa_step(
+    "a range and an infinite setting that are not declared are not shown for it",
+    c(1L, 1L), c(length(ex_layout_lines(text, "Cell range")), length(ex_layout_lines(text, "Infinite values")))
+  )
+  second_cols <- ex_layout_lines(text, "Data columns")[[2]]
+  qa_step("an exact count is worded as exact", "| Data columns | exactly 3 |", second_cols)
+  second_rows <- ex_layout_lines(text, "Data rows")[[2]]
+  qa_step("an upper-bounded row count is worded as an upper bound", "| Data rows | at most 10 |", second_rows)
+  qa_step("no row of the layout is named Header corner", 0L, length(ex_layout_lines(text, "Header corner")))
+
+  plain <- ex_md_text(et_dta(), dir)
+  qa_step(
+    "a document with no matrix has neither heading",
+    c(FALSE, FALSE),
+    c(grepl("Row label columns", plain, fixed = TRUE), grepl("Matrix layout", plain, fixed = TRUE))
+  )
+})
+
+test_that("OQ-EXPORT-076 | the layout distinguishes a header line with no field from an empty one, a two-sided bound from a one-sided one, and nullable from not | REQ-EXPORT-046", {
+  value <- function(ds, label) ex_layout_value(ds, label)[[1]]
+
+  none <- value(ex_layout_dta(first_header = FALSE), "Header line")
+  blank <- value(ex_layout_dta(first_header = ""), "Header line")
+  qa_step("both header lines state the declared text", c(TRUE, TRUE), c(grepl("gene_name", none, fixed = TRUE), grepl("gene_name", blank, fixed = TRUE)))
+  qa_step("no field and an empty text are stated differently", TRUE, !identical(none, blank))
+
+  two <- value(ex_layout_dta(count = list(min = 4, max = 9)), "Data columns")
+  qa_step("a two-sided count is worded N to M", "| Data columns | 4 to 9 |", two)
+  low <- value(ex_layout_dta(count = list(min = 4)), "Data columns")
+  qa_step("a lower bound alone is worded at least", "| Data columns | at least 4 |", low)
+  qa_step("and differs from the two-sided count", TRUE, !identical(low, two))
+
+  yes <- value(ex_layout_dta(cells = list(type = "SAS Num", nullable = TRUE)), "Missing cells")
+  no <- value(ex_layout_dta(cells = list(type = "SAS Num", nullable = FALSE)), "Missing cells")
+  qa_step("missing cells allowed and not allowed are stated differently", TRUE, !identical(yes, no))
+
+  upper <- value(ex_layout_dta(cells = list(type = "SAS Num", nullable = FALSE, range = list(max = 7))), "Cell range")
+  qa_step("an open lower side is worded at most", "| Cell range | at most 7 |", upper)
+  closed <- value(ex_layout_dta(cells = list(type = "SAS Num", nullable = FALSE, range = list(min = 2, max = 7))), "Cell range")
+  qa_step("and differs from the closed range, which is worded N to M with both ends included", "| Cell range | 2 to 7 (both included) |", closed)
+
+  inf_no <- value(ex_layout_dta(cells = list(type = "SAS Num", nullable = FALSE, infinite = FALSE)), "Infinite values")
+  inf_yes <- value(ex_layout_dta(cells = list(type = "SAS Num", nullable = FALSE, infinite = TRUE)), "Infinite values")
+  qa_step("infinite values allowed and not allowed are stated differently", TRUE, !identical(inf_no, inf_yes))
+
+  described <- ex_layout_dta(
+    columns_extra = list(description = "Sample identifiers as sequenced"),
+    cells = list(type = "SAS Num", nullable = FALSE, description = "Normalised read count")
+  )
+  text <- ex_md_text(DTA(datasets = list(described)), qa_tempdir())
+  qa_step(
+    "the data-column label and cell descriptions appear verbatim",
+    c(TRUE, TRUE),
+    c(grepl("Sample identifiers as sequenced", text, fixed = TRUE), grepl("Normalised read count", text, fixed = TRUE))
+  )
+})
+
+test_that("OQ-EXPORT-075 | write_dta docx carries the row-label heading, the layout heading and the layout table | REQ-EXPORT-046", {
+  qa_requires("officer")
+  dir <- qa_tempdir()
+  out <- file.path(dir, "matrix.docx")
+  write_dta(ex_matrix_dta(), file = out, format = "docx", quiet = TRUE)
+  text <- qa_docx_text(out)
+  qa_step("the row-label heading", TRUE, grepl("Row label columns", text, fixed = TRUE))
+  qa_step("the layout heading", TRUE, grepl("Matrix layout", text, fixed = TRUE))
+
+  tables <- qa_docx_tables(out)
+  layout <- Filter(function(t) "Header line" %in% t$col1, tables)
+  qa_step("one layout table per matrix dataset", 2L, length(layout))
+  first <- layout[[1]]
+  qa_step(
+    "the first layout table states the header line and the row bound",
+    c(TRUE, "at least 50000"),
+    c(
+      grepl("gene_name", first$col2[first$col1 == "Header line"], fixed = TRUE),
+      first$col2[first$col1 == "Data rows"]
+    )
+  )
+})
+
+test_that("OQ-EXPORT-077 | a column id with spaces, dots or a placeholder-like spelling appears exactly in the column table, in a template block and in a rule's wording | REQ-EXPORT-003 REQ-EXPORT-014 REQ-EXPORT-036", {
+  dir <- qa_tempdir()
+  # "{DTA_TITLE}" is a column id that is spelled like a placeholder of the
+  # template language: nothing the export inserts may be replaced again.
+  ids <- c("Subject ID", "Wt. (kg)", "{DTA_TITLE}")
+  dta <- DTA(
+    datasets = list(DTADataSetTabular(
+      id = "ADSL",
+      specs = DTAColumnSpecCollection(
+        columns = list(
+          `Subject ID` = DTAColumnSpec(id = "Subject ID", type = "SAS Char", length = 10, nullable = FALSE),
+          `Wt. (kg)` = DTAColumnSpec(id = "Wt. (kg)", type = "SAS Num", nullable = TRUE),
+          `{DTA_TITLE}` = DTAColumnSpec(id = "{DTA_TITLE}", type = "SAS Char", length = 10, nullable = TRUE)
+        ),
+        rules = list(DTARuleColRange(id = "wt_range", columns = "Wt. (kg)", range = c(0, 300)))
+      )
+    )),
+    metadata = DTAMetaData(title = "Id Fixture", version = "1.0")
+  )
+
+  # REQ-EXPORT-003: the column table, in declaration order, id by id.
+  out <- file.path(dir, "ids.docx")
+  write_dta(dta, file = out, quiet = TRUE)
+  tbl <- et_docx_table(out, "Variable Name")
+  qa_check("the column specification table is found", !is.null(tbl))
+  qa_step("each declared id is the first cell of its row, in declaration order", ids, tbl$col1[-1])
+
+  # REQ-EXPORT-036: the rule's wording names the column by its exact id.
+  rules <- et_docx_table(out, "Rule ID")
+  qa_check("the rules table is found", !is.null(rules))
+  qa_check(
+    "the description of wt_range names the column Wt. (kg) exactly",
+    grepl("Wt. (kg)", rules$col2[rules$col1 == "wt_range"], fixed = TRUE)
+  )
+
+  # REQ-EXPORT-014: a {COLUMN_SPECS:ADSL} block inserts the same cells, and the
+  # id spelled like a placeholder is neither replaced nor reported unresolved.
+  template <- et_write_template(c("Columns:", "{COLUMN_SPECS:ADSL}"), dir)
+  filled <- file.path(dir, "ids_template.docx")
+  warnings_seen <- character(0)
+  withCallingHandlers(
+    export_with_template(dta, template, filled, quiet = TRUE),
+    warning = function(w) {
+      warnings_seen <<- c(warnings_seen, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
+  )
+  block <- Filter(function(t) nrow(t) > 0 && "Subject ID" %in% t$col1, et_docx_tables(filled))
+  qa_check("the block holds the column table", length(block) == 1L)
+  qa_step(
+    "its first column holds each id exactly, {DTA_TITLE} included",
+    ids, if (length(block) == 1L) block[[1]]$col1[-1] else character(0)
+  )
+  qa_check(
+    "and no warning names {DTA_TITLE} as a placeholder left unresolved",
+    !any(grepl("DTA_TITLE", warnings_seen, fixed = TRUE))
+  )
 })

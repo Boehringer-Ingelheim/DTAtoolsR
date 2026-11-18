@@ -22,6 +22,9 @@ left at its default and the table's header row is the one
 matched by their header instead, so the six-column layout without a
 Length column is read correctly too. Recognised names: \code{id}, \code{label},
 \code{type}, \code{length}, \code{format}, \code{nullable}, \code{description}; \code{id} is required.
+An id keeps the plain spaces typed inside it (\verb{STUDY ID} stays
+\verb{STUDY ID}); its ends are trimmed and any other whitespace inside it (a
+line break, a tab) is dropped.
 
 A description cell may carry markers on their own lines:
 \code{#@values: a;b;c} gives the permitted values (separated by

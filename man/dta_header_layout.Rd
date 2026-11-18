@@ -21,8 +21,9 @@ line holds an unbalanced quote, i.e. a quoted line break).
 Arrow takes the column names from the first NON-EMPTY line
 (\code{ignore_empty_lines = TRUE}), but \code{skip_rows} counts PHYSICAL lines, empty
 ones included. Skipping one line after a leading blank line therefore left
-the header to be parsed as a data row. This reads the first bytes to count
-the leading empty lines (LF or CRLF), so that the skip can include them, and
-to notice a header with a quoted line break, which \code{skip_rows} would split.
+the header to be parsed as a data row. This reads the head of the file
+(\code{\link[=dta_head_records]{dta_head_records()}}) to count the leading empty lines (LF, CRLF or a lone
+CR), so that the skip can include them, and to notice a header with a quoted
+line break, which \code{skip_rows} would split.
 }
 \keyword{internal}

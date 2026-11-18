@@ -9,7 +9,9 @@ dta_overall_summary_message(
   total_import_errors,
   total_unchecked,
   total_undelivered = 0,
-  total_count_errors = 0L
+  total_count_errors = 0L,
+  total_container_errors = 0L,
+  total_container_unverified = 0L
 )
 }
 \arguments{
@@ -27,6 +29,13 @@ was not checked" says nothing about which target, and there is none.}
 
 \item{total_count_errors}{Integer. Datasets whose supplied file count lies
 outside the bounds their handlers declare. Fails the run on its own.}
+
+\item{total_container_errors}{Integer. Files that arrived loose or inside
+another container than the one their entry requires. Fails the run.}
+
+\item{total_container_unverified}{Integer. Files whose packaging was never
+seen (loaded on their own, or without a record). Leaves the run
+incomplete.}
 }
 \value{
 A list of \code{severity} (\code{"danger"}, \code{"warning"} or \code{"success"}) and

@@ -278,12 +278,7 @@ test_that("removing the only dataset leaves a valid DTA with zero datasets", {
 # reading the outputs themselves rather than only rv$* (an output an app test
 # never reads is an output the suite never renders).
 
-sidebar_upload <- function(path, name = basename(path)) {
-  data.frame(
-    name = name, size = file.size(path), type = "",
-    datapath = path, stringsAsFactors = FALSE
-  )
-}
+sidebar_upload <- function(path, name = basename(path)) app_upload_value(path, name)
 
 test_that("the sidebar outputs opt out of suspendWhenHidden", {
   skip_if_not_installed("shiny")
@@ -294,7 +289,8 @@ test_that("the sidebar outputs opt out of suspendWhenHidden", {
   shiny::testServer(.shiny_app_dir(), {
     for (id in c(
       "workspace_header", "summary_metrics", "dataset_nav_ui",
-      "add_dataset_ui", "validation_report_ui"
+      "add_dataset_ui", "validation_report_ui",
+      "delivery_panel", "delivery_zone"
     )) {
       expect_false(
         isTRUE(outputOptions(output, id)$suspendWhenHidden),

@@ -60,10 +60,19 @@ test_that("OQ-CONT-001 | a zip of CSVs is routed to every dataset whose entry ma
 
   qa_step(
     "last_delivery has exactly the documented columns, in order",
-    c("delivered", "container", "member", "name", "dataset", "handler", "item", "status", "reason", "path"),
+    c(
+      "delivered", "container", "member", "name", "dataset", "handler", "item", "status", "reason",
+      "conformant", "candidates", "path"
+    ),
     names(plan)
   )
   qa_step("the handler column is an integer", TRUE, is.integer(plan$handler))
+  qa_step("conformant is logical, and NA on every row when no entry has a container", rep(NA, nrow(plan)), plan$conformant)
+  qa_step(
+    "candidates is a list column holding an empty vector on every row that is not ambiguous",
+    list(TRUE, TRUE),
+    list(is.list(plan$candidates), all(lengths(plan$candidates) == 0L))
+  )
 
   qa_step("dataset ae holds the table ae", "ae", zp_tables(d, "ae"))
   qa_step("dataset dm holds the table dm", "dm", zp_tables(d, "dm"))

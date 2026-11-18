@@ -108,12 +108,16 @@ the file to be converted to UTF-8 first. A name this platform's
 \code{\link[base]{iconv}()} does not know (\code{"latin-1"} for
 \code{"latin1"}, say) is refused too, before the file is opened.}
 
-\item{container}{Character or \code{NULL}; the name of the \code{.zip}
-archive or \code{.xpt} SAS transport file this file arrives inside.
-\code{*} matches any text and \code{?} one character
-(\code{"sdtm_*.zip"}); the name is matched as a whole, independently of
-\code{pattern}. \code{NULL} (the default) accepts the file loose or inside
-any container. Only \code{\link{load_delivery}()} consults it.}
+\item{container}{Character or \code{NULL}; where this file must arrive: a
+container id defined in the document's \code{containers} (\code{"sdtm"}),
+the name of a \code{.zip} archive or \code{.xpt} SAS transport file
+(\code{"sdtm_*.zip"}; \code{*} matches any text and \code{?} one
+character, the name is matched as a whole, independently of
+\code{pattern}), or \code{"none"} (no container needed, even when the
+document has a default container). \code{NULL} (the default) means the
+document's default container if it has one, otherwise the file may
+arrive loose or inside any container. An id resolves only inside a
+\code{\link{DTA}}.}
 }
 \value{
 An object of class \code{DTAFileTabular}.

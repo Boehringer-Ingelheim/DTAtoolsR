@@ -3,6 +3,7 @@ id: pin_ds
 version: "1.0"
 dataset:
   id: pin_data
+  files: {filename: x.tsv, type: tsv}
   columns:
     - id: A
       type: SAS Char

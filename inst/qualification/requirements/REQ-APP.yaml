@@ -484,3 +484,313 @@ requirements:
       bar is static page chrome outside the server function, which
       shiny::testServer() never renders, so the test renders the UI function
       itself and reads the HTML.
+
+  # ---- matrix datasets in the application ------------------------------------
+
+  - id: REQ-APP-033
+    text: >
+      Saving a document that holds a dataset of type matrix shall write the
+      dataset's row-label column specifications under the key row_labels, in
+      the order declared, and its matrix settings under the key matrix, and
+      shall write no columns key for it. The header of a row label shall be
+      written as it was declared: absent when absent, the text when a text
+      (an empty text and the texts named and blank included), and the plain
+      YAML boolean No when the header line has no field above the row label,
+      so that reading the saved text back yields a dataset with the same row
+      labels and the same header of each, and saving that dataset again shall
+      give the identical text.
+    risk: high
+    category: integrity
+    covers: [run_dta_app, read_dta_from_yaml]
+    source: >
+      PLAN-matrix-dataset.md 4.6, T1; PLAN-matrix-format-review.md 2, 3;
+      inst/shiny/dta_app/R/utils_dta.R (dta_dataset_to_list, .dta_compact)
+    notes: >
+      The application drops empty entries recursively before it writes YAML;
+      an empty header text must not be dropped with them (it would become the
+      row label's id), and No must stay a boolean, not become a text.
+
+  - id: REQ-APP-034
+    text: >
+      A matrix dataset's recorded header, the raw header fields of each table
+      loaded with load_file(), shall survive the application's session dump and
+      restore: after a dump written with saveRDS() and read back, the restored
+      dataset shall hold the same recorded header for the table, and checking
+      it shall find no missing-header or load-it-again finding.
+    risk: high
+    category: integrity
+    covers: [run_dta_app, load_file, check]
+    source: >
+      PLAN-matrix-dataset.md D13, 4.7, T10;
+      inst/shiny/dta_app/R/utils_dta.R (dta_dump_session, dta_restore_session)
+    notes: >
+      PINNED STRUCTURALLY through the dump and restore helpers, which the
+      restore button calls: the harness has no browser to press it.
+
+  - id: REQ-APP-035
+    text: >
+      Applying edited raw YAML that changes the matrix block of a dataset with
+      loaded data shall re-validate that dataset without the user pressing
+      check, so that its verdict and findings reflect the new settings, and
+      shall leave the verdict of a dataset whose settings did not change as it
+      was.
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-dataset.md T15;
+      inst/shiny/dta_app/R/utils_dta.R (dta_specs_signature)
+    notes: >
+      A verdict reached against one matrix block and shown against another
+      would be a pass on settings nobody wrote.
+
+  - id: REQ-APP-036
+    text: >
+      Applying edited raw YAML that changes the type of one dataset shall drop
+      that dataset's bound tables, recorded headers and upload records and
+      leave it in the no-data state, and shall leave the bound tables, upload
+      records, recorded headers and verdicts of every other dataset
+      unchanged.
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-dataset.md T10;
+      inst/shiny/dta_app/R/utils_dta.R (dta_transfer_bound_data)
+    notes: >
+      A table bound under one type read as another would be judged by
+      specifications it was never loaded against.
+
+  - id: REQ-APP-037
+    text: >
+      Applying edited raw YAML that changes whether the first row label of a
+      matrix dataset with a loaded table has a field in the header line (for
+      example header: No in place of a text), so that the header line the
+      table was loaded with no longer fits, shall not raise: the next check shall report the
+      dataset as failing, with a finding telling the user to load the file
+      again, because the recorded header no longer yields the table's column
+      names under the new specification.
+    risk: high
+    category: integrity
+    covers: [run_dta_app, check, messages]
+    source: PLAN-matrix-dataset.md D13, T11; REQ-MATRIX-045
+
+  - id: REQ-APP-038
+    text: >
+      Unloading one table of a matrix dataset shall drop that table's recorded
+      header and keep the recorded headers of the dataset's other tables;
+      unloading every table shall drop every recorded header.
+    risk: medium
+    category: integrity
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-dataset.md 4.7, T10;
+      inst/shiny/dta_app/R/utils_dta.R (dta_unload_table, dta_unload_all,
+      dta_drop_provenance)
+    notes: >
+      PINNED STRUCTURALLY through the unload helpers the remove-file control
+      calls: the harness has no browser to press it.
+
+  - id: REQ-APP-039
+    text: >
+      The application shall list matrix among the dataset types it supports,
+      beside tabular and file, and for a dataset of type matrix shall offer
+      only csv and tsv as the type of a file entry, while tabular datasets
+      keep csv, tsv, sas7bdat and xpt and file datasets any type.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-dataset.md D11, D12;
+      inst/shiny/dta_app/R/utils_dta.R (dta_supported_types, dta_handler_types)
+    notes: >
+      PINNED STRUCTURALLY: the offered types are read from the helpers that
+      build the dropdown, not from a rendered dropdown.
+
+  - id: REQ-APP-040
+    text: >
+      A specification with matrix datasets loaded into the application, with a
+      file bound to each, shall validate: a conforming delivery shall be
+      reported as passing, and a delivery with a cell below the declared
+      minimum shall be reported as failing, with one finding of keyword minimum
+      at the row and column of that cell, which the application shall allow the
+      user to inspect, the inspected row showing the offending value.
+    risk: high
+    category: functional
+    covers: [run_dta_app, check, messages]
+    source: PLAN-matrix-dataset.md D1, 3.5; REQ-MATRIX-039
+
+  - id: REQ-APP-041
+    text: >
+      Adding a dataset of type matrix shall require a row-label column ID, a
+      choice of the header text above that row label (the ID, an empty field,
+      another text, or no field) and a cell type, and shall refuse the addition
+      when the ID, the choice or the cell type is missing, or when another text
+      is chosen and left blank. The dataset added shall be a matrix whose
+      single row-label column carries the given ID, is of type SAS Char, is
+      not nullable and is the row key, whose header is the one chosen (no
+      header key for the ID, "" for an empty field, the text, No for no field)
+      and whose cell type is the one chosen, and which requires at least one
+      data column and at least one data row.
+    risk: high
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-shiny.md 2.1; PLAN-matrix-format-review.md 3 (App);
+      inst/shiny/dta_app/R/utils_dta.R (dta_add_dataset)
+
+  - id: REQ-APP-042
+    text: >
+      Editing the row-label columns of a matrix dataset shall keep the dataset
+      valid and shall leave the header text of every other row label
+      unchanged: renaming a row-key column shall rename it in the row key;
+      adding a row label, removing one that is not the row key or moving one
+      shall not change the header declared on any other row label; removing
+      the row-key column shall be refused; choosing no field above a row label
+      that is not the first, and moving the first row label away from first
+      place (or another row label into it) while the first has no field above
+      it, shall each be refused; every refusal shall leave the dataset
+      unchanged.
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-shiny.md 2.2; PLAN-matrix-format-review.md 3 (App);
+      inst/shiny/dta_app/R/utils_dta.R (dta_set_column, dta_remove_column,
+      dta_move_column)
+
+  - id: REQ-APP-043
+    text: >
+      The matrix-layout editor shall save the data-column, row and cell
+      settings entered for a matrix dataset into its specification and shall re-validate
+      the dataset; saving it without changes shall leave the matrix settings
+      unchanged; an entry whose minimum exceeds its maximum shall be refused
+      and shall leave the dataset unchanged.
+    risk: high
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-shiny.md 2.4; PLAN-matrix-format-review.md 3 (App);
+      inst/shiny/dta_app/R/utils_dta.R (dta_matrix_fields, dta_set_matrix)
+
+  - id: REQ-APP-044
+    text: >
+      The rules of a matrix dataset shall be editable on its row-label
+      columns, and a rule whose ID starts with .matrix: shall be refused,
+      because that prefix is reserved for the checks the matrix layout
+      generates.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-shiny.md 2.3;
+      inst/shiny/dta_app/R/utils_dta.R (dta_set_rule)
+
+  - id: REQ-APP-045
+    text: >
+      Inspecting a finding that a matrix has fewer data rows than declared
+      shall state the declared minimum number of data rows and the actual
+      number of data rows.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-shiny.md 2.5;
+      inst/shiny/dta_app/app.R (render_inspect_body)
+
+  - id: REQ-APP-046
+    text: >
+      A file the application refuses to load into a dataset shall be listed in
+      that dataset's validation messages with the reason, until a file loads in
+      its place. Removing a file entry of a matrix dataset in the editor, or
+      reordering its file entries in raw YAML, shall not make a table already
+      loaded from a remaining entry fail as changed.
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-shiny.md 2.6, 2.7;
+      inst/shiny/dta_app/R/utils_dta.R (dta_load_errors_add,
+      dta_remap_file_handlers, dta_transfer_bound_data)
+    notes: >
+      A reason that vanishes after ten seconds is not evidence, and a false
+      "changed" failure blocks a conforming delivery.
+
+  - id: REQ-APP-047
+    text: >
+      The row-label form of a matrix dataset shall carry the header text above
+      the row label as a choice of the ID, an empty field, another text or no
+      field, with the text: the values the application reads for a row label
+      shall report the choice and text that its header declares, and saving the
+      form shall declare exactly that header on the row label, leaving the
+      row label's other settings unchanged.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-format-review.md 3 (App);
+      inst/shiny/dta_app/R/utils_dta.R (dta_column_fields, dta_set_column)
+
+  - id: REQ-APP-048
+    text: >
+      For a matrix dataset the application shall hold a two-line sketch of the
+      file the dataset describes, which it shows above the row-label list and
+      above the matrix-layout form. The second line shall hold the row-label
+      IDs in file order, followed by placeholders for the cells. The first line
+      shall hold, above each row-label ID, the header text expected there: the
+      ID when the row label declares no header, the declared text, two double
+      quotes for an empty field, and nothing where the header line has no
+      field -- in which case the line shall end with a note naming the row
+      label that has no field above it -- followed by placeholders for the
+      data-column labels. The row-label list shall carry the header of each
+      row label in a column named header: the expected text, "(empty)" for an
+      empty field and "(no field)" for none. A dataset of another type shall
+      have no sketch, and its column list no header column.
+    risk: low
+    category: interface
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-format-review.md 3 (App), 6;
+      inst/shiny/dta_app/R/utils_dta.R (dta_matrix_sketch, dta_columns_overview)
+
+  - id: REQ-APP-049
+    text: >
+      After an edit of the row labels of a matrix dataset that has a loaded
+      table, the application shall tell the user to load the file again exactly
+      when the edit makes that table stale: when it changes the row-label IDs
+      or their order (a rename, an added, a removed or a moved row label) or
+      whether the header line has a field above the first row label. An edit
+      that changes neither (another header text, another constraint), an edit
+      of a matrix with no table loaded and an edit of a dataset of another
+      type shall not.
+    risk: medium
+    category: interface
+    covers: [run_dta_app]
+    source: >
+      PLAN-matrix-format-review.md 6;
+      inst/shiny/dta_app/R/utils_dta.R (dta_matrix_needs_reload)
+
+  - id: REQ-APP-050
+    text: >
+      The application shall act on a file-input value only when it is a data
+      frame in which every file path names a file that exists and is not a
+      directory, located at
+      <R session temporary directory>/<24 lowercase hexadecimal
+      characters>/<digits>[.<alphanumeric extension>]. For any other value (not
+      a data frame, a path outside such a folder, a directory, a file that does
+      not exist) it shall read nothing, load nothing and leave the loaded
+      document unchanged.
+    risk: high
+    category: security
+    covers: [run_dta_app]
+    source: >
+      inst/shiny/dta_app/R/utils_dta.R (dta_upload_value_problem,
+      dta_stage_upload); inst/shiny/dta_app/app.R (accept_upload)
+    notes: >
+      A file input's value carries a server path, and a client that writes the
+      value itself could name any readable file. The application additionally
+      refuses any value that arrived as a client input message.
+      shiny::testServer cannot deliver one, so that binding rests on the
+      developer suite's wiring and Shiny-contract tests
+      (tests/testthat/test-shinyapp-upload-guard.R) and on a browser run, not on
+      this suite. This requirement is verified here for the value itself.

@@ -6,9 +6,11 @@
 #' @importFrom stringr str_flatten_comma
 #' @param id Character. Identifier of the dataset: its key in a DTA's
 #'   \code{datasets}, in every validation message and in \code{load_file()}.
-#' @param type Character. Dataset type: either \code{"tabular"}, whose files
-#'   are read and validated against column specifications, or \code{"file"},
-#'   whose files are only checked for presence, readability and non-emptiness.
+#' @param type Character. Dataset type: \code{"tabular"}, whose files
+#'   are read and validated against column specifications; \code{"file"},
+#'   whose files are only checked for presence, readability and non-emptiness;
+#'   or \code{"matrix"}, whose files are one homogeneous matrix of measurements
+#'   (see \code{\link{DTADataSetMatrix}}).
 #' @param files a list of DTAFile objects specifying input file information.
 #' @param name Character or NULL. Human-readable name of the dataset, e.g.
 #'   \code{"Demographics"}; shown in place of the \code{id} where one is set.
@@ -19,6 +21,16 @@
 #' @param template_version Character or NULL. Version of the template used.
 #' @param template_date Character or NULL. Date of the template used.
 #' @return An object of class DTADataSet.
+#'
+#' @section Provenance:
+#' The property \code{provenance} records, for every bound item (a table of a
+#' tabular dataset, a path of a file dataset), the delivered file name, the
+#' chain of containers it arrived in (outermost first; empty when it arrived
+#' loose) and \code{via}: \code{"file"} when \code{load_file()} bound it,
+#' \code{"delivery"} when \code{load_delivery()} did. It travels with the
+#' dataset. It is maintained by \code{load_file()} and \code{load_delivery()}
+#' only: a table assigned to \code{@tables} directly has no record, or, if it
+#' replaced a recorded one, keeps that record.
 #'
 #' @examples
 #' ds <- DTADataSet(
@@ -55,7 +67,8 @@ DTADataSet <- S7::new_class(
       description = description,
       template_source = template_source,
       template_version = template_version,
-      template_date = template_date
+      template_date = template_date,
+      provenance = list()
     )
   },
   properties = list(
@@ -66,7 +79,10 @@ DTADataSet <- S7::new_class(
     template_source = class_character_or_null,
     template_version = class_character_or_null,
     template_date = class_character_or_null,
-    description = class_character_or_null
+    description = class_character_or_null,
+    # One record per bound item; see the Provenance section above. No
+    # validator rule: a record is bookkeeping, never a reason to refuse an edit.
+    provenance = S7::new_property(class_list, default = list())
   ),
   validator = function(self) {
     if (!is.character(self@id) || length(self@id) != 1 || is.na(self@id) || self@id == "") {
@@ -88,6 +104,27 @@ DTADataSet <- S7::new_class(
     }
   }
 )
+
+# The records of a dataset (`list()` for an object restored from before the
+# property existed) and the write-safe way to add or drop one. `key` is the
+# table name (tabular) or the bound path (file dataset); `rec = NULL` drops it.
+# An object that has no such slot is returned unchanged: it still loads, its
+# items then read as "unrecorded".
+dta_provenance <- function(ds) {
+  tryCatch(ds@provenance, error = function(e) list())
+}
+dta_set_provenance <- function(ds, key, rec) {
+  # An object restored from an older version has no slot: unchanged. Any other
+  # error is a real one and propagates.
+  if (!"provenance" %in% S7::prop_names(ds)) {
+    return(ds)
+  }
+  prov <- ds@provenance
+  prov[[key]] <- rec
+  if (length(prov) == 0L) prov <- list()
+  ds@provenance <- prov
+  ds
+}
 
 #' @title Get max number of files
 #' @description
@@ -331,7 +368,27 @@ dta_dataset_from_list <- function(x, recursive = TRUE) {
     cli_abort("Dataset {.val {id}} must contain a {.field type}.")
   }
 
+  bad <- dta_dataset_runtime_keys(x)
+  if (length(bad) > 0L) {
+    cli_abort(
+      c(
+        "Dataset {.val {id}} has {.field {bad}}, which a specification cannot set.",
+        "i" = "It holds what the running session has bound or read; remove it from the YAML."
+      ),
+      class = "dta_dataset_runtime_key"
+    )
+  }
+
   do.call(DTADataSetFactory, x)
+}
+
+# Constructor arguments that hold session state, not specification: `paths`
+# binds server file paths to a file dataset, `tables` and `specs` hand over
+# built objects. The product never writes them to YAML, and read from one
+# `paths` would make the app stat arbitrary server paths on the author's behalf.
+#' @keywords internal
+dta_dataset_runtime_keys <- function(x) {
+  intersect(names(x), c("paths", "tables", "specs"))
 }
 
 

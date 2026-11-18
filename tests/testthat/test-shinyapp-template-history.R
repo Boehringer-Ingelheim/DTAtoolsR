@@ -487,6 +487,19 @@ test_that("ordinary history builds retain their original result and comparison s
   expect_equal(nrow(ch), 0)
 })
 
+# A variants build always has >= 1 choice (template_core.R rejects none), so
+# this pins the defensive guard: two builds with no choices compare as the
+# empty change frame instead of failing in order() on a NULL.
+test_that("comparing two variant builds with no choices returns the empty change frame", {
+  expect_identical(
+    app_fn("template_history_compare")(list(variants = list()), list(variants = list())),
+    data.frame(
+      area = character(0), what = character(0), change = character(0),
+      from = character(0), to = character(0), stringsAsFactors = FALSE
+    )
+  )
+})
+
 # ---- prior_versions: history from before the library ------------------------
 
 # Append a `prior_versions:` block to a file written by write_ct().
@@ -607,4 +620,176 @@ test_that("prior_versions keys match exactly and dates must be YYYY-MM-DD", {
   expect_true(any(grepl("entry 1 (3.0) has unknown key(s): change", res$problems, fixed = TRUE)))
   expect_true(any(grepl("entry 2 (2.0): date '2024-3-1'", res$problems, fixed = TRUE)))
   expect_true(any(grepl("entry 3 is not a mapping", res$problems, fixed = TRUE)))
+})
+
+# ---- column ids that contain spaces or dots ------------------------------------
+#
+# A history line names a column by its id, and an id may contain spaces and dots
+# (`Wt. (kg)`, `Subject.ID`), so which thing a changed leaf belongs to is looked
+# up in the entity table rather than read off the leaf key, and `a` / `a.b` are
+# two columns whose changes never swallow each other.
+
+# One version of `demo` with the given datasets: a named list of dataset name ->
+# list of columns, each a list with an `id` and optional `description` /
+# `values`. Written through yaml::as.yaml() so no id needs hand quoting.
+write_cols_ct <- function(root, version, datasets) {
+  column <- function(col) {
+    c(list(id = col$id, label = col$id, type = "SAS Char"), col[setdiff(names(col), "id")])
+  }
+  def <- list(
+    kind = "dta_creation_template", id = "demo", version = version, label = "demo",
+    base = list(metadata = list(title = "Demo", version = "1.0", date = "${today}", header = "H")),
+    datasets = unname(lapply(names(datasets), function(nm) {
+      list(
+        id = nm, name = nm, type = "tabular",
+        files = list(filename = paste0(nm, ".csv"), type = "csv"),
+        columns = lapply(datasets[[nm]], column)
+      )
+    }))
+  )
+  writeLines(
+    yaml::as.yaml(def, indent = 2, line.sep = "\n"),
+    lib_path(root, sprintf("demo_%s.dta-template.yaml", gsub(".", "_", version, fixed = TRUE)))
+  )
+}
+
+history_lines <- function(root, version) {
+  e <- entry_for(app_fn("template_history")(index_over(root), "demo"), "version", version)
+  expect_null(e$error)
+  paste(e$changes$what, e$changes$change, sep = " | ")
+}
+
+test_that("a column id with spaces is named whole in a version's changes", {
+  root <- withr::local_tempdir()
+  write_cols_ct(root, "1.0", list(ds1 = list(
+    list(id = "Subject ID", description = "one"), list(id = "Visit Date (UTC)")
+  )))
+  write_cols_ct(root, "1.1", list(ds1 = list(
+    list(id = "Subject ID", description = "two"), list(id = "Visit Date (UTC)"),
+    list(id = "Dose mg/kg")
+  )))
+
+  expect_setequal(
+    history_lines(root, "1.1"),
+    c(
+      "Dataset 'ds1', column 'Subject ID': description | changed",
+      "Dataset 'ds1', column 'Dose mg/kg' | added"
+    )
+  )
+  ch <- entry_for(app_fn("template_history")(index_over(root), "demo"), "version", "1.1")$changes
+  row <- ch[ch$what == "Dataset 'ds1', column 'Subject ID': description", ]
+  expect_equal(c(row$from, row$to), c("one", "two"))
+})
+
+test_that("a column id with dots is named whole, trailing dot included", {
+  root <- withr::local_tempdir()
+  cols <- function(suffix) {
+    list(ds1 = list(
+      list(id = "Subject.ID", description = paste0("s", suffix)),
+      list(id = "Wt. (kg)", description = paste0("w", suffix)),
+      list(id = "Dose No.", description = paste0("d", suffix))
+    ))
+  }
+  write_cols_ct(root, "1.0", cols("1"))
+  write_cols_ct(root, "1.1", cols("2"))
+
+  expect_setequal(
+    history_lines(root, "1.1"),
+    c(
+      "Dataset 'ds1', column 'Subject.ID': description | changed",
+      "Dataset 'ds1', column 'Wt. (kg)': description | changed",
+      "Dataset 'ds1', column 'Dose No.': description | changed"
+    )
+  )
+})
+
+test_that("a column and a column whose id extends it are attributed separately", {
+  # `a` and `a.b` share a key prefix, so a leaf of `a.b` also starts with
+  # `ds1.columns.a.`. Reading the key, a NEW column `a` swallowed the change to
+  # `a.b` into its own "added" line, and a REMOVED `a.b` was reported as a
+  # field `b` of column `a`.
+  root <- withr::local_tempdir()
+  write_cols_ct(root, "1.0", list(ds1 = list(list(id = "a.b", description = "one", values = c("p", "q")))))
+  write_cols_ct(root, "1.1", list(ds1 = list(
+    list(id = "a", description = "s", values = c("m", "n")),
+    list(id = "a.b", description = "two", values = c("p", "q"))
+  )))
+  write_cols_ct(root, "1.2", list(ds1 = list(list(id = "a", description = "s", values = c("m", "CHG")))))
+
+  expect_setequal(
+    history_lines(root, "1.1"),
+    c("Dataset 'ds1', column 'a' | added", "Dataset 'ds1', column 'a.b': description | changed")
+  )
+  expect_setequal(
+    history_lines(root, "1.2"),
+    c("Dataset 'ds1', column 'a.b' | removed", "Dataset 'ds1', column 'a': values | changed")
+  )
+})
+
+test_that("a new dataset is one line however many columns it brings, a new column one line", {
+  root <- withr::local_tempdir()
+  write_cols_ct(root, "1.0", list(ds1 = list(list(id = "Subject ID"))))
+  write_cols_ct(root, "1.1", list(
+    ds1 = list(list(id = "Subject ID"), list(id = "New Col (x)")),
+    ds2 = list(list(id = "Subject ID"), list(id = "Wt. (kg)"), list(id = "a"), list(id = "a.b"))
+  ))
+  write_cols_ct(root, "1.2", list(ds1 = list(list(id = "Subject ID"), list(id = "New Col (x)"))))
+
+  expect_setequal(
+    history_lines(root, "1.1"),
+    c("Dataset 'ds1', column 'New Col (x)' | added", "Dataset 'ds2' | added")
+  )
+  expect_identical(history_lines(root, "1.2"), "Dataset 'ds2' | removed")
+})
+
+test_that("template_history_owner() takes the longest thing whose prefix the key carries", {
+  owner <- app_fn("template_history_owner")
+  entities <- data.frame(
+    prefix = c("ds1", "ds1.columns.a", "ds1.columns.a.b", "ds1.columns.a.values"),
+    kind = c("dataset", "columns", "columns", "columns"),
+    dataset = "ds1", id = c(NA, "a", "a.b", "a.values"), parent = c(NA, "ds1", "ds1", "ds1"),
+    stringsAsFactors = FALSE
+  )
+
+  expect_identical(owner("ds1.columns.a.b.description", entities), 3L)
+  expect_identical(owner("ds1.columns.a.description", entities), 2L)
+  # `a.values` is a column of its own here, so a leaf below it is its leaf ...
+  expect_identical(owner("ds1.columns.a.values.type", entities), 4L)
+  # ... but the key `ds1.columns.a.values` itself is a field `values` of column `a`
+  expect_identical(owner("ds1.columns.a.values", entities), 2L)
+  expect_identical(owner("ds1.files.filename", entities), 1L)
+  # The match is strict (prefix + "."): a key that IS a thing's prefix is not a
+  # leaf of that thing, so it reads as a field of the next shorter one. (The
+  # collapsed "added"/"removed" line looks the thing up by its prefix instead.)
+  expect_identical(owner("ds1.columns.a.b", entities), 2L)
+  expect_true(is.na(owner("label", entities)))
+  expect_true(is.na(owner("label", entities[0, ])))
+})
+
+test_that("template_history_label() reads the entity table, and splits the key without one", {
+  lab <- app_fn("template_history_label")
+  entities <- data.frame(
+    prefix = c("ds1", "ds1.columns.Wt. (kg)", "ds1.row_labels.GENE.ID", "options.opt_1"),
+    kind = c("dataset", "columns", "row_labels", "options"),
+    dataset = c("ds1", "ds1", "ds1", NA), id = c(NA, "Wt. (kg)", "GENE.ID", "opt_1"),
+    parent = c(NA, "ds1", "ds1", NA), stringsAsFactors = FALSE
+  )
+
+  expect_identical(
+    lab("Datasets", "ds1.columns.Wt. (kg).description", entities),
+    "Dataset 'ds1', column 'Wt. (kg)': description"
+  )
+  expect_identical(
+    lab("Datasets", "ds1.columns.Wt. (kg).values_from.exclude", entities),
+    "Dataset 'ds1', column 'Wt. (kg)': values_from > exclude"
+  )
+  expect_identical(
+    lab("Datasets", "ds1.row_labels.GENE.ID.nullable", entities),
+    "Dataset 'ds1', row label 'GENE.ID': nullable"
+  )
+  expect_identical(lab("Datasets", "ds1.files.filename", entities), "Dataset 'ds1': files > filename")
+  expect_identical(lab("Template", "options.opt_1.label", entities), "Option 'opt_1': label")
+  # no entity owns the key: the old split of the key, which only suits ids without dots
+  expect_identical(lab("Template", "based_on", entities), "Based on")
+  expect_identical(lab("Datasets", "ds1.columns.A.values"), "Dataset 'ds1', column 'A': values")
 })

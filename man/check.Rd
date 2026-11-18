@@ -59,6 +59,11 @@ outside its declared bounds, zero rows when none. A check of a subset of
 datasets replaces the rows of the datasets it checked; a row of another
 dataset is kept while that dataset still exists and still holds a file
 count outside its bounds (it is judged again, not copied).}
+\item{\code{"last_container_findings"}}{data.frame from
+\code{\link{container_findings}()}, covering ALL datasets also when
+only some were checked: one row per file not known to be inside its
+container (\code{outside}, \code{unverified} or \code{unrecorded}),
+zero rows when none.}
 \item{\code{"last_metadata_summary"}}{one-row data.frame for the metadata
 axis, with columns scope, status, import_valid, n_import_errors, fields,
 ok. Metadata belongs to the \code{DTA} itself rather than to any
@@ -69,7 +74,9 @@ no dataset is invalid, no table has an import error, the metadata
 imported cleanly, no target -- e.g. a table checked against zero
 column specs -- was left unchecked, every dataset had something to
 check in the first place, and no tabular dataset holds a number of
-files outside the bounds its handlers declare.}
+files outside the bounds its handlers declare, no file is
+\code{outside} its container and none is \code{unverified} or
+\code{unrecorded} (see \code{\link{container_findings}()}).}
 \item{\code{"benchmark"}}{Present only when \code{benchmark = TRUE}. A
 one-row data.frame of runtime/memory metrics; see
 \code{\link{validation_benchmark}}. \code{rows} is \code{NA} at this
@@ -143,6 +150,15 @@ bound on that side. A count outside them signals a warning of class
 \code{FALSE}) and is listed in the \code{"last_file_count_findings"}
 attribute. This applies only to a DTA-level check, not to a dataset checked
 alone, and a dataset with no handlers or no tables is not judged.
+
+Packaging is a verdict of its own, apart from content. A file that arrived
+loose or inside another container than its entry requires
+(\code{outside}) fails the run ("Validation FAILED") and signals a warning
+of class \code{dta_container_mismatch}; a file that was loaded on its own
+or without a record of how it arrived (\code{unverified},
+\code{unrecorded}) leaves it incomplete ("Validation INCOMPLETE"), and the
+warning is signalled for it too. The content of each file is validated
+either way, so \code{validation_status()} of the dataset is unaffected.
 }
 \section{Options that tune a scan}{
 

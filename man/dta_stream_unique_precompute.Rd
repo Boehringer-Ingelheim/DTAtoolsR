@@ -60,11 +60,13 @@ to Acero, so the cast is followed by \code{if_else(k == 0, 0, k)}. Measured on t
 eight values \verb{NaN, NaN, <missing>, <missing>, -0, 0, 1.5, 1.50}, which
 \code{duplicated()} calls 4 duplicates: without the fold Acero reported 3.
 
-No \code{NaN} normalisation is applied, deliberately. Acero already groups \code{NaN}
-with itself and apart from null, which is exactly what the R key does --
-\code{dta_row_key()} masks only \code{is.na(x) & !is.nan(x)}, leaving \code{NaN} its own
-rendering. Folding \code{NaN} into null as well took those same eight values to 5
-duplicates, one more than the table contains.
+\code{NaN} is folded into null as well. A \code{NaN} here can only come from a \code{NaN}
+token in the text, and the import typing (\code{dta_coerce_table_to_specs()})
+reports such a token as not convertible and stores it as missing -- so the
+R key, which treats all missing values as one, sees it as missing too. Left
+unfolded, Acero grouped \code{NaN} apart from null and counted one duplicate fewer
+than the eager path on the same file. On the eight values above, the eager
+path and the double fold both count 5 duplicates.
 }
 
 \keyword{internal}

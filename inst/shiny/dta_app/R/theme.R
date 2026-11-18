@@ -411,6 +411,77 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
        per-slot state after matches_filename() + load_file() succeed and verify. */
     .dropzone .progress, .dropzone .shiny-file-input-progress { display: none !important; }
 
+    /* The sidebar's Delivery zone: the same dashed target as a slot, sized like
+       the landing drop (label, and a field that shrinks instead of pushing the
+       Browse button out of a 320px sidebar). While a file is dragged over
+       ANY zone it highlights; the Delivery zone says what dropping does. */
+    .delivery-block { margin: 2px 0 6px; }
+    .delivery-drop .shiny-input-container { width: 100%; }
+    .delivery-drop .control-label { font-size: .8125rem; font-weight: 500; color: var(--bi-ink); }
+    .delivery-drop .input-group { position: relative; padding: 10px 12px; flex-wrap: nowrap; }
+    .delivery-drop .form-control { flex: 1 1 auto; width: auto; max-width: none; }
+    .delivery-drop .input-group.shiny-file-input-active {
+      background: var(--bi-green-light); border-color: var(--bi-accent);
+      box-shadow: 0 0 0 3px var(--bi-accent-glow);
+    }
+    .delivery-drop .input-group.shiny-file-input-active::after {
+      content: 'Drop here to load every dataset';
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      border-radius: .5rem; background: var(--bi-green-light); color: var(--bi-green-dark);
+      font-weight: 600; font-size: .875rem; text-align: center; pointer-events: none;
+      z-index: 3; /* Bootstrap's .input-group .btn is z-index 2: the cue must cover Browse */
+    }
+    /* Slot zones stay subdued while a delivery is dragged in: the highlight is
+       the Delivery zone's alone. */
+    .slot-card .dropzone .input-group.shiny-file-input-active { border-color: rgba(0,98,91,.7); background: var(--bi-surface); }
+
+    /* One line per container in the sidebar: the glyph is decoration (the words
+       carry the state), long file names are ellipsised. */
+    .delivery-panel { margin-top: 8px; font-size: .8125rem; }
+    .dp-line { display: flex; gap: 6px; align-items: baseline; margin: 2px 0; min-width: 0; }
+    .dp-glyph { flex: none; width: 1.1em; text-align: center; font-weight: 600; }
+    /* The state words must always be readable: a long container name wraps
+       (breaking inside the name if it has to) instead of being ellipsised away. */
+    .dp-text { min-width: 0; overflow-wrap: anywhere; color: var(--bi-ink); }
+    .dp-ok .dp-glyph { color: var(--bi-pass); }
+    .dp-bad .dp-glyph { color: var(--bi-fail); }
+    .dp-warn .dp-glyph { color: var(--bi-warn-dark); }
+    .dp-none .dp-glyph { color: var(--bi-grey); }
+    .dp-last, .dp-links { margin-top: 6px; color: var(--bi-grey); }
+    .dv-back { margin-bottom: 6px; font-size: .8125rem; }
+    /* The ambiguity dialog: the table scrolls, the footer buttons stay on one line. */
+    .amb-body { max-height: max(12rem, calc(100vh - 33rem)); overflow-y: auto; }
+    .amb-body .shiny-input-radiogroup { margin-bottom: 0; }
+    .amb-footer { display: flex; gap: .5rem; flex-wrap: nowrap; }
+    .amb-footer .btn { white-space: nowrap; }
+    /* The container manager: its Assign tab scrolls (header row pinned) under
+       the tabs and the filter, and Save/Cancel live in the footer. */
+    .ctr-assign-tools { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 4px; }
+    .ctr-assign-tools .ctr-filter { width: 18rem; max-width: 100%; margin-bottom: 1rem; }
+    .ctr-assign-scroll { max-height: max(12rem, calc(100vh - 36rem)); overflow-y: auto; }
+    .ctr-assign-scroll thead th { position: sticky; top: 0; background: var(--bi-surface); z-index: 1; }
+    .ctr-assign-scroll .form-group { margin-bottom: 0; }
+    .ctr-repeat { color: var(--bi-grey); }
+    #ctr_modal_footer { display: flex; gap: .5rem; }
+    .modal-footer:has(> #ctr_modal_footer:empty) { display: none; }
+    /* An empty option (with all other files) is not centred like a heading. */
+    .selectize-dropdown .option[data-value=''] { text-align: left; }
+
+    /* The Delivery view and the ambiguity dialog share one table style. */
+    .delivery-view .dv-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+    .delivery-view .dv-head h4 { margin: 0; }
+    .delivery-view .dv-container { margin: 14px 0; }
+    .delivery-view h5 { margin: 14px 0 4px; font-weight: 600; }
+    .dv-table { font-size: .8125rem; }
+    .dv-table th { color: var(--bi-grey); font-weight: 600; }
+    .dv-table tr.dv-group td { background: var(--bi-grey-light); font-weight: 600; color: var(--bi-grey); }
+    .dv-table tr.dv-problem td:first-child { box-shadow: inset 3px 0 0 var(--bi-fail); }
+    .amb-set-all { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 8px; }
+    .amb-set-all .form-group { margin-bottom: 0; }
+    .loaded-file-row .file-finding { font-size: .75rem; border-radius: 999px; padding: 1px 8px; border: 1px solid var(--bi-pending-border); color: var(--bi-ink); }
+    .loaded-file-row .ff-outside { border-color: var(--bi-fail-border); }
+    .loaded-file-row .ff-unverified, .loaded-file-row .ff-unrecorded { border-color: var(--bi-warn-border); }
+
     .msg-hint { font-size: .8125rem; color: var(--bi-grey); line-height: 1.45; }
 
     /* bslib layout_sidebar() renders one bordered, rounded outer box
@@ -460,6 +531,11 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
       --bs-btn-color: var(--bi-pass); --bs-btn-bg: transparent; --bs-btn-border-color: var(--bi-pass);
       --bs-btn-hover-color: #fff; --bs-btn-hover-bg: var(--bi-pass); --bs-btn-hover-border-color: var(--bi-pass);
       --bs-btn-active-color: #fff; --bs-btn-active-bg: var(--bi-pass); --bs-btn-active-border-color: var(--bi-pass);
+    }
+    .bslib-sidebar-layout > .sidebar #dl_validation_summary.btn-outline-danger {
+      --bs-btn-color: var(--bi-fail); --bs-btn-border-color: var(--bi-fail);
+      --bs-btn-hover-color: #fff; --bs-btn-hover-bg: var(--bi-fail); --bs-btn-hover-border-color: var(--bi-fail);
+      --bs-btn-active-color: #fff; --bs-btn-active-bg: var(--bi-fail); --bs-btn-active-border-color: var(--bi-fail);
     }
     .bslib-sidebar-layout > .sidebar #dl_validation_summary.btn-warning {
       --bs-btn-color: var(--bi-warn-dark); --bs-btn-border-color: var(--bi-warn);
@@ -571,6 +647,7 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
     .yaml-edit-bar { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
     .yaml-edit-bar .msg-hint { flex: 1 1 auto; }
     .yaml-edit-actions { flex: none; display: flex; gap: 6px; }
+    .yaml-edit-bar .yaml-copy { flex: none; }
     textarea#raw_yaml_editor {
       background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 8px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -633,6 +710,23 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
        (not-checked/pass/fail/no-data); the background encodes selection only
        (a brand tint), so the two never collide. */
     .dataset-nav-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 2px; }
+    /* A long list scrolls in its own box, so Delivery and Check all datasets
+       below it stay in reach. The box is the output element itself, which
+       Shiny keeps while it swaps the list inside, so the scroll position
+       survives a re-render; the Datasets label stays pinned at its top.
+       Shiny draws a filled output as display: contents, which has no box to
+       scroll, hence the block (only while filled: empty, it stays hidden). */
+    #dataset_nav_ui:not(:empty) { display: block; }
+    #dataset_nav_ui {
+      /* 37rem: what sits under the list (Delivery, Check all, Export, the
+         messages dock) in view mode, so Check all stays above the dock. */
+      max-height: clamp(12rem, calc(100vh - 37rem), 30rem); overflow-y: auto;
+      overscroll-behavior: contain; scrollbar-width: thin; padding-right: 2px;
+    }
+    #dataset_nav_ui .section-label {
+      position: sticky; top: 0; z-index: 1;
+      margin: 0; padding: 6px 0 4px; background: var(--bi-surface);
+    }
     .dataset-nav-row {
       display: flex; align-items: center; gap: 8px;
       padding: 6px 6px 6px 10px;
@@ -680,10 +774,10 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
     }
     .dataset-nav-row .nav-check:hover { background: var(--bi-surface); border-color: var(--bi-pass-border); }
 
-    /* Add dataset sits directly above Check all datasets (btn-primary, the
-       sidebar's actual call to action) -- btn-sm + btn-outline-secondary
-       alone still draws a full-width bordered box the same size as that
-       button, so this drops the border and dims the text further at rest,
+    /* Add dataset sits under the list, above Delivery and Check all datasets
+       (btn-primary, the sidebar's actual call to action) -- btn-sm +
+       btn-outline-secondary alone still draws a full-width bordered box the
+       size of that button, so this drops the border and dims the text further at rest,
        leaving only a hover/focus state as the affordance that it is
        clickable at all. Reads as a small addition to the list above it, not
        a second primary action. */
@@ -819,6 +913,10 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
     }
     #shiny-notification-panel .shiny-notification-error { border-left-color: var(--bi-fail); }
     #shiny-notification-panel .shiny-notification-warning { border-left-color: var(--bi-warn); }
+    .notice-multiline { white-space: pre-line; }
+    .matrix-sketch { font-family: var(--bs-font-monospace); font-size: .8125rem; line-height: 1.6;
+      margin: 0 0 12px; padding: 8px 12px; overflow-x: auto; white-space: pre;
+      background: var(--bs-tertiary-bg, #f4f6f5); border: 1px solid var(--bs-border-color); border-radius: 6px; }
 
     /* Wider inspect modal + a body that wraps/scrolls instead of overflowing. */
     .modal-xl { max-width: 92vw; }
@@ -1477,15 +1575,36 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
 }
 
 # Status chip HTML ---------------------------------------------------------
-status_chip <- function(status) {
+#
+# `packaging` ("none", "unverified" or "outside") is the dataset's verdict on how
+# its files arrived. Nothing may read Passed while a finding exists, so a content
+# pass with a finding says so and takes the amber (unverified) or red (outside)
+# class; `status` itself stays the content status.
+status_display <- function(status, packaging = "none") {
+  if (!identical(status, "pass")) {
+    return(status)
+  }
+  switch(packaging,
+    outside = "fail",
+    unverified = "nodata",
+    status
+  )
+}
+
+status_chip <- function(status, packaging = "none") {
   status <- match.arg(status, c("pass", "fail", "pending", "nodata"))
+  packaging <- match.arg(packaging, c("none", "unverified", "outside"))
   label <- switch(status,
-    pass = "Passed",
+    pass = switch(packaging,
+      outside = "Content passed \u00B7 not inside its container",
+      unverified = "Passed \u00B7 packaging not verified",
+      "Passed"
+    ),
     fail = "Failed",
     pending = "Not validated",
     nodata = "No data"
   )
-  cls <- paste0("status-chip status-", status)
+  cls <- paste0("status-chip status-", status_display(status, packaging))
   shiny::span(
     class = cls,
     shiny::span(class = "status-dot"),

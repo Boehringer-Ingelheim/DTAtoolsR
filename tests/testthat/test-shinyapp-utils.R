@@ -138,7 +138,7 @@ test_that("dta_rule_summary gives the plain-English sentence of the package, not
 # ---- supported types / backends --------------------------------------------
 
 test_that("dta_supported_types / dta_supported_backends / dta_sas_types return the real package sets", {
-  expect_equal(app_fn("dta_supported_types")(), c("tabular", "file"))
+  expect_equal(app_fn("dta_supported_types")(), c("tabular", "file", "matrix"))
   expect_equal(app_fn("dta_supported_backends")(), "SAS")
   expect_equal(
     app_fn("dta_sas_types")(),
@@ -764,7 +764,9 @@ test_that("dta_example_yaml_files lists the bundled examples in the taught order
       "clinical_dta.yaml",
       "clinical_dta_multiple_files.yaml",
       "clinical_dta_with_file_dataset.yaml",
-      "gf_dataset.yaml"
+      "gf_dataset.yaml",
+      # Not on the preferred list, so appended in sorted order after it.
+      "matrix_dta.yaml"
     )
   )
 })

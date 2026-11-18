@@ -15,8 +15,9 @@ caller can reach this failure through either -- and naming the wrong one
 sends them looking in the wrong place.}
 }
 \value{
-A list with \code{file} (the path) and \code{specs} (a
-\code{DTAColumnSpecCollection}, or \code{NULL} when the caller supplied none).
+A list with \code{file} (the path), \code{specs} (a
+\code{DTAColumnSpecCollection}, or \code{NULL} when the caller supplied none) and
+\code{column_names} (a character vector, or \code{NULL}).
 }
 \description{
 \code{read_file_execution()} and \code{open_file_execution()} dispatch on \code{x} alone and

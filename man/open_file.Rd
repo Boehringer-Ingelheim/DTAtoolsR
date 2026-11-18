@@ -20,6 +20,9 @@ must match the object's filename or pattern.}
 \code{NULL} (the default). Passed to the reader so that a column the
 specification declares as text is parsed as text rather than inferred
 -- see \code{\link{read_file}()} for why that matters.}
+\item{column_names}{Character vector or \code{NULL}. Column names to use
+instead of the file's header, verbatim; the header line is still
+skipped. Used by matrix datasets.}
 }}
 }
 \value{

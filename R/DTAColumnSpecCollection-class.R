@@ -571,6 +571,9 @@ import_specs_from_json <- function(file) {
 #'   matched by their header instead, so the six-column layout without a
 #'   Length column is read correctly too. Recognised names: `id`, `label`,
 #'   `type`, `length`, `format`, `nullable`, `description`; `id` is required.
+#'   An id keeps the plain spaces typed inside it (`STUDY ID` stays
+#'   `STUDY ID`); its ends are trimmed and any other whitespace inside it (a
+#'   line break, a tab) is dropped.
 #'
 #'   A description cell may carry markers on their own lines:
 #'   \code{#@values: a;b;c} gives the permitted values (separated by
@@ -678,7 +681,13 @@ columns_specs_from_word <- function(
     if (first %in% `__DTAtools_supported_backends__`) first else NULL
   }
 
-  ids <- gsub("[[:space:]]+", "", as.character(columns$id))
+  # A column id is the exact header text, so plain spaces are kept as typed
+  # ("Subject ID", "Subject  ID"); the ends are trimmed, and any other
+  # whitespace inside a cell (a line break, a tab, a thin or ideographic space:
+  # a column id cannot hold them) is dropped, as all whitespace was before.
+  # The plain spaces are set aside while the class removes the rest.
+  ids <- gsub(" ", "\001", as.character(columns$id), fixed = TRUE)
+  ids <- trimws(gsub("\001", " ", gsub("[[:space:]]+", "", ids), fixed = TRUE))
   keep <- which(!blank(ids))
   column_list <- lapply(keep, function(i) {
     row <- as.list(columns[i, , drop = FALSE])

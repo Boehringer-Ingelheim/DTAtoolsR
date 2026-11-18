@@ -12,7 +12,8 @@ dta_validate_table_stream(
   coerce = TRUE,
   fail_fast = FALSE,
   precomputed = list(),
-  known_columns = character(0)
+  known_columns = character(0),
+  structure = NULL
 )
 }
 \arguments{
@@ -56,6 +57,14 @@ stream yields no rows: rules are then evaluated once against an empty
 table with these columns, so a rule naming a column the table lacks
 still reports "could not be evaluated" exactly as the materialising path
 does -- previously a header-only file certified such rules as passed.}
+
+\item{structure}{\code{NULL} (a plain table) or the structural findings of a
+matrix dataset (see \code{dta_validate_any_table()}): \code{findings}, \code{rows} and
+\code{declared}. The header findings enter the error sink first, the row-count
+finding follows them and the cells come last, on every cap: when the header
+findings alone overflow the cap, the row-count row is appended to the first
+spill part. Otherwise it is inserted into the retained head, which may then
+hold one row more than \code{max_errors}.}
 }
 \value{
 A \code{details} list of the same shape \code{validate_table_detailed()}

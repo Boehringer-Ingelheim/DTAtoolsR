@@ -44,18 +44,39 @@ cont_specs <- function(domain) {
   )
 }
 # A DTA with datasets ae, dm, vs; one file entry each, of `type`, named
-# "<id>.<ext>", optionally declaring `container`. (`container` is a property
-# of the file handlers, not of the container layer under test here: call this
-# only where that property exists.)
-cont_dta <- function(type = "csv", container = NULL, ext = type) {
+# "<id>.<ext>", optionally declaring `container` (a reference: id, file name or
+# "none") and carrying the document-level `containers` (a list of
+# DTAContainer).
+cont_dta <- function(type = "csv", container = NULL, ext = type, containers = list()) {
   mk <- function(id) {
     DTAtools::DTADataSetTabular(
       id = id, specs = cont_specs(id),
       files = list(DTAtools::DTAFileFactory(type = type, filename = paste0(id, ".", ext), container = container))
     )
   }
-  DTAtools::DTA(datasets = list(mk("ae"), mk("dm"), mk("vs")))
+  DTAtools::DTA(datasets = list(mk("ae"), mk("dm"), mk("vs")), containers = containers)
 }
+
+# --- Shared by the delivery, container and provenance tests -------------------
+
+# load_delivery() without its summary message.
+ld <- function(...) suppressMessages(load_delivery(...))
+
+# The last_delivery table of a result.
+plan_of <- function(d) attr(d, "last_delivery")
+
+# The rows of a plan with one status.
+rows_of <- function(plan, status) plan[plan$status == status, , drop = FALSE]
+
+# A tabular dataset; specs default to the domain's.
+tab_ds <- function(id, files, specs = cont_specs(id)) {
+  DTADataSetTabular(id = id, specs = specs, files = files)
+}
+
+# A file dataset.
+file_ds <- function(id, ...) DTADataSetFile(id = id, files = list(...))
+
+dta_of <- function(...) DTA(datasets = list(...))
 # A table bound in a dataset of a DTA, as a plain data.frame.
 cont_table <- function(dta, dataset, table) {
   as.data.frame(DTAtools::tables(DTAtools::datasets(dta, dataset))[[table]])

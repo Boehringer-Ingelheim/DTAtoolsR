@@ -85,7 +85,7 @@
     "{DATASET_TYPE}" = "Type of the current dataset",
     "{DATASET_DESCRIPTION}" = "Description of the current dataset",
     "{DATASET_FILE_COUNT}" = "Number of expected files of the current dataset",
-    "{DATASET_COLUMN_COUNT}" = "Number of columns of the current dataset (0 unless tabular)",
+    "{DATASET_COLUMN_COUNT}" = "Number of columns of the current dataset (0 unless tabular; a matrix counts its row-label columns)",
     "{DATASET_RULE_COUNT}" = "Number of validation rules of the current dataset (0 unless tabular)"
   )
 }

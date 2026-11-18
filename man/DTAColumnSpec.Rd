@@ -19,7 +19,11 @@ DTAColumnSpec(
 )
 }
 \arguments{
-\item{id}{Character. The id of the column.}
+\item{id}{Character. The id of the column: the exact text of its header in
+the data, so spaces and punctuation are allowed (\code{"Subject ID"},
+\code{"Dose mg/kg"}). It cannot start or end with a space, and it cannot
+contain whitespace other than spaces between characters (no tab or line
+break).}
 
 \item{label}{Character or NULL. The label of the column.}
 

@@ -3,10 +3,10 @@
 %   R/DTAColumnSpecCollection-class.R, R/DTAColumnSpecStructure-class.R,
 %   R/DTAColumnSpecStructureSAS-class.R, R/DTADataSet-class.R,
 %   R/DTAFile-class.R, R/DTAFileAny-class.R, R/DTADataSetTabular-class.R,
-%   R/DTAFileCSV-class.R, R/DTAFileDelim-class.R, R/DTAFileTSV-class.R,
-%   R/DTAMetaData-class.R, R/DTARule-class.R, R/DTARuleColCondition-class.R,
-%   R/DTARuleColRange-class.R, R/DTARuleColUnique-class.R,
-%   R/DTARuleGroupCondition-class.R
+%   R/DTADataSetMatrix-class.R, R/DTAFileCSV-class.R, R/DTAFileDelim-class.R,
+%   R/DTAFileTSV-class.R, R/DTAMetaData-class.R, R/DTARule-class.R,
+%   R/DTARuleColCondition-class.R, R/DTARuleColRange-class.R,
+%   R/DTARuleColUnique-class.R, R/DTARuleGroupCondition-class.R
 \name{print}
 \alias{print}
 \title{Print a DTAtools Object}
@@ -30,6 +30,9 @@ print(x, ...)
 print(x, ...)
 
 ## S7 method for class <DTAtools::DTADataSetTabular>
+print(x, ...)
+
+## S7 method for class <DTAtools::DTADataSetMatrix>
 print(x, ...)
 
 ## S7 method for class <DTAtools::DTAFileCSV>

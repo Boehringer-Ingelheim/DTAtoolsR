@@ -346,10 +346,18 @@ dta_import_messages_to_df <- function(dataset_name, table_name, details) {
       row = NA_real_,
       column = NA_character_,
       keyword = NA_character_,
-      message = paste0(
-        "validation artifact predates import checking (result_version 1); ",
-        "re-run check(force = TRUE)"
-      ),
+      message = if (isTRUE(attr(details, "partial_scan")) ||
+        isTRUE(details$result_version >= 2L)) {
+        paste0(
+          "import checking was not settled: the scan stopped early (fail_fast) ",
+          "before every value was read; re-run check(force = TRUE) without fail_fast"
+        )
+      } else {
+        paste0(
+          "validation artifact predates import checking (result_version 1); ",
+          "re-run check(force = TRUE)"
+        )
+      },
       stringsAsFactors = FALSE
     ))
   }
@@ -568,8 +576,9 @@ dta_find_rule_def <- function(x, dataset_name, rule_id) {
   tryCatch(
     {
       ds <- if (inherits(x, "DTAtools::DTA")) x@datasets[[dataset_name]] else x
-      if (!is.null(ds) && !is.null(ds@specs) && !is.null(ds@specs@rules)) {
-        for (r in ds@specs@rules) {
+      if (!is.null(ds) && !is.null(ds@specs)) {
+        # A matrix also owns the generated row-key rule.
+        for (r in dta_dataset_rules(ds)) {
           if (!is.null(r@id) && identical(r@id, rule_id)) {
             return(r)
           }
@@ -1126,12 +1135,18 @@ dta_filter_columnspec_matches <- function(columnspec_full, msg_row) {
       return(df)
     }
 
+    # A missing value selects the rows whose field is missing too, rather than
+    # comparing with NA (which matched nothing, or every row via NA subsetting).
+    if (length(value) == 1 && is.na(value)) {
+      return(df[is.na(df[[field]]), , drop = FALSE])
+    }
+
     if (is.numeric(value)) {
       return(df[!is.na(df[[field]]) & df[[field]] == value, , drop = FALSE])
     }
 
     value_chr <- as.character(value)
-    if (length(value_chr) == 0 || is.na(value_chr) || !nzchar(value_chr)) {
+    if (length(value_chr) == 0 || !nzchar(value_chr)) {
       return(df)
     }
 
@@ -1387,7 +1402,7 @@ dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory",
   }
 
   rule_id <- as.character(msg_row$rule_id)
-  rules_list <- tryCatch(x@specs@rules, error = function(e) NULL)
+  rules_list <- tryCatch(dta_dataset_rules(x), error = function(e) NULL)
   if (is.null(rules_list)) {
     rules_list <- list()
   }

@@ -990,6 +990,8 @@ test_that("a cached file validates to the same verdict as the original", {
   )
 
   cache_as_parquet(specs, csv, cache_path = cache)
+  # Pins the one legitimate directory input (a Parquet dataset directory) that
+  # the directory refusal must not break.
   expect_true(dir.exists(cache))
 
   from_csv <- validate_file_stream(specs, csv, verbose = FALSE)

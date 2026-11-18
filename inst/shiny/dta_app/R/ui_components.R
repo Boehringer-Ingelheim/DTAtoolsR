@@ -244,7 +244,10 @@ ds_edit_menu_item <- function(id, icon, title, description, class = NULL) {
 # contents -- the others are what a user came to edit, and this one is the
 # header they set once.
 #
-# Columns and Rules are offered only when `type` is "tabular". Both editors
+# Columns and Rules are offered when `type` is "tabular"; a "matrix" dataset
+# gets Row labels (the same column editor, over its row-label columns), Matrix
+# layout (header, dimensions and cells) and Rules; a "file" dataset gets none of
+# them. Both editors
 # work on ds@specs (a DTAColumnSpecCollection); a DTADataSetFile has no
 # @specs property at all. Before this gate, opening either editor on a file
 # dataset was not just unhelpful, it was actively wrong: dta_column_ids()
@@ -296,6 +299,21 @@ ds_edit_menu <- function(type = "tabular") {
             "Checks that span several columns"
           ))
         )
+      } else if (identical(type, "matrix")) {
+        tagList(
+          tags$li(ds_edit_menu_item(
+            "edit_cols", "&#x1F4D0;", "Row labels",
+            "Columns that identify and describe each row, by position"
+          )),
+          tags$li(ds_edit_menu_item(
+            "edit_matrix", "&#x25A6;", "Matrix layout",
+            "Data columns, size of the matrix and cell values"
+          )),
+          tags$li(ds_edit_menu_item(
+            "edit_rules", "&#x2696;&#xFE0F;", "Rules",
+            "Checks that span several columns"
+          ))
+        )
       },
       tags$li(ds_edit_menu_item(
         "edit_files", "&#x1F5C2;&#xFE0F;", "Files",
@@ -312,6 +330,27 @@ ds_edit_menu <- function(type = "tabular") {
         class = "ds-edit-item-danger"
       ))
     )
+  )
+}
+
+# The body of a sticky load-failure notification. The failure reason is several
+# lines (cli bullets); pre-line keeps those breaks, which a plain notification
+# would collapse into one run-on paragraph.
+load_failure_notice <- function(text) {
+  div(class = "notice-multiline", text)
+}
+
+# The sketch of the file a matrix dataset describes (dta_matrix_sketch()): its
+# header line and one data row, shown above the Row labels list and the Matrix
+# layout form. NULL for a dataset that is not a matrix.
+matrix_sketch_ui <- function(dta, dataset) {
+  lines <- tryCatch(dta_matrix_sketch(dta, dataset), error = function(e) character(0))
+  if (length(lines) == 0L) {
+    return(NULL)
+  }
+  tags$pre(
+    class = "matrix-sketch", `aria-label` = "Layout of the file this matrix dataset describes",
+    paste(lines, collapse = "\n")
   )
 }
 

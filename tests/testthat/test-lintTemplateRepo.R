@@ -193,3 +193,86 @@ test_that("export templates under a non-ASCII repository folder are checked, not
   res <- expect_no_error(lint_quiet(root, fail_on = "none"))
   expect_identical(sum(res$code == "export_template_no_placeholders"), 2L)
 })
+
+# ---- spaced column ids ---------------------------------------------------------
+
+lint_spaced_dataset <- function(dir, id = "spaced_dataset", row_label = NULL) {
+  body <- if (is.null(row_label)) {
+    c(
+      "  type: tabular",
+      "  files: {filename: spaced.csv, type: csv}",
+      "  columns:",
+      "    - {id: Subject ID, type: SAS Char, nullable: No}",
+      "    - {id: Visit Date (UTC), type: SAS Char}",
+      "    - {id: Dose mg/kg, type: SAS Num}"
+    )
+  } else {
+    c(
+      "  type: matrix",
+      "  files: {filename: spaced.tsv, type: tsv}",
+      "  row_labels:",
+      paste0("    - ", row_label),
+      "  matrix:",
+      "    cells: {type: SAS Num}"
+    )
+  }
+  writeLines(
+    c(
+      "kind: dta_dataset_template", paste0("id: ", id), "version: \"1.0\"",
+      "dataset:", "  id: spaced_data", body
+    ),
+    file.path(dir, "templates", paste0(id, ".dta-dataset-template.yaml"))
+  )
+}
+
+test_that("a repository whose templates declare spaced column ids lints clean, warnings included", {
+  dir <- lint_scaffold()
+  lint_spaced_dataset(dir)
+
+  res <- lint_quiet(dir, fail_on = "warning")
+
+  expect_equal(nrow(res), 0L)
+})
+
+test_that("a matrix template with a spaced row-label id is an error that aborts the lint", {
+  dir <- lint_scaffold()
+  lint_spaced_dataset(dir, id = "spaced_matrix", row_label = "{id: Sample ID, type: SAS Char, nullable: No}")
+
+  expect_error(lint_quiet(dir), class = "dta_template_lint_error")
+  res <- lint_quiet(dir, fail_on = "none")
+  hit <- res[res$code == "matrix_row_label_id_invalid", ]
+  expect_equal(nrow(hit), 1L)
+  expect_identical(hit$severity, "error")
+  expect_identical(hit$id, "spaced_matrix")
+})
+
+test_that("the same matrix with the header text under header: lints clean", {
+  dir <- lint_scaffold()
+  lint_spaced_dataset(
+    dir,
+    id = "headed_matrix",
+    row_label = "{id: SAMPLE_ID, header: Sample ID, type: SAS Char, nullable: No}"
+  )
+
+  expect_equal(nrow(lint_quiet(dir, fail_on = "warning")), 0L)
+})
+
+test_that("a column and a column named after one of its fields lint as a warning, not an error", {
+  dir <- lint_scaffold()
+  writeLines(
+    c(
+      "kind: dta_dataset_template", "id: shadow_dataset", "version: \"1.0\"",
+      "dataset:", "  id: shadow_data", "  type: tabular",
+      "  files: {filename: shadow.csv, type: csv}",
+      "  columns:",
+      "    - {id: Specimen, type: SAS Char}",
+      "    - {id: Specimen.type, type: SAS Char}"
+    ),
+    file.path(dir, "templates", "shadow_dataset.dta-dataset-template.yaml")
+  )
+
+  res <- lint_quiet(dir, fail_on = "none")
+
+  expect_true("column_id_shadows_field" %in% res$code)
+  expect_false(any(res$severity == "error"))
+})

@@ -52,6 +52,49 @@ test_that("dta_normalize_column_names leaves already-clean names untouched", {
   expect_equal(names(dta_normalize_column_names(tbl)), c("AGE", "SEX"))
 })
 
+test_that("dta_clean_column_names strips whitespace and one matched pair of double quotes", {
+  raw <- c(
+    '"AGE"', " SEX ", '  "RACE"  ', ' "Subject ID" ', '"  padded  "', '""', "Visit Date (UTC)",
+    '""x""'
+  )
+  expect_identical(
+    dta_clean_column_names(raw),
+    # a doubled pair loses one pair only: the inner quotes are part of the name
+    c("AGE", "SEX", "RACE", "Subject ID", "padded", "", "Visit Date (UTC)", '"x"')
+  )
+})
+
+test_that("dta_clean_column_names keeps a quote that nothing pairs", {
+  # `Length 5"` is inches: its closing quote is the name, not a wrapper.
+  raw <- c('Length 5"', '"lead', 'trail"', '"', ' Length 5" ')
+  expect_identical(
+    dta_clean_column_names(raw),
+    c('Length 5"', '"lead', 'trail"', '"', 'Length 5"')
+  )
+})
+
+test_that("dta_clean_column_names keeps NA and an empty vector", {
+  expect_identical(dta_clean_column_names(c("A", NA_character_)), c("A", NA_character_))
+  expect_identical(dta_clean_column_names(character(0)), character(0))
+})
+
+test_that("dta_normalize_column_names keeps a trailing quote that nothing opens", {
+  tbl <- arrow::arrow_table(data.frame(a = 1, b = 2, c = 3))
+  names(tbl) <- c('Length 5"', '"lead', '"Subject ID"')
+
+  expect_equal(names(dta_normalize_column_names(tbl)), c('Length 5"', '"lead', "Subject ID"))
+})
+
+test_that("a CSV header with spaces, a quoted field and an inch mark is read as the names it spells", {
+  path <- withr::local_tempfile(fileext = ".csv")
+  # Fields: Subject ID | Length 5" (CSV-quoted) | "lead (quote kept) | padded (quotes strip)
+  writeLines(c('Subject ID,"Length 5""","""lead","  padded  "', "1,2,3,4"), path)
+
+  x <- read_file(DTAFileCSV(basename(path)), path)
+
+  expect_identical(names(x), c("Subject ID", 'Length 5"', '"lead', "padded"))
+})
+
 
 test_that("DTAFileTSV object is created from reading in tsv and table is accessible", {
   path <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")
@@ -1490,6 +1533,20 @@ test_that("a file name containing braces still reports the real problem", {
   )
 })
 
+test_that("read_file() and open_file() refuse a directory but still read a file", {
+  dir <- withr::local_tempdir()
+  csv <- file.path(dir, "data.csv")
+  writeLines(c("A", "1"), csv)
+  # The pattern matches every name, so the name check passes and it is the
+  # directory check that fires.
+  handler <- DTAFileCSV(filename = ".*", pattern = TRUE)
+
+  expect_error(read_file(handler, dir), class = "dta_file_is_directory")
+  expect_error(open_file(handler, dir), class = "dta_file_is_directory")
+
+  expect_equal(nrow(read_file(handler, csv)), 1)
+})
+
 test_that("a file name containing cli markup is not rendered as markup", {
   # `{.field x}` is a style, not a variable, so it would not have aborted --
   # it would have printed the name in colour with the markup silently removed,
@@ -1676,4 +1733,13 @@ test_that("valid file-count bounds are still accepted", {
   expect_equal(max_number_of_files(h), 2)
   expect_null(max_number_of_files(mk(min_number_of_files = 1)))
   expect_equal(min_number_of_files(mk()), 1) # the documented default
+})
+
+test_that("dta_reader_args picks column_names by exact name and defaults it to NULL", {
+  args <- dta_reader_args("a.csv", column_names = c("x", "y"))
+  expect_identical(args$column_names, c("x", "y"))
+  expect_identical(args$file, "a.csv")
+  expect_null(dta_reader_args(file = "a.csv")$column_names)
+  # a partial name must not bind
+  expect_null(dta_reader_args(file = "a.csv", column = c("x"))$column_names)
 })

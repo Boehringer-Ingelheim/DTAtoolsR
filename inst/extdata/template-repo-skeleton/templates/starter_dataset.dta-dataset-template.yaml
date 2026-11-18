@@ -39,7 +39,7 @@ dataset:
       format: SAS $10.
       nullable: No
       description: Unique identifier for a study subject.
-      example: SUBJ0001
+      examples: SUBJ0001
     - id: STATUS
       label: Record status
       type: SAS Char

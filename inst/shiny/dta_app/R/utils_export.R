@@ -208,6 +208,14 @@ pandoc_markdown_filter <- function() {
 # optional `:DATASET` argument (e.g. `{COLUMN_SPECS:ADSL}`) must be non-empty.
 .template_placeholder_pattern <- "\\{[A-Za-z_][A-Za-z0-9_]*(?::[^{}]+)?\\}"
 
+# Would extracting an archive member of this name write outside the target
+# directory? A mirror of dta_zip_entry_escape() (R/containerFiles.R): the app
+# reaches no package internals, and a test holds the two in step.
+docx_member_is_hostile <- function(m) {
+  !nzchar(m) || !validUTF8(m) || grepl("^([/\\\\]|[A-Za-z]:)", m) ||
+    any(strsplit(sub("[/\\\\]$", "", m), "[/\\\\]")[[1]] %in% c("", ".", ".."))
+}
+
 # Does this .docx contain at least one {PLACEHOLDER} marker?
 #
 # The word-templates directory also holds dta_numbered_template.docx, which is not a
@@ -231,6 +239,17 @@ template_has_placeholders <- function(path) {
   dir.create(temp_dir)
   on.exit(unlink(temp_dir, recursive = TRUE, force = TRUE), add = TRUE)
 
+  # A library-supplied archive is untrusted: utils::unzip() only neutralises
+  # '..' members from R 4.5.1 on, so refuse such names before extracting. This
+  # mirrors DTAtools:::.dta_unzip_docx_checked(); the app reaches no internals.
+  members <- tryCatch(
+    utils::unzip(path, list = TRUE)$Name,
+    warning = function(w) character(0),
+    error = function(e) character(0)
+  )
+  if (length(members) == 0 || any(vapply(members, docx_member_is_hostile, logical(1)))) {
+    return(FALSE)
+  }
   extracted <- tryCatch(
     utils::unzip(path, exdir = temp_dir),
     warning = function(w) character(0),

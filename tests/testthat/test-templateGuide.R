@@ -809,3 +809,72 @@ test_that("the reading guide for rules appears once, before the first rules tabl
   # Every paragraph of the guide is there once.
   for (s in .rule_reading_guide()) expect_equal(sum(grepl(s, lines, fixed = TRUE)), 1L)
 })
+
+# ---- column ids with spaces ---------------------------------------------------
+
+tg_spaced_library <- function(env = parent.frame()) {
+  dir <- withr::local_tempdir(.local_envir = env)
+  writeLines(
+    c(
+      "kind: dta_dataset_template", "id: spaced_ds", "version: \"1.0\"", "label: Spaced dataset",
+      "dataset:", "  id: spaced_data", "  type: tabular",
+      "  files: {filename: spaced.csv, type: csv}",
+      "  columns:",
+      "    - {id: Subject ID, label: Subject, type: SAS Char, nullable: No}",
+      "    - {id: Visit Date (UTC), type: SAS Char, nullable: Yes}",
+      "    - {id: Dose mg/kg, type: SAS Num, nullable: Yes}",
+      "    - {id: Arm Code, type: SAS Char, nullable: No, values: [A, B]}"
+    ),
+    tg_path(dir, "templates", "spaced_ds.dta-dataset-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: spaced_tpl", "version: \"1.0\"", "label: Spaced template",
+      "base:", "  metadata:", "    title: T",
+      "datasets:", "  - template: spaced_ds@1.0",
+      "    patch:",
+      "      add_columns:", "        - {id: New Col (x), type: SAS Char}",
+      "      modify_columns:", "        - {id: Visit Date (UTC), label: Visit date}"
+    ),
+    tg_path(dir, "templates", "spaced_tpl.dta-template.yaml")
+  )
+  dir
+}
+
+# The text of every table cell, one string per cell; the paragraphs of a cell are
+# separated by a line break.
+tg_table_cell_texts <- function(file) {
+  s <- officer::docx_summary(officer::read_docx(file))
+  s$text[s$content_type == "table cell"]
+}
+
+test_that("every built column of a template with spaced ids is in the guide, each id as declared", {
+  dir <- tg_spaced_library()
+  out <- withr::local_tempdir()
+
+  got <- write_template_guide(dir, out, templates = "spaced_tpl", quiet = TRUE)
+
+  # the first line of a column cell is the id; a label may follow on the next line
+  cells <- tg_table_cell_texts(got[["spaced_tpl"]])
+  first_line <- sub("\n.*$", "", cells)
+  ids <- c("Subject ID", "Visit Date (UTC)", "Dose mg/kg", "Arm Code", "New Col (x)")
+  for (id in ids) {
+    expect_true(id %in% first_line, info = id)
+  }
+  # and none of them was split or run together
+  expect_false("SubjectID" %in% first_line)
+  expect_false("Visit" %in% first_line)
+})
+
+test_that("the guide marks a spaced column that the template changes or adds", {
+  dir <- tg_spaced_library()
+  out <- withr::local_tempdir()
+
+  got <- write_template_guide(dir, out, templates = "spaced_tpl", quiet = TRUE)
+
+  cells <- tg_table_cell_texts(got[["spaced_tpl"]])
+  cell_of <- function(id) cells[startsWith(cells, paste0(id, "\n")) | cells == id][[1]]
+  expect_match(cell_of("Visit Date (UTC)"), "Changed by this template", fixed = TRUE)
+  expect_match(cell_of("New Col (x)"), "Added by this template", fixed = TRUE)
+  expect_false(grepl("by this template", cell_of("Dose mg/kg"), fixed = TRUE))
+})

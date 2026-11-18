@@ -91,7 +91,9 @@ fills them from its \code{document_name}, \code{document_abbreviation},
 \code{{SUPPLIER_CONTACTS_TABLE}}, \code{{RECEIVER_CONTACTS_TABLE}},
 \code{{SIGNATURES_TABLE}}, \code{{VERSION_HISTORY_TABLE}}, \code{{STUDY_TABLE}},
 \code{{AGREEMENT_SECTIONS}},
-\code{{AUTHORIZED_CORRECTIONS_LIST}}. Unlike the placeholders above, a block
+\code{{AUTHORIZED_CORRECTIONS_LIST}}, \code{{CONTAINERS_TABLE}} (the delivery
+containers: an intro sentence and a table; omitted when the document
+has none). Unlike the placeholders above, a block
 placeholder is replaced by rendered Word content -- a table, a heading, a
 list -- so it must be the only text in its paragraph, and only in the
 document body (not a header, footer or table cell). A \code{variables} entry
@@ -103,8 +105,10 @@ markers must be alone in their paragraph, and a region does not nest.
 Inside each repetition, seven placeholders resolve to that dataset's
 values: \code{{DATASET_ID}}, \code{{DATASET_NAME}} (its id where no name is set),
 \code{{DATASET_TYPE}}, \code{{DATASET_DESCRIPTION}}, \code{{DATASET_FILE_COUNT}},
-\code{{DATASET_COLUMN_COUNT}} and \code{{DATASET_RULE_COUNT}} (the last two are
-\code{0} for a non-tabular dataset). A bare dataset block
+\code{{DATASET_COLUMN_COUNT}} and \code{{DATASET_RULE_COUNT}} (both \code{0} for a
+non-tabular dataset; a matrix dataset is tabular here, so its column
+count is the number of its row-label columns, not of its data columns).
+A bare dataset block
 (\code{{COLUMN_SPECS}}, \code{{VALIDATION_RULES}}, \code{{FILE_SPECS}}, \code{{DATASETS}})
 alone in a paragraph of the region is bound to the repetition's dataset
 (a bare \code{{COLUMN_SPECS}} or \code{{VALIDATION_RULES}} renders nothing for a

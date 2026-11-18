@@ -99,6 +99,8 @@ write_validation_report <- function(
   # Likewise a file count outside the declared bounds (also folded into
   # last_validation_ok by check()); its messages are added to the table below.
   res <- .report_with_file_count_rows(x, res)
+  # And a file outside (or not verified inside) its container.
+  res <- .report_with_container_rows(x, res)
   msgs <- DTAtools::messages(x, as_tibble = FALSE)
 
   # Fetch inspect() detail for every message with ONE call, not one call per
@@ -195,6 +197,7 @@ write_validation_report <- function(
   # Build HTML document
   summary_html <- .report_summary_html(res)
   msgs <- .report_with_file_count_messages(x, msgs)
+  msgs <- .report_with_container_messages(x, msgs)
   messages_html <- .report_messages_table_html(msgs, max_repeats = max_repeats)
   # The offset makes the moment unambiguous to a reader in another timezone.
   timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S %z")

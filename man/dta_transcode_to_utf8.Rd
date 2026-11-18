@@ -60,7 +60,9 @@ line-oriented converter cannot preserve.
 That is what the block boundary is for. Each block is trimmed back to its
 last \code{0x0A} byte and the remainder carried into the next one, so the
 converter never cuts a line and never has to decide what a line ending is; a
-line longer than one block simply grows the buffer until a newline arrives.
+line longer than one block grows the buffer until a newline arrives, up to 64
+blocks (256 MiB by default), past which the conversion aborts with class
+\code{dta_transcode_line_too_long}.
 The pieces a block is then converted in (see \code{\link[=dta_transcode_spans]{dta_transcode_spans()}}) are cut
 on newline bytes for the same reason, and rejoined verbatim, so they are a
 fact about how fast iconv runs and not about what the copy contains.
@@ -94,7 +96,9 @@ The copy is the size of the decoded text: about the size of the source for
 latin1 that is mostly ASCII, up to twice it for text that is wholly
 accented, and the full decoded size for a \code{.gz} source. Free space under
 \code{tempdir()}, not memory, is therefore what a very large non-UTF-8 delivery
-needs.
+needs. The copy may not grow past \code{DTAtools.container_max_bytes}; the
+conversion aborts with class \code{dta_container_too_large} and deletes the
+partial copy.
 }
 
 \keyword{internal}

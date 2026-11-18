@@ -134,7 +134,7 @@ Register it rather than working around it.
   entry, the way `LIM-004` and `LIM-009` already are.
 
 Every entry needs the full schema: `title`, `severity` for a deviation,
-`affects` (requirement ids that must exist, M3), `observed`, `expected`,
+`affects` (requirement ids), `observed`, `expected`,
 `impact`, `workaround`, `reference`, `opened`. Write `impact` for a reader
 deciding whether they can ship: what does this cost the person relying on the
 software?
@@ -254,7 +254,10 @@ app harness in `tests/helper-app.R` (`qapp_*`).
 
 - **Never write outside `qa_tempdir()` or `qa_artifact_dir()`.** On a target
   system the suite runs from a read-only library, and testthat sets the working
-  directory to the test folder inside it.
+  directory to the test folder inside it. One sanctioned exception: a file-input
+  value for the app must be staged by `qapp_upload_value()` in an upload folder
+  directly under R's `tempdir()`, because that is the only place the app accepts
+  an upload from (REQ-APP-050); that folder dies with the R session.
 - **No `expect_snapshot*`** (M8, parse-based, so a mention in a string is fine
   but a call is not).
 - **No existence-only assertions.** Reading a file back beats
@@ -300,7 +303,7 @@ The meta checks guard the suite against itself. Each names what is wrong.
 | --- | --- | --- |
 | M1 | A `test_that()` title does not parse | Correct the title to the grammar above |
 | M2 | Duplicate test-case id, or id disagrees with the file name | Renumber, or move the test to the right file |
-| M3 | A test names a requirement or deviation that does not exist | Add it, or correct the reference |
+| M3 | A test names a requirement that does not exist | Add it, or correct the reference |
 | M4 | A requirement has no test case | Write one, or delete the requirement |
 | M5 | An exported symbol is in no requirement's `covers:` | Cover it, usually with a new requirement |
 | M6 | A `covers:` entry is not an export | Remove it, or export the symbol |

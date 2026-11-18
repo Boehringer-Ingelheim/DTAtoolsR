@@ -52,7 +52,9 @@
 #'     `{SUPPLIER_CONTACTS_TABLE}`, `{RECEIVER_CONTACTS_TABLE}`,
 #'     `{SIGNATURES_TABLE}`, `{VERSION_HISTORY_TABLE}`, `{STUDY_TABLE}`,
 #'     `{AGREEMENT_SECTIONS}`,
-#'     `{AUTHORIZED_CORRECTIONS_LIST}`. Unlike the placeholders above, a block
+#'     `{AUTHORIZED_CORRECTIONS_LIST}`, `{CONTAINERS_TABLE}` (the delivery
+#'     containers: an intro sentence and a table; omitted when the document
+#'     has none). Unlike the placeholders above, a block
 #'     placeholder is replaced by rendered Word content -- a table, a heading, a
 #'     list -- so it must be the only text in its paragraph, and only in the
 #'     document body (not a header, footer or table cell). A `variables` entry
@@ -64,8 +66,10 @@
 #'     Inside each repetition, seven placeholders resolve to that dataset's
 #'     values: `{DATASET_ID}`, `{DATASET_NAME}` (its id where no name is set),
 #'     `{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`, `{DATASET_FILE_COUNT}`,
-#'     `{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}` (the last two are
-#'     `0` for a non-tabular dataset). A bare dataset block
+#'     `{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}` (both `0` for a
+#'     non-tabular dataset; a matrix dataset is tabular here, so its column
+#'     count is the number of its row-label columns, not of its data columns).
+#'     A bare dataset block
 #'     (`{COLUMN_SPECS}`, `{VALIDATION_RULES}`, `{FILE_SPECS}`, `{DATASETS}`)
 #'     alone in a paragraph of the region is bound to the repetition's dataset
 #'     (a bare `{COLUMN_SPECS}` or `{VALIDATION_RULES}` renders nothing for a
@@ -769,6 +773,33 @@ dta_template_placeholders <- function(dta = NULL) {
   "\u25aa"
 }
 
+# Extracts a library-supplied .docx into `exdir`, or returns character(0) --
+# which every caller already reads as "not a readable DOCX" -- when the archive
+# cannot be listed or holds any entry whose name would land outside `exdir`
+# (absolute, drive-lettered, or with a '.' / '..' segment). The names are
+# checked here, before extraction, because utils::unzip() only neutralises '..'
+# members from R 4.5.1 on and the package supports R >= 4.1.0. The same rule
+# guards uploaded containers (dta_zip_entry_escape()). A mirror of this check
+# lives in the app's template_has_placeholders(), which cannot reach internals.
+.dta_unzip_docx_checked <- function(path, exdir) {
+  members <- tryCatch(
+    utils::unzip(path, list = TRUE)$Name,
+    warning = function(w) NULL,
+    error = function(e) NULL
+  )
+  if (length(members) == 0) {
+    return(character(0))
+  }
+  escape <- vapply(members, dta_zip_entry_escape, character(1), USE.NAMES = FALSE)
+  if (!all(is.na(escape))) {
+    return(character(0))
+  }
+  tryCatch(
+    utils::unzip(path, exdir = exdir),
+    warning = function(w) character(0),
+    error = function(e) character(0)
+  )
+}
 
 #' Replace placeholders in a DOCX template and write a new DOCX
 #'
@@ -799,11 +830,7 @@ dta_template_placeholders <- function(dta = NULL) {
   dir.create(temp_dir)
   on.exit(unlink(temp_dir, recursive = TRUE, force = TRUE), add = TRUE)
 
-  extracted <- tryCatch(
-    utils::unzip(template_path, exdir = temp_dir),
-    warning = function(w) character(0),
-    error = function(e) character(0)
-  )
+  extracted <- .dta_unzip_docx_checked(template_path, temp_dir)
   if (length(extracted) == 0) {
     cli::cli_abort("Template is not a readable DOCX (ZIP) archive: {.file {template_path}}")
   }

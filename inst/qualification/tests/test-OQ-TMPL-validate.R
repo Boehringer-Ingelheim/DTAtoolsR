@@ -1,5 +1,6 @@
 # validate_template(): the codes it emits, and its strict/kinds/path arguments.
-# REQ-TMPL-001 .. REQ-TMPL-018, REQ-TMPL-031, REQ-TMPL-033 and REQ-TMPL-034.
+# REQ-TMPL-001 .. REQ-TMPL-018, REQ-TMPL-031, REQ-TMPL-033, REQ-TMPL-034,
+# REQ-TMPL-057, REQ-TMPL-058 (its dry-run half) and REQ-TMPL-059.
 #
 # Every fixture below lives under fx/t/ and is built to trigger
 # EXACTLY the one code its test names -- verified by running validate_template()
@@ -1118,4 +1119,330 @@ test_that("OQ-TMPL-106 | a .docx in export-templates/ without a {PLACEHOLDER} ma
     "corrupt.docx",
     basename(listed$file[listed$code == "export_template_no_placeholders"])
   )
+})
+
+# ---- REQ-TMPL-057: a template dataset that declares no files ------------------
+
+# A dataset template whose body carries `files_lines`, or no file declaration.
+tmpl_files_dataset_text <- function(files_lines = character(0), id = "no_files_ds") {
+  c(
+    "kind: dta_dataset_template",
+    sprintf("id: %s", id),
+    'version: "1.0"',
+    "dataset:",
+    "  id: obs",
+    "  type: tabular",
+    files_lines,
+    "  columns:",
+    "    - {id: C1, type: SAS Char}"
+  )
+}
+
+# A creation template whose `datasets:` section is `dataset_lines`.
+tmpl_files_creation_text <- function(dataset_lines, id = "files_tpl", extra = character(0)) {
+  c(
+    "kind: dta_creation_template",
+    sprintf("id: %s", id),
+    'version: "1.0"',
+    extra,
+    "base:",
+    "  metadata:",
+    "    title: Files Template",
+    dataset_lines
+  )
+}
+
+test_that("OQ-TMPL-132 | a dataset template that declares no files is dataset_no_files, a warning naming the dataset; one that declares files is not | REQ-TMPL-057", {
+  root <- qa_tempdir()
+  tmpl_put(root, "templates/no_files_ds.dta-dataset-template.yaml", tmpl_files_dataset_text())
+  result <- validate_template(root)
+  hit <- result[result$code == "dataset_no_files", ]
+  qa_step("exactly one dataset_no_files row", 1L, nrow(hit))
+  qa_step("and no other row", 1L, nrow(result))
+  qa_step("at severity warning", "warning", hit$severity)
+  qa_step("on the dataset template file", "no_files_ds.dta-dataset-template.yaml", basename(hit$file))
+  qa_check("whose message names the dataset id", grepl("'obs'", hit$message, fixed = TRUE))
+  qa_step(
+    "strict validation does not abort on a warning", "no condition",
+    tryCatch(
+      {
+        validate_template(root, strict = TRUE)
+        "no condition"
+      },
+      error = function(e) "aborted"
+    )
+  )
+
+  empty <- qa_tempdir()
+  tmpl_put(empty, "templates/no_files_ds.dta-dataset-template.yaml", tmpl_files_dataset_text("  files: []"))
+  qa_step(
+    "an empty files list is reported the same way", 1L,
+    sum(validate_template(empty)$code == "dataset_no_files")
+  )
+
+  odd <- qa_tempdir()
+  tmpl_put(odd, "templates/odd_id.dta-dataset-template.yaml", c(
+    "kind: dta_dataset_template", "id: odd_id", 'version: "1.0"',
+    "dataset:", "  id: []", "  type: tabular",
+    "  columns:", "    - {id: C1, type: SAS Char}"
+  ))
+  odd_result <- validate_template(odd)
+  qa_check(
+    "a body whose id is not usable text still gets the findings it always did",
+    "dataset_field_invalid" %in% odd_result$code
+  )
+  qa_check(
+    "and the no-files warning names the template instead of the dataset",
+    grepl("'odd_id'", odd_result$message[odd_result$code == "dataset_no_files"], fixed = TRUE)
+  )
+
+  shapes <- list(
+    mapping = "  files: {filename: one.tsv, type: tsv}",
+    sequence = c("  files:", "    - {filename: one.tsv, type: tsv}", "    - {filename: two.tsv, type: tsv}"),
+    singular = "  file: {filename: one.tsv, type: tsv}"
+  )
+  for (shape in names(shapes)) {
+    declared <- qa_tempdir()
+    tmpl_put(
+      declared, "templates/no_files_ds.dta-dataset-template.yaml",
+      tmpl_files_dataset_text(shapes[[shape]])
+    )
+    qa_step(
+      sprintf("a files entry written as a %s gives no row at all", shape), 0L,
+      nrow(validate_template(declared))
+    )
+  }
+})
+
+test_that("OQ-TMPL-133 | a creation template is judged on the datasets it builds: reported, named by variant, unless abstract or its patch supplies the files | REQ-TMPL-057", {
+  bare <- c("datasets:", "  - id: ds1", "    type: tabular", "    columns:", "      - {id: COL1, type: SAS Char}")
+  root <- qa_tempdir()
+  tmpl_put(root, "templates/files_tpl.dta-template.yaml", tmpl_files_creation_text(bare))
+  inline <- validate_template(root)
+  hit <- inline[inline$code == "dataset_no_files", ]
+  qa_step("an inline dataset without files gives exactly one row", 1L, nrow(hit))
+  qa_step("at severity warning", "warning", hit$severity)
+  qa_check("whose message names the dataset id", grepl("'ds1'", hit$message, fixed = TRUE))
+
+  declared <- qa_tempdir()
+  tmpl_put(
+    declared, "templates/files_tpl.dta-template.yaml",
+    tmpl_files_creation_text(append(bare, "    files: {filename: x.csv, type: csv}", after = 3L))
+  )
+  qa_step(
+    "the same dataset with a files entry gives no row at all", 0L,
+    nrow(validate_template(declared))
+  )
+
+  abstract <- qa_tempdir()
+  tmpl_put(abstract, "templates/files_tpl.dta-template.yaml", tmpl_files_creation_text(bare, extra = "abstract: true"))
+  qa_step(
+    "an abstract template is never instantiated, so it gives no row at all", 0L,
+    nrow(validate_template(abstract))
+  )
+
+  variants <- qa_tempdir()
+  tmpl_put(variants, "templates/variant_tpl.dta-template.yaml", c(
+    "kind: dta_creation_template",
+    "id: variant_tpl",
+    'version: "1.0"',
+    "base:",
+    "  metadata:",
+    "    title: Variants",
+    "variants:",
+    "  id: platform",
+    "  choices:",
+    "    - value: with_file",
+    "      datasets:",
+    "        - id: ds1",
+    "          type: tabular",
+    "          files: {filename: x.csv, type: csv}",
+    "          columns:",
+    "            - {id: COL1, type: SAS Char}",
+    "    - value: without_file",
+    "      datasets:",
+    "        - id: ds1",
+    "          type: tabular",
+    "          columns:",
+    "            - {id: COL1, type: SAS Char}"
+  ))
+  vall <- validate_template(variants)
+  vrows <- vall[vall$code == "dataset_no_files", ]
+  qa_step("only the variant that builds a dataset without files is reported", "dataset_no_files", vall$code)
+  qa_check("and the message begins with that variant's value", startsWith(vrows$message, "[without_file] "))
+
+  imported <- qa_tempdir()
+  tmpl_put(imported, "templates/bare_ds.dta-dataset-template.yaml", tmpl_files_dataset_text(id = "bare_ds"))
+  tmpl_put(
+    imported, "templates/bare_tpl.dta-template.yaml",
+    tmpl_files_creation_text(c("datasets:", "  - template: bare_ds@1.0"), id = "bare_tpl")
+  )
+  irows <- validate_template(imported)
+  qa_step(
+    "an imported files-less dataset is reported on the dataset template and on the creation template that builds it",
+    c("bare_ds.dta-dataset-template.yaml", "bare_tpl.dta-template.yaml"),
+    sort(basename(irows$file[irows$code == "dataset_no_files"]))
+  )
+
+  patched <- qa_tempdir()
+  tmpl_put(patched, "templates/bare_ds.dta-dataset-template.yaml", tmpl_files_dataset_text(id = "bare_ds"))
+  tmpl_put(
+    patched, "templates/patched_tpl.dta-template.yaml",
+    tmpl_files_creation_text(
+      c(
+        "datasets:", "  - template: bare_ds@1.0", "    patch:", "      set:",
+        "        files: {filename: x.tsv, type: tsv}"
+      ),
+      id = "patched_tpl"
+    )
+  )
+  prows <- validate_template(patched)
+  qa_step(
+    "a creation template whose patch supplies the files is not reported for them",
+    "bare_ds.dta-dataset-template.yaml",
+    basename(prows$file[prows$code == "dataset_no_files"])
+  )
+  qa_step(
+    "and the patch itself is accepted: that one row is all there is",
+    "dataset_no_files", prows$code
+  )
+})
+
+test_that("OQ-TMPL-134 | a dataset template using study tokens builds in the dry run and is not judged on the token text | REQ-TMPL-058", {
+  root <- qa_tempdir()
+  # "${study.id}" is 11 characters and format SAS $9. holds 9: only the stand-in
+  # value STUDY-ID (8 characters) fits, so a check that read the placeholder text
+  # would report this column.
+  tmpl_put(root, "templates/tok.dta-dataset-template.yaml", c(
+    "kind: dta_dataset_template", "id: tok_dt", 'version: "1.0"',
+    "dataset:", "  id: tok", "  type: tabular",
+    "  files:",
+    "    filename: ^s${study.id}_[0-9]{12}\\.csv$",
+    "    pattern: true",
+    "    type: csv",
+    "  columns:",
+    '    - {id: STUDYID, type: SAS Char, format: SAS $9., values: "${study.id}"}',
+    '    - {id: PROTID, type: SAS Char, format: SAS $9., values: "${study.protocol_id}"}'
+  ))
+  tmpl_put(root, "templates/tok_ct.dta-template.yaml", c(
+    "kind: dta_creation_template", "id: tok_ct", 'version: "1.0"',
+    "base:", "  metadata:", "    title: Token template",
+    "datasets:", "  - template: tok_dt@1.0",
+    "options:",
+    "  - {id: study_id, label: Study ID, type: text, target: metadata.study.id}",
+    "  - {id: protocol_id, label: Protocol ID, type: text, target: metadata.study.protocol_id}"
+  ))
+  result <- validate_template(root)
+  qa_step("no instantiate_failed row", 0L, sum(result$code == "instantiate_failed"))
+  qa_step("no column_spec_invalid row", 0L, sum(result$code == "column_spec_invalid"))
+  qa_step("no row at all", 0L, nrow(result))
+})
+
+test_that("OQ-TMPL-135 | token_unknown is a warning once per file and distinct placeholder, and the four known placeholders give none | REQ-TMPL-059", {
+  root <- qa_tempdir()
+  tmpl_put(root, "templates/typo.dta-dataset-template.yaml", c(
+    "kind: dta_dataset_template", "id: typo_dt", 'version: "1.0"',
+    "dataset:", "  id: typo", "  type: tabular",
+    "  files: {filename: x.csv, type: csv}",
+    "  columns:",
+    '    - {id: A, type: SAS Char, values: "${studyid}"}',
+    '    - {id: B, type: SAS Char, description: "${studyid} again"}',
+    '    - {id: C, type: SAS Char, values: "${study.id}"}'
+  ))
+  # Both creation templates set the study identity in base metadata, so the
+  # study placeholders in their titles have a value (see OQ-TMPL-137 for one
+  # that has none).
+  tmpl_put(root, "templates/typo_ct.dta-template.yaml", c(
+    "kind: dta_creation_template", "id: typo_ct", 'version: "1.0"',
+    "base:", "  metadata:",
+    '    title: "${today} ${version} ${study.id} ${study.protocol_id}"',
+    '    header: "${studyid}"',
+    "    study: {id: S-1, protocol_id: P-1}",
+    "datasets:", "  - id: ds1", "    type: tabular",
+    "    files: {filename: x.csv, type: csv}",
+    "    columns:", "      - {id: COL1, type: SAS Char}"
+  ))
+  tmpl_put(root, "templates/known_ct.dta-template.yaml", c(
+    "kind: dta_creation_template", "id: known_ct", 'version: "1.0"',
+    "base:", "  metadata:",
+    '    title: "${today} ${version} ${study.id} ${study.protocol_id}"',
+    "    study: {id: S-1, protocol_id: P-1}",
+    "datasets:", "  - id: ds1", "    type: tabular",
+    "    files: {filename: x.csv, type: csv}",
+    "    columns:", "      - {id: COL1, type: SAS Char}"
+  ))
+  result <- validate_template(root)
+  hit <- result[result$code == "token_unknown", ]
+  qa_step(
+    "one row for the dataset template and one for the creation template",
+    c("typo.dta-dataset-template.yaml", "typo_ct.dta-template.yaml"),
+    sort(basename(hit$file))
+  )
+  qa_step("at severity warning", "warning", unique(hit$severity))
+  qa_check("each message contains the placeholder as written", all(grepl("${studyid}", hit$message, fixed = TRUE)))
+  qa_step("the template with only known placeholders gives no row", 0L, sum(grepl("known_ct", result$file, fixed = TRUE)))
+  qa_step("and no other row is reported", 2L, nrow(result))
+  qa_step(
+    "strict validation does not abort on a warning", "no condition",
+    tryCatch(
+      {
+        validate_template(root, strict = TRUE)
+        "no condition"
+      },
+      error = function(e) "aborted"
+    )
+  )
+})
+
+test_that("OQ-TMPL-137 | the dry run flags a study placeholder nothing can answer and a dataset ${version}, and takes the study option's first suggestion as its stand-in | REQ-TMPL-058 REQ-TMPL-059", {
+  # No option and no base metadata sets the protocol id, and a file name uses
+  # ${version}, which is filled in only in the document metadata.
+  unanswered <- qa_tempdir()
+  tmpl_put(unanswered, "templates/u.dta-template.yaml", c(
+    "kind: dta_creation_template", "id: u_ct", 'version: "1.0"',
+    "base:", "  metadata:", "    title: U", '    version: "1.0"',
+    "datasets:", "  - id: ds1", "    type: tabular",
+    "    files: {filename: 'u_${version}.csv', type: csv}",
+    "    columns:",
+    '      - {id: PROTID, type: SAS Char, values: "${study.protocol_id}"}',
+    "options:",
+    "  - {id: study_id, label: Study ID, type: text, target: metadata.study.id}"
+  ))
+  result <- validate_template(unanswered)
+  gap <- result[result$code == "study_token_unanswered", ]
+  qa_step("one study_token_unanswered row", 1L, nrow(gap))
+  qa_step("at severity warning", "warning", gap$severity)
+  qa_check(
+    "naming the placeholder and the target that would answer it",
+    grepl("${study.protocol_id}", gap$message, fixed = TRUE) &&
+      grepl("metadata.study.protocol_id", gap$message, fixed = TRUE)
+  )
+  late <- result[result$code == "token_unknown", ]
+  qa_step("one token_unknown row for the dataset ${version}", 1L, nrow(late))
+  qa_check("naming ${version}", grepl("${version}", late$message, fixed = TRUE))
+
+  # A column four characters wide cannot hold the generic stand-in STUDY-ID.
+  narrow <- function(choices) {
+    root <- qa_tempdir()
+    tmpl_put(root, "templates/n.dta-template.yaml", c(
+      "kind: dta_creation_template", "id: n_ct", 'version: "1.0"',
+      "base:", "  metadata:", "    title: Narrow",
+      "datasets:", "  - id: ds1", "    type: tabular",
+      "    files: {filename: n.csv, type: csv}",
+      "    columns:",
+      '      - {id: STUDYID, type: SAS Char, format: SAS $4., values: "${study.id}"}',
+      "options:",
+      paste0("  - {id: study_id, label: Study ID, type: text, target: metadata.study.id", choices, "}")
+    ))
+    validate_template(root)
+  }
+  without <- narrow("")
+  failed <- without[without$code == "instantiate_failed", ]
+  qa_step("without a suggestion the dry run fails on the stand-in", 1L, nrow(failed))
+  qa_check(
+    "and says it stood in STUDY-ID and how to suggest a realistic id",
+    grepl("STUDY-ID", failed$message, fixed = TRUE) && grepl("choices:", failed$message, fixed = TRUE)
+  )
+  with <- narrow(', choices: ["1001"]')
+  qa_step("with a fitting first suggestion the dry run builds", 0L, sum(with$code == "instantiate_failed"))
 })

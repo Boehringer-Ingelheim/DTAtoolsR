@@ -554,6 +554,38 @@
     return(.dta_template_bind_rows(rows))
   }
 
+  # A ${...} token the engine does not know is never substituted: it reaches
+  # the document as literal text, and in a filename pattern it makes the
+  # pattern match nothing. A misspelt ${studyid} is the case this catches.
+  if (kind %in% c("dta_creation_template", "dta_dataset_template")) {
+    known <- .dta_template_engine_get("dta_template_known_tokens")()
+    for (tok in .dta_template_unknown_tokens(def, known)) {
+      add(
+        kind, id, version, "warning", "token_unknown",
+        sprintf(
+          "Placeholder %s is not one the template engine fills in, so it stays in the document as literal text. Known placeholders: %s.",
+          tok, paste(known, collapse = ", ")
+        )
+      )
+    }
+    # Known is not the same as known everywhere: ${version} is filled in only
+    # in the document metadata, never in a dataset body.
+    bodies <- if (identical(kind, "dta_dataset_template")) {
+      def[["dataset"]]
+    } else {
+      list(
+        def[["datasets"]], def[["base"]][["datasets"]],
+        lapply(def[["variants"]][["choices"]] %||% list(), function(ch) ch[["datasets"]])
+      )
+    }
+    if ("${version}" %in% .dta_template_unknown_tokens(bodies, setdiff(known, "${version}"))) {
+      add(
+        kind, id, version, "warning", "token_unknown",
+        "Placeholder ${version} is filled in only in the document metadata, so in a dataset it stays literal text."
+      )
+    }
+  }
+
   kind_rows <- if (identical(kind, "dta_creation_template")) {
     .dta_template_check_creation(path, id, version, def, index_df, resolve_extends)
   } else if (identical(kind, "dta_dataset_template")) {
@@ -567,6 +599,20 @@
   }
 
   .dta_template_bind_rows(c(rows, kind_rows))
+}
+
+# Every distinct ${...} token in the parsed template's text values that is not
+# in `known`, in order of appearance. Keys and YAML comments are not scanned:
+# only a value is ever substituted.
+.dta_template_unknown_tokens <- function(def, known) {
+  # unlist() makes every leaf text as soon as one is; with none, there is no
+  # token to find.
+  values <- unlist(def, use.names = FALSE)
+  if (!is.character(values)) {
+    return(character(0))
+  }
+  found <- unlist(regmatches(values, gregexpr("\\$\\{[^}]*\\}", values)), use.names = FALSE)
+  setdiff(unique(found), known)
 }
 
 # A party profile is validated by the reader the app itself uses; a file it
@@ -858,24 +904,54 @@
       }
       for (selection in selections) {
         selected_def <- .dta_template_engine_get("resolve_template_variant")(resolved$def, selection)
+        dry_study <- .dta_template_engine_get("dta_template_dry_study")(selected_def)
         build_res <- .dta_template_engine_get("create_dta_from_template")(
           selected_def, path, selections = selection,
           index = index_df,
-          vocab_selections = .dta_template_vocab_dry_selections(selected_def, index_df)
+          vocab_selections = .dta_template_vocab_dry_selections(selected_def, index_df),
+          # Nobody answers the study identity in a dry run, so a dataset body
+          # using ${study.id} / ${study.protocol_id} would fail on the
+          # unanswered question rather than on anything wrong with it.
+          study_fallback = dry_study
         )
         prefix <- if (is.null(spec)) "" else paste0("[", selection[[spec[["id"]]]], "] ")
+        study_used <- .dta_template_study_tokens_used(selected_def, index_df)
         if (!isTRUE(build_res$ok)) {
-          add("error", "instantiate_failed", paste0(prefix, build_res$error))
+          add("error", "instantiate_failed", paste0(
+            prefix, build_res$error, .dta_template_dry_study_hint(build_res$error, dry_study, study_used)
+          ))
         } else {
+          for (tok in .dta_template_unanswered_study_tokens(selected_def, study_used)) {
+            add(
+              "warning", "study_token_unanswered",
+              paste0(prefix, sprintf(
+                "The document uses %s, but no option and no base metadata of this template supplies it, so creating a new document fails; only a draft carrying the study identity over from an existing document gets one. Add an option with `target: %s`.",
+                tok, if (identical(tok, "${study.id}")) "metadata.study.id" else "metadata.study.protocol_id"
+              ))
+            )
+          }
           # Lint only what built: a failed build is already instantiate_failed.
           # The class invariant keeps errors out of a built DTA, so in practice
           # these are the linter's warnings.
           lint <- tryCatch(lint_dta(build_res$value), error = function(e) NULL)
           for (i in seq_len(if (is.null(lint)) 0L else nrow(lint))) {
             add(
-              lint$severity[[i]], lint$code[[i]],
+              # A template library must not ship overlapping file names: the
+              # linter's warning is an error here (D16).
+              if (identical(lint$code[[i]], "file_name_conflict")) "error" else lint$severity[[i]],
+              lint$code[[i]],
               .dta_template_lint_message(prefix, lint[i, , drop = FALSE])
             )
+          }
+          # The BUILT datasets, not the raw `datasets:` entries: a `modify:` or
+          # `remove: true` entry, a mixin or an inherited dataset is only part
+          # of what is declared, and a patch may add the file. What reaches a
+          # person creating a document is the built dataset, so that is judged.
+          built <- datasets(build_res$value)
+          for (ds_id in names(built)) {
+            if (length(built[[ds_id]]@files) == 0L) {
+              add("warning", "dataset_no_files", paste0(prefix, .dta_template_no_files_message(ds_id)))
+            }
           }
         }
       }
@@ -883,6 +959,89 @@
   }
 
   rows
+}
+
+# The study tokens (`${study.id}`, `${study.protocol_id}`) a creation template's
+# documents can contain: anywhere in its own resolved definition -- base
+# metadata, options, inline datasets, patches, mixins and parents already merged
+# in -- or in the body or options of a dataset template it imports. Read from
+# the definitions, not the built document, so a template that merely contains
+# the stand-in text (a column called STUDY-ID) is not taken for one using a
+# token. Every one of these is resolved at creation; a `path:`/`source:`
+# dataset file is not, and is not read.
+.dta_template_study_tokens_used <- function(def, index_df) {
+  values <- unlist(def, use.names = FALSE)
+  resolve_ref <- .dta_template_engine_get("resolve_template_ref")
+  read_ds <- .dta_template_engine_get("read_dataset_template")
+  entries <- c(def[["datasets"]] %||% list(), def[["base"]][["datasets"]] %||% list())
+  for (entry in entries) {
+    ref <- if (is.list(entry)) as.character(entry[["template"]] %||% "")[1] else ""
+    if (is.na(ref) || !nzchar(ref)) next
+    hit <- tryCatch(resolve_ref(index_df, ref, kind = "dta_dataset_template"), error = function(e) NULL)
+    if (is.null(hit) || nrow(hit) == 0) next
+    rd <- tryCatch(read_ds(hit$path[[1]]), error = function(e) NULL)
+    if (isTRUE(rd$ok)) {
+      values <- c(values, unlist(rd$value[["dataset"]], use.names = FALSE), unlist(rd$value[["options"]], use.names = FALSE))
+    }
+  }
+  values <- as.character(values)
+  tokens <- c(id = "${study.id}", protocol_id = "${study.protocol_id}")
+  tokens[vapply(tokens, function(t) any(grepl(t, values, fixed = TRUE)), logical(1))]
+}
+
+# When a dry build failed on the stand-in study identity itself (its text is in
+# the error: "values 'STUDY-ID' is not a valid Num"), say so and how to give the
+# dry run a value the dataset accepts. "" otherwise. Only the stand-ins of
+# tokens the template actually uses (`used`, named by study field) are looked
+# for, and only as a whole word, so a short suggestion such as "1" does not
+# match every error containing the digit.
+.dta_template_dry_study_hint <- function(error, dry_study, used) {
+  escape <- .dta_template_engine_get("dta_template_regex_escape")
+  keys <- intersect(names(used), names(dry_study))
+  hit <- vapply(keys, function(k) {
+    grepl(paste0("(^|[^[:alnum:]_])", escape(dry_study[[k]]), "([^[:alnum:]_]|$)"), error, perl = TRUE)
+  }, logical(1))
+  if (!any(hit)) {
+    return("")
+  }
+  dry_study <- dry_study[keys]
+  sprintf(
+    paste(
+      " (The dry run stood in '%s' for a study identity nobody has entered yet. If a dataset",
+      "constrains its shape -- a numeric or narrow column, a pattern -- give the option that asks",
+      "for it a realistic first `choices:` suggestion; the dry run uses that instead.)"
+    ),
+    paste(unlist(dry_study[hit]), collapse = "' / '")
+  )
+}
+
+# Of the study tokens a template uses (`used`, from
+# .dta_template_study_tokens_used()), the ones it cannot answer: no option
+# writes that study field (.dta_template_option_targets() reads `target:`,
+# `effects:` and `set:` alike) and its base metadata does not set it, so a
+# fresh document can never get a value.
+.dta_template_unanswered_study_tokens <- function(def, used) {
+  targets <- unlist(lapply(def[["options"]] %||% list(), .dta_template_option_targets), use.names = FALSE)
+  base_study <- def[["base"]][["metadata"]][["study"]]
+  out <- character(0)
+  for (key in names(used)) {
+    base_value <- base_study[[key]]
+    answered <- any(targets %in% c(paste0("metadata.study.", key), "metadata.study")) ||
+      (is.character(base_value) && length(base_value) == 1L && !is.na(base_value) && nzchar(trimws(base_value)))
+    if (!answered) {
+      out <- c(out, used[[key]])
+    }
+  }
+  out
+}
+
+# The one wording for a dataset that declares no files, shared by the dataset
+# template check and the creation template's dry-run so the two cannot drift.
+.dta_template_no_files_message <- function(dataset_id) {
+  sprintf(
+    "Dataset '%s' declares no files, so nothing can be loaded into it. Add a 'files:' entry (filename and type).",
+    as.character(dataset_id)[[1]]
+  )
 }
 
 # One lint_dta() row as a template-row message: "[variant] dataset/object id: text".
@@ -1018,7 +1177,8 @@
     rows[[length(rows) + 1L]] <<- .dta_template_row(path, kind, id, version, severity, code, message)
   }
 
-  columns <- ds_body[["columns"]] %||% list()
+  # A matrix body keeps its column specs under `row_labels`.
+  columns <- ds_body[[dta_dataset_spec_key(ds_body)]] %||% list()
   if (!is.list(columns) || length(columns) == 0) {
     return(rows)
   }
@@ -1153,6 +1313,19 @@
   if (!is.null(identity)) {
     add("error", identity$code, identity$message)
   }
+  # A "warning", not an "error": a creation template's patch may still supply
+  # the file, so a body without one is not by itself unusable. The singular
+  # `file:` is read as well because DTADataSetFactory() accepts it (R's partial
+  # argument matching), so a template that spells it that way does build a file.
+  if (length(dta_lint_file_entries(ds_body[["files"]] %||% ds_body[["file"]])) == 0L) {
+    # The body's own id when it is one usable text, else the template's: an
+    # `id: []` gets here too (dataset_field_invalid reports that one) and must
+    # not abort the run on the way to naming itself. `%||%` here is rlang's, so
+    # it only replaces NULL, never an empty list.
+    body_id <- ds_body[["id"]]
+    shown <- if (is.character(body_id) && length(body_id) == 1L && !is.na(body_id) && nzchar(body_id)) body_id else id
+    add("warning", "dataset_no_files", .dta_template_no_files_message(shown))
+  }
   # A dataset template is never instantiated on its own, so a column the
   # DTAColumnSpec constructor rejects (an example longer than its length, a
   # value that does not fit the type, an invalid pattern) would only surface
@@ -1170,12 +1343,57 @@
   # do.call(), so the keys the constructor does not take are dropped first.
   plain <- tryCatch(yaml::read_yaml(path), error = function(e) NULL)
   plain_ds <- plain[["dataset"]]
-  cols <- Filter(is.list, plain_ds[["columns"]] %||% list())
-  cols <- lapply(cols, function(col) col[intersect(names(col), names(formals(DTAColumnSpec)))])
-  lint <- tryCatch(
-    lint_dta(list(columns = cols, rules = plain_ds[["rules"]] %||% list())),
-    error = function(e) NULL
-  )
+  # Study tokens resolved to the dry-run stand-ins first, as a creation would
+  # resolve them: `values: ${study.id}` under `format: SAS $9.` is eleven
+  # characters of token, not the id it stands for, and would be judged too long.
+  #
+  # Even so, the parts of a column built from a study token -- its `values`,
+  # `examples` or `pattern` -- are not judged HERE: the generic stand-in may not
+  # fit them (a SAS Num column, a narrow format, a hand-written pattern its
+  # example must match), and a dataset template has no study option to suggest
+  # a realistic one. Those fields are dropped for this lint and judged in the
+  # dry run of each creation template that imports the dataset template, with
+  # that template's own suggestion. The rest of the column (type, format,
+  # length, ...) is still judged here.
+  spec_key0 <- if (is.list(plain_ds)) dta_dataset_spec_key(plain_ds) else ""
+  if (nzchar(spec_key0) && is.list(plain_ds[[spec_key0]])) {
+    plain_ds[[spec_key0]] <- lapply(plain_ds[[spec_key0]], function(col) {
+      if (!is.list(col) || is.null(names(col))) {
+        return(col)
+      }
+      judged <- names(col) %in% c("values", "examples", "pattern")
+      tokened <- vapply(col, function(v) any(grepl("${study.", as.character(unlist(v)), fixed = TRUE)), logical(1))
+      col[!(judged & tokened)]
+    })
+  }
+  if (is.list(plain_ds)) {
+    plain_ds <- tryCatch(
+      .dta_template_engine_get("resolve_dataset_tokens")(
+        plain_ds,
+        .dta_template_engine_get("dta_template_dataset_env")(
+          NULL, .dta_template_engine_get("dta_template_dry_study")()
+        )
+      ),
+      error = function(e) plain_ds
+    )
+  }
+  spec_key <- dta_dataset_spec_key(plain_ds)
+  cols <- Filter(is.list, plain_ds[[spec_key]] %||% list())
+  # A row label of a matrix also carries `header`.
+  col_keys <- c(names(formals(DTAColumnSpec)), if (identical(spec_key, "row_labels")) "header")
+  cols <- lapply(cols, function(col) col[intersect(names(col), col_keys)])
+  # A matrix template is linted as the dataset it is, so its `matrix:` block is
+  # judged too; a tabular one stays a bare columns + rules input.
+  lint_input <- if (identical(spec_key, "row_labels")) {
+    list(
+      id = as.character(plain_ds[["id"]] %||% id), type = "matrix", row_labels = cols,
+      columns = plain_ds[["columns"]], files = plain_ds[["files"]],
+      rules = plain_ds[["rules"]] %||% list(), matrix = plain_ds[["matrix"]]
+    )
+  } else {
+    list(columns = cols, rules = plain_ds[["rules"]] %||% list())
+  }
+  lint <- tryCatch(lint_dta(lint_input), error = function(e) NULL)
   for (i in seq_len(if (is.null(lint)) 0L else nrow(lint))) {
     row <- lint[i, , drop = FALSE]
     add(
@@ -1662,13 +1880,26 @@
 #' `rule_id_duplicate`, `rule_column_undeclared`, `rule_range_non_numeric`,
 #' `rule_condition_operator_invalid`, `rule_condition_numeric_on_text`,
 #' `rule_condition_value_unfit`, `rule_condition_value_outside_values` (only for `equals`/`in`; the negated
-#' operators raise no finding), `group_constraint_unknown_condition`.
+#' operators raise no finding), `group_constraint_unknown_condition`, and
+#' `file_name_conflict` (file entries of two datasets could take the same file
+#' name; the linter's warning is an error here). Any other [lint_dta()] code
+#' (see its Codes section) is passed on with the linter's severity.
 #' The linter codes come from the columns and rules of a dataset template's
 #' body, and from every instantiated variant of a creation template.
 #' Warnings: the linter's `rules_without_columns`, `rule_not_checkable` and
 #' `format_narrower_than_length`, plus `kind_unknown`, `id_missing`, `version_missing`,
 #' `version_unparseable`, `target_invalid`, `party_slot_invalid`,
 #' `vocab_slot_unresolved`, `dataset_template_unresolved`, `patch_incoherent`,
+#' `dataset_no_files` (a dataset template body, or a dataset built by a
+#' non-abstract creation template, that declares no files, so nothing can be
+#' loaded into it; a patch may still supply them, hence a warning),
+#' `token_unknown` (a `${...}` placeholder in a creation or dataset template
+#' other than `${today}`, `${version}`, `${study.id}` and
+#' `${study.protocol_id}`, or a `${version}` inside a dataset, either of which
+#' is left in the document as literal text), `study_token_unanswered` (a
+#' dataset or metadata value uses `${study.id}` / `${study.protocol_id}` but no
+#' option and no base metadata of the template supplies that study field, so a
+#' new document cannot be created),
 #' `extends_unresolved`, `extends_cycle`, `mixin_unresolved` (a `mixins:`
 #' reference that does not resolve within the directory; a warning for the
 #' same reason as `extends_unresolved`), `sealed_violation`,

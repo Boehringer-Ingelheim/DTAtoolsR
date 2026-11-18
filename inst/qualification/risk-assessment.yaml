@@ -86,6 +86,26 @@ assessment:
       One case per handler property and per compression; explicit cases for
       empty, header-only, malformed and oddly-encoded files.
 
+  - area: MATRIX
+    title: Matrix datasets (type matrix)
+    severity: critical
+    probability: high
+    detectability: low
+    rationale: >
+      The header decides what every later column is called, so a header read
+      wrongly misaligns every cell finding after it, and a cell token
+      classified the wrong way (a value, a missing value or an error) is a value
+      never checked: a supplier's N/A, NaN, -Inf or 0x1F is judged by a rule
+      nobody sees being applied. A matrix may have tens of thousands of columns
+      and rows, so a single misjudged token is invisible in the summary.
+    depth: >
+      One case per rule of the header, the rows and the dimensions, and one per
+      row of the cell contract with every token listed in the requirement,
+      for each of the three cell types; every semantic case runs on a table held
+      in memory and on one scanned in batches, and a generated file with
+      defects placed at chosen positions is compared between the two with the
+      findings written down from the injection plan.
+
   - area: CONT
     title: Container deliveries (zip archives, SAS transport libraries)
     severity: critical
@@ -100,7 +120,18 @@ assessment:
     depth: >
       One case per refusal rule with a hostile fixture; byte-level comparison of
       split members against the library; truncation at every kind of boundary;
-      parity of verdict and counts between a zipped and a loose file.
+      parity of verdict and counts between a zipped and a loose file. Routing is
+      covered tier by tier (five tiers, the entry of the best tier winning
+      within and across datasets) with the ambiguity a pattern tie leaves and
+      the route and datasets arguments that resolve and scope it, and the
+      duplicate rules for copies that fit and copies that do not. Packaging is a
+      separate verdict from content: a file outside its container still loads,
+      and cases pin each of the three findings (outside, unverified,
+      unrecorded), their effect on the overall verdict of check() (failed,
+      incomplete, never passed) and their place in the validation report. The
+      container model, its YAML and lint rules, the exported Containers section
+      and the detection of overlapping file names have their own cases, with the
+      limits of that detection pinned (LIM-019 to LIM-022).
 
   - area: PERF
     title: End-to-end workflows and behaviour at scale

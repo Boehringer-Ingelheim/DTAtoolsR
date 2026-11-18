@@ -652,12 +652,12 @@ NULL
 #' Build the expected-files table (flextable). Shared by the built-in layout and
 #' by the `{FILE_SPECS}` template block.
 #' @keywords internal
-.build_file_specs_table <- function(files, width = TEXT_WIDTH$portrait) {
+.build_file_specs_table <- function(files, width = TEXT_WIDTH$portrait, ctx = NULL, dataset = NULL) {
   if (is.null(files) || length(files) == 0) {
     return(NULL)
   }
 
-  file_data <- .file_specs_df(files)
+  file_data <- .file_specs_df(files, ctx = ctx, dataset = dataset)
 
   ft <- flextable::flextable(file_data)
   ft <- flextable::width(ft, j = 1, width = 1.8)
@@ -671,9 +671,22 @@ NULL
   ft
 }
 
+#' The Containers table (flextable), or NULL when no container is in effect
+#' @keywords internal
+.build_containers_table <- function(ctx, width = TEXT_WIDTH$portrait) {
+  df <- .containers_df(ctx)
+  if (nrow(df) == 0) {
+    return(NULL)
+  }
+  ft <- flextable::flextable(df)
+  ft <- flextable::width(ft, j = 1:3, width = c(1.8, 2.0, 3.0))
+  .fit_table_width(.style_table(ft), width)
+}
+
 #' Add file specifications section
 #' @keywords internal
-.add_file_specifications <- function(doc, files, title = "File Specifications", heading_level = 2) {
+.add_file_specifications <- function(doc, files, title = "File Specifications", heading_level = 2,
+                                     ctx = NULL, dataset = NULL) {
   doc <- if (is.null(heading_level)) .add_bold_subheading(doc, title) else .add_heading(doc, title, level = heading_level)
 
   if (is.null(files) || length(files) == 0) {
@@ -683,7 +696,7 @@ NULL
   doc <- .add_body_par(doc, .file_count_sentence(files))
   doc <- .add_spacer(doc)
 
-  ft <- .build_file_specs_table(files)
+  ft <- .build_file_specs_table(files, ctx = ctx, dataset = dataset)
   doc <- flextable::body_add_flextable(doc, ft, align = "left")
   doc <- .add_spacer(doc)
 
@@ -897,6 +910,84 @@ RULE_READING_GUIDE_TITLE <- "How to read the rules"
   )
 }
 
+.is_matrix_dataset <- function(dataset) inherits(dataset, "DTAtools::DTADataSetMatrix")
+
+# Title of the column table: a matrix lists its row-label columns only.
+.column_specs_title <- function(dataset) {
+  if (.is_matrix_dataset(dataset)) "Row label columns" else "Column Specifications"
+}
+
+# The "Matrix layout" key/value rows of a matrix dataset (key, value; plain
+# English, unescaped). A row whose value is absent is omitted.
+.matrix_layout_rows <- function(dataset) {
+  m <- as.list(dataset@matrix)
+  h <- m$columns
+  cl <- m$cells
+  # Shortest decimal text that reads back as the same double; scientific
+  # notation is left to format() so 1e300 stays short.
+  num <- function(v) {
+    s <- format(v, digits = 15, trim = TRUE)
+    if (is.finite(v) && as.numeric(s) != v) s <- format(v, digits = 17, trim = TRUE)
+    s
+  }
+  ids <- dta_matrix_label_ids(dataset)
+  label_rule <- if (!is.null(h$pattern)) {
+    paste("matches", h$pattern)
+  } else if (!is.null(h$values)) {
+    paste("one of", paste(unlist(h$values), collapse = ", "))
+  }
+  if (!is.null(h$length)) {
+    label_rule <- paste(c(label_rule, paste("at most", num(h$length), "characters")), collapse = "; ")
+  }
+  label_rule <- paste(
+    c(label_rule, "labels must be unique and must not repeat a row-label id"),
+    collapse = "; "
+  )
+  key <- m$rows$key
+  key_txt <- if (!is.null(key)) {
+    paste0(
+      paste(key, collapse = " + "),
+      if (length(key) > 1L) " (unique together, no missing values)" else " (unique, no missing values)"
+    )
+  }
+  rng <- cl$range
+  range_txt <- if (!is.null(rng$min) && !is.null(rng$max)) {
+    paste(num(rng$min), "to", num(rng$max), "(both included)")
+  } else if (!is.null(rng$min)) {
+    paste("at least", num(rng$min))
+  } else if (!is.null(rng$max)) {
+    paste("at most", num(rng$max))
+  }
+  rows <- list(
+    "File layout" = paste0(
+      "A header line, then one line per row. Each line starts with the row label column",
+      if (length(ids) > 1L) "s " else " ", paste(ids, collapse = ", "),
+      "; every further column is a data column."
+    ),
+    "Header line" = dta_matrix_header_words(dataset),
+    "Column label" = h$label,
+    "Column label description" = h$description,
+    "Column label rule" = label_rule,
+    "Data columns" = dta_matrix_count_words(dataset@matrix@n_columns),
+    "Row key" = key_txt,
+    "Data rows" = dta_matrix_count_words(dataset@matrix@n_rows),
+    "Cell label" = cl$label,
+    "Cell description" = cl$description,
+    "Cell type" = cl$type,
+    "Missing cells" = if (isTRUE(cl$nullable)) "allowed" else "not allowed",
+    "Cell values" = if (!is.null(cl$values)) paste(unlist(cl$values), collapse = ", "),
+    "Cell pattern" = cl$pattern,
+    "Cell length" = if (!is.null(cl$length) && identical(dta_cell_type(dataset@matrix@cells), "Char")) paste("at most", num(cl$length), "characters"),
+    "Cell format" = cl$format,
+    "Cell range" = range_txt,
+    "Infinite values" = if (identical(dta_cell_type(dataset@matrix@cells), "Num") && !is.null(cl$infinite)) {
+      if (isTRUE(cl$infinite)) "allowed" else "not allowed"
+    }
+  )
+  rows <- Filter(function(v) length(v) == 1L && !is.na(v) && nzchar(v), rows)
+  .pairs_df(unlist(rows))
+}
+
 #' Add Column Specifications + Validation Rules sections for one dataset (DOCX).
 #' Used standalone by write_dataset_metadata() (heading_level = 1) and embedded
 #' within write_dta()'s per-dataset "Datasets" section (heading_level = 3);
@@ -928,7 +1019,7 @@ RULE_READING_GUIDE_TITLE <- "How to read the rules"
     doc <- .end_section_orientation(doc, "portrait", furniture_meta, furniture = furniture)
   }
 
-  doc <- add_section_heading(doc, "Column Specifications")
+  doc <- add_section_heading(doc, .column_specs_title(dataset))
   ft <- .build_column_specs_table(dataset@specs)
   if (!is.null(ft)) {
     doc <- flextable::body_add_flextable(doc, ft)
@@ -936,6 +1027,11 @@ RULE_READING_GUIDE_TITLE <- "How to read the rules"
     doc <- .add_body_par(doc, "No column specifications available.", italic = TRUE, color = THEME_COLORS$gray_mid)
   }
   doc <- .add_spacer(doc)
+  if (.is_matrix_dataset(dataset)) {
+    doc <- add_section_heading(doc, "Matrix layout")
+    doc <- flextable::body_add_flextable(doc, .kv_table(.matrix_layout_rows(dataset)), align = "left")
+    doc <- .add_spacer(doc)
+  }
 
   if (include_rules) {
     doc <- add_section_heading(doc, "Validation Rules")

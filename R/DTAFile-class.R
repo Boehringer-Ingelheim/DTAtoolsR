@@ -26,12 +26,16 @@
 #'   expected.
 #' @param info Character, list or \code{NULL}; free-text description of the
 #'   file.
-#' @param container Character or \code{NULL}; the name of the \code{.zip}
-#'   archive or \code{.xpt} SAS transport file this file arrives inside.
-#'   \code{*} matches any text and \code{?} one character
-#'   (\code{"sdtm_*.zip"}); the name is matched as a whole, independently of
-#'   \code{pattern}. \code{NULL} (the default) accepts the file loose or inside
-#'   any container. Only \code{\link{load_delivery}()} consults it.
+#' @param container Character or \code{NULL}; where this file must arrive: a
+#'   container id defined in the document's \code{containers} (\code{"sdtm"}),
+#'   the name of a \code{.zip} archive or \code{.xpt} SAS transport file
+#'   (\code{"sdtm_*.zip"}; \code{*} matches any text and \code{?} one
+#'   character, the name is matched as a whole, independently of
+#'   \code{pattern}), or \code{"none"} (no container needed, even when the
+#'   document has a default container). \code{NULL} (the default) means the
+#'   document's default container if it has one, otherwise the file may
+#'   arrive loose or inside any container. An id resolves only inside a
+#'   \code{\link{DTA}}.
 #'
 #' @return An object of class \code{DTAFile} containing file parsing
 #'   information.
@@ -99,7 +103,7 @@ DTAFile <- S7::new_class(
     # runs the validator, so `container = 3`, `TRUE` or a list would otherwise
     # be refused with a plain simpleError and no class. A list is refused, not
     # flattened (the YAML lint refuses `container: [a.zip]` the same way).
-    problem <- dta_container_value_problem(container)
+    problem <- dta_container_ref_problem(container)
     if (!is.null(problem)) {
       cli::cli_abort(
         "{problem}",
@@ -161,7 +165,7 @@ DTAFile <- S7::new_class(
     # The constructor checks the same thing; this is what refuses `h@container
     # <- "x.tar"`, which never passes through the constructor.
     container <- dta_handler_container(self)
-    problem <- dta_container_value_problem(container)
+    problem <- dta_container_ref_problem(container)
     if (!is.null(problem)) {
       cli::cli_abort(
         "{problem}",
@@ -331,7 +335,7 @@ dta_matches_filename_base <- function(x, file) {
     # `x@filename` may hold several patterns, and the result is one logical per
     # pattern. Folding with OR over the candidates preserves that shape.
     Reduce(`|`, lapply(candidates, function(nm) {
-      stringr::str_detect(nm, x@filename)
+      dta_str_detect(nm, x@filename)
     }))
   } else {
     any(candidates %in% x@filename)
@@ -408,6 +412,12 @@ dta_container_value_problem <- function(value) {
   if (is.na(dta_container_kind(value))) {
     return(sprintf("The container '%s' must name a .zip archive or a .xpt SAS transport file.", value))
   }
+  # Each `*` is a backtracking choice point when two globs are compared for
+  # overlap (file_name_conflicts()): matching a long literal costs about
+  # length^stars steps. Real names use one or two.
+  if (nchar(gsub("[^*]", "", value)) > 3L) {
+    return(sprintf("The container '%s' has more than three `*`; use fewer wildcards.", value))
+  }
   NULL
 }
 
@@ -415,15 +425,138 @@ dta_container_value_problem <- function(value) {
 # before `container` existed has no such slot, and reads as "no container".
 dta_handler_container <- function(h) tryCatch(h@container, error = function(e) NULL)
 
-# TRUE when `names` (container file names) include one the handler's container
-# declaration matches. Letter case must match; a compression suffix is ignored.
-dta_matches_container <- function(x, names) {
-  declared <- dta_handler_container(x)
-  if (is.null(declared) || length(names) == 0) {
+# ---- container references ------------------------------------------------------
+# A file entry's `container` is a REFERENCE, and the three kinds are disjoint by
+# syntax, so no lookup order exists to get wrong:
+#   "none"        reserved: the entry needs no container, even under a default;
+#   has a dot     a container FILE NAME (glob); equal to an explicit container's
+#                 `filename` it IS that container, otherwise it declares an
+#                 implied container of its own;
+#   has no dot    a container ID, which must name an explicit container.
+
+# NULL when `value` is an acceptable reference, else the sentence saying why
+# not. Dotted values keep the 0.27.0 judge (and so its classes and messages).
+dta_container_ref_problem <- function(value) {
+  if (is.null(value)) {
+    return(NULL)
+  }
+  if (!is.character(value) || length(value) != 1L || is.na(value) || !nzchar(value)) {
+    return(dta_container_value_problem(value))
+  }
+  if (identical(value, "none")) {
+    return(NULL)
+  }
+  if (grepl(".", value, fixed = TRUE)) {
+    return(dta_container_value_problem(value))
+  }
+  if (!dta_container_id_ok(value)) {
+    return(sprintf(
+      "The container of a file entry must be a .zip/.xpt file name or a container id (letters, digits, '_' or '-', starting with a letter); got '%s'.",
+      value
+    ))
+  }
+  NULL
+}
+
+# The containers a DTA (or an already-extracted list) holds; an object restored
+# from before the property existed holds none.
+dta_containers <- function(x) {
+  if (!inherits(x, "S7_object")) {
+    return(if (is.null(x)) list() else x)
+  }
+  tryCatch(x@containers, error = function(e) list())
+}
+
+# "Container info", the one representation every consumer uses:
+# list(key, filename, description, default, implied). `key` is the id of an
+# explicit container and the file name of an implied one. An implied container
+# is a plain list and NEVER a DTAContainer: it has no id, and a file name would
+# violate the id rule.
+dta_container_info <- function(container) {
+  list(
+    key = container@id, filename = container@filename,
+    description = container@description, default = container@default,
+    implied = FALSE
+  )
+}
+
+# Container info for `ref` against `containers` (a list of DTAContainer), or
+# NULL: "none" and an unknown id resolve to nothing, a dotted reference to the
+# explicit container with exactly that file name, else to an implied one.
+dta_resolve_container <- function(containers, ref) {
+  if (is.null(ref) || identical(ref, "none")) {
+    return(NULL)
+  }
+  if (grepl(".", ref, fixed = TRUE)) {
+    for (cn in dta_containers(containers)) {
+      if (identical(cn@filename, ref)) {
+        return(dta_container_info(cn))
+      }
+    }
+    return(list(key = ref, filename = ref, description = NULL, default = FALSE, implied = TRUE))
+  }
+  cn <- dta_containers(containers)[[ref]]
+  if (is.null(cn)) NULL else dta_container_info(cn)
+}
+
+# Where entry `h` must arrive: its own reference resolved; no reference means
+# the default container, if the document has one; "none" opts out of it.
+# `x` is a DTA or its list of containers.
+dta_effective_container <- function(x, h) {
+  containers <- dta_containers(x)
+  ref <- dta_handler_container(h)
+  if (is.null(ref)) {
+    for (cn in containers) {
+      if (isTRUE(cn@default)) {
+        return(dta_container_info(cn))
+      }
+    }
+    return(NULL)
+  }
+  dta_resolve_container(containers, ref)
+}
+
+# TRUE when one of `names` (container file names) matches `glob`. Letter case
+# must match; a compression suffix is ignored. The glob -> regex step is pure,
+# so it is memoised here (dta_container_regex() itself stays unmemoised).
+dta_glob_regex_memo <- new.env(parent = emptyenv())
+dta_glob_matches <- function(glob, names, ignore.case = FALSE) {
+  if (is.null(glob) || is.na(glob) || length(names) == 0) {
     return(FALSE)
   }
-  candidates <- unique(c(names, dta_strip_compression_extension(names)))
-  any(grepl(dta_container_regex(declared), candidates, perl = TRUE))
+  re <- dta_glob_regex_memo[[glob]]
+  if (is.null(re)) {
+    re <- dta_container_regex(glob)
+    assign(glob, re, envir = dta_glob_regex_memo)
+  }
+  any(grepl(re, unique(c(names, dta_strip_compression_extension(names))), perl = TRUE, ignore.case = ignore.case))
+}
+
+# Whether entry `h` can take a candidate of container `kind` ("zip", "xpt" or
+# NA for a plain file; vectorised over `kind`): a .zip only as a deliverable
+# (DTAFileAny), a .xpt as one SAS transport file (DTAFileXPT) or a deliverable.
+dta_entry_takes_kind <- function(h, kind) {
+  any_ok <- inherits(h, "DTAtools::DTAFileAny")
+  xpt_ok <- any_ok || inherits(h, "DTAtools::DTAFileXPT")
+  ok <- rep(TRUE, length(kind))
+  ok[!is.na(kind) & kind == "zip"] <- any_ok
+  ok[!is.na(kind) & kind == "xpt"] <- xpt_ok
+  ok
+}
+
+# load_file() reads ONE file. A .zip, or a .xpt the entry does not read as a
+# SAS transport file, is a container: say where to take it instead. The message
+# carries the base name only (never a server path) and goes to cli as data.
+dta_assert_not_container <- function(x, handler, file) {
+  kind <- dta_container_kind(file)
+  if (!is.na(kind) && !dta_entry_takes_kind(handler, kind)) {
+    msg <- sprintf(
+      "'%s' is a container (.zip/.xpt); load_file() reads one file. Use load_delivery(x, files, datasets = \"%s\") to load this dataset's files from it.",
+      basename(file), x@id
+    )
+    cli::cli_abort("{msg}", class = "dta_load_file_container")
+  }
+  invisible(NULL)
 }
 
 #' @keywords internal
@@ -437,12 +570,35 @@ dta_assert_single_file_path <- function(file, .caller) {
   file
 }
 
+#' @title Refuse a Directory Where a File Is Expected
+#' @description
+#' A directory passes `file.exists()`, so a reader handed one would open or
+#' enumerate files the caller never named -- and its error message would name
+#' one of them. Aborts with a condition of class `dta_file_is_directory`.
+#' @param file A character string specifying the path.
+#' @param .caller Name of the function to blame in the error message.
+#' @return `file`, invisibly.
+#' @keywords internal
+dta_assert_not_directory <- function(file, .caller) {
+  if (dir.exists(file)) {
+    cli::cli_abort(
+      c(
+        "{.fn {(.caller)}} was given a directory, not a file: {.path {file}}.",
+        "i" = "Pass the path of one file."
+      ),
+      class = "dta_file_is_directory"
+    )
+  }
+  invisible(file)
+}
+
 #' @title The Guard Sequence Shared by `read_file()` and `open_file()`
 #' @description
 #' Both generics accept the same arguments and must reject the same malformed
 #' input the same way before handing off to their respective `*_execution()`
 #' method -- factored out here so the two stay in sync rather than drifting,
-#' as two independent copies of the same checks eventually do.
+#' as two independent copies of the same checks eventually do. A path that is
+#' a directory is refused with class `dta_file_is_directory`.
 #' @param x A `DTAFile` object (or subclass).
 #' @param file A character string specifying the path to the file.
 #' @param namecheck Logical; when `TRUE` the file name must match the
@@ -474,6 +630,8 @@ dta_check_readable_file <- function(x, file, namecheck, .caller) {
   if (!file.exists(file)) {
     cli::cli_abort("File {.path {file}} cannot be found.")
   }
+
+  dta_assert_not_directory(file, .caller)
 
   # A missing file is the more fundamental problem, so this check runs after
   # file.exists() above rather than before it. Arrow does not reject a `.zip`
@@ -552,6 +710,9 @@ method(read_file_execution, DTAFile) <- function(x, ...) {
 #'       must match the object's filename or pattern.}
 #'     \item{specs}{A \code{DTAColumnSpecCollection} declaring the columns, or
 #'       \code{NULL} (the default). See the section below for why it matters.}
+#'     \item{column_names}{Character vector or \code{NULL}. Column names to use
+#'       instead of the file's header, verbatim; the header line is still
+#'       skipped. Used by matrix datasets.}
 #'   }
 #' @section Why the specs are handed to the reader:
 #'   A reader that knows nothing about the specification has to guess a type per
@@ -595,9 +756,9 @@ if (!exists("read_file", mode = "function", inherits = FALSE)) {
   read_file <- new_generic("read_file", "x")
 }
 
-method(read_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL) {
+method(read_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL, column_names = NULL) {
   file <- dta_check_readable_file(x, file, namecheck, "read_file")
-  read_file_execution(x, file, specs = specs)
+  read_file_execution(x, file, specs = specs, column_names = column_names)
 }
 
 
@@ -708,6 +869,9 @@ method(open_file_execution, DTAFile) <- function(x, ...) {
 #'       \code{NULL} (the default). Passed to the reader so that a column the
 #'       specification declares as text is parsed as text rather than inferred
 #'       -- see \code{\link{read_file}()} for why that matters.}
+#'     \item{column_names}{Character vector or \code{NULL}. Column names to use
+#'       instead of the file's header, verbatim; the header line is still
+#'       skipped. Used by matrix datasets.}
 #'   }
 #' @return An \code{arrow::Dataset}.
 #' @seealso \code{\link{read_file}()} for the materialising counterpart, and
@@ -730,9 +894,9 @@ if (!exists("open_file", mode = "function", inherits = FALSE)) {
 }
 
 #' @export
-method(open_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL) {
+method(open_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL, column_names = NULL) {
   file <- dta_check_readable_file(x, file, namecheck, "open_file")
-  open_file_execution(x, file, specs = specs)
+  open_file_execution(x, file, specs = specs, column_names = column_names)
 }
 
 

@@ -4,7 +4,13 @@
 \alias{dta_columnspec_check_summary}
 \title{Per-Check Summary of the Column Spec Axis}
 \usage{
-dta_columnspec_check_summary(schemas, tally = NULL, settled = NULL)
+dta_columnspec_check_summary(
+  schemas,
+  tally = NULL,
+  settled = NULL,
+  matrix = FALSE,
+  structure_declared = NULL
+)
 }
 \arguments{
 \item{schemas}{Compiled schemas, from \code{dta_compile_columnspec_schemas()}.}

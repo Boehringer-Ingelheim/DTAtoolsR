@@ -46,6 +46,91 @@
   out
 }
 
+# Where files must arrive, for the exported documents: the document's file
+# entries (container_assignments()), its containers, and each dataset's display
+# name by id. NULL when `dta` is not a DTA: every consumer then behaves as if
+# the document had no containers.
+.container_ctx <- function(dta) {
+  if (!inherits(dta, "DTAtools::DTA")) {
+    return(NULL)
+  }
+  if (dta_is_stale(dta)) dta <- dta_upgrade(dta)
+  list(
+    rows = container_assignments(dta),
+    containers = dta_containers(dta),
+    labels = stats::setNames(
+      vapply(dta@datasets, dta_dataset_label, character(1)),
+      vapply(dta@datasets, function(d) d@id, character(1))
+    )
+  )
+}
+
+# "<expected> (<dataset name or id>)" for the given container_assignments() rows.
+.container_member_texts <- function(rows, ctx) {
+  label <- unname(ctx$labels[rows$dataset])
+  label[is.na(label)] <- rows$dataset[is.na(label)]
+  paste0(rows$expected, " (", label, ")")
+}
+
+# The Containers table: Container (its file name) | Description | Files.
+# Explicit containers in definition order, then implied ones in first-use
+# order. Files lists the entries that must arrive inside the container; the
+# default container takes "All other files" except the `none` entries; a
+# container nobody is assigned to reads "No file assigned". Zero rows when
+# there is no container in effect.
+.containers_df <- function(ctx) {
+  columns <- c("Container", "Description", "Files")
+  if (is.null(ctx)) {
+    return(.empty_text_df(columns))
+  }
+  rows <- ctx$rows
+  explicit <- lapply(unname(ctx$containers), dta_container_info)
+  implied_keys <- unique(rows$container[!is.na(rows$container) & rows$implied])
+  implied <- lapply(implied_keys, function(k) {
+    list(key = k, filename = k, description = NULL, default = FALSE, implied = TRUE)
+  })
+  none <- rows[!is.na(rows$reference) & rows$reference == "none", , drop = FALSE]
+
+  out <- lapply(c(explicit, implied), function(cn) {
+    files <- if (isTRUE(cn$default)) {
+      paste0(
+        "All other files",
+        if (nrow(none) > 0) paste0("; except: ", paste(.container_member_texts(none, ctx), collapse = ", "))
+      )
+    } else {
+      members <- rows[!is.na(rows$container) & rows$container == cn$key, , drop = FALSE]
+      if (nrow(members) == 0) "No file assigned" else paste(.container_member_texts(members, ctx), collapse = "; ")
+    }
+    data.frame(
+      Container = cn$filename, Description = cn$description %||% "", Files = files,
+      stringsAsFactors = FALSE, check.names = FALSE
+    )
+  })
+  .rbind_rows(out, .empty_text_df(columns))
+}
+
+# The sentence that introduces the Containers table; the first variant that
+# applies wins.
+.containers_intro <- function(ctx) {
+  if (is.null(ctx) || nrow(.containers_df(ctx)) == 0) {
+    return("")
+  }
+  rows <- ctx$rows
+  loose <- "A file that arrives loose or inside another container does not conform to this agreement."
+  if (any(vapply(ctx$containers, function(cn) isTRUE(cn@default), logical(1)))) {
+    except <- if (any(!is.na(rows$reference) & rows$reference == "none")) {
+      ", except those whose Delivered In is Not required"
+    } else {
+      ""
+    }
+    return(paste0("All files must be delivered inside the containers below", except, ". ", loose))
+  }
+  if (nrow(rows) > 0 && !anyNA(rows$container)) {
+    return(paste0("All files must be delivered inside the containers below. ", loose))
+  }
+  "The files listed for a container must be delivered inside it. Any other file may be delivered loose or inside any container."
+}
+
 # Facts of the cover page: version, date, study, parties and template.
 # Empty values are dropped. `meta` is a DTAMetaData.
 .cover_facts <- function(meta) {
@@ -174,9 +259,29 @@
 # it is empty. When at least one entry declares a container, a sixth column
 # "Delivered In" holds the container (or "") of every entry; otherwise the five
 # columns are exactly the same as without containers.
-.file_specs_df <- function(files) {
+#
+# `ctx` (.container_ctx(); NULL outside a DTA) switches "Delivered In" from the
+# entry's raw reference to where the entry must arrive: the effective container
+# file name (default container included), "Not required" for `none`. The
+# column is still shown only when a row of THIS table has a value. `dataset` is
+# the owning dataset's id; with it the answer is read from the entry's
+# container_assignments() row.
+.file_specs_df <- function(files, ctx = NULL, dataset = NULL) {
   columns <- c("File Name / Pattern", "Match Type", "Format", "Expected Count", "Description")
-  containers <- vapply(files, function(f) dta_handler_container(f) %||% "", character(1))
+  # Without any container in effect "Not required" would be meaningless.
+  none_text <- if (!is.null(ctx) && nrow(.containers_df(ctx)) > 0) "Not required" else ""
+  containers <- vapply(seq_along(files), function(i) {
+    f <- files[[i]]
+    if (is.null(ctx)) {
+      return(dta_handler_container(f) %||% "")
+    }
+    if (identical(dta_handler_container(f), "none")) {
+      return(none_text)
+    }
+    row <- if (!is.null(dataset)) ctx$rows[ctx$rows$dataset == dataset & ctx$rows$handler == i, , drop = FALSE]
+    glob <- if (!is.null(row) && nrow(row) == 1L) row$filename else dta_effective_container(ctx$containers, f)$filename
+    if (is.null(glob) || is.na(glob)) "" else glob
+  }, character(1))
   with_container <- any(nzchar(containers))
   if (with_container) {
     columns <- c(columns, "Delivered In")

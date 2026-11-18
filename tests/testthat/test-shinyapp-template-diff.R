@@ -208,3 +208,88 @@ test_that("failure after a section write still leaves the original document unch
   expect_null(failed$value)
   expect_identical(current, before)
 })
+
+# ---- Containers in the dataset leaves ---------------------------------------------
+
+diff_ctr_dta <- function(ref = NULL, containers = list()) {
+  DTAtools::DTA(
+    datasets = list(DTAtools::DTADataSetTabular(
+      id = "ae", specs = DTAtools::create_example_DTAColumnSpecCollection(1),
+      files = list(DTAtools::DTAFileFactory(type = "csv", filename = "ae.csv", container = ref))
+    )),
+    metadata = DTAtools::create_example_DTAMetaData(),
+    containers = containers
+  )
+}
+
+test_that("dataset leaves carry the entry's own reference resolved to its file name", {
+  leaves <- app_fn("dta_dataset_leaves")
+  ctr <- list(DTAtools::DTAContainer("adam", "adam.zip", default = TRUE))
+  # An id is written as the file name, so an id and the file name it stands for
+  # are the same leaf (a materialised implied container is no change).
+  expect_identical(leaves(diff_ctr_dta("adam", ctr))[["ae.files.container"]], "adam.zip")
+  expect_identical(leaves(diff_ctr_dta("adam.zip"))[["ae.files.container"]], "adam.zip")
+  expect_identical(leaves(diff_ctr_dta("none", ctr))[["ae.files.container"]], "none")
+  # The default container is NOT applied to an entry without its own reference.
+  expect_null(leaves(diff_ctr_dta(NULL, ctr))[["ae.files.container"]])
+})
+
+test_that("dta_diff() has a containers section named by file name", {
+  a <- diff_ctr_dta(NULL, list(DTAtools::DTAContainer("adam", "adam.zip")))
+  b <- diff_ctr_dta(NULL, list(
+    DTAtools::DTAContainer("adam", "adam.zip", description = "ADaM"),
+    DTAtools::DTAContainer("sdtm", "sdtm.zip")
+  ))
+  d <- app_fn("dta_diff")(a, b)
+  expect_setequal(d$containers$key, c("adam.zip.description", "sdtm.zip.filename"))
+  expect_identical(d$containers$change[d$containers$key == "adam.zip.description"], "added")
+  expect_identical(nrow(app_fn("dta_diff")(a, a)$containers), 0L)
+})
+
+# ---- Two sides with no leaves at all -----------------------------------------
+
+# An empty leaf map has NULL names, so the union of two is NULL and
+# sort(NULL, method = "radix") used to abort with "not a vector". Expected
+# frames are spelled out here rather than read back from the app's own
+# empty-frame helpers.
+test_that("a diff of two empty leaf maps is the empty change frame, not an error", {
+  expect_identical(
+    app_fn("dta_diff_two_way")(list(), list()),
+    data.frame(
+      key = character(0), change = character(0),
+      from = character(0), to = character(0),
+      stringsAsFactors = FALSE
+    )
+  )
+})
+
+test_that("dta_diff() of two documents with no metadata fields and no datasets reports nothing", {
+  empty <- function() DTAtools::DTA(datasets = list(), metadata = DTAtools::DTAMetaData())
+  d <- app_fn("dta_diff")(empty(), empty())
+  expect_named(d, c("metadata", "containers", "datasets"))
+  for (section in d) {
+    expect_identical(names(section), c("key", "change", "from", "to"))
+    expect_identical(nrow(section), 0L)
+  }
+})
+
+test_that("rebase classification of three empty leaf maps yields empty change and conflict frames", {
+  conflicts <- data.frame(
+    key = character(0), ancestor = character(0),
+    current = character(0), target = character(0),
+    stringsAsFactors = FALSE
+  )
+  changes <- data.frame(
+    key = character(0), resolution = character(0),
+    ancestor = character(0), current = character(0), target = character(0),
+    stringsAsFactors = FALSE
+  )
+  expect_identical(
+    app_fn(".rebase_classify_three_way")(list(), list(), list()),
+    list(changes = changes, conflicts = conflicts)
+  )
+  expect_identical(
+    app_fn(".rebase_classify_two_way")(list(), list()),
+    list(changes = changes, conflicts = conflicts)
+  )
+})

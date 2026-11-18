@@ -34,12 +34,16 @@
 #'   a line break. Default \code{FALSE}. See \code{\link{DTAFileTabular}}.
 #' @param encoding Character; the file's character encoding. Default
 #'   \code{"UTF-8"}. See \code{\link{DTAFileTabular}}.
-#' @param container Character or \code{NULL}; the name of the \code{.zip}
-#'   archive or \code{.xpt} SAS transport file this file arrives inside.
-#'   \code{*} matches any text and \code{?} one character
-#'   (\code{"sdtm_*.zip"}); the name is matched as a whole, independently of
-#'   \code{pattern}. \code{NULL} (the default) accepts the file loose or inside
-#'   any container. Only \code{\link{load_delivery}()} consults it.
+#' @param container Character or \code{NULL}; where this file must arrive: a
+#'   container id defined in the document's \code{containers} (\code{"sdtm"}),
+#'   the name of a \code{.zip} archive or \code{.xpt} SAS transport file
+#'   (\code{"sdtm_*.zip"}; \code{*} matches any text and \code{?} one
+#'   character, the name is matched as a whole, independently of
+#'   \code{pattern}), or \code{"none"} (no container needed, even when the
+#'   document has a default container). \code{NULL} (the default) means the
+#'   document's default container if it has one, otherwise the file may
+#'   arrive loose or inside any container. An id resolves only inside a
+#'   \code{\link{DTA}}.
 #'
 #' @name DTAFileCSV-class
 #' @return An object of class \code{DTAFileCSV}.
@@ -114,7 +118,8 @@ method(read_file_execution, DTAFileCSV) <- function(x, ...) {
     has_header = x@has_header,
     specs = args$specs,
     na = dta_reader_na_values(x),
-    handler = x
+    handler = x,
+    column_names = args$column_names
   )
 }
 
@@ -141,7 +146,8 @@ method(open_file_execution, DTAFileCSV) <- function(x, ...) {
     quote = x@quote,
     has_header = x@has_header,
     na = dta_reader_na_values(x),
-    handler = x
+    handler = x,
+    column_names = args$column_names
   )
 }
 

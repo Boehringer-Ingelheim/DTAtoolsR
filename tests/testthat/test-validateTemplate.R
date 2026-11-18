@@ -2164,3 +2164,754 @@ test_that("an id that merely contains 'cycle detected' is still classified by co
   expect_code_row(result, "mixin_conflict", "error")
   expect_no_code_row(result, "extends_cycle")
 })
+
+# ---- file_name_conflict (D16) ---------------------------------------------------
+
+test_that("a creation template whose datasets conflict on a file name is an error", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: conflicting",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Conflicting",
+      "datasets:",
+      "  - id: ae",
+      "    type: tabular",
+      "    files: {filename: '^a.*[.]csv$', type: csv, pattern: true}",
+      "    columns:",
+      "      - {id: COL1, type: SAS Char}",
+      "  - id: dm",
+      "    type: tabular",
+      "    files: {filename: '^.*e[.]csv$', type: csv, pattern: true}",
+      "    columns:",
+      "      - {id: COL1, type: SAS Char}"
+    ),
+    lib_file(dir, "conflicting.dta-template.yaml")
+  )
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "file_name_conflict", "error")
+  expect_equal(nrow(rows), 1)
+  expect_match(rows$message, "'ae'", fixed = TRUE)
+  expect_match(rows$message, "'dm'", fixed = TRUE)
+})
+
+# ---- column ids with spaces ---------------------------------------------------
+#
+# A column id is the exact header text, so a template may declare "Subject ID".
+# Every path a template takes to a column (inline, an imported dataset template,
+# the add/modify/remove verbs) must keep the id as written. A matrix row-label
+# id may not hold whitespace: its header text goes under `header`.
+
+test_that("a library whose templates declare spaced column ids validates with no finding", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: spaced_ds",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: ds1",
+      "  type: tabular",
+      "  files: {filename: x.csv, type: csv}",
+      "  columns:",
+      "    - {id: Subject ID, type: SAS Char, nullable: No}",
+      "    - {id: Visit Date (UTC), type: SAS Char}",
+      "    - {id: Dose mg/kg, type: SAS Num}"
+    ),
+    lib_file(dir, "spaced_ds.dta-dataset-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: spaced_inline",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Spaced",
+      "datasets:",
+      "  - id: ds2",
+      "    type: tabular",
+      "    files: {filename: y.csv, type: csv}",
+      "    columns:",
+      "      - {id: Subject ID, type: SAS Char, nullable: No}",
+      "      - {id: Visit Date (UTC), type: SAS Char}",
+      "    rules:",
+      "      - {id: ukey, type: col_unique, columns: [Subject ID, Visit Date (UTC)]}"
+    ),
+    lib_file(dir, "spaced_inline.dta-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: spaced_patch",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Patched",
+      "datasets:",
+      "  - template: spaced_ds@1.0",
+      "    patch:",
+      "      add_columns:",
+      "        - {id: New Col (x), type: SAS Char}",
+      "      modify_columns:",
+      "        - {id: Subject ID, label: Subject}",
+      "      remove_columns: [Dose mg/kg]"
+    ),
+    lib_file(dir, "spaced_patch.dta-template.yaml")
+  )
+
+  result <- validate_template(dir)
+  expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
+})
+
+test_that("a patch that names a spaced column id that is not there is still patch_incoherent", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: spaced_ds",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: ds1",
+      "  type: tabular",
+      "  files: {filename: x.csv, type: csv}",
+      "  columns:",
+      "    - {id: Subject ID, type: SAS Char}"
+    ),
+    lib_file(dir, "spaced_ds.dta-dataset-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: bad_patch",
+      "version: \"1.0\"",
+      "abstract: true",
+      "base: {metadata: {}}",
+      "datasets:",
+      "  - template: spaced_ds@1.0",
+      "    patch:",
+      "      remove_columns: [Subject  ID]"
+    ),
+    lib_file(dir, "bad_patch.dta-template.yaml")
+  )
+
+  expect_code_row(validate_template(dir), "patch_incoherent", "warning")
+})
+
+test_that("a dataset template whose matrix row label has a spaced id is a matrix_row_label_id_invalid error", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: spaced_matrix",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: counts",
+      "  type: matrix",
+      "  files: {filename: c.tsv, type: tsv}",
+      "  row_labels:",
+      "    - {id: Sample ID, type: SAS Char, nullable: No}",
+      "  matrix:",
+      "    cells: {type: SAS Num}"
+    ),
+    lib_file(dir, "spaced_matrix.dta-dataset-template.yaml")
+  )
+
+  rows <- expect_code_row(validate_template(dir), "matrix_row_label_id_invalid", "error")
+  expect_equal(nrow(rows), 1)
+  expect_equal(rows$id, "spaced_matrix")
+})
+
+test_that("the same matrix with id SAMPLE_ID and header 'Sample ID' validates with no finding", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: headed_matrix",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: counts",
+      "  type: matrix",
+      "  files: {filename: c.tsv, type: tsv}",
+      "  row_labels:",
+      "    - {id: SAMPLE_ID, header: Sample ID, type: SAS Char, nullable: No}",
+      "  matrix:",
+      "    cells: {type: SAS Num}"
+    ),
+    lib_file(dir, "headed_matrix.dta-dataset-template.yaml")
+  )
+
+  expect_equal(nrow(validate_template(dir)), 0)
+})
+
+test_that("an inline matrix with a spaced row-label id in a creation template is instantiate_failed", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: inline_matrix",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Inline matrix",
+      "datasets:",
+      "  - id: counts",
+      "    type: matrix",
+      "    files: {filename: c.tsv, type: tsv}",
+      "    row_labels:",
+      "      - {id: Sample ID, type: SAS Char, nullable: No}",
+      "    matrix:",
+      "      cells: {type: SAS Num}"
+    ),
+    lib_file(dir, "inline_matrix.dta-template.yaml")
+  )
+
+  rows <- expect_code_row(validate_template(dir), "instantiate_failed", "error")
+  expect_equal(rows$id, "inline_matrix")
+  # the lint code, which is an identifier and not prose, names the cause
+  expect_match(rows$message, "matrix_row_label_id_invalid", fixed = TRUE)
+})
+
+test_that("a patch that adds a spaced row label to an imported matrix is instantiate_failed", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: plain_matrix",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: counts",
+      "  type: matrix",
+      "  files: {filename: c.tsv, type: tsv}",
+      "  row_labels:",
+      "    - {id: GENE_ID, type: SAS Char, nullable: No}",
+      "  matrix:",
+      "    cells: {type: SAS Num}"
+    ),
+    lib_file(dir, "plain_matrix.dta-dataset-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: adds_spaced",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Adds",
+      "datasets:",
+      "  - template: plain_matrix@1.0",
+      "    patch:",
+      "      add_columns:",
+      "        - {id: Gene Name, type: SAS Char, nullable: Yes}"
+    ),
+    lib_file(dir, "adds_spaced.dta-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: adds_spaced_verb",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Adds",
+      "datasets:",
+      "  - template: plain_matrix@1.0",
+      "    patch:",
+      "      columns:",
+      "        add:",
+      "          - {id: Gene Name, type: SAS Char, nullable: Yes}"
+    ),
+    lib_file(dir, "adds_spaced_verb.dta-template.yaml")
+  )
+  # the control: the same label under an unspaced id, its text under `header`
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: adds_headed",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Adds",
+      "datasets:",
+      "  - template: plain_matrix@1.0",
+      "    patch:",
+      "      add_columns:",
+      "        - {id: GENE_NAME, header: Gene Name, type: SAS Char, nullable: Yes}"
+    ),
+    lib_file(dir, "adds_headed.dta-template.yaml")
+  )
+
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "instantiate_failed", "error")
+  expect_setequal(rows$id, c("adds_spaced", "adds_spaced_verb"))
+  # the space is what fails: the unspaced control and the matrix template itself are fine
+  expect_false("adds_headed" %in% result$id)
+  expect_false("plain_matrix" %in% result$id)
+})
+
+# ---- dataset_no_files: a dataset nothing can ever be loaded into -------------
+
+# A dataset template whose body carries `files_lines` (already indented to sit
+# under `dataset:`), or no file declaration at all when it is empty.
+write_files_dataset_tpl <- function(dir, files_lines = character(0), id = "gf_files") {
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      sprintf("id: %s", id),
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: gf_data",
+      "  type: tabular",
+      files_lines,
+      "  columns:",
+      "    - {id: C1, type: SAS Char}"
+    ),
+    lib_file(dir, paste0(id, ".dta-dataset-template.yaml"))
+  )
+}
+
+# A creation template whose lone dataset is the inline body `dataset_lines`.
+write_creation_with_dataset <- function(dir, dataset_lines, abstract = FALSE) {
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: files_tpl",
+      "version: \"1.0\"",
+      if (abstract) "abstract: true",
+      "base:",
+      "  metadata:",
+      "    title: Files Template",
+      "datasets:",
+      dataset_lines
+    ),
+    lib_file(dir, "files_tpl.dta-template.yaml")
+  )
+}
+
+test_that("a dataset template that declares no files is a dataset_no_files warning naming the dataset", {
+  dir <- withr::local_tempdir()
+  write_files_dataset_tpl(dir)
+
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "dataset_no_files", "warning")
+  expect_equal(nrow(rows), 1L)
+  expect_match(rows$message, "'gf_data'", fixed = TRUE)
+  # Only a warning is raised: nothing else is wrong with the file, and strict
+  # mode (which aborts on errors only) must not stop a pipeline over it.
+  expect_identical(result$code, "dataset_no_files")
+  expect_no_error(validate_template(dir, strict = TRUE))
+})
+
+test_that("an empty files: list is reported the same as an absent one", {
+  dir <- withr::local_tempdir()
+  write_files_dataset_tpl(dir, "  files: []")
+  expect_code_row(validate_template(dir), "dataset_no_files", "warning")
+})
+
+test_that("a dataset template declaring its files, as a mapping, a sequence or the singular file:, is clean", {
+  # `file:` still builds a dataset with one file (DTADataSetFactory() takes it
+  # by partial argument matching), so reporting it would be a false alarm.
+  shapes <- list(
+    mapping = "  files: {filename: one.tsv, type: tsv}",
+    sequence = c("  files:", "    - {filename: one.tsv, type: tsv}", "    - {filename: two.tsv, type: tsv}"),
+    singular = "  file: {filename: one.tsv, type: tsv}"
+  )
+  for (shape in names(shapes)) {
+    dir <- withr::local_tempdir()
+    write_files_dataset_tpl(dir, shapes[[shape]])
+    # No rows AT ALL, so a fixture that stopped parsing cannot pass by merely
+    # lacking the one code under test.
+    expect_equal(nrow(validate_template(dir)), 0L, info = shape)
+  }
+})
+
+test_that("a dataset template with no usable id is still reported, naming the template, and never aborts the run", {
+  # An id that is a list is dataset_field_invalid's to report; the new check
+  # must not trip over it while naming the dataset, or one malformed file
+  # would hide every finding in the library.
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template", "id: odd_id", "version: \"1.0\"",
+      "dataset:", "  id: []", "  type: tabular",
+      "  columns:", "    - {id: C1, type: SAS Char}"
+    ),
+    lib_file(dir, "odd_id.dta-dataset-template.yaml")
+  )
+  expect_no_error(result <- validate_template(dir))
+  expect_true("dataset_field_invalid" %in% result$code)
+  rows <- expect_code_row(result, "dataset_no_files", "warning")
+  expect_match(rows$message, "'odd_id'", fixed = TRUE)
+
+  # No id at all: dataset_id_missing is the error, the template names itself.
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template", "id: nameless", "version: \"1.0\"",
+      "dataset:", "  type: tabular",
+      "  columns:", "    - {id: C1, type: SAS Char}"
+    ),
+    lib_file(dir, "nameless.dta-dataset-template.yaml")
+  )
+  result <- validate_template(dir)
+  expect_true("dataset_id_missing" %in% result$code)
+  rows <- expect_code_row(result, "dataset_no_files", "warning")
+  expect_match(rows$message, "'nameless'", fixed = TRUE)
+})
+
+test_that("a dataset template with no dataset body reports dataset_missing and no dataset_no_files", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c("kind: dta_dataset_template", "id: empty_body", "version: \"1.0\""),
+    lib_file(dir, "empty_body.dta-dataset-template.yaml")
+  )
+  result <- validate_template(dir)
+  expect_identical(result$code, "dataset_missing")
+})
+
+test_that("an inline dataset of a creation template without files is reported once, with files it is clean", {
+  no_files <- c(
+    "  - id: ds1",
+    "    type: tabular",
+    "    columns:",
+    "      - {id: COL1, type: SAS Char}"
+  )
+  dir <- withr::local_tempdir()
+  write_creation_with_dataset(dir, no_files)
+  rows <- expect_code_row(validate_template(dir), "dataset_no_files", "warning")
+  expect_equal(nrow(rows), 1L)
+  expect_match(rows$message, "'ds1'", fixed = TRUE)
+
+  dir <- withr::local_tempdir()
+  write_creation_with_dataset(dir, append(no_files, "    files: {filename: x.csv, type: csv}", after = 2L))
+  expect_equal(nrow(validate_template(dir)), 0L)
+})
+
+test_that("an abstract creation template is not judged, since it is never instantiated", {
+  dir <- withr::local_tempdir()
+  write_creation_with_dataset(
+    dir,
+    c("  - id: ds1", "    type: tabular", "    columns:", "      - {id: COL1, type: SAS Char}"),
+    abstract = TRUE
+  )
+  expect_equal(nrow(validate_template(dir)), 0L)
+})
+
+test_that("a creation template whose patch supplies the files adds no row of its own", {
+  # The dataset template is files-less and is itself reported, but the
+  # document the creation template builds has a file, so that file is clean.
+  dir <- withr::local_tempdir()
+  write_files_dataset_tpl(dir, id = "bare_ds")
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: patched_tpl",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Patched",
+      "datasets:",
+      "  - template: bare_ds@1.0",
+      "    patch:",
+      "      set:",
+      "        files: {filename: x.tsv, type: tsv}"
+    ),
+    lib_file(dir, "patched_tpl.dta-template.yaml")
+  )
+
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "dataset_no_files", "warning")
+  expect_equal(basename(rows$file), "bare_ds.dta-dataset-template.yaml")
+  # That one row is ALL there is: had the patch been rejected, the creation
+  # template would have carried an instantiate_failed or patch_incoherent row
+  # and no dataset_no_files row, which the check above alone cannot tell apart.
+  expect_identical(result$code, "dataset_no_files")
+})
+
+test_that("a creation template importing a files-less dataset template is reported against the document it builds", {
+  dir <- withr::local_tempdir()
+  write_files_dataset_tpl(dir, id = "bare_ds")
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: bare_tpl",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Bare",
+      "datasets:",
+      "  - template: bare_ds@1.0"
+    ),
+    lib_file(dir, "bare_tpl.dta-template.yaml")
+  )
+
+  rows <- expect_code_row(validate_template(dir), "dataset_no_files", "warning")
+  expect_setequal(
+    basename(rows$file),
+    c("bare_ds.dta-dataset-template.yaml", "bare_tpl.dta-template.yaml")
+  )
+})
+
+test_that("dataset_no_files names the variant whose built dataset has no files", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: variant_tpl",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Variants",
+      "variants:",
+      "  id: platform",
+      "  choices:",
+      "    - value: with_file",
+      "      datasets:",
+      "        - id: ds1",
+      "          type: tabular",
+      "          files: {filename: x.csv, type: csv}",
+      "          columns:",
+      "            - {id: COL1, type: SAS Char}",
+      "    - value: without_file",
+      "      datasets:",
+      "        - id: ds1",
+      "          type: tabular",
+      "          columns:",
+      "            - {id: COL1, type: SAS Char}"
+    ),
+    lib_file(dir, "variant_tpl.dta-template.yaml")
+  )
+
+  rows <- expect_code_row(validate_template(dir), "dataset_no_files", "warning")
+  expect_equal(nrow(rows), 1L)
+  expect_match(rows$message, "^[[]without_file[]] ")
+})
+
+# ---- study tokens: ${study.id} / ${study.protocol_id} ------------------------
+
+test_that("a dataset template using study tokens builds in the dry run and is not judged on the raw token text", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: tok_dt",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: tok",
+      "  type: tabular",
+      "  files:",
+      "    filename: ^s${study.id}_[0-9]{12}\\.csv$",
+      "    pattern: true",
+      "    type: csv",
+      "  columns:",
+      # "${study.id}" is 11 characters; $9. holds 9. Only the stand-in ("STUDY-ID",
+      # 8 characters) fits, so a lint that read the raw token text would object.
+      "    - {id: STUDYID, type: SAS Char, format: SAS $9., values: \"${study.id}\"}"
+    ),
+    lib_file(dir, "tok.dta-dataset-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: tok_ct",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Token CT",
+      "datasets:",
+      "  - template: tok_dt@1.0",
+      "options:",
+      "  - {id: study_id, label: Study ID, type: text, target: metadata.study.id}"
+    ),
+    lib_file(dir, "tok_ct.dta-template.yaml")
+  )
+
+  result <- validate_template(dir)
+  expect_no_code_row(result, "instantiate_failed")
+  expect_no_code_row(result, "column_spec_invalid")
+  expect_no_code_row(result, "token_unknown")
+  expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
+})
+
+test_that("a column built from a study token is judged with the study option's first suggestion, not the generic stand-in", {
+  # A 4-character column cannot hold the generic stand-in STUDY-ID. On its own,
+  # the dataset template is not judged on that column; the creation template's
+  # dry run is, and its suggestion "1001" fits.
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: narrow_dt",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: narrow",
+      "  type: tabular",
+      "  files: {filename: n.csv, type: csv}",
+      "  columns:",
+      "    - {id: STUDYID, type: SAS Char, format: SAS $4., values: \"${study.id}\"}"
+    ),
+    lib_file(dir, "narrow.dta-dataset-template.yaml")
+  )
+  ct <- function(option) {
+    writeLines(
+      c(
+        "kind: dta_creation_template", "id: narrow_ct", "version: \"1.0\"",
+        "base:", "  metadata:", "    title: Narrow",
+        "datasets:", "  - template: narrow_dt@1.0",
+        "options:", option
+      ),
+      lib_file(dir, "narrow_ct.dta-template.yaml")
+    )
+  }
+
+  ct("  - {id: study_id, type: text, target: metadata.study.id, choices: [\"1001\"]}")
+  suggested <- validate_template(dir)
+  expect_equal(nrow(suggested), 0, info = paste(utils::capture.output(print(suggested)), collapse = "\n"))
+
+  ct("  - {id: study_id, type: text, target: metadata.study.id}")
+  generic <- validate_template(dir)
+  expect_no_code_row(generic, "column_spec_invalid")
+  failed <- expect_code_row(generic, "instantiate_failed", "error")
+  expect_match(failed$message, "STUDY-ID", fixed = TRUE)
+  expect_match(failed$message, "choices:", fixed = TRUE)
+})
+
+test_that("study_token_unanswered names a study placeholder no option or base value answers", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: gap_ct", "version: \"1.0\"",
+      "base:", "  metadata:", "    title: \"For ${study.protocol_id}\"",
+      "datasets:",
+      "  - id: ds1",
+      "    type: tabular",
+      "    files: {filename: 'g_${version}.csv', type: csv}",
+      "    columns:",
+      "      - {id: STUDYID, type: SAS Char, values: \"${study.id}\"}",
+      "options:",
+      "  - {id: study_id, type: text, target: metadata.study.id}"
+    ),
+    lib_file(dir, "gap_ct.dta-template.yaml")
+  )
+  result <- validate_template(dir)
+  gap <- expect_code_row(result, "study_token_unanswered", "warning")
+  expect_equal(nrow(gap), 1L)
+  expect_match(gap$message, "${study.protocol_id}", fixed = TRUE)
+  expect_match(gap$message, "metadata.study.protocol_id", fixed = TRUE)
+  # ${version} is not filled in inside a dataset.
+  late <- expect_code_row(result, "token_unknown", "warning")
+  expect_match(late$message, "${version}", fixed = TRUE)
+
+  # Setting the protocol id in base metadata answers it.
+  txt <- readLines(lib_file(dir, "gap_ct.dta-template.yaml"))
+  writeLines(append(txt, "    study: {protocol_id: P-1}", after = 5L), lib_file(dir, "gap_ct.dta-template.yaml"))
+  expect_no_code_row(validate_template(dir), "study_token_unanswered")
+})
+
+test_that("text that merely looks like a stand-in is not taken for a study token", {
+  # A column called STUDY-ID and a title naming PROT-ID, but no placeholder at all.
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: look_ct", "version: \"1.0\"",
+      "base:", "  metadata:", "    title: \"Transfer for PROT-ID 12\"",
+      "datasets:",
+      "  - id: ds1",
+      "    type: tabular",
+      "    files: {filename: l.csv, type: csv}",
+      "    columns:",
+      "      - {id: STUDY-ID, type: SAS Char}"
+    ),
+    lib_file(dir, "look_ct.dta-template.yaml")
+  )
+  expect_no_code_row(validate_template(dir), "study_token_unanswered")
+})
+
+test_that("a study token in a column's description does not hide that column's other faults", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template", "id: age_dt", "version: \"1.0\"",
+      "dataset:",
+      "  id: age",
+      "  type: tabular",
+      "  files: {filename: a.csv, type: csv}",
+      "  columns:",
+      "    - {id: AGE, type: SAS Num, format: SAS $20., description: \"Collected in study ${study.id}\"}"
+    ),
+    lib_file(dir, "age.dta-dataset-template.yaml")
+  )
+  bad <- expect_code_row(validate_template(dir), "column_spec_invalid", "error")
+  expect_match(bad$message, "AGE", fixed = TRUE)
+})
+
+test_that("token_unknown fires once per file for a mistyped placeholder, and never for the four known ones", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: typo_dt",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: typo",
+      "  type: tabular",
+      "  files: {filename: x.csv, type: csv}",
+      "  columns:",
+      "    - {id: A, type: SAS Char, values: \"${studyid}\"}",
+      "    - {id: B, type: SAS Char, description: \"${studyid} again\"}",
+      "    - {id: C, type: SAS Char, values: \"${study.id}\"}",
+      "    - {id: D, type: SAS Char, values: \"${study.protocol_id}\"}"
+    ),
+    lib_file(dir, "typo.dta-dataset-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: typo_ct",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: \"${today} ${version} ${study.id} ${study.protocol_id}\"",
+      "    header: \"${studyid}\"",
+      "datasets:",
+      "  - id: ds1",
+      "    type: tabular",
+      "    files: {filename: x.csv, type: csv}",
+      "    columns:",
+      "      - {id: COL1, type: SAS Char}"
+    ),
+    lib_file(dir, "typo_ct.dta-template.yaml")
+  )
+  # Only the four known tokens: nothing to report.
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: known_ct",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: \"${today} ${version} ${study.id} ${study.protocol_id}\"",
+      "datasets:",
+      "  - id: ds1",
+      "    type: tabular",
+      "    files: {filename: x.csv, type: csv}",
+      "    columns:",
+      "      - {id: COL1, type: SAS Char}"
+    ),
+    lib_file(dir, "known_ct.dta-template.yaml")
+  )
+
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "token_unknown", "warning")
+  expect_equal(nrow(rows), 2L)
+  expect_setequal(basename(rows$file), c("typo.dta-dataset-template.yaml", "typo_ct.dta-template.yaml"))
+  expect_true(all(grepl("${studyid}", rows$message, fixed = TRUE)))
+  expect_false(any(grepl("known_ct", rows$file, fixed = TRUE)))
+
+  # A warning does not abort strict mode.
+  strict <- validate_template(dir, strict = TRUE)
+  expect_equal(sum(strict$code == "token_unknown"), 2L)
+})

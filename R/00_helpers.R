@@ -148,7 +148,7 @@ dta_narrow_rows <- function(v) {
 }
 
 `__DTAtools_supported_backends__` <- c("SAS")
-`__DTAtools_supported_dataset_types__` <- c("tabular", "file")
+`__DTAtools_supported_dataset_types__` <- c("tabular", "file", "matrix")
 `__DTAtools_stream_modes__` <- c("auto", "always", "never")
 
 # The size above which `stream = "auto"` keeps a file lazy rather than reading
@@ -579,19 +579,31 @@ DTAColumnSpecStructureFactory <- function(
 #' @title Create a DTADataSet Object
 #'
 #' @description
-#' Constructs a DTADataSetTabular or DTADataSetFile object, according to
-#' `type`.
+#' Constructs a DTADataSetTabular, DTADataSetFile or DTADataSetMatrix object,
+#' according to `type`.
 #'
-#' @param type Character. Dataset type, \code{"tabular"} or \code{"file"}.
-#' @param columns A list with column specifications (optional)
+#' @param type Character. Dataset type, \code{"tabular"}, \code{"file"} or
+#'   \code{"matrix"}.
+#' @param columns A list with column specifications (optional). Not allowed for
+#'   a \code{"matrix"}, whose row-label columns are given as \code{row_labels}.
 #' @param rules A list of rules specifications (optional)
 #' @param files Specification of the dataset's file handlers (optional). Either
 #'   a single named list -- one handler, the shape a YAML \code{files:} mapping
 #'   parses to -- or an unnamed list of such lists, one per handler, the shape a
 #'   YAML \code{files:} sequence parses to. \code{NULL} or an empty list yields a
 #'   dataset with no file handlers.
-#' @param ... Further arguments passed on to the \code{DTADataSetTabular()}
-#'   or \code{DTADataSetFile()} constructor, according to \code{type}.
+#' @param matrix A list with the settings of a matrix dataset (the YAML
+#'   \code{matrix:} block), or a \code{DTAMatrixSpec}. Only for
+#'   \code{type = "matrix"}.
+#' @param row_labels A list with the column specifications of the row-label
+#'   columns of a matrix dataset, matched to the file's leading columns by
+#'   position. Besides the keys of a column specification an entry may carry
+#'   \code{header}: the text the header line holds above the column (left out:
+#'   the \code{id}; \code{""}: an empty field; \code{FALSE}: no field at all,
+#'   first row label only). Only for \code{type = "matrix"}.
+#' @param ... Further arguments passed on to the \code{DTADataSetTabular()},
+#'   \code{DTADataSetFile()} or \code{DTADataSetMatrix()} constructor,
+#'   according to \code{type}.
 #' @importFrom cli cli_abort
 #' @return An object derived from class \code{DTADataSet} like \code{DTADataSetTabular},
 #' depending on \code{type}.
@@ -613,19 +625,60 @@ DTAColumnSpecStructureFactory <- function(
 #'   )
 #' )
 #'
-#' @seealso \code{\link{DTADataSet}}, \code{\link{DTADataSetTabular}}
+#' # A matrix dataset: row-label columns, then the settings of the matrix.
+#' DTADataSetFactory(
+#'   type = "matrix",
+#'   id = "counts",
+#'   files = list(type = "tsv", filename = "counts.tsv"),
+#'   row_labels = list(list(id = "GENE", header = "", type = "SAS Char", nullable = FALSE)),
+#'   matrix = list(
+#'     columns = list(pattern = "^S[0-9]+$"),
+#'     cells = list(type = "SAS Int", range = list(min = 0))
+#'   )
+#' )
+#'
+#' @seealso \code{\link{DTADataSet}}, \code{\link{DTADataSetTabular}},
+#'   \code{\link{DTADataSetMatrix}}
 #' @export
 DTADataSetFactory <- function(
   type,
   columns = NULL,
   rules = NULL,
   files = NULL,
+  matrix = NULL,
+  row_labels = NULL,
   ...
 ) {
   # check that type is not NULL and
   if (!type %in% `__DTAtools_supported_dataset_types__`) {
     cli_abort(
       "'type' prefix '{type}'must be one of the supported: {str_flatten_comma(`__DTAtools_supported_dataset_types__`)}"
+    )
+  }
+
+  if (!identical(type, "matrix")) {
+    if (!is.null(row_labels)) {
+      cli_abort(
+        c(
+          "{.field row_labels} belongs to a {.val matrix} dataset, not to type {.val {type}}.",
+          "i" = "Write {.field columns} for this type."
+        ),
+        class = "dta_row_labels_key"
+      )
+    }
+    if (!is.null(matrix)) {
+      cli_abort(
+        "{.field matrix} belongs to a {.val matrix} dataset, not to type {.val {type}}.",
+        class = "dta_matrix_key"
+      )
+    }
+  } else if (!is.null(columns)) {
+    cli_abort(
+      c(
+        "A {.val matrix} dataset has no {.field columns}.",
+        "i" = "List the row-label columns under {.field row_labels}; the data columns are described by {.field matrix.columns} and {.field matrix.cells}."
+      ),
+      class = "dta_matrix_columns_key"
     )
   }
 
@@ -645,8 +698,36 @@ DTADataSetFactory <- function(
         ...
       ))
     },
+    "matrix" = {
+      return(DTADataSetMatrix(
+        specs = dta_row_label_specs(row_labels, rules = rules),
+        matrix = matrix,
+        files = file_handlers,
+        ...
+      ))
+    },
     cli_abort("Dataset type '{type}' not implemented.")
   )
+}
+
+#' @title The Key That Holds a Dataset's Column Specifications
+#' @description
+#' A `matrix` dataset writes its row-label columns under `row_labels:`; every
+#' other dataset writes `columns:`. This is the one place that says so, for code
+#' that reads or writes a dataset body.
+#' @param body A dataset body as a list (a parsed YAML mapping), fully resolved.
+#'   A body with no `type` (a child template's inline dataset, merged over its
+#'   parent's by key) is decided by the keys present.
+#' @return `"row_labels"` or `"columns"`.
+#' @keywords internal
+dta_dataset_spec_key <- function(body) {
+  type <- body[["type"]]
+  if (is.null(type)) {
+    # A child template's inline dataset may omit `type` (merged over the
+    # parent's by key, template_inherit.R:483): decide from the keys present.
+    return(if (!is.null(body[["row_labels"]]) && is.null(body[["columns"]])) "row_labels" else "columns")
+  }
+  if (identical(type, "matrix")) "row_labels" else "columns"
 }
 
 
@@ -795,4 +876,78 @@ DTAFileFactory <- function(
     ),
     cli_abort("Filetype '{type}' not implemented.")
   )
+}
+
+# ---- bounded regex matching ---------------------------------------------------
+
+# A pattern a specification supplies (a file entry with `pattern: true`, a
+# container glob turned into a regex) is run by ICU, whose backtracking engine
+# has NO time or stack limit unless one is asked for: `^(a+)+$` against a short
+# name that ends in `!` keeps the R process busy for as long as the name is
+# long. This is the one place those patterns are matched, with both limits on.
+# A pattern that hits a limit matches nothing and says so in a warning of class
+# `dta_regex_limit`; any other failure (an invalid pattern) still errors as it
+# did before. The limits are ICU's own units (about a millisecond per step):
+# an ordinary file-name pattern takes a few hundred steps.
+dta_regex_time_limit <- 1000L
+dta_regex_stack_limit <- 1e6
+# Each name that trips a limit costs the full time limit, so a vector of hostile
+# names is cut off after this many trips; the names not yet tried stay FALSE.
+dta_regex_max_trips <- 5L
+
+dta_str_detect <- function(string, pattern) {
+  if (length(pattern) != 1L) {
+    # stringr recycles a single string over several patterns; keep that.
+    n <- if (length(string) == 0L || length(pattern) == 0L) 0L else max(length(string), length(pattern))
+    string <- rep_len(string, n)
+    pattern <- rep_len(pattern, n)
+    return(vapply(seq_len(n), function(i) dta_str_detect(string[i], pattern[i]), logical(1)))
+  }
+  rx <- stringr::regex(pattern, time_limit = dta_regex_time_limit, stack_limit = dta_regex_stack_limit)
+  # ICU names its limit errors by code, which is not translated.
+  is_limit <- function(e) grepl("U_REGEX_(TIME_OUT|STACK_OVERFLOW)", conditionMessage(e))
+  tryCatch(
+    stringr::str_detect(string, rx),
+    error = function(e) {
+      if (!is_limit(e)) {
+        stop(e)
+      }
+      trips <- 0L
+      out <- rep(FALSE, length(string))
+      if (length(string) > 1L) {
+        # One string that trips the limit must not hide the others.
+        for (i in seq_along(string)) {
+          hit <- tryCatch(stringr::str_detect(string[i], rx), error = function(e2) {
+            if (!is_limit(e2)) stop(e2)
+            NULL
+          })
+          if (is.null(hit)) {
+            trips <- trips + 1L
+            if (trips >= dta_regex_max_trips) break
+          } else {
+            out[i] <- hit
+          }
+        }
+      }
+      cli::cli_warn(
+        "The pattern {.val {pattern}} took too long to match and was treated as not matching.",
+        class = "dta_regex_limit"
+      )
+      out
+    }
+  )
+}
+
+# ---- where the package's own temporary copies go -------------------------------
+
+# The directory for the large copies the package writes while it works on a
+# file: the UTF-8 copy of a non-UTF-8 delimited file and the spill of row errors
+# past the in-memory cap. `tempdir()` unless `DTAtools.temp_dir` names an
+# existing directory. A host that serves several sessions from one process
+# (the Shiny app) points it, for the duration of one call, at a directory it
+# can delete when the session starts over or the retention window ends; a copy
+# in `tempdir()` lives as long as the R process.
+dta_temp_dir <- function() {
+  d <- getOption("DTAtools.temp_dir")
+  if (is.character(d) && length(d) == 1L && !is.na(d) && nzchar(d) && dir.exists(d)) d else tempdir()
 }

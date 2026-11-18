@@ -179,6 +179,243 @@ test_that("top-level metadata keys have document names, nested paths keep the ar
   expect_identical(.tgc_path_text("metadata.transmission.frequency"), paste0("Transmission ", right_angle, " Frequency"))
 })
 
+# A column id is the header text, so it may contain spaces and dots. The path
+# text keeps the whole id: it is everything between "columns." and the field
+# that closes the path, not the one segment between two dots.
+
+test_that("a path through a column id with spaces or dots keeps the whole id", {
+  expect_identical(
+    .tgc_path_text("datasets.inl.columns.Visit Date (UTC).values"),
+    "Allowed values of column Visit Date (UTC) in inl"
+  )
+  expect_identical(
+    .tgc_path_text("datasets.inl.columns.Wt. (kg).values"),
+    "Allowed values of column Wt. (kg) in inl"
+  )
+  expect_identical(
+    .tgc_path_text("dataset.columns.Subject.ID.values"),
+    "Allowed values of column Subject.ID"
+  )
+  # The guide holds no declared ids, so an id that itself ends in a field name
+  # is read as that field of the shorter id: the id is everything before the
+  # FIRST segment, after the first, that is a column field.
+  expect_identical(
+    .tgc_path_text("datasets.inl.columns.a.values.values"),
+    paste0("Values ", right_angle, " Values of column a in inl")
+  )
+  expect_identical(
+    .tgc_path_text("datasets.inl.columns.Dose.length"),
+    "Length of column Dose in inl"
+  )
+  expect_identical(
+    .tgc_path_text("datasets.counts.row_labels.GENE.ID.values"),
+    "Allowed values of row label GENE.ID in counts"
+  )
+  # the dataset is named by its title when there is one
+  expect_identical(
+    .tgc_path_text("datasets.inl.columns.Wt. (kg).values", ds_titles = c(inl = "Inline data")),
+    "Allowed values of column Wt. (kg) in Inline data"
+  )
+})
+
+test_that("a sealed or required path that ends in another column field keeps the whole id", {
+  expect_identical(
+    .tgc_path_text("datasets.inl.columns.Wt. (kg).description"),
+    "Description of column Wt. (kg) in inl"
+  )
+  expect_identical(
+    .tgc_path_text("base.datasets.inl.columns.Visit Date (UTC).label"),
+    "Label of column Visit Date (UTC) in inl"
+  )
+  expect_identical(
+    .tgc_path_text("datasets.counts.row_labels.GENE.ID.nullable"),
+    "Nullable of row label GENE.ID in counts"
+  )
+  # a path that is not a column path is untouched
+  expect_identical(.tgc_path_text("datasets.inl.name"), paste0("Datasets ", right_angle, " Inl ", right_angle, " Name"))
+})
+
+test_that("a path that ends at a column, not at one of its fields, names the whole column", {
+  # A whole-column seal has no field behind the id, so the last segment is part
+  # of the id -- `(kg)` of `Wt. (kg)`, `ID` of `Subject.ID`, `b` of `a.b`, and the
+  # empty piece after the final dot of `Dose No.`.
+  expect_identical(.tgc_path_text("datasets.inl.columns.Wt. (kg)"), "Column Wt. (kg) in inl")
+  expect_identical(.tgc_path_text("datasets.inl.columns.Subject.ID"), "Column Subject.ID in inl")
+  expect_identical(.tgc_path_text("datasets.inl.columns.a.b"), "Column a.b in inl")
+  expect_identical(.tgc_path_text("datasets.inl.columns.Dose No."), "Column Dose No. in inl")
+  expect_identical(.tgc_path_text("datasets.counts.row_labels.GENE.ID"), "Row label GENE.ID in counts")
+  expect_identical(
+    .tgc_path_text("datasets.inl.columns.Wt. (kg)", ds_titles = c(inl = "Inline data")),
+    "Column Wt. (kg) in Inline data"
+  )
+  # a last segment that IS a column field is still read as the field
+  expect_identical(.tgc_path_text("datasets.inl.columns.Subject.type"), "Type of column Subject in inl")
+})
+
+test_that("a nested field path reads as a breadcrumb of the field names", {
+  expect_identical(
+    .tgc_path_text("datasets.inl.columns.X.values_from.vocabulary"),
+    paste0("Values from ", right_angle, " Vocabulary of column X in inl")
+  )
+  expect_identical(
+    .tgc_path_text("datasets.inl.columns.Wt. (kg).values_from.exclude", ds_titles = c(inl = "Inline data")),
+    paste0("Values from ", right_angle, " Exclude of column Wt. (kg) in Inline data")
+  )
+  expect_identical(
+    .tgc_path_text("dataset.row_labels.GENE.ID.values_from.vocabulary"),
+    paste0("Values from ", right_angle, " Vocabulary of row label GENE.ID")
+  )
+  # a lone `values` is still the allowed values
+  expect_identical(.tgc_path_text("datasets.inl.columns.X.values"), "Allowed values of column X in inl")
+})
+
+test_that("a change to a column is worded from the whole id, an apostrophe included", {
+  change_row <- .tgc_change_row
+  row <- function(what, change, from = NA_character_, to = NA_character_) {
+    data.frame(area = "Datasets", what = what, change = change, from = from, to = to, stringsAsFactors = FALSE)
+  }
+  titles <- c(ds1 = "Dataset one")
+
+  expect_identical(
+    change_row(row("Dataset 'ds1', column 'O'Brien': description", "changed", "a", "b"), character(0), titles),
+    c("Column O'Brien in Dataset one", "Description now: \"b\"")
+  )
+  expect_identical(
+    change_row(row("Dataset 'ds1', column 'O'Brien'", "added"), character(0), titles),
+    c("Column O'Brien in Dataset one", "Added")
+  )
+  expect_identical(
+    change_row(row("Dataset 'ds1', column 'Wt. (kg)': values", "changed", "x", "y"), character(0), titles),
+    c("Column Wt. (kg) in Dataset one", paste0("Allowed values: x ", arrow, " y"))
+  )
+  expect_identical(
+    change_row(row("Dataset 'ds1', column 'Subject ID'", "removed"), character(0), titles),
+    c("Column Subject ID in Dataset one", "Removed")
+  )
+})
+
+# A one-dataset template whose columns carry the given ids; `description` is what
+# each id's description is set to. Written through yaml::as.yaml() so that ids with
+# an apostrophe or a dot need no hand quoting.
+guide_ids_template <- function(dir, name, ids, description, extends = NULL, abstract = FALSE,
+                               sealed = NULL, required = NULL) {
+  def <- list(
+    kind = "dta_creation_template", id = sub("[.].*$", "", name), version = "1.0",
+    label = sub("[.].*$", "", name)
+  )
+  if (!is.null(extends)) def$extends <- extends
+  if (abstract) def$abstract <- TRUE
+  if (is.null(extends) || abstract) def$base <- list(metadata = list(title = "T"))
+  def$sealed <- sealed
+  def$required <- required
+  def$datasets <- list(list(
+    id = "tiny", name = "Tiny", type = "tabular",
+    files = list(filename = "t.csv", type = "csv"),
+    columns = lapply(ids, function(id) {
+      list(id = id, label = id, type = "SAS Char", description = description[[id]], values = "v")
+    })
+  ))
+  write_lines(dir, name, strsplit(yaml::as.yaml(def, indent = 2, line.sep = "\n"), "\n", fixed = TRUE)[[1]])
+}
+
+test_that("the guide marks changes to columns with spaces, dots and apostrophes by their whole id", {
+  dir <- withr::local_tempdir()
+  ids <- c("Wt. (kg)", "O'Brien", "Subject.ID", "Visit Date (UTC)")
+  guide_ids_template(dir, "pt.dta-template.yaml", ids, list(
+    "Wt. (kg)" = "w", "O'Brien" = "o", "Subject.ID" = "s", "Visit Date (UTC)" = "v"
+  ))
+  guide_ids_template(dir, "ct.dta-template.yaml", c(ids, "New Col (x)"), list(
+    "Wt. (kg)" = "w2", "O'Brien" = "o2", "Subject.ID" = "s", "Visit Date (UTC)" = "v",
+    "New Col (x)" = "n"
+  ), extends = "pt@1.0")
+
+  g <- .template_guide_collect(dir)
+  expect_identical(nrow(g$problems), 0L)
+  e <- entry_by_id(g$creation, "ct")
+  expect_setequal(
+    paste(e$changes$What, e$changes$Change, sep = " | "),
+    c(
+      "Column Wt. (kg) in Tiny | Description now: \"w2\"",
+      "Column O'Brien in Tiny | Description now: \"o2\"",
+      "Column New Col (x) in Tiny | Added"
+    )
+  )
+  # the columns table lists each id exactly
+  id <- sub("\n.*$", "", e$datasets[[1]]$columns$Column)
+  expect_identical(id, c(ids, "New Col (x)"))
+})
+
+test_that("a column imported from a dataset template is marked Changed or Added by its whole id", {
+  # The marks in a dataset's columns table compare it with the DATASET template
+  # it was imported from, so this is the one route that carries them.
+  dir <- withr::local_tempdir()
+  yaml_lines <- function(x) strsplit(yaml::as.yaml(x, indent = 2, line.sep = "\n"), "\n", fixed = TRUE)[[1]]
+  ids <- c("Wt. (kg)", "O'Brien", "Subject.ID", "Dose No.")
+  write_lines(dir, "dst.dta-dataset-template.yaml", yaml_lines(list(
+    kind = "dta_dataset_template", id = "dst", version = "1.0", label = "dst",
+    dataset = list(
+      id = "d", name = "Tiny", type = "tabular", files = list(filename = "t.csv", type = "csv"),
+      columns = lapply(ids, function(id) list(id = id, label = id, type = "SAS Char"))
+    )
+  )))
+  write_lines(dir, "imp.dta-template.yaml", yaml_lines(list(
+    kind = "dta_creation_template", id = "imp", version = "1.0", label = "imp",
+    base = list(metadata = list(title = "T")),
+    datasets = list(list(
+      template = "dst@1.0", as = "tiny",
+      patch = list(
+        modify_columns = list(list(id = "Wt. (kg)", label = "Weight")),
+        add_columns = list(list(id = "New Col (x)", label = "New", type = "SAS Char")),
+        set = list("columns.O'Brien.description" = "changed text", "columns.Dose No..description" = "dose")
+      )
+    ))
+  )))
+
+  g <- .template_guide_collect(dir)
+  expect_identical(nrow(g$problems), 0L)
+  cols <- entry_by_id(g$creation, "imp")$datasets[[1]]$columns
+  marks <- stats::setNames(cols$Change, sub("\n.*$", "", cols$Column))
+  expect_identical(
+    marks,
+    c(
+      "Wt. (kg)" = "Changed", "O'Brien" = "Changed", "Subject.ID" = "", "Dose No." = "Changed",
+      "New Col (x)" = "Added"
+    )
+  )
+})
+
+test_that("the guide's fixed and must-fill tables name a dotted column id whole", {
+  dir <- withr::local_tempdir()
+  ids <- c("Wt. (kg)", "Subject.ID")
+  guide_ids_template(
+    dir, "locked.dta-template.yaml", ids,
+    list("Wt. (kg)" = "", "Subject.ID" = "set already"),
+    abstract = TRUE,
+    sealed = list("datasets.tiny.columns.Wt. (kg).values"),
+    required = list(
+      "datasets.tiny.columns.Wt. (kg).description", "datasets.tiny.columns.Subject.ID.description"
+    )
+  )
+  g <- .template_guide_collect(dir)
+  expect_identical(nrow(g$problems), 0L)
+  e <- entry_by_id(g$creation, "locked")
+
+  rules <- stats::setNames(e$locked$Rule, e$locked$Field)
+  expect_identical(
+    rules[["Allowed values of column Wt. (kg) in tiny"]],
+    "Fixed: templates based on this one cannot change it"
+  )
+  # only the required field the template has NOT already filled in is left open
+  expect_identical(
+    rules[["Description of column Wt. (kg) in tiny"]],
+    "Must be filled in when the DTA is created"
+  )
+  expect_identical(
+    sort(names(rules)),
+    sort(c("Allowed values of column Wt. (kg) in tiny", "Description of column Wt. (kg) in tiny"))
+  )
+})
+
 test_that("the inheritance chain reads nearest parent first", {
   expect_identical(.tgc_based_text("P"), "P")
   expect_identical(.tgc_based_text(c("P", "G")), "P (which is based on G)")
@@ -721,6 +958,7 @@ test_that("a field a term-list choice or party fills is not shown with the base 
     pre[["The supplier: organisation and contacts"]], "From the supplier profile you choose"
   )
   expect_identical(sum(grepl("upplier", names(pre))), 1L)
+  expect_match(e$summary, "1 column, 0 rules", fixed = TRUE)
   expect_false(any(grepl("Base Supplier", e$prefilled$Value, fixed = TRUE)))
 })
 
@@ -968,4 +1206,73 @@ test_that(".tgc_select_ids picks the newest version of every non-abstract templa
   err <- expect_error(.tgc_select_ids(g, "abs_tpl"), class = "dta_template_guide_abstract")
   expect_match(conditionMessage(err), "child_tpl", fixed = TRUE)
   expect_error(.tgc_select_ids(g, "no_such"), class = "dta_template_guide_unknown")
+})
+
+# ---- study tokens -----------------------------------------------------------
+
+write_study_token_library <- function(dir) {
+  write_lines(dir, "stu.dta-dataset-template.yaml", c(
+    "kind: dta_dataset_template", "id: stu_dt", "version: '1.0'", "label: Study data",
+    "dataset:",
+    "  id: stu",
+    "  name: Study data",
+    "  type: tabular",
+    "  files:",
+    "    filename: ^s${study.id}_[0-9]{12}\\.csv$",
+    "    pattern: true",
+    "    pattern_description: s${study.id}_YYYYMMDDHHMM.csv",
+    "    type: csv",
+    "  columns:",
+    "    - {id: STUDYID, type: SAS Char, format: SAS $9., values: '${study.id}'}",
+    "    - {id: PROTID, type: SAS Char, format: SAS $9., values: '${study.protocol_id}'}"
+  ))
+  write_lines(dir, "stu_ct.dta-template.yaml", c(
+    "kind: dta_creation_template", "id: stu_ct", "version: '1.0'", "label: Study CT",
+    "base:", "  metadata:", "    title: T",
+    "datasets:", "  - template: stu_dt@1.0",
+    "options:",
+    "  - {id: study_id, label: Study ID, type: text, target: metadata.study.id}"
+  ))
+}
+
+test_that("a creation template importing a study-token dataset builds a guide with no change marks", {
+  dir <- withr::local_tempdir()
+  write_study_token_library(dir)
+  g <- .template_guide_collect(dir)
+  expect_identical(nrow(g$problems), 0L)
+  e <- entry_by_id(g$creation, "stu_ct")
+  ds <- e$datasets[[1]]
+  expect_identical(ds$source_version, "1.0")
+  cols <- ds$columns
+  ids <- sub("\n.*$", "", cols$Column)
+  expect_identical(ids, c("STUDYID", "PROTID"))
+  # Both sides resolve the tokens to the same stand-ins, so neither is "Changed".
+  expect_identical(cols$Change, c("", ""))
+})
+
+test_that("a study option's default reaches both sides of the guide's comparison", {
+  dir <- withr::local_tempdir()
+  write_study_token_library(dir)
+  # The creation side now resolves ${study.id} to the default; the dataset
+  # template side must use the same value, or STUDYID reads as "Changed".
+  write_lines(dir, "stu_ct.dta-template.yaml", c(
+    "kind: dta_creation_template", "id: stu_ct", "version: '1.0'", "label: Study CT",
+    "base:", "  metadata:", "    title: T",
+    "datasets:", "  - template: stu_dt@1.0",
+    "options:",
+    "  - {id: study_id, label: Study ID, type: text, target: metadata.study.id, default: '1001_0190'}"
+  ))
+  g <- .template_guide_collect(dir)
+  expect_identical(nrow(g$problems), 0L)
+  cols <- entry_by_id(g$creation, "stu_ct")$datasets[[1]]$columns
+  expect_identical(sub("\n.*$", "", cols$Column), c("STUDYID", "PROTID"))
+  expect_identical(cols$Change, c("", ""))
+})
+
+test_that("the guide's value text spells the study tokens out", {
+  expect_identical(.tgc_value_text("${study.id}"), "(the study ID you enter)")
+  expect_identical(.tgc_value_text("${study.protocol_id}"), "(the protocol ID you enter)")
+  expect_identical(
+    .tgc_value_text("s${study.id}_x"), "s(the study ID you enter)_x"
+  )
 })

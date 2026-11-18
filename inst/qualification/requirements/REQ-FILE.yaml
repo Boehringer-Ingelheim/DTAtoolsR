@@ -593,3 +593,57 @@ requirements:
     category: interface
     covers: [DTAFile, DTAFileCSV, DTAFileAny, min_number_of_files, max_number_of_files]
     source: R/DTAFile-class.R (validator)
+
+  - id: REQ-FILE-043
+    text: >
+      A delimited file whose header row is longer than 1 MiB and whose header
+      fields are quoted shall be read with the whole of that row as its header,
+      not aborted as a quoted line break: a comma-separated file with 60000
+      quoted header labels and one data row of 60000 values shall read to a
+      table of 60000 columns, the last of them named by the last label.
+    risk: medium
+    category: integrity
+    covers: [read_file, open_file]
+    source: R/DTAFileTabular-class.R; CHANGELOG Unreleased, Fixed
+    notes: >
+      Wide matrix deliveries (tens of thousands of samples) made the header
+      row exceed the 1 MiB window in which a quoted line break is looked for.
+
+  - id: REQ-FILE-044
+    text: >
+      read_file(), open_file() and load_file() shall refuse a path that names a
+      directory before any reader runs: no file below that directory shall be
+      read and the message shall name none of them; when the handler accepts the
+      directory's name the condition shall be of class dta_file_is_directory. A
+      regular file in the same directory shall still be read.
+    risk: high
+    category: security
+    covers: [read_file, open_file, load_file]
+    source: R/DTAFile-class.R; R/DTADataSetFile-class.R; R/DTADataSetMatrix-class.R
+    notes: >
+      A directory passes a file-exists test, so a reader handed one could open
+      or enumerate files the caller never named, and its error would name one
+      of them. Evidence of "no file below the directory was read" is the
+      condition class and the absence of any member's name from its message.
+
+  - id: REQ-FILE-045
+    text: >
+      When a delimited-text file's header names are cleaned, a double quote
+      shall be removed only as one matched pair wrapped around the whole name
+      (the inside is then trimmed), never a single quote at one edge. A name
+      that is Length 5" keeps its closing quote, as do "lead and trail", while
+      "Subject ID" with its quotes part of the name reads as Subject ID. A file
+      headed Length 5" shall check clean against a specification declaring the
+      column Length 5", read in memory or streamed. REQ-FILE-018 and
+      REQ-FILE-019 are unchanged.
+    risk: medium
+    category: integrity
+    covers: [read_file, load_file, check, validation_status]
+    source: R/DTAFileTabular-class.R (dta_clean_column_names); CHANGELOG Unreleased, Fixed
+    notes: >
+      Before, the cleaning removed a quote at either edge on its own, so a
+      header for a length in inches could not be declared at all: the file
+      read as Length 5, one declared column was missing and one undeclared. In
+      CSV the name Length 5" is written "Length 5""" (a doubled quote stands
+      for one), and "Subject ID" with its quotes in the name is written
+      """Subject ID""".

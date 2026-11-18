@@ -8,7 +8,9 @@
   doc,
   files,
   title = "File Specifications",
-  heading_level = 2
+  heading_level = 2,
+  ctx = NULL,
+  dataset = NULL
 )
 }
 \description{
