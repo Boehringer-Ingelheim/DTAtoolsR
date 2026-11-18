@@ -71,7 +71,7 @@ options:
     label: Study identifier
     type: text
     target: metadata.study.id
-    help: Agreement identity only; does not constrain any dataset column.
+    help: The study this agreement covers. A dataset can reuse it in its file names and column values.
 
   - id: protocol_id
     label: Protocol identifier

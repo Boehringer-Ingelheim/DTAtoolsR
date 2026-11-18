@@ -71,3 +71,75 @@ test_that("OQ-TMPL-067 | structured metadata inherits and carries over without r
   qa_step("explicit clause carry-over works", "Old wording", explicit@metadata@sections$scope$text)
   qa_check("old machine provenance never carries over", !identical(explicit@metadata@template$id, "old"))
 })
+
+test_that("OQ-TMPL-136 | study tokens in a dataset body take the document's study identity, escaped in a regular expression, and creation fails when none is known | REQ-TMPL-058 | tags: white-box", {
+  engine <- getFromNamespace(".dta_template_engine", "DTAtools")()
+  inline <- list(
+    id = "tok", type = "tabular",
+    files = list(filename = "^s${study.id}_[0-9]{12}\\.csv$", pattern = TRUE, type = "csv"),
+    columns = list(
+      list(id = "STUDYID", type = "SAS Char", values = "${study.id}"),
+      list(id = "PROTID", type = "SAS Char", values = "${study.protocol_id}"),
+      list(id = "SUBJID", type = "SAS Char", pattern = "^${study.id}-[0-9]{4}$")
+    )
+  )
+  def_with <- function(study = NULL) {
+    md <- list(title = "T", version = "1.0")
+    if (!is.null(study)) md$study <- study
+    list(base = list(metadata = md), datasets = list(inline))
+  }
+  path <- file.path(qa_tempdir(), "t.yaml")
+
+  built <- engine$create_dta_from_template(def_with(list(id = "1199.187(a)", protocol_id = "BI 1-2")), path)
+  qa_check("creation with a study identity succeeds", isTRUE(built$ok))
+  ds <- built$value@datasets[["tok"]]
+  file <- ds@files[[1]]
+  qa_step("the id is escaped in the file name pattern", "^s1199\\.187\\(a\\)_[0-9]{12}\\.csv$", file@filename)
+  qa_step("the pattern accepts the literal id", TRUE, any(matches_filename(file, "s1199.187(a)_202611181200.csv")))
+  qa_step("the pattern refuses a lookalike", FALSE, any(matches_filename(file, "s1199x187(a)_202611181200.csv")))
+  cols <- ds@specs@columns
+  qa_step("allowed values carry the id as entered", "1199.187(a)", unlist(cols[["STUDYID"]]@values))
+  qa_step("allowed values carry the protocol id", "BI 1-2", unlist(cols[["PROTID"]]@values))
+  qa_step("the id is escaped in a column pattern", "^1199\\.187\\(a\\)-[0-9]{4}$", cols[["SUBJID"]]@pattern)
+
+  unanswered <- engine$create_dta_from_template(def_with(NULL), path)
+  qa_step("creation without any study identity fails", FALSE, unanswered$ok)
+  qa_check(
+    "the error names the dataset and the placeholder",
+    grepl("tok", unanswered$error, fixed = TRUE) && grepl("${study.id}", unanswered$error, fixed = TRUE)
+  )
+  # Blank through the study id QUESTION: base.metadata.study rejects a blank id
+  # on its own, so only an option answer reaches the placeholder check.
+  def_asked <- def_with(list(protocol_id = "P"))
+  def_asked$options <- list(list(id = "study_id", type = "text", target = "metadata.study.id"))
+  blank <- engine$create_dta_from_template(def_asked, path, selections = list(study_id = "   "))
+  qa_step("a blank answer to the study id question counts as not supplied", FALSE, blank$ok)
+  qa_check("and is reported as the missing placeholder", grepl("${study.id}", blank$error, fixed = TRUE))
+  answered <- engine$create_dta_from_template(def_asked, path, selections = list(study_id = "OPT-1"))
+  qa_step(
+    "an answer to the study id question reaches the dataset", "OPT-1",
+    unlist(answered$value@datasets[["tok"]]@specs@columns[["STUDYID"]]@values)
+  )
+
+  titled <- def_with(list(id = "1199.187(a)", protocol_id = "P"))
+  titled$base$metadata$title <- "Transfer for ${study.id}"
+  titled_built <- engine$create_dta_from_template(titled, path)
+  qa_step(
+    "the placeholder is filled in the document metadata too, as entered",
+    "Transfer for 1199.187(a)", titled_built$value@metadata@title
+  )
+
+  fallback <- engine$create_dta_from_template(
+    def_with(NULL), path,
+    study_fallback = list(id = "FB-1", protocol_id = "FB-P")
+  )
+  qa_check("a supplied fallback answers the placeholders", isTRUE(fallback$ok))
+  qa_step(
+    "and is not written to the document's metadata", NULL,
+    fallback$value@metadata@study$id
+  )
+  qa_step(
+    "the dataset carries the fallback value", "FB-1",
+    unlist(fallback$value@datasets[["tok"]]@specs@columns[["STUDYID"]]@values)
+  )
+})

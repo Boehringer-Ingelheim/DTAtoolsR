@@ -453,7 +453,7 @@ rebase_option_answer <- function(opt, md) {
 # no carry-over, because ancestor/target reconstruction must reproduce
 # exactly what the template alone would build, not a document blended with
 # something else.
-materialise_template <- function(ref, index, selections, carry_over = NULL) {
+materialise_template <- function(ref, index, selections, carry_over = NULL, study_fallback = NULL) {
   dta_try({
     loaded <- load_template_definition(ref, index = index)
     if (!isTRUE(loaded$ok)) {
@@ -464,7 +464,8 @@ materialise_template <- function(ref, index, selections, carry_over = NULL) {
       loaded$value$def, loaded$value$path,
       selections = selections %||% list(),
       index = index,
-      carry_over = carry_over
+      carry_over = carry_over,
+      study_fallback = study_fallback
     )
     if (!isTRUE(built$ok)) {
       stop(built$error)
@@ -717,9 +718,17 @@ rebase_plan <- function(current, to_version, index = NULL) {
         if (isTRUE(ancestor_loaded$ok)) ancestor_loaded$value$def
       )
     )
+    # Ancestor and target resolve ${study.id} / ${study.protocol_id} to the
+    # document's OWN study identity when no option answers it (an option's
+    # answer is already read back from the document, above), so a dataset
+    # value or filename built from it is the same on all three sides and is
+    # never reported as a template change -- nor does the rebuild fail for a
+    # template that settled its study identity by carry-over.
+    current_study <- DTAtools::metadata(current)@study
     target_built <- create_dta_from_template(
       target_loaded$value$def, target_loaded$value$path,
-      selections = selections, index = index
+      selections = selections, index = index,
+      study_fallback = current_study
     )
     if (!isTRUE(target_built$ok)) {
       stop(sprintf("Could not build target template '%s': %s", target_ref, target_built$error))
@@ -746,7 +755,7 @@ rebase_plan <- function(current, to_version, index = NULL) {
     # document was created -- degrades to the two-way, everything-is-a-
     # conflict comparison; see .rebase_classify_two_way() for why silently
     # guessing is never acceptable here.
-    ancestor_res <- materialise_template(ancestor_ref, index, selections)
+    ancestor_res <- materialise_template(ancestor_ref, index, selections, study_fallback = current_study)
     ancestor_available <- isTRUE(ancestor_res$ok)
     ancestor <- if (ancestor_available) ancestor_res$value else NULL
 

@@ -1207,3 +1207,72 @@ test_that(".tgc_select_ids picks the newest version of every non-abstract templa
   expect_match(conditionMessage(err), "child_tpl", fixed = TRUE)
   expect_error(.tgc_select_ids(g, "no_such"), class = "dta_template_guide_unknown")
 })
+
+# ---- study tokens -----------------------------------------------------------
+
+write_study_token_library <- function(dir) {
+  write_lines(dir, "stu.dta-dataset-template.yaml", c(
+    "kind: dta_dataset_template", "id: stu_dt", "version: '1.0'", "label: Study data",
+    "dataset:",
+    "  id: stu",
+    "  name: Study data",
+    "  type: tabular",
+    "  files:",
+    "    filename: ^s${study.id}_[0-9]{12}\\.csv$",
+    "    pattern: true",
+    "    pattern_description: s${study.id}_YYYYMMDDHHMM.csv",
+    "    type: csv",
+    "  columns:",
+    "    - {id: STUDYID, type: SAS Char, format: SAS $9., values: '${study.id}'}",
+    "    - {id: PROTID, type: SAS Char, format: SAS $9., values: '${study.protocol_id}'}"
+  ))
+  write_lines(dir, "stu_ct.dta-template.yaml", c(
+    "kind: dta_creation_template", "id: stu_ct", "version: '1.0'", "label: Study CT",
+    "base:", "  metadata:", "    title: T",
+    "datasets:", "  - template: stu_dt@1.0",
+    "options:",
+    "  - {id: study_id, label: Study ID, type: text, target: metadata.study.id}"
+  ))
+}
+
+test_that("a creation template importing a study-token dataset builds a guide with no change marks", {
+  dir <- withr::local_tempdir()
+  write_study_token_library(dir)
+  g <- .template_guide_collect(dir)
+  expect_identical(nrow(g$problems), 0L)
+  e <- entry_by_id(g$creation, "stu_ct")
+  ds <- e$datasets[[1]]
+  expect_identical(ds$source_version, "1.0")
+  cols <- ds$columns
+  ids <- sub("\n.*$", "", cols$Column)
+  expect_identical(ids, c("STUDYID", "PROTID"))
+  # Both sides resolve the tokens to the same stand-ins, so neither is "Changed".
+  expect_identical(cols$Change, c("", ""))
+})
+
+test_that("a study option's default reaches both sides of the guide's comparison", {
+  dir <- withr::local_tempdir()
+  write_study_token_library(dir)
+  # The creation side now resolves ${study.id} to the default; the dataset
+  # template side must use the same value, or STUDYID reads as "Changed".
+  write_lines(dir, "stu_ct.dta-template.yaml", c(
+    "kind: dta_creation_template", "id: stu_ct", "version: '1.0'", "label: Study CT",
+    "base:", "  metadata:", "    title: T",
+    "datasets:", "  - template: stu_dt@1.0",
+    "options:",
+    "  - {id: study_id, label: Study ID, type: text, target: metadata.study.id, default: '1001_0190'}"
+  ))
+  g <- .template_guide_collect(dir)
+  expect_identical(nrow(g$problems), 0L)
+  cols <- entry_by_id(g$creation, "stu_ct")$datasets[[1]]$columns
+  expect_identical(sub("\n.*$", "", cols$Column), c("STUDYID", "PROTID"))
+  expect_identical(cols$Change, c("", ""))
+})
+
+test_that("the guide's value text spells the study tokens out", {
+  expect_identical(.tgc_value_text("${study.id}"), "(the study ID you enter)")
+  expect_identical(.tgc_value_text("${study.protocol_id}"), "(the protocol ID you enter)")
+  expect_identical(
+    .tgc_value_text("s${study.id}_x"), "s(the study ID you enter)_x"
+  )
+})

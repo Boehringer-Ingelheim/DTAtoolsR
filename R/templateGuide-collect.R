@@ -184,6 +184,8 @@
   }
   x <- gsub("${today}", "(the date the DTA is created)", x, fixed = TRUE)
   x <- gsub("${version}", "(the version you enter)", x, fixed = TRUE)
+  x <- gsub("${study.id}", "(the study ID you enter)", x, fixed = TRUE)
+  x <- gsub("${study.protocol_id}", "(the protocol ID you enter)", x, fixed = TRUE)
   x[!nzchar(x)] <- "(empty)"
   paste(x, collapse = ", ")
 }
@@ -688,7 +690,7 @@
       }
     )
     for (b in built) {
-      datasets <- c(datasets, .tgc_built_datasets(b$dta, b$variant, ctx, b$overrides))
+      datasets <- c(datasets, .tgc_built_datasets(b$dta, b$variant, ctx, b$overrides, b$token_env))
     }
     ds_titles <- .tgc_titles(datasets)
   }
@@ -769,8 +771,17 @@
   one <- function(sel) {
     sdef <- g("resolve_template_variant")(def, sel)
     vsel <- .dta_template_vocab_dry_selections(sdef, ctx$index)
-    b <- g("create_dta_from_template")(sdef, path, sel, index = ctx$index, vocab_selections = vsel)
+    # The study identity is nobody's answer yet; the stand-ins are what the
+    # guide shows where a dataset uses ${study.id} / ${study.protocol_id}.
+    fallback <- g("dta_template_dry_study")(sdef)
+    b <- g("create_dta_from_template")(
+      sdef, path, sel,
+      index = ctx$index, vocab_selections = vsel, study_fallback = fallback
+    )
     if (!isTRUE(b$ok)) cli::cli_abort("{b$error}")
+    # The tokens exactly as this build resolved them (an option's default
+    # included), for the dataset template it is compared with.
+    token_env <- g("dta_template_dataset_env")(b$value@metadata, fallback)
     # The same term-list narrowing, to lay over the dataset template when the
     # built dataset is compared with it.
     overrides <- tryCatch(
@@ -780,17 +791,17 @@
       ),
       error = function(e) list()
     )
-    list(dta = b$value, overrides = overrides)
+    list(dta = b$value, overrides = overrides, token_env = token_env)
   }
   if (is.null(spec)) {
     r <- one(list())
-    return(list(list(dta = r$dta, overrides = r$overrides, variant = "")))
+    return(list(list(dta = r$dta, overrides = r$overrides, token_env = r$token_env, variant = "")))
   }
   lapply(spec[["choices"]], function(choice) {
     sel <- stats::setNames(list(choice[["value"]]), spec[["id"]])
     r <- one(sel)
     list(
-      dta = r$dta, overrides = r$overrides,
+      dta = r$dta, overrides = r$overrides, token_env = r$token_env,
       variant = sprintf("For choice '%s'", .tgc_chr(choice[["label"]], choice[["value"]]))
     )
   })
@@ -1381,7 +1392,7 @@
 }
 
 # The dataset template (as a DTADataSet) a built dataset came from, or NULL.
-.tgc_template_dataset <- function(ds, ctx, overrides = list()) {
+.tgc_template_dataset <- function(ds, ctx, overrides = list(), token_env = NULL) {
   src <- .tgc_chr(ds@template_source)
   if (!nzchar(src)) {
     return(NULL)
@@ -1393,7 +1404,7 @@
   if (is.null(hit)) {
     return(NULL)
   }
-  built <- .tgc_build_dataset_template(hit$path[[1]], ctx, ds@id, overrides)
+  built <- .tgc_build_dataset_template(hit$path[[1]], ctx, ds@id, overrides, token_env)
   if (is.null(built)) {
     NULL
   } else {
@@ -1403,8 +1414,10 @@
 
 # `as_name` and `overrides` make the template side go through the same
 # term-list narrowing as the dataset the creation template built, so a narrowed
-# term list is not reported as a change.
-.tgc_build_dataset_template <- function(path, ctx, as_name = NULL, overrides = list()) {
+# term list is not reported as a change; `token_env` does the same for the
+# study tokens (the creation build's own values, its option defaults included).
+# Without one -- a dataset template on its own -- the generic stand-ins are used.
+.tgc_build_dataset_template <- function(path, ctx, as_name = NULL, overrides = list(), token_env = NULL) {
   g <- ctx$g
   rd <- g("read_dataset_template")(path)
   if (!isTRUE(rd$ok)) {
@@ -1418,6 +1431,8 @@
     return(NULL)
   }
   plain <- tryCatch(g("apply_vocabulary_slot_overrides")(b$value$dataset, overrides), error = function(e) b$value$dataset)
+  env <- token_env %||% g("dta_template_dataset_env")(NULL, g("dta_template_dry_study")())
+  plain <- tryCatch(g("resolve_dataset_tokens")(plain, env), error = function(e) plain)
   tryCatch(dta_dataset_from_list(plain), error = function(e) NULL)
 }
 
@@ -1427,7 +1442,7 @@
   ifelse(is.na(hit), "Added", ifelse(keys == tpl_keys[hit], "", "Changed"))
 }
 
-.tgc_built_datasets <- function(dta, variant, ctx, overrides = list()) {
+.tgc_built_datasets <- function(dta, variant, ctx, overrides = list(), token_env = NULL) {
   unname(lapply(dta@datasets, function(ds) {
     cols <- .tgc_col_rows(ds)
     rules <- .tgc_rule_rows(ds)
@@ -1437,7 +1452,7 @@
     removed_rules <- character(0)
     source <- ""
     source_version <- ""
-    tpl <- .tgc_template_dataset(ds, ctx, overrides)
+    tpl <- .tgc_template_dataset(ds, ctx, overrides, token_env)
     if (!is.null(tpl)) {
       source <- tpl$label
       source_version <- tpl$version

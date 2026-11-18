@@ -8,6 +8,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **Templates can reuse the study identity.** `${study.id}` and
+  `${study.protocol_id}` in a dataset body (a dataset template's `dataset:` or
+  an inline `datasets:` entry) or in the document metadata (a title, a clause)
+  become the document's `metadata.study.id` / `protocol_id` when it is
+  created, so one answer drives a file name pattern
+  (`filename: ^s${study.id}_[0-9]{12}\.csv$`) and a column's allowed value
+  (`values: ${study.id}`). Inside a regular expression -- a pattern
+  `filename`, a column `pattern:`, a rule `pattern` condition -- the identifier
+  is escaped, so `1199.187` does not also accept `1199x187`. Creating a
+  document that uses a study token it has no value for fails and names the
+  dataset or metadata field. The value is copied in at creation; editing the
+  study identity later does not update the datasets. `validate_template()`,
+  the template guide and the template history stand in the study option's
+  first `choices:` suggestion, else `STUDY-ID` / `PROT-ID`; a rebase uses the
+  document's own study identity.
+- **`validate_template()` warns about a placeholder that stays literal text**
+  (`token_unknown`): a `${...}` token other than `${today}`, `${version}`,
+  `${study.id}` and `${study.protocol_id}` in a creation or dataset template,
+  or a `${version}` inside a dataset, is never substituted, and a filename
+  pattern containing one matches nothing.
+- **`validate_template()` warns about a study token nothing can answer**
+  (`study_token_unanswered`): the template uses `${study.id}` /
+  `${study.protocol_id}` but neither an option nor its base metadata supplies
+  that field, so a new document cannot be created from it. Both new codes are
+  warnings: `strict = TRUE` aborts on errors alone, but a pipeline that runs
+  `lint_template_repo(fail_on = "warning")` will now fail on a library that
+  triggers either.
 - **A Copy button on the Raw YAML tab.** One click puts the editor's whole
   text on the clipboard, including edits not yet applied. It is shown while the
   document is read-only as well.
@@ -126,6 +153,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **`${today}` is now resolved in an inline dataset of a creation template.**
+  It always was in a dataset template's body; in a creation template's own
+  `datasets:` entries it was left as literal text.
+- **A creation template builds its datasets after its metadata.** The study
+  identity has to be settled before a dataset body can use it. Visible only in
+  which error a template with several faults reports first.
 - **Breaking:** a file that arrives outside the container its entry names is
   now loaded (it was listed as unused), and `check()` reports it: a file `outside` its
   container fails the run ("Validation FAILED") and an `unverified` or

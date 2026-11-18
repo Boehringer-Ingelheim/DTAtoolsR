@@ -180,12 +180,18 @@ template_dataset_entry_kind <- function(ref) {
 # forms contribute NOTHING to `provenance` -- they carry no template identity
 # to record, unlike an entry built from a dataset template.
 build_template_datasets <- function(def, index, selections, source_label = NULL, template_path = NULL,
-                                    vocab_overrides = list()) {
+                                    vocab_overrides = list(), token_env = NULL) {
   def <- resolve_template_variant(def, selections)
-  # Mirrors create_dta_from_template()'s own ${today} handling: only base$
-  # datasets (the legacy `base.datasets` fallback) is expression-resolved --
-  # the preferred top-level `datasets:` never was, and changing that now would
-  # be a silent behaviour change to a form none of this exists to touch.
+  # The tokens every plain dataset body is resolved with, last, just before it
+  # becomes S7 objects -- so a value a `patch:`, a dataset option or a
+  # vocabulary slot wrote is resolved too. create_dta_from_template() passes
+  # the study identity it settled; without one, a body using a study token is
+  # an error (resolve_dataset_tokens()).
+  token_env <- token_env %||% dta_template_dataset_env()
+  # Mirrors create_dta_from_template()'s own ${today} handling of `base`
+  # (which carries the legacy `base.datasets` fallback). The preferred
+  # top-level `datasets:` is resolved per body below, by the token pass every
+  # plain body goes through.
   today_env <- dta_template_today_env()
   base <- resolve_template_expressions(def$base %||% list(), today_env)
   ds_refs <- def$datasets %||% base$datasets %||% list()
@@ -239,6 +245,7 @@ build_template_datasets <- function(def, index, selections, source_label = NULL,
       }
 
       ds_plain <- apply_vocabulary_slot_overrides(built$value$dataset, vocab_overrides)
+      ds_plain <- resolve_dataset_tokens(ds_plain, token_env, ds_plain$id)
       ds <- DTAtools::dta_dataset_from_list(ds_plain)
       built_names <- c(built_names, as.character(ds_plain$id %||% ""))
       provenance[[length(provenance) + 1L]] <- built$value$provenance
@@ -276,6 +283,7 @@ build_template_datasets <- function(def, index, selections, source_label = NULL,
       # there, naming an "unused argument" rather than the template.
       ref <- expand_column_vocabularies(ref, resolve_vocab, dataset_name = ref$id)
       ref <- apply_vocabulary_slot_overrides(ref, vocab_overrides)
+      ref <- resolve_dataset_tokens(ref, token_env, ref$id)
       built_names <- c(built_names, as.character(ref$id %||% ""))
       tf <- tempfile(fileext = ".yaml")
       yaml_txt <- yaml::as.yaml(ref, indent = 2, line.sep = "\n")

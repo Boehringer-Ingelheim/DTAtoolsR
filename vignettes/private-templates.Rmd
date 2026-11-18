@@ -584,6 +584,44 @@ No metadata selection implicitly restricts dataset `STUDYID` or laboratory
 values, redacts results, sends files or records an electronic signature.
 Keep such dataset constraints and operational controls explicit.
 
+To make a dataset depend on the study identity explicitly, write
+`${study.id}` or `${study.protocol_id}` in its body. Each is replaced with
+the value the document ends up with when it is created, so with the option
+above answered `1001_0190`, this dataset template body accepts only files
+named like `s1001_0190_202611181200.csv` and only `1001_0190` as `STUDYID`:
+
+```yaml
+dataset:
+  id: lab_results
+  type: tabular
+  files:
+    filename: ^s${study.id}_[0-9]{12}\.csv$
+    pattern: true
+    pattern_description: s${study.id}_YYYYMMDDHHMM.csv
+    type: csv
+  columns:
+    - id: STUDYID
+      type: SAS Char
+      format: SAS $9.
+      nullable: No
+      values: ${study.id}
+```
+
+Inside a regular expression (a `filename` with `pattern: true`, a column's
+`pattern:`, a rule's `pattern` condition) the identifier is escaped and so
+matched literally; everywhere else -- the metadata too, e.g.
+`title: "Transfer for ${study.id}"` -- it is inserted as entered. Creating a
+document fails, naming the dataset or field, if it uses a study token the
+document has no value for. The value is copied in at creation: changing the
+study identity later in the Metadata tab does not update the datasets.
+
+`validate_template()` builds the template with the study option's first
+`choices:` suggestion, else the stand-in `STUDY-ID`; give the option a
+realistic suggestion if a column constrains the identifier's shape. It warns
+with `study_token_unanswered` when no option or base value supplies a study
+field the template uses, and with `token_unknown` for any other `${...}`
+token, or a `${version}` inside a dataset.
+
 Default document exports include study identity and sections. A custom Word
 layout can use inline `{STUDY_ID}` and `{PROTOCOL_ID}`, plus standalone
 `{STUDY_TABLE}` and `{AGREEMENT_SECTIONS}` block paragraphs. An existing

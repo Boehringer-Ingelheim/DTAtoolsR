@@ -2689,3 +2689,229 @@ test_that("dataset_no_files names the variant whose built dataset has no files",
   expect_equal(nrow(rows), 1L)
   expect_match(rows$message, "^[[]without_file[]] ")
 })
+
+# ---- study tokens: ${study.id} / ${study.protocol_id} ------------------------
+
+test_that("a dataset template using study tokens builds in the dry run and is not judged on the raw token text", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: tok_dt",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: tok",
+      "  type: tabular",
+      "  files:",
+      "    filename: ^s${study.id}_[0-9]{12}\\.csv$",
+      "    pattern: true",
+      "    type: csv",
+      "  columns:",
+      # "${study.id}" is 11 characters; $9. holds 9. Only the stand-in ("STUDY-ID",
+      # 8 characters) fits, so a lint that read the raw token text would object.
+      "    - {id: STUDYID, type: SAS Char, format: SAS $9., values: \"${study.id}\"}"
+    ),
+    lib_file(dir, "tok.dta-dataset-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: tok_ct",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Token CT",
+      "datasets:",
+      "  - template: tok_dt@1.0",
+      "options:",
+      "  - {id: study_id, label: Study ID, type: text, target: metadata.study.id}"
+    ),
+    lib_file(dir, "tok_ct.dta-template.yaml")
+  )
+
+  result <- validate_template(dir)
+  expect_no_code_row(result, "instantiate_failed")
+  expect_no_code_row(result, "column_spec_invalid")
+  expect_no_code_row(result, "token_unknown")
+  expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
+})
+
+test_that("a column built from a study token is judged with the study option's first suggestion, not the generic stand-in", {
+  # A 4-character column cannot hold the generic stand-in STUDY-ID. On its own,
+  # the dataset template is not judged on that column; the creation template's
+  # dry run is, and its suggestion "1001" fits.
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: narrow_dt",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: narrow",
+      "  type: tabular",
+      "  files: {filename: n.csv, type: csv}",
+      "  columns:",
+      "    - {id: STUDYID, type: SAS Char, format: SAS $4., values: \"${study.id}\"}"
+    ),
+    lib_file(dir, "narrow.dta-dataset-template.yaml")
+  )
+  ct <- function(option) {
+    writeLines(
+      c(
+        "kind: dta_creation_template", "id: narrow_ct", "version: \"1.0\"",
+        "base:", "  metadata:", "    title: Narrow",
+        "datasets:", "  - template: narrow_dt@1.0",
+        "options:", option
+      ),
+      lib_file(dir, "narrow_ct.dta-template.yaml")
+    )
+  }
+
+  ct("  - {id: study_id, type: text, target: metadata.study.id, choices: [\"1001\"]}")
+  suggested <- validate_template(dir)
+  expect_equal(nrow(suggested), 0, info = paste(utils::capture.output(print(suggested)), collapse = "\n"))
+
+  ct("  - {id: study_id, type: text, target: metadata.study.id}")
+  generic <- validate_template(dir)
+  expect_no_code_row(generic, "column_spec_invalid")
+  failed <- expect_code_row(generic, "instantiate_failed", "error")
+  expect_match(failed$message, "STUDY-ID", fixed = TRUE)
+  expect_match(failed$message, "choices:", fixed = TRUE)
+})
+
+test_that("study_token_unanswered names a study placeholder no option or base value answers", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: gap_ct", "version: \"1.0\"",
+      "base:", "  metadata:", "    title: \"For ${study.protocol_id}\"",
+      "datasets:",
+      "  - id: ds1",
+      "    type: tabular",
+      "    files: {filename: 'g_${version}.csv', type: csv}",
+      "    columns:",
+      "      - {id: STUDYID, type: SAS Char, values: \"${study.id}\"}",
+      "options:",
+      "  - {id: study_id, type: text, target: metadata.study.id}"
+    ),
+    lib_file(dir, "gap_ct.dta-template.yaml")
+  )
+  result <- validate_template(dir)
+  gap <- expect_code_row(result, "study_token_unanswered", "warning")
+  expect_equal(nrow(gap), 1L)
+  expect_match(gap$message, "${study.protocol_id}", fixed = TRUE)
+  expect_match(gap$message, "metadata.study.protocol_id", fixed = TRUE)
+  # ${version} is not filled in inside a dataset.
+  late <- expect_code_row(result, "token_unknown", "warning")
+  expect_match(late$message, "${version}", fixed = TRUE)
+
+  # Setting the protocol id in base metadata answers it.
+  txt <- readLines(lib_file(dir, "gap_ct.dta-template.yaml"))
+  writeLines(append(txt, "    study: {protocol_id: P-1}", after = 5L), lib_file(dir, "gap_ct.dta-template.yaml"))
+  expect_no_code_row(validate_template(dir), "study_token_unanswered")
+})
+
+test_that("text that merely looks like a stand-in is not taken for a study token", {
+  # A column called STUDY-ID and a title naming PROT-ID, but no placeholder at all.
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: look_ct", "version: \"1.0\"",
+      "base:", "  metadata:", "    title: \"Transfer for PROT-ID 12\"",
+      "datasets:",
+      "  - id: ds1",
+      "    type: tabular",
+      "    files: {filename: l.csv, type: csv}",
+      "    columns:",
+      "      - {id: STUDY-ID, type: SAS Char}"
+    ),
+    lib_file(dir, "look_ct.dta-template.yaml")
+  )
+  expect_no_code_row(validate_template(dir), "study_token_unanswered")
+})
+
+test_that("a study token in a column's description does not hide that column's other faults", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template", "id: age_dt", "version: \"1.0\"",
+      "dataset:",
+      "  id: age",
+      "  type: tabular",
+      "  files: {filename: a.csv, type: csv}",
+      "  columns:",
+      "    - {id: AGE, type: SAS Num, format: SAS $20., description: \"Collected in study ${study.id}\"}"
+    ),
+    lib_file(dir, "age.dta-dataset-template.yaml")
+  )
+  bad <- expect_code_row(validate_template(dir), "column_spec_invalid", "error")
+  expect_match(bad$message, "AGE", fixed = TRUE)
+})
+
+test_that("token_unknown fires once per file for a mistyped placeholder, and never for the four known ones", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: typo_dt",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: typo",
+      "  type: tabular",
+      "  files: {filename: x.csv, type: csv}",
+      "  columns:",
+      "    - {id: A, type: SAS Char, values: \"${studyid}\"}",
+      "    - {id: B, type: SAS Char, description: \"${studyid} again\"}",
+      "    - {id: C, type: SAS Char, values: \"${study.id}\"}",
+      "    - {id: D, type: SAS Char, values: \"${study.protocol_id}\"}"
+    ),
+    lib_file(dir, "typo.dta-dataset-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: typo_ct",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: \"${today} ${version} ${study.id} ${study.protocol_id}\"",
+      "    header: \"${studyid}\"",
+      "datasets:",
+      "  - id: ds1",
+      "    type: tabular",
+      "    files: {filename: x.csv, type: csv}",
+      "    columns:",
+      "      - {id: COL1, type: SAS Char}"
+    ),
+    lib_file(dir, "typo_ct.dta-template.yaml")
+  )
+  # Only the four known tokens: nothing to report.
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: known_ct",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: \"${today} ${version} ${study.id} ${study.protocol_id}\"",
+      "datasets:",
+      "  - id: ds1",
+      "    type: tabular",
+      "    files: {filename: x.csv, type: csv}",
+      "    columns:",
+      "      - {id: COL1, type: SAS Char}"
+    ),
+    lib_file(dir, "known_ct.dta-template.yaml")
+  )
+
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "token_unknown", "warning")
+  expect_equal(nrow(rows), 2L)
+  expect_setequal(basename(rows$file), c("typo.dta-dataset-template.yaml", "typo_ct.dta-template.yaml"))
+  expect_true(all(grepl("${studyid}", rows$message, fixed = TRUE)))
+  expect_false(any(grepl("known_ct", rows$file, fixed = TRUE)))
+
+  # A warning does not abort strict mode.
+  strict <- validate_template(dir, strict = TRUE)
+  expect_equal(sum(strict$code == "token_unknown"), 2L)
+})
