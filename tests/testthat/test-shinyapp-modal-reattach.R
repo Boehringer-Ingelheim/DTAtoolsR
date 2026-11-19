@@ -16,8 +16,9 @@
 # left two #shiny-modal in the page, the top one directly under <body>, and a
 # Load that did nothing. With the snippet: one dialog, and Load loads.
 #
-# These are SOURCE-LEVEL assertions, for the reason test-shinyapp-modal-outputs.R
-# gives: nothing in this suite starts a browser. The last test is a canary on
+# These are SOURCE-LEVEL assertions: each pins one property the fix rests on.
+# The snippet itself runs in headless Chrome in test-shinyapp-modal-browser.R,
+# which skips where there is no Chrome. The last test is a canary on
 # the Bootstrap that bslib bundles: the snippet rests on a private method, and
 # an upgrade that dropped it would turn the fix into a silent no-op.
 
