@@ -42,7 +42,7 @@ Imports:
 	haven (>= 2.5.2)
 Depends:
 	R (>= 4.1.0),
-	S7 (>= 0.2.2)
+	S7 (< 1.0.0)
 Suggests:
 	knitr,
 	rmarkdown,
