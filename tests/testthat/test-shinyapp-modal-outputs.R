@@ -27,21 +27,9 @@
 
 skip_if_not_installed("shiny")
 
-# app.R is not part of app_env() (which sources only inst/shiny/dta_app/R), so
-# the string is lifted out of the parsed source rather than fetched by name.
-# Returns NA when the binding is gone, which every test below asserts on: a
-# renamed or deleted snippet must fail loudly, not pass vacuously.
-app_r_binding <- function(name) {
-  exprs <- parse(text = app_source("app.R"), keep.source = FALSE)
-  for (e in exprs) {
-    if (is.call(e) && identical(as.character(e[[1]]), "<-") &&
-      identical(as.character(e[[2]]), name)) {
-      return(eval(e[[3]]))
-    }
-  }
-  NA_character_
-}
-
+# app_r_binding() (helper-shinyapp.R) lifts the snippet out of app.R and returns
+# NA when it is gone, which every test below asserts on: a renamed or deleted
+# snippet must fail loudly, not pass vacuously.
 modal_js <- function() app_r_binding("modal_unsuspend_js")
 
 # Every `uiOutput("id")` / `textOutput("id")` written directly into a

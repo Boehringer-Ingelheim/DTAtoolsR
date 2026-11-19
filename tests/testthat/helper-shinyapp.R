@@ -198,6 +198,23 @@ app_source <- function(file) {
   )
 }
 
+# The value of one top-level `name <- <expr>` in app.R, evaluated: the JavaScript
+# snippets the page embeds are plain strings there. app.R is not part of
+# app_env() (which sources only inst/shiny/dta_app/R), so the string is lifted
+# out of the parsed source rather than fetched by name. Returns NA when the
+# binding is gone, so a renamed or deleted snippet fails loudly in the tests
+# that assert on it instead of passing vacuously.
+app_r_binding <- function(name) {
+  exprs <- parse(text = app_source("app.R"), keep.source = FALSE)
+  for (e in exprs) {
+    if (is.call(e) && identical(as.character(e[[1]]), "<-") &&
+      identical(as.character(e[[2]]), name)) {
+      return(eval(e[[3]]))
+    }
+  }
+  NA_character_
+}
+
 # ---- Helpers shared by the test-shinyapp-*.R files ---------------------------
 
 # Path of `filename` inside library root `root`, routed by its kind suffix:
