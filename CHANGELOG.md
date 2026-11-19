@@ -20,6 +20,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   covers every validator code the README documents. Existing repositories
   copy it from
   `system.file("extdata", "agent-skills", package = "DTAtools")`.
+- **Date masks in patterns.** A pattern `filename`, a column `pattern:` or a
+  rule `pattern` condition may contain `<<yyyyMMddHHmm>>`-style masks
+  (`yyyy yy MMMM MMM MM dd d HH H mm ss`, other characters literal) that
+  accept only in-range dates and times, instead of a hand-written
+  `[0-9]{12}`. A malformed mask (`<<yyy>>`, `<<YYYY>>`, or `MM`/`mm` mixed up
+  as in `<<yyyyMMddHHMM>>`) is refused when the specification is built; the
+  specification keeps the mask as written.
 
 ### Fixed
 
@@ -37,6 +44,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   invalid target, a false error for a vocabulary slot. Slots are now checked
   as merged with what they inherit, once, on the file that wrote them; when
   a parent cannot be found, the entries complete as written still are.
+- **The app's page no longer loses its scrollbar after a dialog closes.**
+  A dialog opened again while it was already on screen left the page locked
+  once it closed: no scrollbar, and a mouse wheel that did nothing, so
+  everything below the window was out of reach until the page was reloaded.
+  It followed *Load example*, *Create new* and *Create new from template*
+  whenever the button's dialog was requested twice, and the "Could not
+  load" dialog when a corrected YAML still failed to load. It shows only
+  once a document is taller than the window. The page is now unlocked
+  whenever the last dialog has closed.
+- **A dialog asked for twice in quick succession no longer leaves a dead
+  copy on top.** If the second request reached the app while the first
+  dialog was still opening, a second copy appeared over it whose *Load* or
+  *Create* button did nothing. It most often followed a click the app took
+  several seconds to acknowledge, on a busy machine: the button is released
+  after five seconds, a second click goes through, and the two requests are
+  then answered together. The second dialog now simply replaces the first.
 
 ## [0.28.0] - 2026-11-18
 

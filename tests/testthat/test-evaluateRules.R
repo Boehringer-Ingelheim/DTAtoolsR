@@ -2272,6 +2272,52 @@ test_that("the YAML sequence form and group conditions are checked too", {
   )
 })
 
+test_that("a date mask in a pattern condition is expanded when the rule is evaluated", {
+  df <- data.frame(
+    ARM = c("A", "A", "B", "B"),
+    DTC = c("2024-01-31", "2024-12-01", "2024-13-31", "<<yyyy-MM-dd>>"),
+    stringsAsFactors = FALSE
+  )
+  then_dtc <- function(arm) {
+    rule_check_col_condition(
+      DTARuleColCondition(id = "dtc", condition = list(ARM = list(equals = arm)), then = list(DTC = list(pattern = "^<<yyyy-MM-dd>>$"))),
+      df
+    )$valid
+  }
+  expect_true(then_dtc("A"))
+  # Month 13, and the mask's own text, are no dates.
+  expect_false(then_dtc("B"))
+  # The IF side selects row 1 only (a real date), which breaks `ARM == B`. An
+  # unexpanded mask would select no row and pass vacuously.
+  res_if <- rule_check_col_condition(
+    DTARuleColCondition(id = "dtc_if", condition = list(DTC = list(pattern = "^<<yyyy-MM-dd>>$")), then = list(ARM = list(equals = "B"))),
+    df
+  )
+  expect_false(res_if$valid)
+})
+
+test_that("a malformed date mask in a pattern condition is refused when the rule is built", {
+  for (side in c("condition", "then")) {
+    clauses <- list(condition = list(ARM = list(equals = "A")), then = list(ARM = list(equals = "A")))
+    clauses[[side]] <- list(DTC = list(pattern = "^<<mmm>>$"))
+    err <- expect_error(
+      do.call(DTARuleColCondition, c(list(id = "r1"), clauses)),
+      class = "dta_date_pattern_invalid",
+      info = side
+    )
+    expect_match(conditionMessage(err), "DTC", fixed = TRUE)
+  }
+  expect_error(
+    DTARuleGroupCondition(
+      id = "g1",
+      group_by = "SUBJID",
+      conditions = list(c1 = list(DTC = list(pattern = "<<yyyymmdd>>"))),
+      constraints = list(list(type = "requires", `if` = "c1", then = "c1"))
+    ),
+    class = "dta_date_pattern_invalid"
+  )
+})
+
 test_that("well-formed operator values are unaffected by the arity check", {
   df <- data.frame(
     ARM = c("A", "B", "A", "B"), AGE = c(10, 20, 30, 40),

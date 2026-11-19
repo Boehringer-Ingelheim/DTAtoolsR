@@ -359,9 +359,9 @@ dataset:
   id: lab_results
   type: tabular
   files:
-    filename: ^s${study.id}_[0-9]{12}\.csv$
+    filename: ^s${study.id}_<<yyyyMMddHHmm>>\.csv$
     pattern: true
-    pattern_description: s${study.id}_YYYYMMDDHHMM.csv
+    pattern_description: s${study.id}_yyyyMMddHHmm.csv
     type: csv
   columns:
     - id: STUDYID
@@ -389,6 +389,33 @@ dataset:
 
 These tokens are not general-purpose environment-variable substitution. `validate_template()` reports any other `${...}` token in a creation
 or dataset template, and a `${version}` inside a dataset, as `token_unknown` (a warning), because it would reach the document as literal text.
+
+#### Date masks in patterns: `<<yyyyMMdd>>`
+
+Inside a regular expression -- a `filename` whose entry says `pattern: true`, a column's `pattern:`, or a rule's `pattern` condition -- a
+date/time mask written between `<<` and `>>` stands for the matching digits or names, so `^ae_<<yyyyMMdd>>_<<HHmm>>\.csv$` accepts
+`ae_20240131_1459.csv` but not `ae_20241331_1459.csv`. The tokens are case-sensitive:
+
+| Token | Meaning | Accepts |
+| --- | --- | --- |
+| `yyyy` | 4-digit year | `2000`-`2099` |
+| `yy` | 2-digit year | `00`-`99` |
+| `MMMM` | full month name | `January`-`December` |
+| `MMM` | abbreviated month name | `Jan`-`Dec` |
+| `MM` | 2-digit month | `01`-`12` |
+| `dd` | 2-digit day | `01`-`31` |
+| `d` | day without a leading zero | `1`-`31` |
+| `HH` | 2-digit hour (24 h) | `00`-`23` |
+| `H` | hour without a leading zero | `0`-`23` |
+| `mm` | 2-digit minute | `00`-`59` |
+| `ss` | 2-digit second | `00`-`59` |
+
+- Any other character inside the mask is matched literally, so `<<yyyy-MM-dd>>` and `<<yyyy-MM-ddTHH:mm:ss>>` work as written.
+- The day is not checked against the month: `<<yyyy-MM-dd>>` accepts `2024-02-30`.
+- A mask that is not made of these tokens is refused when the specification is built: a wrong length (`<<yyy>>`), a wrong-case letter
+  (`YYYY`, `DD`, `SS`, `hh`) or a month where minutes were meant (`<<yyyyMMddHHMM>>`, and the reverse, `<<yyyymmdd>>`).
+- The specification keeps the mask as written; it is expanded only where the pattern is matched. Outside `<<...>>` the pattern is an
+  ordinary regular expression, and a `pattern_description` is plain text in which a mask is not expanded.
 
 ### `options:`
 

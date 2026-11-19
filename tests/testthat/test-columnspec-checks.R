@@ -867,6 +867,19 @@ test_that("a typeless, pattern-only column reports pattern violations", {
   expect_equal(sort(code_errs$row), c(2L, 3L))
 })
 
+test_that("a date mask in a column pattern is checked in its expanded form", {
+  specs <- DTAColumnSpecCollection(columns = list(
+    DTC = DTAColumnSpec(id = "DTC", pattern = "^<<yyyyMMddHHmm>>$")
+  ))
+  table <- data.frame(
+    DTC = c("202401311459", "202413311459", "<<yyyyMMddHHmm>>", "202401312400", "202412312359"),
+    stringsAsFactors = FALSE
+  )
+  errs <- dta_columnspec_errors(specs, table)$full_error
+  expect_true(all(errs$keyword == "pattern"))
+  expect_equal(sort(errs$row), c(2L, 3L, 4L))
+})
+
 test_that("as_json_schema() no longer errors when compiling a typeless spec's schema", {
   schemas <- dta_compile_columnspec_schemas(tc_specs())
 

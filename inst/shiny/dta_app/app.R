@@ -348,6 +348,95 @@ $(document).on('shown.bs.modal hidden.bs.modal', '#shiny-modal', function (ev) {
 });
 "
 
+# Give the page its scrolling back once the last dialog has gone.
+#
+# While a modal is open Bootstrap 5 locks the page: `overflow: hidden` and a
+# `padding-right` on <body>, and the `modal-open` class. To unlock it, it puts
+# back whatever it SAW when the modal opened. Shiny's showModal() over a dialog
+# that is still on screen swaps the dialog without hiding the first one, so the
+# second sees the first one's lock, files it away as the page's own style, and
+# faithfully restores it on close: no scrollbar at all and a dead mouse wheel
+# on a page that is much taller than the window, until the page is reloaded.
+#
+# That is "no vertical scrolling after loading an example, creating a new
+# document or creating one from a template". It follows any dialog opened
+# over another, including the same dialog opened twice: a landing button
+# whose click reaches the server twice opens its dialog over itself, and the
+# Load or Create that closes it leaves the lock behind. Also seen with the
+# "Could not load" dialog: a corrected YAML that still fails to load shows
+# the dialog again over itself (finish_file_load), and the correction that
+# finally loads closes it. A template's variant step
+# (template_variant_confirm) opens its options dialog over the open one the
+# same way. With dozens of showModal() calls to get wrong, the lock is
+# cleared once, here, from the one event they all end in.
+#
+# hidden.bs.modal fires after Bootstrap's own restore (so this runs last and
+# wins). Only when neither a modal nor a backdrop remains is the page
+# unlocked, so a dialog the server opens between that event and the timer
+# below, whose backdrop is up by then, keeps its lock.
+#
+# A jQuery handler, not addEventListener (unlike modal_unsuspend_js, which only
+# needs 'shown'): Shiny removes the dialog from the page inside its own jQuery
+# 'hidden' handler, and Bootstrap sends the native event only after that, from
+# a node that is no longer in the document, so it never reaches `document`.
+modal_scroll_lock_js <- "
+$(document).on('hidden.bs.modal', function () {
+  setTimeout(function () {
+    if (document.querySelector('.modal.show, .modal-backdrop')) return;
+    var b = document.body;
+    b.classList.remove('modal-open');
+    b.style.removeProperty('overflow');
+    b.style.removeProperty('padding-right');
+    b.removeAttribute('data-bs-overflow');
+    b.removeAttribute('data-bs-padding-right');
+  }, 0);
+});
+"
+
+# Never put a replaced dialog back on the page.
+#
+# Opening a dialog is not instant: Bootstrap 5 fades the backdrop in first and
+# only then shows the dialog (Modal.show() -> _backdrop.show(() =>
+# _showElement())). Shiny's showModal() over a dialog that is still opening
+# removes the backdrop and swaps the dialog out of #shiny-modal-wrapper
+# without hiding it. When the first dialog's fade-in then finishes,
+# _showElement() finds it no longer in the page and -- by design, for dialogs
+# built in JavaScript -- appends it to <body>: a second copy on top of the
+# real dialog, its inputs already unbound by Shiny, so its Load or Create
+# button does nothing.
+#
+# Two requests arrive that close together when the server answers both at
+# once: the click guard (click_guard_script(), R/ui_components.R) lets a
+# button go after five seconds without a sign of life from the server, a
+# second click goes through, and a server that then catches up answers both
+# in the same instant. Reproduced by holding the page's outgoing messages for
+# seven seconds and clicking Load example twice.
+#
+# So each Shiny dialog's own _showElement() is wrapped as it starts to show: a
+# dialog that has left the page by then was replaced, and is left alone
+# instead of re-attached. The one that replaced it opens as usual. Delegated
+# from document, this only ever sees dialogs that ARE in the page when they
+# start to show, so Bootstrap's own use (a dialog built in JavaScript and not
+# yet inserted) is untouched; and removeModal() keeps a dialog in the page
+# until it has hidden, so closing one mid-fade is unaffected.
+#
+# _showElement() is private to Bootstrap. If an upgrade renames it, the typeof
+# check turns this into a no-op (today's behaviour, not an error), and the
+# canary in test-shinyapp-modal-reattach.R fails so that someone looks.
+modal_reattach_js <- "
+$(document).on('show.bs.modal', '#shiny-modal', function (e) {
+  var M = window.bootstrap && window.bootstrap.Modal;
+  var inst = M && M.getInstance(e.target);
+  if (!inst || inst.dtaNoReattach || typeof inst._showElement !== 'function') return;
+  var showElement = inst._showElement;
+  inst._showElement = function () {
+    if (!document.body.contains(this._element)) return;
+    return showElement.apply(this, arguments);
+  };
+  inst.dtaNoReattach = true;
+});
+"
+
 # Per-browser secret backing 'Restore previous session'. The autosaved session
 # must outlive the Shiny session (the whole point is recovering after a reload
 # or a crash), so it cannot be keyed to session$token, which is regenerated on
@@ -538,7 +627,9 @@ ui_page <- function(cfg) {
       tags$script(shiny::HTML(copy_yaml_js)),
       tags$script(shiny::HTML(modal_unsuspend_js)),
       tags$script(shiny::HTML(modal_state_js)),
-      # Unlike the eight above, this one is a function in R/ui_components.R
+      tags$script(shiny::HTML(modal_scroll_lock_js)),
+      tags$script(shiny::HTML(modal_reattach_js)),
+      # Unlike the scripts above, this one is a function in R/ui_components.R
       # rather than a string here, because its behaviour is worth testing
       # separately -- see click_guard_script() there, and the test file, for why
       # double-click protection cannot live on the server at all. Its position

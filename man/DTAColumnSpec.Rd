@@ -35,7 +35,11 @@ break).}
 
 \item{nullable}{Logical or NULL. Whether the column can be null.}
 
-\item{pattern}{Character or NULL. The pattern of the column.}
+\item{pattern}{Character or NULL. The pattern of the column: a
+Perl-compatible regular expression. It may contain a date mask such as
+\code{<<yyyy-MM-dd>>}, matching only an in-range date or time written
+that way (see the \code{pattern} argument of \code{\link{DTAFile}} for the
+tokens); a malformed mask is refused here.}
 
 \item{values}{Character or numeric vector, or NULL. The permitted values of
 the column. A list is accepted and flattened to a vector.}

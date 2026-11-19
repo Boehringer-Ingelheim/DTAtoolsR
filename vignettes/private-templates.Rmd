@@ -595,9 +595,9 @@ dataset:
   id: lab_results
   type: tabular
   files:
-    filename: ^s${study.id}_[0-9]{12}\.csv$
+    filename: ^s${study.id}_<<yyyyMMddHHmm>>\.csv$
     pattern: true
-    pattern_description: s${study.id}_YYYYMMDDHHMM.csv
+    pattern_description: s${study.id}_yyyyMMddHHmm.csv
     type: csv
   columns:
     - id: STUDYID
@@ -614,6 +614,12 @@ matched literally; everywhere else -- the metadata too, e.g.
 document fails, naming the dataset or field, if it uses a study token the
 document has no value for. The value is copied in at creation: changing the
 study identity later in the Metadata tab does not update the datasets.
+
+`<<yyyyMMddHHmm>>` is a date mask: inside any of those regular expressions,
+a mask between `<<` and `>>` stands for a date or time (here a 12-digit
+stamp whose month, day, hour and minute must be in range), and a malformed
+one is refused when the specification is built. The tokens are listed in
+the scaffolded `README.md` section "Date masks in patterns".
 
 `validate_template()` builds the template with the study option's first
 `choices:` suggestion, else the stand-ins `STUDY-ID` and `PROT-ID`; give the option a

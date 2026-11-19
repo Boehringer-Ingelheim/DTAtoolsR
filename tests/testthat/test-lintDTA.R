@@ -491,6 +491,35 @@ test_that("a rule operand finding names the condition value, not 'values'", {
   expect_no_match(out$message, "values '2.5'", fixed = TRUE)
 })
 
+test_that("a rule operand is checked against the expanded date mask of its column", {
+  dtc <- list(id = "DTC", type = "SAS Char", pattern = "^<<yyyyMMdd>>$")
+  rule <- function(value) {
+    list(list(
+      id = "r", type = "col_condition",
+      condition = list(DTC = list(equals = value)), then = list(AGE = list(empty = FALSE))
+    ))
+  }
+  expect_false("rule_condition_value_unfit" %in% lint_rules(rule("20240131"), columns = cols(dtc))$code)
+  out <- lint_rules(rule("20241331"), columns = cols(dtc))
+  expect_identical(codes_of(out), "rule_condition_value_unfit")
+  expect_match(out$message, "does not match the pattern", fixed = TRUE)
+})
+
+test_that("a malformed date mask in a rule's pattern condition is a rule_invalid finding", {
+  out <- lint_rules(list(list(
+    id = "r", type = "col_condition",
+    condition = list(NAME = list(pattern = "^<<mmm>>$")), then = list(AGE = list(empty = FALSE))
+  )))
+  expect_identical(codes_of(out), "rule_invalid")
+  expect_match(out$message, "mmm", fixed = TRUE)
+})
+
+test_that("a malformed date mask in a column pattern is a column_spec_invalid finding", {
+  out <- lint_dta(list(columns = cols(list(id = "DTC", type = "SAS Char", pattern = "^<<yyyymmdd>>$"))))
+  expect_identical(codes_of(out), "column_spec_invalid")
+  expect_match(out$message, "mistyped", fixed = TRUE)
+})
+
 # ---- file entries: container and unknown keys ----------------------------------
 
 # The one-dataset document of the container tests, with a chosen `container:`
@@ -586,6 +615,26 @@ test_that("file_count_bound_invalid flags bounds the file entry would be refused
     out <- do.call(lint_files, ok)
     expect_false(any(out$code == "file_count_bound_invalid"))
   }
+})
+
+test_that("date_pattern_invalid flags a malformed date mask the file entry would be refused for", {
+  lint_mask <- function(filename, pattern = TRUE) {
+    lint_dta(list(datasets = list(list(
+      id = "ae", type = "tabular",
+      files = list(list(type = "csv", filename = filename, pattern = pattern))
+    ))))
+  }
+  for (bad in c("^ae_<<mmm>>\\.csv$", "^ae_<<yyyymmdd>>\\.csv$", "^ae_<<>>\\.csv$")) {
+    out <- lint_mask(bad)
+    expect_identical(out$code, "date_pattern_invalid", info = bad)
+    expect_identical(out$severity, "error")
+    expect_identical(out$object, "file")
+    # And the class refuses exactly what the lint flags.
+    expect_error(DTAFileCSV(filename = bad, pattern = TRUE), class = "dta_date_pattern_invalid")
+  }
+  expect_false(any(lint_mask("^ae_<<yyyyMMdd>>\\.csv$")$code == "date_pattern_invalid"))
+  # A literal file name is no pattern, so `<<` in it is no mask.
+  expect_false(any(lint_mask("ae_<<mmm>>.csv", pattern = FALSE)$code == "date_pattern_invalid"))
 })
 
 test_that("read_dta_from_yaml stops on an invalid container", {

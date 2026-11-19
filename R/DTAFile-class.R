@@ -12,7 +12,12 @@
 #' @param filename Character vector of file names or regular expression patterns
 #'   to match files.
 #' @param pattern Logical; if \code{TRUE}, \code{filename} is treated as a regex
-#'   pattern. Default is \code{FALSE}.
+#'   pattern. Default is \code{FALSE}. A pattern may contain a date mask such as
+#'   \code{<<yyyyMMddHHmm>>}, which matches only an in-range date and time
+#'   written that way (tokens \code{yyyy yy MMMM MMM MM dd d HH H mm ss}; other
+#'   characters inside the mask are literal); a malformed mask is refused here.
+#'   The property keeps the mask as written. The token table is in the
+#'   template repository \code{README.md}, section "Date masks in patterns".
 #' @param number_of_files Numeric or \code{NULL}; the exact number of files
 #'   expected. Must be a single value -- a length-2 vector is an error, not a
 #'   range. Default is \code{1}. To express a range, set
@@ -148,6 +153,14 @@ DTAFile <- S7::new_class(
     }
     if (!is.logical(self@pattern) || length(self@pattern) != 1) {
       cli::cli_abort("The 'pattern' property must be a single logical value.")
+    }
+    # Only the `<<yyyyMMdd>>` date mask is checked, not whether the rest of
+    # the regex compiles; lint_dta() runs the same test on the raw YAML.
+    if (isTRUE(self@pattern)) {
+      problem <- dta_date_pattern_problem(self@filename)
+      if (!is.null(problem)) {
+        cli::cli_abort("{problem}", class = "dta_date_pattern_invalid")
+      }
     }
 
     # Bounds are counts of files: NULL (no bound) or one non-negative whole

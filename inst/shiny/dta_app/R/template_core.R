@@ -821,7 +821,7 @@ resolve_template_expressions <- function(x, env) {
 # ${study.id} and ${study.protocol_id} let a dataset body reuse the study
 # identity the person creating the document entered once (metadata.study), e.g.
 #
-#   files:   { filename: '^s${study.id}_[0-9]{12}\.csv$', pattern: true }
+#   files:   { filename: '^s${study.id}_<<yyyyMMddHHmm>>\.csv$', pattern: true }
 #   columns: [{ id: STUDYID, values: '${study.id}' }]
 #
 # They are resolved on the PLAIN dataset list, never on the built S7 objects: a

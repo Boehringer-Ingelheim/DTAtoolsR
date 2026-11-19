@@ -403,6 +403,16 @@ test_that("a label that fails the header pattern is a propertyNames finding at t
   })
 })
 
+test_that("a date mask in the header pattern is checked in its expanded form", {
+  ds <- mxd_ds(columns = list(pattern = "^S_<<yyyyMMdd>>$"))
+  path <- mxd_file("\tS_20240131\tS_20241331\nr1\t1\t2\n")
+  mxd_both(ds, path, function(d, stream) {
+    f <- mxd_findings(d)
+    expect_identical(f$keyword, "propertyNames", info = stream)
+    expect_identical(f$column, "S_20241331", info = stream)
+  })
+})
+
 test_that("a label that looks like a generated name does not collide with one", {
   # Column 3 is unlabelled -> "<column 3>"; the label of column 2 is that very text.
   ds <- mxd_ds()
