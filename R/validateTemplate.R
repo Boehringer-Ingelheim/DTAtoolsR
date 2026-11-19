@@ -706,10 +706,17 @@
   # file that wrote them, not again in every descendant.
   own_slots <- function(section) {
     spec <- def[[section]]
-    if (is.null(resolved) || inherits(resolved, "error")) {
-      # Nothing merged to read (the failure is reported below), so check what
-      # is complete as written: a bare list's entries, or the verb form's
-      # add: entries. A modify: entry is only a fragment until merged.
+    # A template with no `extends:` and no mixins never reaches
+    # dta_template_merge_options(), so resolved$def[[section]] is `spec`
+    # itself, verbatim -- no id-matching has anything inherited to tell
+    # itself apart from, and an id-less entry here was never passed through
+    # dta_template_drop_unidentified() (that only runs inside the merge).
+    no_merge <- length(resolved$lineage) == 0 && length(resolved$mixins) == 0
+    if (is.null(resolved) || inherits(resolved, "error") || no_merge) {
+      # Nothing merged to read (the failure is reported below, or there was
+      # nothing to merge), so check what is complete as written: a bare
+      # list's entries, or the verb form's add: entries. A modify: entry is
+      # only a fragment until merged.
       if (.dta_template_engine_get("dta_template_is_mapping")(spec)) {
         return(.dta_template_engine_get("dta_template_verb_entries")(spec[["add"]]))
       }

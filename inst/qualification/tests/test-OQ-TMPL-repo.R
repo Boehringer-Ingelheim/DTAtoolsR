@@ -1,6 +1,6 @@
 # create_template_repo(): scaffolding a new template repository, and the
 # guarantee that both it and every packaged example validate cleanly.
-# REQ-TMPL-026 .. REQ-TMPL-030, REQ-TMPL-048.
+# REQ-TMPL-026 .. REQ-TMPL-030, REQ-TMPL-060.
 #
 # Every call here writes into qa_tempdir() -- never into the package's own
 # inst/extdata/ -- and every create_template_repo() call is wrapped in
@@ -10,7 +10,7 @@
 tmpl_fixture <- function(...) file.path(qa_suite_root(), "fx", "t", ...)
 
 # Expected scaffold paths below are written from REQ-TMPL-026 and
-# REQ-TMPL-048, not discovered from the installed skeleton or the function
+# REQ-TMPL-060, not discovered from the installed skeleton or the function
 # under qualification.
 skill_files <- file.path(
   ".claude/skills/dta-template-authoring",
@@ -22,7 +22,7 @@ skill_files <- file.path(
 
 # ---- REQ-TMPL-026: the default write set, and examples = FALSE ------------
 
-test_that("OQ-TMPL-049 | the defaults write the scaffolding, the skeleton library files, a GitHub workflow and the agent skill | REQ-TMPL-026 REQ-TMPL-048", {
+test_that("OQ-TMPL-049 | the defaults write the scaffolding, the skeleton library files, a GitHub workflow and the agent skill | REQ-TMPL-026 REQ-TMPL-060", {
   dir <- qa_tempdir()
   out <- suppressMessages(create_template_repo(dir))
 
@@ -96,9 +96,9 @@ test_that("OQ-TMPL-053 | an unrecognised ci provider, or an empty ci vector, is 
   qa_check("an empty character vector is rejected too, not treated as FALSE", inherits(err_empty, "condition"))
 })
 
-# ---- REQ-TMPL-048: the agent skill ------------------------------------------
+# ---- REQ-TMPL-060: the agent skill ------------------------------------------
 
-test_that("OQ-TMPL-115 | the agent skill is written byte-identical, with the front matter an agent loads it by | REQ-TMPL-048", {
+test_that("OQ-TMPL-138 | the agent skill is written byte-identical, with the front matter an agent loads it by | REQ-TMPL-060", {
   dir <- qa_tempdir()
   suppressMessages(create_template_repo(dir, examples = FALSE, ci = FALSE))
 
@@ -127,7 +127,7 @@ test_that("OQ-TMPL-115 | the agent skill is written byte-identical, with the fro
   )
 })
 
-test_that("OQ-TMPL-116 | agent_skill = FALSE writes no .claude directory, and a non-logical value is rejected | REQ-TMPL-048", {
+test_that("OQ-TMPL-139 | agent_skill = FALSE writes no .claude directory, and a non-logical value is rejected | REQ-TMPL-060", {
   dir <- qa_tempdir()
   suppressMessages(create_template_repo(dir, agent_skill = FALSE))
   qa_check("no .claude directory exists", !dir.exists(file.path(dir, ".claude")))
@@ -139,7 +139,7 @@ test_that("OQ-TMPL-116 | agent_skill = FALSE writes no .claude directory, and a 
   qa_step("and nothing is written", character(0), list.files(bad, all.files = TRUE, no.. = TRUE))
 })
 
-test_that("OQ-TMPL-117 | a pre-existing skill file is a conflict under the overwrite guard | REQ-TMPL-048 REQ-TMPL-028", {
+test_that("OQ-TMPL-140 | a pre-existing skill file is a conflict under the overwrite guard | REQ-TMPL-060 REQ-TMPL-028", {
   dir <- qa_tempdir()
   skill_md <- file.path(dir, skill_files[[1]])
   dir.create(dirname(skill_md), recursive = TRUE)

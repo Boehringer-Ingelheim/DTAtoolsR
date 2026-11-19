@@ -3025,6 +3025,39 @@ test_that("a party slot problem is reported on the file that wrote it, not on ev
   expect_identical(basename(rows$file), "slot_parent.dta-template.yaml")
 })
 
+test_that("an id-less party or vocabulary slot on a template with no parent and no mixins is still dropped and warned about", {
+  # slot_library()'s own merge path only runs -- and only there does
+  # dta_template_drop_unidentified() fire -- when a template extends or
+  # mixes in something; an abstract root has nothing to merge against, so
+  # own_slots() must fall back to the as-written entries instead of
+  # filtering them away as "not this file's own".
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: slot_root_no_id", "version: \"1.0\"",
+      "abstract: true",
+      "base: {metadata: {title: No id}}",
+      "party_slots:",
+      "  - target: metadata.supplier",
+      "vocabulary_slots:",
+      "  - target: datasets.ds1.columns.STATUS.values"
+    ),
+    lib_file(dir, "slot_root_no_id.dta-template.yaml")
+  )
+
+  warned <- character(0)
+  result <- withCallingHandlers(
+    validate_template(dir),
+    warning = function(w) {
+      warned <<- c(warned, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
+  )
+  expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
+  expect_match(warned, "Dropping 1 party slot with a missing or empty id", fixed = TRUE, all = FALSE)
+  expect_match(warned, "Dropping 1 vocabulary slot with a missing or empty id", fixed = TRUE, all = FALSE)
+})
+
 test_that("a verb-form vocabulary_slots modify is checked as merged, and warns about nothing", {
   dir <- slot_library()
   write_slot_child(dir, c("vocabulary_slots:", "  modify:", "    - id: status_codes", "      default: [NOPE]"))

@@ -133,8 +133,10 @@ Each has bitten someone; the reason is why it is not a style preference.
   oversight. Party-slot `profiles:` are the exception: they take plain ids
   only, and `id@1.0` there silently never matches.
 - **Do not invent**: no `metadata.template` or `metadata.import_issues` (the app
-  owns them), no `${…}` token other than `${today}` and `${version}`, no
-  `example:` (it is `examples:`), no option-level `required`/`min`/`order`.
+  owns them), no `${…}` token other than `${today}`, `${version}`,
+  `${study.id}` and `${study.protocol_id}` (`${version}` is filled in only in
+  the document metadata, not in a dataset), no `example:` (it is
+  `examples:`), no option-level `required`/`min`/`order`.
 - **Template changes do not go in `base.metadata.version_history`.** That list
   is the history of the *document* a template creates and is copied into every
   new DTA.

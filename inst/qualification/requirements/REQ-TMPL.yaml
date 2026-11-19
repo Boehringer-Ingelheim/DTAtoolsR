@@ -490,7 +490,7 @@ requirements:
     text: >
       create_template_repo(path, examples = TRUE, ci = TRUE, overwrite =
       FALSE, agent_skill = TRUE) shall write .gitignore and README.md at the
-      repository root, the agent skill of REQ-TMPL-048,
+      repository root, the agent skill of REQ-TMPL-060,
       and -- when examples is TRUE -- every file of the bundled skeleton
       inst/extdata/template-repo-skeleton/ at the same relative path,
       discovered from the skeleton rather than a hard-coded list: dta-app.yaml
@@ -549,7 +549,7 @@ requirements:
     covers: [create_template_repo]
     source: R/createTemplateRepo.R (create_template_repo path_out and invisible return)
 
-  - id: REQ-TMPL-048
+  - id: REQ-TMPL-060
     text: >
       With agent_skill = TRUE (the default), create_template_repo() shall
       write every file of the bundled agent skill
@@ -570,7 +570,7 @@ requirements:
     covers: [create_template_repo]
     source: R/createTemplateRepo.R (.dta_create_repo_skill_dir, .dta_create_repo_targets, create_template_repo); inst/extdata/agent-skills/dta-template-authoring/
 
-  - id: REQ-TMPL-049
+  - id: REQ-TMPL-061
     text: >
       The dry-run build of validate_template() shall fill every required
       party slot (required: true, set on the template or inherited) with a
@@ -587,7 +587,7 @@ requirements:
       R/validateTemplate.R (.dta_template_party_dry_selections);
       inst/shiny/dta_app/R/party_profiles.R (party_profiles_for_slot, apply_party_selections)
 
-  - id: REQ-TMPL-050
+  - id: REQ-TMPL-062
     text: >
       The checks of REQ-TMPL-012 (option targets), REQ-TMPL-013 (party slots)
       and REQ-TMPL-014 (vocabulary slots) shall apply to the entries a
