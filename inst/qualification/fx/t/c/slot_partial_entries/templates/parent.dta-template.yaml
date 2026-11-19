@@ -1,0 +1,23 @@
+kind: dta_creation_template
+id: spe_parent
+version: "1.0"
+abstract: true
+base:
+  metadata:
+    title: Parent with a party slot
+datasets:
+  - id: ds1
+    type: tabular
+    files: {filename: a.csv, type: csv}
+    columns:
+      - {id: STATUS, type: SAS Char}
+party_slots:
+  - id: supplier
+    label: Supplier
+    target: metadata.supplier
+vocabulary_slots:
+  - id: status_codes
+    label: Status codes
+    target: datasets.ds1.columns.STATUS.values
+    vocabulary: statuses@latest
+    mode: closed
