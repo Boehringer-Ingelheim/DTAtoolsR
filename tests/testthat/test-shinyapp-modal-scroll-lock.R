@@ -25,12 +25,11 @@
 # from template whenever the dialog was requested a second time while open;
 # with the snippet each scrolled to the bottom.
 #
-# These are SOURCE-LEVEL assertions, for the reason test-shinyapp-modal-outputs.R
-# gives: the behaviour is JavaScript against a DOM, and nothing in this test
-# suite starts a browser (chromote and shinytest2 are used by the qualification
-# suite only), so the snippet cannot run here. What is pinned is each property
-# the fix rests on; a regression in any one leaves the page locked again,
-# silently, with every other test still green.
+# These are SOURCE-LEVEL assertions. What is pinned is each property the fix
+# rests on; a regression in any one leaves the page locked again. They cannot
+# tell a snippet that works from one that only reads right: that is the job of
+# test-shinyapp-modal-browser.R, which runs this snippet in headless Chrome.
+# That file skips where there is no Chrome, and this one is then all there is.
 
 skip_if_not_installed("shiny")
 
