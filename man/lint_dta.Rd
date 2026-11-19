@@ -50,6 +50,7 @@ after the matrix reader's own condition for a \verb{matrix:} block it refuses
 (\code{matrix_field_unknown}, \code{matrix_header_invalid}, ...; \code{matrix_invalid} when
 it has none), \code{file_container_invalid},
 \code{file_field_unknown}, \code{file_container_misplaced}, \code{file_count_bound_invalid},
+\code{date_pattern_invalid} (a \code{filename}'s \verb{<<date-mask>>} is malformed),
 \code{container_invalid} (the \code{containers} section is malformed, an element lacks
 an \code{id} or \code{filename}, has an unknown field or a value a container cannot
 hold), \code{container_duplicate} (an id or file name used twice, or more than one

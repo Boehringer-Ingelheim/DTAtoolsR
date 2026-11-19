@@ -114,7 +114,7 @@ dta_operand_problems <- function(spec, vals) {
     # they are here.
     problems <- sub("^values ", "condition value ", dta_spec_value_problems(probe))
   }
-  pattern <- spec@pattern
+  pattern <- dta_expand_date_pattern_tokens(spec@pattern)
   if (!is.null(pattern) && !is.na(pattern)) {
     txt <- dta_operand_text(vals)
     bad <- !is.na(txt) & !vapply(
@@ -452,6 +452,7 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
 #' (`matrix_field_unknown`, `matrix_header_invalid`, ...; `matrix_invalid` when
 #' it has none), `file_container_invalid`,
 #' `file_field_unknown`, `file_container_misplaced`, `file_count_bound_invalid`,
+#' `date_pattern_invalid` (a `filename`'s `<<date-mask>>` is malformed),
 #' `container_invalid` (the `containers` section is malformed, an element lacks
 #' an `id` or `filename`, has an unknown field or a value a container cannot
 #' hold), `container_duplicate` (an id or file name used twice, or more than one
@@ -1216,6 +1217,15 @@ dta_lint_files_list <- function(files, dataset, container_ids = NULL) {
       out <- rbind(out, dta_lint_row(
         dataset, "file", id, "error", "file_count_bound_invalid", problem
       ))
+    }
+    # A malformed `<<yyyyMMdd>>` date mask the DTAFile validator would refuse.
+    if (isTRUE(entry[["pattern"]]) && is.character(unlist(entry[["filename"]]))) {
+      problem <- dta_date_pattern_problem(unlist(entry[["filename"]], use.names = FALSE))
+      if (!is.null(problem)) {
+        out <- rbind(out, dta_lint_row(
+          dataset, "file", id, "error", "date_pattern_invalid", problem
+        ))
+      }
     }
   }
   out

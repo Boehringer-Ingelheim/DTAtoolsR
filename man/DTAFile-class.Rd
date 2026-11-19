@@ -21,7 +21,12 @@ DTAFile(
 to match files.}
 
 \item{pattern}{Logical; if \code{TRUE}, \code{filename} is treated as a regex
-pattern. Default is \code{FALSE}.}
+pattern. Default is \code{FALSE}. A pattern may contain a date mask such as
+\code{<<yyyyMMddHHmm>>}, which matches only an in-range date and time
+written that way (tokens \code{yyyy yy MMMM MMM MM dd d HH H mm ss}; other
+characters inside the mask are literal); a malformed mask is refused here.
+The property keeps the mask as written. The token table is in the
+template repository \code{README.md}, section "Date masks in patterns".}
 
 \item{pattern_description}{Character or \code{NULL}; human-readable
 description of the \code{filename} pattern.}

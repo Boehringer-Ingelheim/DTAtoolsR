@@ -134,7 +134,11 @@ dta_column_id_problem <- function(id) {
 #' @param format Character or NULL. The format of the column.
 #' @param length Numeric or NULL. The max character length.
 #' @param nullable Logical or NULL. Whether the column can be null.
-#' @param pattern Character or NULL. The pattern of the column.
+#' @param pattern Character or NULL. The pattern of the column: a
+#'   Perl-compatible regular expression. It may contain a date mask such as
+#'   \code{<<yyyy-MM-dd>>}, matching only an in-range date or time written
+#'   that way (see the \code{pattern} argument of \code{\link{DTAFile}} for the
+#'   tokens); a malformed mask is refused here.
 #' @param values Character or numeric vector, or NULL. The permitted values of
 #'   the column. A list is accepted and flattened to a vector.
 #' @param examples Character or numeric vector, or NULL. Example value(s) for
@@ -244,10 +248,17 @@ DTAColumnSpec <- S7::new_class(
       # The data is matched with PCRE (dta_check_column_spec()), so the pattern
       # must compile as PCRE: an invalid one would otherwise abort the whole
       # check() much later, on the first column that reaches it.
+      # A `<<yyyyMMdd>>` date mask is expanded where the pattern is used; the
+      # messages below quote the pattern as written.
+      problem <- dta_date_pattern_problem(self@pattern)
+      if (!is.null(problem)) {
+        cli_abort("{self@id}: {problem}", class = "dta_date_pattern_invalid")
+      }
+      expanded_pattern <- dta_expand_date_pattern_tokens(self@pattern)
       if (!is.na(self@pattern)) {
         compiles <- tryCatch(
           {
-            suppressWarnings(grepl(self@pattern, "", perl = TRUE))
+            suppressWarnings(grepl(expanded_pattern, "", perl = TRUE))
             TRUE
           },
           error = function(e) FALSE
@@ -263,7 +274,7 @@ DTAColumnSpec <- S7::new_class(
       if (!is.null(self@examples)) {
         for (ex in self@examples) {
           ex_text <- if (is.numeric(ex)) dta_numeric_text(ex) else as.character(ex)
-          if (!is.na(ex_text) && !grepl(self@pattern, ex_text, perl = TRUE)) {
+          if (!is.na(ex_text) && !grepl(expanded_pattern, ex_text, perl = TRUE)) {
             cli_abort(
               "{self@id}: example '{ex}' must conform to the pattern '{self@pattern}' provided."
             )
@@ -729,7 +740,7 @@ method(as_json_schema, DTAColumnSpec) <- function(x) {
   }
 
   if (!is.null(x@pattern) && !is.na(x@pattern)) {
-    schema$pattern <- x@pattern
+    schema$pattern <- dta_expand_date_pattern_tokens(x@pattern)
   }
 
   schema$format <- dta_columnspec_emitted_format(x)

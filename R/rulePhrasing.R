@@ -1611,7 +1611,18 @@
       "value as text, so a number may read as 1e+05 and a true or false value as",
       "TRUE or FALSE. It is case-sensitive unless the pattern itself says",
       "otherwise, and is satisfied when it matches any part of the value, unless",
-      "the pattern itself is tied to the start or the end of the value."
+      "the pattern itself is tied to the start or the end of the value.",
+      # This text is reused verbatim as plain Word text (.add_body_par()) and
+      # as Markdown source rendered to a PDF preview (dta_md_inline() treats a
+      # bare "<" as an autolink or tag); writing "yyyyMMdd" without the
+      # enclosing angle brackets keeps it literal, correct and unescaped in
+      # both.
+      "A pattern may contain a date mask: a run of the letters y, M, d, H, m",
+      "and s between two angle brackets, such as yyyyMMdd, which stands for a",
+      "date or time written that way. yyyy is a year from 2000 to 2099, yy a",
+      "two-digit year, MM a month number and MMM or MMMM its English name, dd",
+      "or d a day, HH or H an hour, mm a minute and ss a second; any other",
+      "character in the mask stands for itself."
     ),
     paste(
       "If a column that a rule needs is not present in a file, the rule cannot",
