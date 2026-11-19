@@ -106,6 +106,7 @@ Collate:
     'containerFiles.R'
     'containerFindings.R'
     'createTemplateRepo.R'
+    'datePatternTokens.R'
     'documentBuilders.R'
     'documentData.R'
     'evaluateRules.R'

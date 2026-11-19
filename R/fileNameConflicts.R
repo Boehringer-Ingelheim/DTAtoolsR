@@ -15,6 +15,9 @@ dta_pattern_examples <- function(pattern, limit = 40L) {
   if (!is.character(pattern) || length(pattern) != 1L || is.na(pattern)) {
     return(character(0))
   }
+  # A `<<yyyyMMdd>>` date mask is outside the subset parsed below; its
+  # expansion is not.
+  pattern <- dta_expand_date_pattern_tokens(pattern)
   cap <- max(as.integer(limit) * 4L, 40L)
   chars <- strsplit(pattern, "", fixed = TRUE)[[1]]
   n <- length(chars)

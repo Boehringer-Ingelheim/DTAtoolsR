@@ -32,7 +32,7 @@ areas:
     min_tests: 43
   - area: FILE
     title: File handlers and readers
-    min_tests: 57
+    min_tests: 59
   - area: CONT
     title: Container deliveries (zip archives, SAS transport libraries)
     min_tests: 62

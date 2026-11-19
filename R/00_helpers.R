@@ -903,6 +903,7 @@ dta_str_detect <- function(string, pattern) {
     pattern <- rep_len(pattern, n)
     return(vapply(seq_len(n), function(i) dta_str_detect(string[i], pattern[i]), logical(1)))
   }
+  pattern <- dta_expand_date_pattern_tokens(pattern)
   rx <- stringr::regex(pattern, time_limit = dta_regex_time_limit, stack_limit = dta_regex_stack_limit)
   # ICU names its limit errors by code, which is not translated.
   is_limit <- function(e) grepl("U_REGEX_(TIME_OUT|STACK_OVERFLOW)", conditionMessage(e))

@@ -145,6 +145,25 @@ test_that("Testing wrong pattern with DTAFileTSV", {
   expect_false(matches_filename(file_info, basename(path)))
 })
 
+test_that("Testing pattern with a date mask", {
+  file_info <- DTAFileCSV("^s123_<<yyyyMMddHHmm>>\\.csv$", pattern = TRUE)
+  # The property keeps what the author wrote.
+  expect_identical(file_info@filename, "^s123_<<yyyyMMddHHmm>>\\.csv$")
+  expect_true(matches_filename(file_info, "s123_202401311459.csv"))
+  expect_true(matches_filename(file_info, "s123_202401311459.csv.gz"))
+  expect_false(matches_filename(file_info, "s123_202413311459.csv"))
+  expect_false(matches_filename(file_info, "s123_<<yyyyMMddHHmm>>.csv"))
+})
+
+test_that("a malformed date mask in a pattern filename is refused at construction", {
+  expect_error(DTAFileCSV("^ae_<<mmm>>\\.csv$", pattern = TRUE), "mmm", class = "dta_date_pattern_invalid")
+  expect_error(DTAFile("^ae_<<yyyymmdd>>\\.csv$", pattern = TRUE), class = "dta_date_pattern_invalid")
+  ok <- DTAFileCSV("^ae_<<yyyyMMdd>>\\.csv$", pattern = TRUE)
+  expect_error(ok@filename <- "^ae_<<yyy>>\\.csv$", class = "dta_date_pattern_invalid")
+  # A literal file name is not a pattern, so `<<` in it is no mask.
+  expect_no_error(DTAFile("ae_<<x>>.csv"))
+})
+
 test_that("DTAFile Creation", {
   path <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")
 

@@ -45,6 +45,24 @@ test_that("DTAColumnSpec rejects invalid metadata combinations", {
   expect_error(DTAColumnSpec(id = "AGE", colclass = "not_a_real_class"), "colclass")
 })
 
+test_that("DTAColumnSpec checks examples against the expanded date mask", {
+  spec <- DTAColumnSpec(id = "DTC", pattern = "^<<yyyy-MM-dd>>$", examples = c("2024-01-31"))
+  # The property keeps what the author wrote; the schema carries the expansion.
+  expect_identical(spec@pattern, "^<<yyyy-MM-dd>>$")
+  expect_identical(as_json_schema(spec)$pattern, "^20[0-9]{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])$")
+  err <- expect_error(
+    DTAColumnSpec(id = "DTC", pattern = "^<<yyyy-MM-dd>>$", examples = c("2024-13-31")),
+    "must conform"
+  )
+  expect_match(conditionMessage(err), "<<yyyy-MM-dd>>", fixed = TRUE)
+})
+
+test_that("DTAColumnSpec refuses a malformed date mask in its pattern", {
+  err <- expect_error(DTAColumnSpec(id = "DTC", pattern = "^<<mmm>>$"), class = "dta_date_pattern_invalid")
+  expect_match(conditionMessage(err), "DTC", fixed = TRUE)
+  expect_error(DTAColumnSpec(id = "DTC", pattern = "^<<yyyymmdd>>$"), class = "dta_date_pattern_invalid")
+})
+
 test_that("DTAColumnSpec @id validator rejects empty, zero-length and multi-element ids", {
   expect_error(DTAColumnSpec(id = ""), class = "dta_spec_invalid_id")
   expect_error(DTAColumnSpec(id = character(0)), class = "dta_spec_invalid_id")

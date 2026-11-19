@@ -105,6 +105,28 @@ test_that("two entries that take a name only together overlap on it", {
   expect_identical(out$example, "ae.csv")
 })
 
+test_that("dta_pattern_examples() expands a date mask before it enumerates", {
+  ex <- dta_pattern_examples("^lb_<<yyyyMMdd>>\\.csv$", limit = 3L)
+  expect_true(length(ex) > 0L)
+  expect_true(all(grepl("^lb_20[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])\\.csv$", ex)))
+})
+
+test_that("two entries with overlapping date masks conflict", {
+  out <- file_name_conflicts(cfn_dta(list(
+    list(id = "lb", files = list(entry("csv", "^lb.*_<<yyyyMMdd>>[.]csv$"))),
+    list(id = "lb_supp", files = list(entry("csv", "^lb_supp_<<yyyyMMdd>>[.]csv$")))
+  )))
+  expect_identical(nrow(out), 1L)
+  expect_identical(out$expected_a, "^lb.*_<<yyyyMMdd>>[.]csv$")
+  expect_match(out$example, "^lb_supp_20[0-9]{6}[.]csv$")
+  # Distinct literal prefixes do not.
+  none <- file_name_conflicts(cfn_dta(list(
+    list(id = "lb", files = list(entry("csv", "^lb_<<yyyyMMdd>>[.]csv$"))),
+    list(id = "ae", files = list(entry("csv", "^ae_<<yyyyMMdd>>[.]csv$")))
+  )))
+  expect_identical(nrow(none), 0L)
+})
+
 test_that("literal entries are never part of a conflict", {
   same <- cfn_dta(list(
     list(id = "ae", files = list(entry("csv", "ae.csv", pattern = FALSE))),

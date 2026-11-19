@@ -20,6 +20,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   covers every validator code the README documents. Existing repositories
   copy it from
   `system.file("extdata", "agent-skills", package = "DTAtools")`.
+- **Date masks in patterns.** A pattern `filename`, a column `pattern:` or a
+  rule `pattern` condition may contain `<<yyyyMMddHHmm>>`-style masks
+  (`yyyy yy MMMM MMM MM dd d HH H mm ss`, other characters literal) that
+  accept only in-range dates and times, instead of a hand-written
+  `[0-9]{12}`. A malformed mask (`<<yyy>>`, `<<YYYY>>`, or `MM`/`mm` mixed up
+  as in `<<yyyyMMddHHMM>>`) is refused when the specification is built; the
+  specification keeps the mask as written.
 
 ### Fixed
 

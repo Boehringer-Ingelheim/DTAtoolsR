@@ -694,6 +694,21 @@ dta_check_condition_arity <- function(conditions, arg = "condition") {
           class = "dta_condition_arity_error"
         )
       }
+
+      # A malformed `<<yyyyMMdd>>` date mask is refused when the rule is built,
+      # not first when check() evaluates it.
+      if (identical(operator, "pattern") && is.character(flat)) {
+        mask_problem <- dta_date_pattern_problem(flat)
+        if (!is.null(mask_problem)) {
+          cli::cli_abort(
+            c(
+              "{.arg {arg}}: operator {.field pattern} on column {.field {column_name}} has an invalid date mask.",
+              x = "{mask_problem}"
+            ),
+            class = "dta_date_pattern_invalid"
+          )
+        }
+      }
     }
   }
 
@@ -755,7 +770,7 @@ dta_condition_mask <- function(column_name, operator, value, x, converted = NULL
     greater_equal = x >= value,
     less_equal = x <= value,
     range = x >= value[1] & x <= value[2],
-    pattern = grepl(value, as.character(x), perl = TRUE),
+    pattern = grepl(dta_expand_date_pattern_tokens(value), as.character(x), perl = TRUE),
     empty = {
       empty_mask <- is.na(x)
 
