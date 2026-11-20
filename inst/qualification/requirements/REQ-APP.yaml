@@ -626,18 +626,27 @@ requirements:
       choice of the header text above that row label (the ID, an empty field,
       another text, or no field) and a cell type, and shall refuse the addition
       when the ID, the choice or the cell type is missing, or when another text
-      is chosen and left blank. The dataset added shall be a matrix whose
-      single row-label column carries the given ID, is of type SAS Char, is
-      not nullable and is the row key, whose header is the one chosen (no
-      header key for the ID, "" for an empty field, the text, No for no field)
-      and whose cell type is the one chosen, and which requires at least one
-      data column and at least one data row.
+      is chosen and left blank, or when the cell type is not one of SAS Num,
+      SAS Int, SAS Char, R numeric, R integer and R character (a logical, date
+      or time type, a type written without its SAS or R in front and a type
+      system the package does not have being refused); a refused addition
+      leaves the document unchanged. The dataset added shall be a matrix whose
+      single row-label column carries the given ID, is of the text type of the
+      chosen cell type's type system (SAS Char for a SAS cell type, R character
+      for an R one), is not nullable and is the row key, whose header is the
+      one chosen (no header key for the ID, "" for an empty field, the text, No
+      for no field) and whose cell type is the one chosen, and which requires
+      at least one data column and at least one data row.
     risk: high
     category: functional
     covers: [run_dta_app]
     source: >
       PLAN-matrix-shiny.md 2.1; PLAN-matrix-format-review.md 3 (App);
       inst/shiny/dta_app/R/utils_dta.R (dta_add_dataset)
+    notes: >
+      The cell types a matrix can hold are the number, integer and text types
+      of either type system (REQ-MATRIX-060). What the dialog offers, as
+      against what the application accepts, is REQ-APP-056.
 
   - id: REQ-APP-042
     text: >
@@ -794,3 +803,232 @@ requirements:
       developer suite's wiring and Shiny-contract tests
       (tests/testthat/test-shinyapp-upload-guard.R) and on a browser run, not on
       this suite. This requirement is verified here for the value itself.
+
+  # ---- the two type systems in the application (data_types.default) ----------
+  #
+  # A column's declared type is written with its type system in front (SAS Num,
+  # R numeric; REQ-TYPE-003). The key data_types.default of a library's
+  # dta-app.yaml names the type system the application preselects for NEW
+  # columns and new matrix cells, SAS or R. It hides nothing: both are always
+  # on offer, a column or matrix that exists keeps its own, and a type written
+  # in YAML keeps its mandatory prefix. The requirements below are the
+  # application's side of REQ-TMPL-064, which covers the file.
+
+  - id: REQ-APP-051
+    text: >
+      When data_types.default of the application configuration is R, the column
+      editor opened for a new column of a tabular dataset shall preselect the
+      backend R and the type character, shall list character, numeric,
+      integer, logical, Date, POSIXct and hms as the choice of type, and shall
+      show a format placeholder that gives an R format (%Y-%m-%d). When it is
+      SAS, when the configuration sets no data_types.default and when there is
+      no configuration file, the editor shall preselect the backend SAS and
+      the type Char, shall list Char, Num, Int, Date, Time and DateTime, and
+      shall show a placeholder that gives a SAS format ($9. or 8.2). Whichever
+      is preselected, the choice of backend shall offer both SAS and R.
+    risk: high
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      inst/shiny/dta_app/app.R (col_modal_body); inst/shiny/dta_app/R/utils_dta.R
+      (dta_default_backend, dta_backend_types, dta_text_type,
+      dta_format_placeholder); inst/shiny/dta_app/R/app_config.R
+    notes: >
+      The key decides only what a NEW column starts with. The default type is
+      the text type of the preselected type system, never the first type of
+      the list.
+
+  - id: REQ-APP-052
+    text: >
+      The application shall read data_types.default as SAS or R, in any letter
+      case and with blanks around the value ignored. A value that is neither
+      (Python, a number, an empty text, a list) shall be reported as a warning
+      that names data_types.default, once, and the application shall then
+      start as if the key were absent, with SAS preselected; a valid value
+      shall raise no warning.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/R/app_config.R (.cfg_backend, .dta_app_config_build)
+    notes: >
+      The application never fails over a bad value of the file, it warns and
+      keeps the default (REQ-TMPL-037); validate_template() is what fails the
+      library's CI on it (REQ-TMPL-064).
+
+  - id: REQ-APP-053
+    text: >
+      The column editor opened for an existing column shall show the backend,
+      the type, the format and the length the column is declared with,
+      whatever data_types.default says, the format without its backend in
+      front, and saving the form unchanged shall leave the column's declared
+      type and format as they were. A column declared R POSIXct with the
+      format R %Y-%m-%dT%H:%M:%S shall open as the backend R, the type POSIXct
+      and the format %Y-%m-%dT%H:%M:%S; a column declared SAS Num with the
+      format SAS 8.2 as the backend SAS, the type Num and the format 8.2; a
+      column declared R character with the length 12 as the backend R, the
+      type character and the length 12; each in a configuration that prefers
+      SAS and in one that prefers R. A column that declares no type shall open
+      with the preselected backend and its text type (REQ-APP-051).
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: >
+      inst/shiny/dta_app/app.R (col_edit_click); inst/shiny/dta_app/R/utils_dta.R
+      (dta_column_fields)
+    notes: >
+      Opening a column of one type system under a library that prefers the
+      other and saving it must not turn it into the preferred one.
+
+  - id: REQ-APP-054
+    text: >
+      Changing the Backend in the column editor shall replace the chosen type
+      by the other backend's type of the same kind (Char and character, Num and
+      numeric, Int and integer, Date and Date, DateTime and POSIXct, Time and
+      hms), shall list the new backend's types as the choice of type, shall
+      empty the Format whatever it held, because a SAS format and an R format
+      are not interchangeable, shall keep the Length when the new type is Char
+      or character and empty it when the new type is an R type other than
+      character, and shall keep every other entry of the form (the ID, the
+      label, whether the column is nullable, its description). R logical, which
+      has no SAS counterpart, shall become SAS Char, and the application shall
+      show a notice that names logical and SAS Char. Asking for the backend the
+      form already holds shall change nothing.
+    risk: high
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      inst/shiny/dta_app/R/utils_dta.R (dta_switch_backend,
+      dta_backend_type_map); inst/shiny/dta_app/app.R (input$col_backend)
+    notes: >
+      What becomes of a Length held across a switch to a SAS type other than
+      Char is not specified here: the application empties it, and an entry
+      typed against an R type other than character was refused there in any
+      case (REQ-TYPE-016).
+
+  - id: REQ-APP-055
+    text: >
+      The column editor shall show, whatever inputs the browser last reported
+      for it, the backend, type and format of the column it was opened for or,
+      for a new column of a tabular dataset, the preselected backend and its
+      text type (REQ-APP-051): the values of a previously edited column that
+      the browser still holds, and the report the browser sends of the form it
+      has just been given, shall neither change the type shown nor empty the
+      format of the column opened. Closing the editor and opening it again for
+      a new column shall show the preselected backend and its text type again,
+      not those of the column edited last.
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: >
+      inst/shiny/dta_app/app.R (col_modal_body, input$col_backend,
+      col_shown_backend)
+    notes: >
+      Shiny reports a re-opened dialog's previous values first and a rendered
+      select's value as a change; an application that took either for a choice
+      of the user would save a SAS format under an R type, or a column of the
+      wrong type system.
+
+  - id: REQ-APP-056
+    text: >
+      The Add dataset dialog shall offer as the cell type of a matrix dataset
+      SAS Num (decimal numbers), SAS Int (whole numbers) and SAS Char (text)
+      when data_types.default is SAS or not set, and R numeric (decimal
+      numbers), R integer (whole numbers) and R character (text) when it is R,
+      and no type of the other type system; none of the types offered shall be
+      preselected.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      inst/shiny/dta_app/app.R (add_ds_body); inst/shiny/dta_app/R/utils_dta.R
+      (dta_matrix_cell_types)
+    notes: >
+      A matrix whose cells are written in the other type system is made in the
+      raw YAML editor or in a template, or by sending the cell type from
+      another client, which REQ-APP-041 accepts (LIM-033).
+
+  - id: REQ-APP-057
+    text: >
+      The matrix-layout editor shall offer as the cell type the three types of
+      the type system the matrix's cell type is written in, whatever
+      data_types.default says (SAS Num, SAS Int and SAS Char for a matrix of SAS
+      cells; R numeric, R integer and R character for a matrix of R cells), and
+      no type of the other system, with the matrix's own cell type chosen, and
+      for a matrix of R cells it shall offer no field for a format, which R
+      cells do not take, where a matrix of SAS cells keeps its SAS format
+      field. Saving the layout of an R matrix, whatever else was
+      changed, shall keep the cell type written with the prefix R (R numeric,
+      never SAS R numeric) and every cell setting that was not edited, and
+      shall give its cells no format, also when the layout form of a SAS
+      matrix opened earlier reported one; choosing another of the three types
+      shall write that type with the same prefix.
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: >
+      inst/shiny/dta_app/app.R (mx_modal_body, mx_save);
+      inst/shiny/dta_app/R/utils_dta.R (dta_matrix_fields, dta_set_matrix)
+    notes: >
+      Before the R type system, every cell type was written back as SAS and
+      the prefix of a saved type was rewritten, so an R layout could not be
+      saved. Nothing the form offers changes a matrix from one type system to
+      the other (LIM-033).
+
+  - id: REQ-APP-058
+    text: >
+      A row label added to a matrix dataset in the column editor shall be
+      preselected with the type system the matrix's cell type is written in and
+      that system's text type (SAS Char or R character), whatever
+      data_types.default says, and the choice of backend shall still offer both
+      SAS and R; a column added to a tabular dataset shall be preselected as
+      REQ-APP-051 says, also in a document that holds matrix datasets.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      inst/shiny/dta_app/app.R (col_add); inst/shiny/dta_app/R/utils_dta.R
+      (dta_matrix_backend)
+    notes: >
+      A matrix of R cells with a SAS row label is allowed but is not what an
+      author who added a row label to it means.
+
+  - id: REQ-APP-059
+    text: >
+      The column choice of a range rule shall list the columns of the dataset
+      declared with a number or an integer type of either type system (SAS
+      Num, SAS Int, R numeric, R integer) and no column declared with a text,
+      date, time or logical type (SAS Char, SAS Date, SAS Time, SAS DateTime,
+      R character, R logical, R Date, R POSIXct, R hms).
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      inst/shiny/dta_app/R/utils_dta.R (dta_numeric_column_ids);
+      inst/shiny/dta_app/app.R (rule_col_single)
+    notes: >
+      The picker decides by what kind of value the type holds, so an R numeric
+      column is offered as a SAS Num one is and an R character one is not;
+      lint_dta() refuses a range rule on an R logical column all the same
+      (REQ-SPEC-036).
+
+  - id: REQ-APP-060
+    text: >
+      The specification text the application saves shall write the type of each
+      column with its type system in front (SAS Num, R numeric), a format with
+      its type system in front (SAS 8.2, R %Y-%m-%dT%H:%M:%S) and, for an R
+      Date, R POSIXct or R hms column that names no format, the format of its
+      type (R %Y-%m-%d, R %Y-%m-%d %H:%M:%S, R %H:%M:%S; REQ-TYPE-016). Reading
+      the saved text back shall give the same declared type and format for
+      every column, and saving that document again shall give the identical
+      text. A column added in the editor as R Date with the Format left empty
+      shall be saved with the format R %Y-%m-%d.
+    risk: high
+    category: integrity
+    covers: [run_dta_app, read_dta_from_yaml]
+    source: >
+      inst/shiny/dta_app/R/utils_dta.R (dta_to_yaml_text, dta_column_to_list,
+      dta_set_column); R/DTAColumnSpecStructureR-class.R
+    notes: >
+      The application cannot make an R Date, POSIXct or hms column without a
+      format: the one the author did not write is stored and then written
+      (LIM-034).

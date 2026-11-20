@@ -854,7 +854,15 @@
     enum = paste0("Must be one of: ", spec_text_prose, "."),
     const = paste0("Must be exactly: ", spec_text, "."),
     pattern = paste0("Must match the pattern: ", spec_text),
-    format = paste0("Must fit the SAS format: ", spec_text, "."),
+    # An R date/time format is told apart by its `%`, which no SAS format has.
+    format = paste0(
+      if (!is.na(spec) && grepl("%", as.character(spec), fixed = TRUE)) {
+        "Must fit the R date/time format: "
+      } else {
+        "Must fit the SAS format: "
+      },
+      spec_text, "."
+    ),
     minimum = paste0("The value is below the declared minimum (", spec_text, ")."),
     maximum = paste0("The value is above the declared maximum (", spec_text, ")."),
     finite = "The value must be finite (not Inf or -Inf).",

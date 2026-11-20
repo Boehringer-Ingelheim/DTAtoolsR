@@ -34,9 +34,12 @@ DTAMatrixSpec <- S7::new_class(
     if (!identical(self@header@id, "matrix.columns")) {
       cli_abort("The spec of the data-column labels must have the id {.val matrix.columns}.", class = "dta_matrix_header_invalid")
     }
-    if (!identical(dta_cell_type(self@header), "Char") || !identical(self@header@nullable, FALSE)) {
+    # The reader builds the header as SAS Char whatever the cells use (it is not a
+    # user-declared type, and nothing prints it); a text column of either
+    # backend is accepted so a hand-built spec may use R character.
+    if (!identical(dta_cell_family(self@header), "text") || !identical(self@header@nullable, FALSE)) {
       cli_abort(
-        "The matrix header spec must be a non-nullable {.val SAS Char} column.",
+        "The matrix header spec must be a non-nullable text column ({.val SAS Char} or {.val R character}).",
         class = "dta_matrix_header_invalid"
       )
     }
@@ -55,9 +58,9 @@ DTAMatrixSpec <- S7::new_class(
     if (!is.null(self@row_key) && (length(self@row_key) == 0L || anyNA(self@row_key))) {
       cli_abort("{.field row_key} must name at least one row-label id.", class = "dta_matrix_field_invalid")
     }
-    if (!(dta_cell_type(self@cells) %in% c("Num", "Int", "Char"))) {
+    if (!(dta_cell_family(self@cells) %in% c("number", "integer", "text"))) {
       cli_abort(
-        "{.field cells.type} must be {.val SAS Num}, {.val SAS Int} or {.val SAS Char}.",
+        "{.field cells.type} must be a numeric or text type: {.val SAS Num}, {.val SAS Int}, {.val SAS Char}, {.val R numeric}, {.val R integer} or {.val R character}.",
         class = "dta_matrix_cells_type"
       )
     }
@@ -238,8 +241,13 @@ dta_matrix_spec_from_list <- function(x) {
     if (!is.null(rng$max)) hi <- dta_matrix_bound(rng$max, "matrix.cells.range.max")
   }
 
-  cell_type <- if (is.character(cl$type) && length(cl$type) == 1L) {
-    `__dta_normalize_sas_type__`(sub("^SAS\\s+", "", trimws(cl$type), ignore.case = TRUE))
+  # The family of the type as written, whichever backend spells it. A type the
+  # factory refuses has no family here; DTAColumnSpecCell() below reports it.
+  cell_family <- if (is.character(cl$type) && length(cl$type) == 1L) {
+    tryCatch(
+      dta_type_family(DTAColumnSpecStructureFactory(type = cl$type)),
+      error = function(e) NA_character_
+    )
   } else {
     NA_character_
   }
@@ -247,9 +255,10 @@ dta_matrix_spec_from_list <- function(x) {
   if (!is.null(infinite) && !(is.logical(infinite) && length(infinite) == 1L && !is.na(infinite))) {
     cli_abort("{.field matrix.cells.infinite} must be true or false.", class = "dta_cell_finite_type")
   }
-  # Infinite values are rejected unless allowed -- for a Num cell. A written
-  # `infinite` on any other type reaches the cell validator and aborts there.
-  finite <- if (identical(cell_type, "Num")) !isTRUE(infinite) else if (!is.null(infinite)) !infinite
+  # Infinite values are rejected unless allowed -- for a number cell (SAS Num,
+  # R numeric). A written `infinite` on any other type reaches the cell
+  # validator and aborts there.
+  finite <- if (identical(cell_family, "number")) !isTRUE(infinite) else if (!is.null(infinite)) !infinite
 
   cells <- DTAColumnSpecCell(
     id = "cells", type = cl$type, nullable = cl$nullable, values = cl$values,

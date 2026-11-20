@@ -24,7 +24,12 @@ package sees the same shapes it sees from a CSV file:
 \item a column haven delivers as \code{Date}, \code{POSIXct} or \code{hms} is converted back to
 its SAS number and then, by what \code{specs} declares for the column, rendered
 as the declared format's display text, kept as the SAS number, or rendered
-as ISO 8601 text -- see \link{DTAFileSAS7BDAT}.
+as ISO 8601 text -- see \link{DTAFileSAS7BDAT}. A column declared with an \code{R}
+type is decided first, by its family (\code{\link[=dta_type_family]{dta_type_family()}}): \verb{R Date},
+\verb{R POSIXct} and \verb{R hms} render the typed values with
+\code{\link[=dta_r_render_temporal]{dta_r_render_temporal()}} under the stored format when the declaration
+matches the column's kind (Date, DateTime, Time) and otherwise as ISO text;
+any other \code{R} type keeps the SAS number. The SAS branches are unchanged.
 }
 }
 \keyword{internal}

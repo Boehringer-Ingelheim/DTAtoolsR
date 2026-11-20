@@ -104,6 +104,46 @@ test_that("temporal columns are normalised as for sas7bdat", {
   expect_identical(t_num$VSDT, c(23968, 23968, 23969))
 })
 
+test_that("a date declared in the R vocabulary is read as the R format's text, as for sas7bdat", {
+  members <- dta_xpt_members(cont_fx("sdtm.xpt"))
+  dest <- file.path(withr::local_tempdir(), "lib")
+  parts <- dta_xpt_split(cont_fx("sdtm.xpt"), members, dest)
+  vs <- parts[members$name == "vs.xpt"]
+  expect_length(vs, 1)
+
+  vs_specs <- function(...) {
+    DTAColumnSpecCollection(
+      columns = list(
+        USUBJID = DTAColumnSpec(id = "USUBJID", type = "R character", nullable = FALSE),
+        VSTESTCD = DTAColumnSpec(id = "VSTESTCD", type = "R character", nullable = FALSE),
+        VSSTRESN = DTAColumnSpec(id = "VSSTRESN", type = "R numeric", nullable = FALSE),
+        VSDT = DTAColumnSpec(id = "VSDT", nullable = FALSE, ...)
+      ),
+      rules = list()
+    )
+  }
+
+  # SAS days 23968, 23968 and 23969 are 2025-08-15, 2025-08-15 and 2025-08-16.
+  stored_default <- as.data.frame(read_file(
+    DTAFileXPT("vs.xpt"), vs,
+    specs = vs_specs(type = "R Date")
+  ))
+  expect_identical(stored_default$VSDT, c("2025-08-15", "2025-08-15", "2025-08-16"))
+
+  custom <- as.data.frame(read_file(
+    DTAFileXPT("vs.xpt"), vs,
+    specs = vs_specs(type = "R Date", format = "R %d/%m/%Y")
+  ))
+  expect_identical(custom$VSDT, c("15/08/2025", "15/08/2025", "16/08/2025"))
+
+  # R numeric keeps the SAS number, days since 1960-01-01.
+  as_number <- as.data.frame(read_file(
+    DTAFileXPT("vs.xpt"), vs,
+    specs = vs_specs(type = "R numeric")
+  ))
+  expect_identical(as_number$VSDT, c(23968, 23968, 23969))
+})
+
 test_that("an xpt is held in memory and says so when its size would stream", {
   withr::local_options(DTAtools.stream_threshold = 1)
   ds <- DTADataSetTabular(

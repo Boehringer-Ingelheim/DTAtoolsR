@@ -161,6 +161,37 @@ qapp_clean_session_files <- function() {
   invisible(f)
 }
 
+# Make the calling test's next servers read the app configuration in `lines`
+# (the dta-app.yaml of the only template library), or none at all when `lines`
+# is NULL. The configuration is read when a server STARTS, so this has to run
+# before shiny::testServer(); shiny::testServer() sources the application
+# directory afresh, so its configuration cache starts empty each time and the
+# new value is seen. The library, the environment variables and the option are
+# all undone when the calling test ends.
+#
+# Mirrors the development suite's with_app_library(), which is not installed
+# with the package. DTATOOLS_TEMPLATE_INCLUDE_BUILTIN is false so that the
+# packaged templates do not join the library; the remaining variables are
+# cleared so that a machine that exports them does not redirect the run.
+qapp_with_library <- function(lines = NULL, env = parent.frame()) {
+  lib <- qa_tempdir(env)
+  if (!is.null(lines)) {
+    writeLines(c("kind: dta_app_config", lines), file.path(lib, "dta-app.yaml"))
+  }
+  withr::local_envvar(
+    c(
+      DTATOOLS_TEMPLATE_SOURCES = paste0("qualification=dir:", lib),
+      DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = "false",
+      DTATOOLS_TEMPLATE_REFRESH_SECONDS = NA,
+      DTATOOLS_TEMPLATE_CACHE_DIR = NA
+    ),
+    .local_envir = env
+  )
+  withr::local_options(list(DTAtools.template_dir = NULL), .local_envir = env)
+  qapp_clean_session_files()
+  invisible(lib)
+}
+
 # Drive the app's "Create new version" flow -- the route that unlocks
 # editing for a document LOADED from an existing one (an upload or a bundled
 # example arrives read-only; see the WHY comment on editing() in app.R).

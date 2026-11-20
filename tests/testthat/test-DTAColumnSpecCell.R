@@ -187,3 +187,123 @@ test_that("print() names the class and shows the bounds and finiteness", {
   expect_match(open, "[2, Inf]", fixed = TRUE)
   expect_false(grepl("finite", open, fixed = TRUE))
 })
+
+# ---- the R vocabulary ------------------------------------------------------------
+
+# A cell is judged by the family of its type, not by a SAS type name: R numeric
+# and R integer behave as SAS Num and SAS Int do.
+r_cell <- function(type, ...) DTAColumnSpecCell(id = "VAL", type = type, nullable = TRUE, ...)
+
+test_that("an R numeric and an R integer cell take a range; only R numeric takes infinite", {
+  num <- r_cell("R numeric", minimum = 0, maximum = 10, finite = TRUE)
+  expect_equal(num@minimum, 0)
+  expect_equal(num@maximum, 10)
+  expect_true(num@finite)
+  expect_no_error(r_cell("R integer", minimum = 0, maximum = 3))
+  expect_error(r_cell("R integer", finite = TRUE), class = "dta_cell_finite_type")
+  expect_error(r_cell("R integer", finite = FALSE), class = "dta_cell_finite_type")
+})
+
+test_that("a range or infinite on a cell that is not numeric is refused in either vocabulary", {
+  for (type in c(
+    "R character", "R logical", "R Date", "R POSIXct", "R hms",
+    "SAS Char", "SAS Date", "SAS Time", "SAS DateTime"
+  )) {
+    expect_error(r_cell(type, minimum = 0), class = "dta_cell_range_type", info = type)
+    expect_error(r_cell(type, maximum = 1), class = "dta_cell_range_type", info = type)
+    expect_error(r_cell(type, finite = TRUE), class = "dta_cell_finite_type", info = type)
+  }
+  # and SAS Int still refuses infinite, as ever
+  expect_error(r_cell("SAS Int", finite = TRUE), class = "dta_cell_finite_type")
+})
+
+test_that("the refusals name the numeric types of both vocabularies", {
+  text <- function(cnd) gsub("\\s+", " ", conditionMessage(cnd))
+  range <- expect_error(r_cell("R character", minimum = 0), class = "dta_cell_range_type")
+  for (type in c("SAS Num", "SAS Int", "R numeric", "R integer")) {
+    expect_match(text(range), type, fixed = TRUE)
+  }
+  finite <- expect_error(r_cell("R integer", finite = TRUE), class = "dta_cell_finite_type")
+  for (type in c("SAS Num", "R numeric")) {
+    expect_match(text(finite), type, fixed = TRUE)
+  }
+  expect_false(grepl("SAS Int", text(finite), fixed = TRUE))
+})
+
+test_that("as.list() of an R cell writes its type, range and, for R numeric only, infinite", {
+  num <- as.list(r_cell("R numeric", minimum = 0, maximum = 10, finite = TRUE))
+  expect_identical(num$type, "R numeric")
+  expect_equal(num$range, list(min = 0, max = 10))
+  expect_false(num$infinite)
+  expect_true(as.list(r_cell("R numeric", finite = FALSE))$infinite)
+
+  int <- as.list(r_cell("R integer", minimum = 1L))
+  expect_identical(int$type, "R integer")
+  expect_equal(int$range, list(min = 1L))
+  expect_null(int$infinite)
+
+  chr <- as.list(r_cell("R character", length = 4))
+  expect_identical(chr$type, "R character")
+  expect_null(chr$range)
+  expect_null(chr$infinite)
+})
+
+test_that("as_json_schema() of an R cell has the schema type of its family and its bounds", {
+  num <- as_json_schema(r_cell("R numeric", minimum = 0, maximum = 10, finite = TRUE))
+  expect_equal(num$type, c("number", "null"))
+  expect_equal(num$minimum, 0)
+  expect_equal(num$maximum, 10)
+  expect_true(num$finite)
+  expect_equal(as_json_schema(r_cell("R integer", minimum = 1))$type, c("integer", "null"))
+})
+
+test_that("R numeric and R integer cells bound and finite-check as SAS Num and SAS Int do", {
+  num <- as_json_schema(r_cell("R numeric", minimum = 0, maximum = 10, finite = TRUE))
+  out <- dta_check_column_spec("VAL", num, c(-1, 5, 11, Inf))
+  out <- out[order(out$row, out$keyword), ]
+  expect_equal(out$row, c(1L, 3L, 4L))
+  expect_equal(out$keyword, c("minimum", "maximum", "finite"))
+
+  int <- as_json_schema(r_cell("R integer", minimum = 1, maximum = 3))
+  out <- dta_check_column_spec("VAL", int, c(0L, 1L, 3L, 4L))
+  expect_equal(out$row, c(1L, 4L))
+  expect_equal(out$keyword, c("minimum", "maximum"))
+})
+
+test_that("an R numeric cell agrees between the eager and streaming paths", {
+  path <- withr::local_tempfile(fileext = ".tsv")
+  writeLines(
+    c("ID\tVAL", "a\t5", "b\t-1", "c\t11", "d\tInf", "e\t-Inf", "f\t", "g\t10"),
+    path
+  )
+  run <- function(stream) {
+    specs <- DTAColumnSpecCollection(columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "R character", nullable = FALSE),
+      VAL = DTAColumnSpecCell(
+        id = "VAL", type = "R numeric", nullable = TRUE,
+        minimum = 0, maximum = 10, finite = TRUE
+      )
+    ))
+    ds <- DTADataSetTabular(
+      id = "d", specs = specs,
+      files = list(DTAFileTSV(filename = basename(path)))
+    )
+    ds <- load_file(ds, file = path, handler_index = 1, stream = stream)
+    ds <- check(ds, persist = FALSE, quiet = TRUE)
+    m <- messages(ds, as_tibble = FALSE)
+    m <- m[m$keyword %in% c("minimum", "maximum", "finite"), , drop = FALSE]
+    data.frame(
+      row = m$row, column = m$column,
+      keyword = m$keyword, stringsAsFactors = FALSE
+    )
+  }
+  key <- function(d) d[order(d$row, d$keyword), , drop = FALSE]
+  expected <- data.frame(
+    row = c(2L, 3L, 4L, 5L),
+    column = "VAL",
+    keyword = c("minimum", "maximum", "finite", "finite"),
+    stringsAsFactors = FALSE
+  )
+  expect_equal(key(run("never")), expected, ignore_attr = TRUE)
+  expect_equal(key(run("always")), expected, ignore_attr = TRUE)
+})

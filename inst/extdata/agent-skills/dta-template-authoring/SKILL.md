@@ -103,7 +103,7 @@ broken by a one-line edit.
 | "One supplier delivers the dataset with a few extra or different columns" | A `patch:` on that supplier's dataset entry, pinned (`template: ds@1.0`) | Forking the dataset template |
 | "A new kind of dataset" | A new dataset template, referenced with `template:` | An inline dataset in one creation template, if anything else may reuse it |
 | "The same company's contact block in many DTAs" | A party profile plus a `party_slots:` entry | Contacts written into `base.metadata` |
-| "Logo, colours, document name, which exports or features the app offers" | `dta-app.yaml` at the root | Anything in `templates/` |
+| "Logo, colours, document name, which exports or features the app offers, which type system (`SAS` or `R`) new columns start with" | `dta-app.yaml` at the root (`data_types.default`) | Anything in `templates/` |
 
 [composition.md](references/composition.md) explains each row, with examples
 that lint clean.
@@ -136,7 +136,9 @@ Each has bitten someone; the reason is why it is not a style preference.
   owns them), no `${…}` token other than `${today}`, `${version}`,
   `${study.id}` and `${study.protocol_id}` (`${version}` is filled in only in
   the document metadata, not in a dataset), no `example:` (it is
-  `examples:`), no option-level `required`/`min`/`order`.
+  `examples:`), no option-level `required`/`min`/`order`, no bare column type
+  (`Char`, `character`): a `type` and its `format` start with `SAS ` or `R `,
+  and an R date format uses only `%Y %m %d %H %M %S %OS1`–`%OS6 %F %T`.
 - **Template changes do not go in `base.metadata.version_history`.** That list
   is the history of the *document* a template creates and is copied into every
   new DTA.

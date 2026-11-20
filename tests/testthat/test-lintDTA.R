@@ -1013,3 +1013,350 @@ test_that("a rule id with spaces is still rewritten to underscores, not kept as 
   expect_identical(rule@id, "my_rule")
   expect_identical(nrow(lint_rules(list(list(id = "my rule", type = "col_unique", columns = "SEX")))), 0L)
 })
+
+# ---- the R vocabulary --------------------------------------------------------------
+# A column is judged by the family of its type (text, number, integer, logical,
+# temporal), never by a SAS type name. Every check here is a construction gate: a
+# lint error stops a collection from being built.
+
+r_cols <- function(...) {
+  list(
+    list(id = "TXT", type = "R character", length = 5),
+    list(id = "NUM", type = "R numeric"),
+    list(id = "INT", type = "R integer"),
+    list(id = "LGL", type = "R logical"),
+    list(id = "LGV", type = "R logical", values = c("TRUE", "FALSE")),
+    list(id = "LGO", type = "R logical", values = "TRUE"),
+    list(id = "DAY", type = "R Date"),
+    list(id = "STAMP", type = "R POSIXct"),
+    list(id = "TOD", type = "R hms"),
+    ...
+  )
+}
+
+# One col_condition rule: `col` `op` `value`, with a harmless `then` on the same
+# column.
+r_cond <- function(col, op, value, id = paste(col, op)) {
+  list(
+    id = id, type = "col_condition",
+    condition = stats::setNames(list(stats::setNames(list(value), op)), col),
+    then = stats::setNames(list(list(empty = FALSE)), col)
+  )
+}
+
+# The findings of one rule on r_cols(), as "code/severity" in sorted order.
+r_lint <- function(rule, columns = r_cols()) {
+  out <- lint_dta(list(columns = columns, rules = list(rule)))
+  sort(sprintf("%s/%s", out$code, out$severity), method = "radix")
+}
+
+r_lint_df <- function(rule, columns = r_cols()) lint_dta(list(columns = columns, rules = list(rule)))
+
+test_that("rule_range_non_numeric flags R character, logical and temporal columns, passes R numeric and integer", {
+  range <- function(col) list(id = "r", type = "col_range", columns = col, min = 1, max = 2)
+  for (bad in c("TXT", "LGL", "DAY", "STAMP", "TOD")) {
+    expect_identical(r_lint(range(bad)), "rule_range_non_numeric/error", info = bad)
+  }
+  for (ok in c("NUM", "INT")) {
+    expect_identical(r_lint(range(ok)), character(0), info = ok)
+  }
+})
+
+test_that("a numeric operator on R character is an error, on an R temporal a warning, on R numbers none", {
+  expect_identical(
+    r_lint(r_cond("TXT", "greater", 3)), "rule_condition_numeric_on_text/error"
+  )
+  for (col in c("DAY", "STAMP", "TOD")) {
+    expect_identical(
+      r_lint(r_cond(col, "less", 3)), "rule_condition_numeric_on_text/warning",
+      info = col
+    )
+  }
+  for (col in c("NUM", "INT")) {
+    expect_identical(r_lint(r_cond(col, "greater", 3)), character(0), info = col)
+    expect_identical(
+      r_lint(r_cond(col, "greater", "abc")), "rule_condition_numeric_on_text/error",
+      info = col
+    )
+  }
+  # a numeric operator on a logical column reads TRUE as 1, as the engine does
+  expect_identical(r_lint(r_cond("LGL", "greater", 0)), character(0))
+})
+
+test_that("an R column is judged like its SAS counterpart in every operator check", {
+  rules <- function(col) {
+    list(
+      list(id = "range", type = "col_range", columns = col, min = 1, max = 2),
+      r_cond(col, "greater", 3, id = "gt3"),
+      r_cond(col, "greater", "abc", id = "gtabc"),
+      r_cond(col, "equals", TRUE, id = "eqtrue"),
+      r_cond(col, "not_in", list(FALSE, TRUE), id = "notin")
+    )
+  }
+  # The plain value checks differ by design for the temporal types: an R
+  # date is strict about its format, a SAS date with no format is not.
+  value_rules <- function(col) {
+    list(
+      r_cond(col, "equals", 7, id = "eq7"),
+      r_cond(col, "equals", "waytoolong", id = "eqlong"),
+      r_cond(col, "in", list("a", "b"), id = "ina")
+    )
+  }
+  findings <- function(type, rules) {
+    # a length belongs to the text types only; the R ones refuse it elsewhere
+    col <- c(list(id = "C", type = type), if (grepl("Char$|character$", type)) list(length = 5))
+    out <- lint_dta(list(columns = list(col), rules = rules))
+    out[order(out$id, out$code, method = "radix"), c("id", "code", "severity")]
+  }
+  pairs <- list(
+    c("SAS Char", "R character"), c("SAS Num", "R numeric"), c("SAS Int", "R integer"),
+    c("SAS Date", "R Date"), c("SAS Time", "R hms"), c("SAS DateTime", "R POSIXct")
+  )
+  for (p in pairs) {
+    sas <- findings(p[[1]], rules("C"))
+    r <- findings(p[[2]], rules("C"))
+    expect_identical(r, sas, info = paste(p, collapse = " / "))
+  }
+  for (p in pairs[1:3]) {
+    sas <- findings(p[[1]], value_rules("C"))
+    r <- findings(p[[2]], value_rules("C"))
+    expect_identical(r, sas, info = paste(p, collapse = " / "))
+  }
+})
+
+test_that("the operand checks of R numeric, R integer and R character are those of SAS Num, Int and Char", {
+  expect_identical(r_lint(r_cond("INT", "equals", "abc")), "rule_condition_value_unfit/error")
+  expect_identical(r_lint(r_cond("INT", "equals", 1.5)), "rule_condition_value_unfit/error")
+  expect_identical(r_lint(r_cond("INT", "equals", 3)), character(0))
+  expect_identical(r_lint(r_cond("NUM", "in", list("1.5", "abc"))), "rule_condition_value_unfit/error")
+  expect_identical(r_lint(r_cond("NUM", "equals", 1.5)), character(0))
+  expect_identical(r_lint(r_cond("TXT", "equals", "waytoolong")), "rule_condition_value_unfit/error")
+  expect_identical(r_lint(r_cond("TXT", "equals", "ok")), character(0))
+  # YAML has dropped the zeros of a number written against text
+  expect_identical(r_lint(r_cond("TXT", "equals", 7)), "rule_condition_value_unfit/warning")
+})
+
+test_that("an R temporal operand must fit the column's format", {
+  expect_identical(r_lint(r_cond("DAY", "equals", "2024-13-01")), "rule_condition_value_unfit/error")
+  expect_identical(r_lint(r_cond("DAY", "equals", "2024-02-29")), character(0))
+  expect_identical(r_lint(r_cond("DAY", "in", list("2024-02-29", "tomorrow"))), "rule_condition_value_unfit/error")
+  expect_identical(r_lint(r_cond("TOD", "equals", "25:00:00")), "rule_condition_value_unfit/error")
+  expect_identical(r_lint(r_cond("TOD", "equals", "23:59:59")), character(0))
+  expect_identical(r_lint(r_cond("STAMP", "equals", "2024-01-31 12:00:00")), character(0))
+  # a format written on the column is the one the operand must fit
+  fmt <- list(list(id = "D", type = "R Date", format = "R %d.%m.%Y"))
+  expect_identical(r_lint(r_cond("D", "equals", "31.01.2024"), fmt), character(0))
+  expect_identical(r_lint(r_cond("D", "equals", "2024-01-31"), fmt), "rule_condition_value_unfit/error")
+})
+
+test_that("a YAML logical against a column that is not logical is an error naming the R type", {
+  for (col in c("TXT", "NUM", "INT", "DAY", "TOD")) {
+    out <- r_lint_df(r_cond(col, "equals", TRUE))
+    expect_identical(out$code, "rule_condition_value_unfit", info = col)
+    expect_identical(out$severity, "error", info = col)
+    expect_match(out$message, paste0("column is R ", c(
+      TXT = "character", NUM = "numeric", INT = "integer", DAY = "Date", TOD = "hms"
+    )[[col]]), fixed = TRUE)
+  }
+  # and the negated operators too
+  expect_identical(r_lint(r_cond("TXT", "not_equals", FALSE)), "rule_condition_value_unfit/error")
+})
+
+test_that("a SAS finding still names the bare type, an R finding the type with its backend", {
+  sas <- lint_dta(list(
+    columns = list(list(id = "A", type = "SAS Char")),
+    rules = list(r_cond("A", "equals", TRUE, id = "r"))
+  ))
+  expect_match(sas$message, "the column is Char.", fixed = TRUE)
+  r <- lint_dta(list(
+    columns = list(list(id = "A", type = "R character")),
+    rules = list(r_cond("A", "equals", TRUE, id = "r"))
+  ))
+  expect_match(r$message, "the column is R character.", fixed = TRUE)
+})
+
+# ---- operands of a logical column --------------------------------------------------
+
+test_that("a logical column takes true, false and the eight logical tokens as operands", {
+  for (v in list(TRUE, FALSE, "TRUE", "T", "true", "True", "FALSE", "F", "false", "False")) {
+    expect_identical(r_lint(r_cond("LGL", "equals", v)), character(0), info = format(v))
+    expect_identical(r_lint(r_cond("LGL", "not_equals", v)), character(0), info = format(v))
+  }
+  expect_identical(r_lint(r_cond("LGL", "in", list("T", "False", TRUE))), character(0))
+  expect_identical(r_lint(r_cond("LGL", "not_in", list("F"))), character(0))
+})
+
+test_that("a logical column refuses any other operand with the operand-type code", {
+  for (v in list("maybe", "yes", "1", "t", "TRUE ", "NA", " T", 1, 0, 2.5)) {
+    out <- r_lint_df(r_cond("LGL", "equals", v))
+    expect_identical(out$code, "rule_condition_value_unfit", info = format(v))
+    expect_identical(out$severity, "error", info = format(v))
+  }
+  # a list with one bad member is refused, and so is a negated operator
+  expect_identical(r_lint(r_cond("LGL", "in", list("T", "maybe"))), "rule_condition_value_unfit/error")
+  expect_identical(r_lint(r_cond("LGL", "not_equals", "maybe")), "rule_condition_value_unfit/error")
+  expect_identical(r_lint(r_cond("LGL", "not_in", list("maybe"))), "rule_condition_value_unfit/error")
+  # no new code: the one every operand-type finding has
+  expect_identical(
+    unique(r_lint_df(r_cond("LGL", "equals", "maybe"))$code), "rule_condition_value_unfit"
+  )
+})
+
+test_that("the refusal of a logical operand names the operand and the tokens", {
+  out <- r_lint_df(r_cond("LGL", "in", list("T", "maybe", "nope")))
+  expect_match(out$message, "'maybe', 'nope'", fixed = TRUE)
+  expect_false(grepl("'T'", out$message, fixed = TRUE))
+  expect_match(out$message, "TRUE, T, true, True, FALSE, F, false, False", fixed = TRUE)
+})
+
+test_that("an operand that is a token of a logical is judged against `values` by what it means", {
+  # values: ["TRUE", "FALSE"]: T and false are both inside it
+  expect_identical(r_lint(r_cond("LGV", "equals", "T")), character(0))
+  expect_identical(r_lint(r_cond("LGV", "in", list("false", TRUE))), character(0))
+  # values: ["TRUE"]: F and FALSE mean the same value, which is not listed
+  expect_identical(r_lint(r_cond("LGO", "equals", "T")), character(0))
+  expect_identical(r_lint(r_cond("LGO", "equals", "F")), "rule_condition_value_outside_values/error")
+  expect_identical(r_lint(r_cond("LGO", "equals", FALSE)), "rule_condition_value_outside_values/error")
+  # a bad token is the operand-type error, not an outside-values one
+  expect_identical(r_lint(r_cond("LGO", "equals", "maybe")), "rule_condition_value_unfit/error")
+  # a negated comparison outside the list is harmless, as for any column
+  expect_identical(r_lint(r_cond("LGO", "not_equals", "F")), character(0))
+})
+
+test_that("SAS columns do not take the logical tokens as operands", {
+  # `T` on a SAS Char column is plain text and needs no reading as a logical
+  cols <- list(list(id = "A", type = "SAS Char"), list(id = "B", type = "SAS Num"))
+  expect_identical(r_lint(r_cond("A", "equals", "T"), cols), character(0))
+  expect_identical(r_lint(r_cond("B", "equals", "T"), cols), "rule_condition_value_unfit/error")
+  expect_identical(r_lint(r_cond("A", "equals", TRUE), cols), "rule_condition_value_unfit/error")
+})
+
+test_that("the rules of a logical column are a construction gate", {
+  columns <- list(list(id = "FLAG", type = "R logical"), list(id = "ID", type = "R character"))
+  good <- list(list(
+    id = "ok", type = "col_condition",
+    condition = list(FLAG = list(equals = "T")), then = list(ID = list(empty = FALSE))
+  ))
+  bad <- list(list(
+    id = "no", type = "col_condition",
+    condition = list(FLAG = list(equals = "maybe")), then = list(ID = list(empty = FALSE))
+  ))
+  expect_no_error(specs_from_list(columns, good))
+  err <- tryCatch(specs_from_list(columns, bad), error = identity)
+  expect_s3_class(err, "error")
+  expect_match(conditionMessage(err), "rule_condition_value_unfit", fixed = TRUE)
+  # the same operand on a text column is no finding at all
+  text <- list(list(id = "FLAG", type = "R character"), list(id = "ID", type = "R character"))
+  expect_no_error(specs_from_list(text, bad))
+})
+
+# ---- the `$w.` check is a SAS format check -----------------------------------------
+
+test_that("format_narrower_than_length never fires for an R column", {
+  out <- lint_dta(list(columns = list(
+    list(id = "A", type = "R character", length = 8),
+    list(id = "B", type = "R Date", format = "R %Y-%m-%d"),
+    list(id = "C", type = "R POSIXct", format = "R %Y-%m-%dT%H:%M:%SZ"),
+    list(id = "D", type = "R hms")
+  )))
+  expect_identical(nrow(out), 0L)
+  # and still fires for the SAS column it was written for
+  sas <- lint_dta(list(columns = list(
+    list(id = "X", type = "SAS Char", format = "SAS $3.", length = 8)
+  )))
+  expect_identical(sas$code, "format_narrower_than_length")
+})
+
+# ---- a pattern operator on a logical column ---------------------------------------
+# The engine reads a logical column as TRUE/FALSE, which hold no text, so a rule
+# `pattern` on one never matches a row. It is refused where the rule is read.
+
+test_that("a pattern operator on an R logical column is refused, on text columns it is accepted", {
+  pattern_rule <- function(col, then = "TXT", where = "condition", op = "pattern") {
+    clause <- stats::setNames(list(stats::setNames(list("^T$"), op)), col)
+    other <- stats::setNames(list(list(empty = FALSE)), then)
+    rule <- list(id = "p", type = "col_condition")
+    rule[[where]] <- clause
+    rule[[setdiff(c("condition", "then"), where)]] <- other
+    rule
+  }
+  columns <- c(r_cols(), list(list(id = "SX", type = "SAS Char")))
+  expect_identical(
+    r_lint(pattern_rule("LGL"), columns), "rule_condition_operator_invalid/error"
+  )
+  # in the `then` clause too, and on a logical column with a values list
+  expect_identical(
+    r_lint(pattern_rule("LGL", then = "TXT", where = "then"), columns),
+    "rule_condition_operator_invalid/error"
+  )
+  expect_identical(
+    r_lint(pattern_rule("LGV"), columns), "rule_condition_operator_invalid/error"
+  )
+  # a text column of either backend and the temporal ones still take a pattern
+  for (col in c("TXT", "SX", "DAY", "STAMP", "TOD")) {
+    expect_identical(r_lint(pattern_rule(col, then = "TXT"), columns), character(0), info = col)
+  }
+  # and a logical column still takes the equality operators
+  expect_identical(r_lint(r_cond("LGL", "equals", "T"), columns), character(0))
+})
+
+test_that("the pattern operator on an R logical column is refused at every entry point", {
+  columns <- list(list(id = "FLAG", type = "R logical"), list(id = "NAME", type = "R character"))
+  bad <- list(list(
+    id = "p", type = "col_condition",
+    condition = list(FLAG = list(pattern = "^T$")), then = list(NAME = list(empty = FALSE))
+  ))
+  good <- bad
+  good[[1]]$condition <- list(NAME = list(pattern = "^T$"))
+
+  # lint_dta(): a finding of its own
+  out <- lint_dta(list(columns = columns, rules = bad))
+  expect_identical(out$code, "rule_condition_operator_invalid")
+  expect_identical(out$severity, "error")
+  expect_match(out$message, "R logical", fixed = TRUE)
+  expect_identical(nrow(lint_dta(list(columns = columns, rules = good))), 0L)
+
+  # the collection validator: no collection is built
+  err <- tryCatch(specs_from_list(columns, bad), error = identity)
+  expect_s3_class(err, "error")
+  expect_match(conditionMessage(err), "rule_condition_operator_invalid", fixed = TRUE)
+  expect_no_error(specs_from_list(columns, good))
+
+  # the YAML reader lints first and aborts with every finding
+  path <- withr::local_tempfile(fileext = ".yaml")
+  yaml::write_yaml(list(columns = columns, rules = bad), path)
+  err <- tryCatch(import_specs_from_yaml(path), error = identity)
+  expect_s3_class(err, "dta_lint_error")
+  expect_identical(err$findings$code, "rule_condition_operator_invalid")
+  yaml::write_yaml(list(columns = columns, rules = good), path)
+  expect_no_error(import_specs_from_yaml(path))
+
+  # validate_template() reports it for a dataset template
+  write_tpl <- function(dir, condition) {
+    dir.create(file.path(dir, "templates"))
+    writeLines(
+      c(
+        "kind: dta_dataset_template", "id: ruled", "version: \"1.0\"",
+        "dataset:", "  id: ds1", "  type: tabular",
+        "  files: {filename: x.csv, type: csv}",
+        "  columns:",
+        "    - {id: FLAG, type: R logical}",
+        "    - {id: NAME, type: R character}",
+        "  rules:",
+        "    - id: p", "      type: col_condition",
+        paste0("      condition: {", condition, ": {pattern: '^T$'}}"),
+        "      then: {NAME: {empty: false}}"
+      ),
+      file.path(dir, "templates", "ruled.dta-dataset-template.yaml")
+    )
+  }
+  dir <- withr::local_tempdir()
+  write_tpl(dir, "FLAG")
+  res <- validate_template(dir)
+  hit <- res[res$code == "rule_condition_operator_invalid", , drop = FALSE]
+  expect_equal(nrow(hit), 1L)
+  expect_identical(hit$severity, "error")
+  ok <- withr::local_tempdir()
+  write_tpl(ok, "NAME")
+  expect_false("rule_condition_operator_invalid" %in% validate_template(ok)$code)
+})

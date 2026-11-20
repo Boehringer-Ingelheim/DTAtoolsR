@@ -646,9 +646,9 @@ A column specification is passed into `DTAColumnSpec`. Supported fields are:
 | --- | --- |
 | `id` | Required column identifier: the exact text of the column's header. Spaces and punctuation are allowed between characters (`Subject ID`, `Wt. (kg)`); no space at the start or end, and no whitespace other than spaces between characters (tabs, line breaks and other whitespace such as an ideographic space are refused). A matrix row label is the exception, see below. |
 | `label` | Human-readable column label. |
-| `type` | Data type, including the supported SAS-prefixed types below. |
-| `format` | Format string, such as a SAS format. |
-| `length` | Maximum character length where applicable. |
+| `type` | Data type, always prefixed with its type system: the `SAS` or `R` types below. |
+| `format` | Format string, prefixed like the type: a SAS format (`SAS $10.`) or an R date/time format (`R %Y-%m-%d`). |
+| `length` | Maximum character length where applicable (of the `R` types, only `R character`). |
 | `nullable` | Whether an empty or missing value is permitted. |
 | `values` | Explicit permitted values. |
 | `values_from` | A controlled-vocabulary binding expanded to `values` when built. |
@@ -671,7 +671,7 @@ Use `examples` (plural), matching the column-specification field. Do not use `ex
 exclusive. When a column uses `values_from`, do not also set `pattern`; that is an error. A literal `values` list combined with `values_from` is
 a warning, and the vocabulary binding wins.
 
-The supported SAS type names are:
+The supported type names are, in the `SAS` type system:
 
 - `SAS Char`
 - `SAS Num`
@@ -680,8 +680,50 @@ The supported SAS type names are:
 - `SAS Time`
 - `SAS DateTime`
 
-Use the `SAS` prefix where the type is a SAS type. A SAS format may follow the same backend prefix convention, for example `format: SAS $10.` for
-a character column. The package's column-structure factory supports the SAS backend; do not assume an unlisted backend is available.
+and in the `R` type system (`R` in capitals, then the type, which is not case-sensitive):
+
+- `R character`
+- `R numeric` (`R double` is accepted)
+- `R integer`
+- `R logical`
+- `R Date`
+- `R POSIXct`
+- `R hms`
+
+Every `type` and every `format` starts with the name of its type system, and the two must match on one column (`type: SAS Char` with `format: R %Y-%m-%d`
+is refused). A bare `Char` or `character` is refused, and no other type system exists. One dataset may mix the two. A SAS format follows the same
+prefix convention, for example `format: SAS $10.` for a character column.
+
+The `R` types in short:
+
+| Type | Checks | `format` |
+| --- | --- | --- |
+| `R character` | Any text; `length` is the maximum number of characters. | no |
+| `R numeric` | A number, parsed strictly as `SAS Num` is. | no |
+| `R integer` | A whole number within the 32-bit range, as `SAS Int`. | no |
+| `R logical` | `TRUE`, `T`, `true`, `True` or `FALSE`, `F`, `false`, `False`; blank is missing; anything else is an import error. | no |
+| `R Date`, `R POSIXct`, `R hms` | Text that fits the format. Defaults: `%Y-%m-%d`, `%Y-%m-%d %H:%M:%S`, `%H:%M:%S`; the default is written into the specification. | optional |
+
+An R date/time format is built from `%Y` (four digits), `%m`, `%d`, `%H`, `%M`, `%S` (two digits, in range, the day checked against its month),
+`%OS1` to `%OS6` (seconds with an optional fraction of one to n digits), and the shorthands `%F` (`%Y-%m-%d`) and `%T` (`%H:%M:%S`), plus a space,
+`- / . , : ; _` and the letters `T` and `Z`, each standing for itself. Fields have a fixed width, a value from a text source (CSV, TSV) is matched exactly (neither trimmed nor
+case-folded; a `.sas7bdat` or `.xpt` value is rendered under the format first), a `Date` format needs year, month and day, a `POSIXct` format also hour and minute, and an `hms` format (a time of day,
+`00:00:00` to `23:59:59`) hour and minute and no date. Month names, AM/PM, two-digit years and time zones are not supported (a seconds field of `60` simply does not fit `%S`); use
+`SAS Date` with `SAS DATE9.` for `15AUG2025`. A format that contains a colon followed by a space must be quoted: `format: 'R %H: %M'`. On an `R logical` column
+`values` and `examples` must be quoted (`values: ["TRUE", "FALSE"]`, since YAML reads a bare `true` as a boolean), `pattern` is refused, and so is a rule condition with the `pattern` operator.
+
+```yaml
+- id: VISITDT
+  label: Visit date
+  type: R Date
+  format: R %d/%m/%Y
+  nullable: No
+  examples: [15/08/2025]
+```
+
+A matrix `cells.type` is `SAS Num`, `SAS Int`, `SAS Char`, `R numeric`, `R integer` or `R character`; its row labels may use either system.
+Which system the app starts new columns and matrix cells with is the `data_types.default` key of `dta-app.yaml` (see its key reference below); it does not
+restrict the types a template may use.
 
 Example of a column bound to a vocabulary:
 
@@ -1475,6 +1517,12 @@ Each link is an `http://`, `https://` or `mailto:` URL without spaces or quotes.
 | `dta_yaml_download` | Download of the whole DTA's YAML. |
 | `editing` | `false` makes the app read-only: no edit menu and no editing at all. |
 
+`data_types`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `default` | `SAS` | The type system the app preselects for **new** columns and new matrix cells: `SAS` or `R`, in any case. It is only the starting choice: the column editor still offers both type systems, an existing column or matrix keeps its own, and a type written in YAML keeps its mandatory prefix (`SAS Char`, `R character`), so existing templates and DTA files are read exactly as before. A **new** matrix gets the default system's cell types; a matrix of the other system can be written in YAML. Any other value is an error and keeps `SAS`. |
+
 `exports`
 
 | Key | Default | Meaning |
@@ -1536,7 +1584,7 @@ The app reads the configuration together with the template index: after "Refresh
 
 | Code | Severity | Meaning |
 | --- | --- | --- |
-| `app_config_invalid` | error | A value the app would reject: unreadable YAML, wrong `kind`, a bad colour, link or format, or a logo or `.docx` that is missing, too large, of the wrong type or outside the library. |
+| `app_config_invalid` | error | A value the app would reject: unreadable YAML, wrong `kind`, a bad colour, link or format, a `data_types.default` other than `SAS` or `R`, or a logo or `.docx` that is missing, too large, of the wrong type or outside the library. |
 | `app_config_unknown_key` | warning | A key the app does not know. |
 | `app_config_warning` | warning | A value the app accepts but adjusts, such as `create_blank: true` with `editing: false`. |
 | `app_config_duplicate` | error | Both `dta-app.yaml` and `dta-app.yml` in the library. Keep one. |

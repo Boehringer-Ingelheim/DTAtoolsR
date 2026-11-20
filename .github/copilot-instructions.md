@@ -43,6 +43,7 @@ The package is organized as a hierarchy of S7 classes, all defined in `R/<ClassN
     - **DTAFileXPT** — A SAS transport file (`.xpt`) holding one dataset, read via haven and held in memory only (child of DTAFileSAS7BDAT).
   - **DTAFileAny** — Handler for non-tabular deliverable files (child of DTAFile).
 - **DTAColumnSpec** — Single column type/nullability/allowed values/regex.
+  - **DTAColumnSpecStructure** (abstract) — The declared type of a column, one child per type system: **DTAColumnSpecStructureSAS** (`SAS Char`, `SAS Num`, ... with SAS formats) and **DTAColumnSpecStructureR** (`R character`, `R numeric`, `R integer`, `R logical`, `R Date`, `R POSIXct`, `R hms`, with R date/time formats). The prefix of `type:`/`format:` picks the child in `DTAColumnSpecStructureFactory()`; a bare type is refused.
 - **DTAColumnSpecCollection** — All columns for one dataset.
 - **DTAMetaData** — Agreement title, version, author, etc.
 - **DTARule** (abstract base, for cross-column validation)
@@ -66,11 +67,12 @@ The package is organized as a hierarchy of S7 classes, all defined in `R/<ClassN
 
 ### Key Helpers
 
-- **R/00_helpers.R** — Reusable S7 union types (`class_*_or_null`), global config (`__DTAtools_supported_*__`), utility functions. Do not redefine union types; reuse them.
+- **R/00_helpers.R** — Reusable S7 union types (`class_*_or_null`), global config (`__DTAtools_supported_*__`), utility functions. Do not redefine union types; reuse them. It also holds the one table of declared types (`__DTAtools_type_families__`) with `dta_type_family()` and `dta_backend_types()`: to ask what kind of column a type is (text, number, integer, logical, temporal), use the family rather than comparing against `Char`, `Num`, `numeric`, ..., which would cover one type system only.
+- **R/rTemporalFormat.R** — The `R Date`/`R POSIXct`/`R hms` format grammar: one tokeniser that feeds the value checker and the reader's renderer. Never call `strptime()` or `as.Date()` on user data to check a format (lenient and locale-dependent).
 - **R/validationReporting.R** — Structured validation result objects and querying.
 - **R/evaluateRules.R** — JSON Schema compilation and row-level validation (performance-critical).
 - **R/exportDocuments.R** — Word document generation via `officer` + `flextable`.
-- **R/importConversion.R** — Type coercion and import error detection.
+- **R/importConversion.R** — Type coercion and import error detection: numbers (`SAS Num`/`SAS Int`, `R numeric`/`R integer`) and `R logical`; every other type is left as text.
 
 ## Conventions
 

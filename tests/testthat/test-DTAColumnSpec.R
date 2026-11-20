@@ -168,14 +168,21 @@ test_that("print() survives a column id containing braces", {
 })
 
 test_that("DTAColumnSpecStructureFactory validates backend prefixes", {
+  # "R" is a supported backend now; "Python" is not.
   expect_error(
-    DTAColumnSpecStructureFactory(type = "R Char", format = "R $10."),
+    DTAColumnSpecStructureFactory(type = "Python Char", format = "R $10."),
     "supported backends"
   )
 
   expect_error(
-    DTAColumnSpecStructureFactory(type = "SAS Char", format = "R $10."),
+    DTAColumnSpecStructureFactory(type = "SAS Char", format = "Python $10."),
     "supported backends"
+  )
+
+  # Two supported backends that disagree are refused for the mismatch itself.
+  expect_error(
+    DTAColumnSpecStructureFactory(type = "SAS Char", format = "R $10."),
+    "prefixes must be the same"
   )
 
   # With no type, format or length there is no backend to build: a package

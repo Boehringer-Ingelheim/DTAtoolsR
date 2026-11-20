@@ -43,6 +43,11 @@ conservative rather than necessary -- only text-typed sources have been
 validated against the per-batch path -- and it costs nothing but speed: an
 ineligible source takes the per-batch path, which answers the rule
 correctly either way.
+\item no key column is declared logical. The per-batch accumulator keys a logical
+column on its coerced \code{TRUE}/\code{FALSE}, where \code{T}, \code{true} and \code{TRUE} are one
+key; Arrow groups the raw text, which would call them three. There is no
+Arrow-side normalisation of the logical tokens, so such a rule is
+ineligible and the per-batch path answers it.
 }
 
 A key column's DECLARED type decides how it is grouped, not whether it is

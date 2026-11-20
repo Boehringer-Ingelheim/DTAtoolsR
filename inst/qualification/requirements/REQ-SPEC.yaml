@@ -410,11 +410,12 @@ requirements:
     text: >
       lint_dta() shall report a numeric comparison operator (greater, less,
       greater_equal, less_equal and the other numeric operators) applied to a
-      column of SAS type Date, Time or DateTime as a finding with code
-      rule_condition_numeric_on_text at severity warning, and the same
-      operator applied to a SAS Char column as that code at severity error.
-      A numeric operator on a SAS Num or SAS Int column shall produce no such
-      finding. A specification with the warning shall still construct.
+      column of SAS type Date, Time or DateTime, or of R type Date, POSIXct or
+      hms, as a finding with code rule_condition_numeric_on_text at severity
+      warning, and the same operator applied to a SAS Char or R character
+      column as that code at severity error. A numeric operator on a SAS Num,
+      SAS Int, R numeric or R integer column shall produce no such finding. A
+      specification with the warning shall still construct.
     risk: medium
     category: functional
     covers: [lint_dta]
@@ -543,3 +544,44 @@ requirements:
       lint_dta() judges the raw entry because it builds row labels as plain
       column specifications, which accept a space, and never builds the
       dataset.
+
+  - id: REQ-SPEC-036
+    text: >
+      lint_dta() shall accept, as the operand of equals, not_equals, in and
+      not_in on a column declared R logical, true or false (as YAML writes
+      them) and the eight texts TRUE, T, true, True, FALSE, F, false and False,
+      and shall report any other operand (maybe, yes, 1, a text with a blank
+      around a token, a number) as a finding with code rule_condition_value_unfit
+      at severity error, for the negated operators as well. It shall report a
+      range rule on an R logical column as rule_range_non_numeric at severity
+      error, and an operand written as an unquoted YAML true or false against a
+      column of any type but logical (R character, R numeric, SAS Char) as
+      rule_condition_value_unfit at severity error. A specification with such
+      an error shall not be built.
+    risk: high
+    category: functional
+    covers: [lint_dta, DTAColumnSpecCollection]
+    source: R/lintDTA.R (dta_specs_findings, dta_logical_operand)
+    notes: >
+      The operand check of a logical column is the one every other operand
+      type has; it has no code of its own. On a SAS column the text T is plain
+      text and an operand of T is not read as a logical.
+
+  - id: REQ-SPEC-037
+    text: >
+      lint_dta() shall report the operator pattern, applied to a column
+      declared R logical in the condition of a conditional rule, as a finding
+      with code rule_condition_operator_invalid at severity error, and a
+      specification with that error shall not be built; the same operator
+      applied to a column declared R character or SAS Char shall be accepted.
+    risk: medium
+    category: functional
+    covers: [lint_dta, DTAColumnSpecCollection]
+    source: R/lintDTA.R (dta_specs_findings)
+    notes: >
+      A logical column holds no text to match, and the evaluator applies no
+      pattern to it (REQ-TYPE-025 refuses a pattern on the column itself for
+      the same reason), so a rule that only a pattern could select would
+      never select a row and nothing would say so. It is the operator that is
+      wrong for the column, not an operand value, so the code is the one of an
+      operator that cannot be used (REQ-SPEC-036 states the operand check).

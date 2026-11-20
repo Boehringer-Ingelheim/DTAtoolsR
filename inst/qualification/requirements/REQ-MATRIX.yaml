@@ -745,3 +745,46 @@ requirements:
     category: integrity
     covers: [upgrade_dta, check, load_file, lint_dta]
     source: "PLAN-matrix-format-review.md 6; R/containerAssignments.R (dta_is_old_matrix, dta_upgrade)"
+
+  - id: REQ-MATRIX-060
+    text: >
+      The cells of a matrix dataset shall accept the types R numeric, R integer
+      and R character as they accept SAS Num, SAS Int and SAS Char, and the
+      row labels shall accept the types of either vocabulary whatever the cells
+      use. An R numeric cell shall take a range and shall reject infinite
+      values unless infinite: true is written; an R integer cell shall take a
+      range and no infinite setting; an R character cell shall take a length
+      and either a pattern or a list of values, and neither a range nor an
+      infinite setting. A
+      range on an R character cell shall be refused with a condition of class
+      dta_cell_range_type, an infinite setting on an R integer or R character
+      cell with class dta_cell_finite_type, and a cell of type R logical, R
+      Date, R POSIXct, R hms, SAS Date, SAS Time or SAS DateTime with class
+      dta_matrix_cells_type.
+    risk: high
+    category: functional
+    covers: [dta_dataset_from_list, DTADataSetFactory, DTADataSetMatrix]
+    source: R/DTAMatrixSpec-class.R; R/DTAColumnSpecCell-class.R
+    notes: >
+      The cell types are judged by what kind of value they hold, not by their
+      SAS name, so the R types behave as their SAS counterparts (REQ-MATRIX-041
+      for the SAS refusals). The header line's own column specification is
+      built by the package as SAS Char whatever the cells use (LIM-031).
+
+  - id: REQ-MATRIX-061
+    text: >
+      A cell of type R numeric, R integer or R character shall be typed and
+      validated as a SAS Num, SAS Int or SAS Char cell is, with the table held
+      in memory and scanned in batches alike. In an R numeric cell the raw text
+      007 shall be the value 7 and Inf shall be reported with the keyword
+      finite; in an R integer cell 1.5 shall be reported on the import axis
+      with the keyword not_whole and abc with not_convertible; a value below
+      range.min shall be reported with the keyword minimum and one above
+      range.max with maximum; and an R character cell shall keep the text 007.
+    risk: high
+    category: functional
+    covers: [check, messages, validation_status, load_file]
+    source: R/DTADataSetMatrix-class.R; R/importConversion.R
+    notes: >
+      The SAS statements of REQ-MATRIX-024 to REQ-MATRIX-039 are not repeated;
+      the cases here check that the R cell types are read the same way.

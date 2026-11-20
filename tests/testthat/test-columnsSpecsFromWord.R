@@ -324,3 +324,119 @@ test_that("a spaced column id survives export_specs_table() and columns_specs_fr
   expect_identical(names(back@columns), ids)
   expect_identical(unname(vapply(back@columns, function(s) s@id, "")), ids)
 })
+
+# ---- the R vocabulary ------------------------------------------------------------
+
+test_that("an R table is read: the type cell carries the backend, a prefixed format is kept", {
+  path <- wd_docx(data.frame(
+    id = c("NAME", "AGE", "COUNT", "DAY", "STAMP", "TOD"),
+    label = c("n", "a", "c", "d", "s", "t"),
+    type = c("R character", "R numeric", "R integer", "R Date", "R POSIXct", "R hms"),
+    length = c("12", "", "", "", "", ""),
+    format = c("", "", "", "R %Y-%m-%d", "R %Y-%m-%dT%H:%M:%SZ", "R %H:%M"),
+    nullable = c("No", "Yes", "No", "Yes", "Yes", "Yes"),
+    description = "d",
+    stringsAsFactors = FALSE
+  ))
+  back <- columns_specs_from_word(path)
+  facts <- function(id) wd_facts(back@columns[[id]])
+  expect_identical(facts("NAME")[c("backend", "type", "format", "length")], list(
+    backend = "R", type = "character", format = NULL, length = 12
+  ))
+  expect_identical(facts("AGE")[c("backend", "type", "format")], list(
+    backend = "R", type = "numeric", format = NULL
+  ))
+  expect_identical(facts("COUNT")$type, "integer")
+  expect_identical(facts("DAY")[c("backend", "type", "format")], list(
+    backend = "R", type = "Date", format = "%Y-%m-%d"
+  ))
+  expect_identical(facts("STAMP")$format, "%Y-%m-%dT%H:%M:%SZ")
+  expect_identical(facts("TOD")[c("type", "format")], list(type = "hms", format = "%H:%M"))
+})
+
+test_that("an R format cell without its prefix takes the backend of the Type cell", {
+  path <- wd_docx(data.frame(
+    id = c("DAY", "STAMP", "OLD"),
+    label = c("d", "s", "o"),
+    type = c("R Date", "R POSIXct", "SAS Char"),
+    length = c("", "", "6"),
+    format = c("%d.%m.%Y", "%Y-%m-%d %H:%M", "$6."),
+    nullable = "Yes", description = "x",
+    stringsAsFactors = FALSE
+  ))
+  back <- columns_specs_from_word(path)
+  expect_identical(wd_facts(back@columns$DAY)[c("backend", "type", "format")], list(
+    backend = "R", type = "Date", format = "%d.%m.%Y"
+  ))
+  expect_identical(wd_facts(back@columns$STAMP)[c("backend", "type", "format")], list(
+    backend = "R", type = "POSIXct", format = "%Y-%m-%d %H:%M"
+  ))
+  # the SAS row beside them is restored as before
+  expect_identical(wd_facts(back@columns$OLD)[c("backend", "type", "format")], list(
+    backend = "SAS", type = "Char", format = "$6."
+  ))
+})
+
+test_that("a blank format cell on an R date, time or timestamp stores the default format", {
+  path <- wd_docx(data.frame(
+    id = c("DAY", "STAMP", "TOD"),
+    label = "x",
+    type = c("R Date", "R POSIXct", "R hms"),
+    length = "", format = "", nullable = "Yes", description = "x",
+    stringsAsFactors = FALSE
+  ))
+  back <- columns_specs_from_word(path)
+  expect_identical(back@columns$DAY@structure@format, "%Y-%m-%d")
+  expect_identical(back@columns$STAMP@structure@format, "%Y-%m-%d %H:%M:%S")
+  expect_identical(back@columns$TOD@structure@format, "%H:%M:%S")
+})
+
+test_that("an R type is read case-insensitively and a type that is not an R type is refused", {
+  path <- wd_docx(data.frame(
+    id = c("A", "B"), label = "x", type = c("R DOUBLE", "R INTEGER"),
+    length = "", format = "", nullable = "Yes", description = "x",
+    stringsAsFactors = FALSE
+  ))
+  back <- columns_specs_from_word(path)
+  expect_identical(back@columns$A@structure@type, "numeric")
+  expect_identical(back@columns$B@structure@type, "integer")
+
+  bad <- wd_docx(wd_fixture(type = "R complex", format = "", length = ""))
+  expect_error(columns_specs_from_word(bad), regexp = "must\\s+be\\s+one\\s+of")
+})
+
+test_that("a Word table written by export_specs_table() reads back as the same R specs", {
+  columns <- list(
+    NAME = DTAColumnSpec(id = "NAME", label = "Name", type = "R character", length = 12, nullable = FALSE),
+    AGE = DTAColumnSpec(id = "AGE", label = "Age", type = "R numeric", nullable = TRUE),
+    COUNT = DTAColumnSpec(id = "COUNT", label = "Count", type = "R integer", nullable = FALSE),
+    FLAG = DTAColumnSpec(id = "FLAG", label = "Flag", type = "R logical", nullable = TRUE, values = c("TRUE", "FALSE")),
+    DAY = DTAColumnSpec(id = "DAY", label = "Day", type = "R Date", format = "R %d.%m.%Y", nullable = TRUE),
+    STAMP = DTAColumnSpec(id = "STAMP", label = "Stamp", type = "R POSIXct", nullable = TRUE),
+    TOD = DTAColumnSpec(id = "TOD", label = "Time", type = "R hms", format = "R %H:%M", nullable = TRUE)
+  )
+  original <- DTAColumnSpecCollection(columns = columns)
+  f <- tempfile(fileext = ".docx")
+  on.exit(unlink(f, force = TRUE), add = TRUE)
+  export_specs_table(original, file = f, quiet = TRUE)
+
+  back <- columns_specs_from_word(f)
+
+  expect_identical(names(back@columns), names(columns))
+  for (id in names(columns)) {
+    expect_identical(wd_facts(back@columns[[id]]), wd_facts(columns[[id]]), info = id)
+  }
+  # the default format an R timestamp was given is written, so it is read back
+  expect_identical(back@columns$STAMP@structure@format, "%Y-%m-%d %H:%M:%S")
+})
+
+test_that("permitted values on an R character column are warned about when YAML read them as numbers", {
+  expect_warning(
+    specs_from_list(list(list(id = "A", type = "R character", values = c(1.1, 2))), NULL),
+    regexp = "read\\s+as\\s+numbers"
+  )
+  # an R numeric, integer or logical column holds no text: nothing to warn about
+  expect_no_warning(specs_from_list(list(list(id = "A", type = "R numeric", values = c(1.1, 2))), NULL))
+  expect_no_warning(specs_from_list(list(list(id = "A", type = "R integer", values = c(1, 2))), NULL))
+  expect_no_warning(specs_from_list(list(list(id = "A", type = "R logical", values = c("TRUE", "FALSE"))), NULL))
+})

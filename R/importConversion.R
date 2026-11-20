@@ -348,18 +348,91 @@ dta_compile_spec_types <- function(specs) {
 }
 
 
+#' @title Strict Logical Conversion
+#' @description
+#' Reads text as `TRUE`/`FALSE` for a column declared `R logical`, keeping the
+#' two cases a bare `as.logical()` collapses into one `NA` apart, the way
+#' [dta_as_numeric_strict()] does for numbers:
+#'
+#' * **missing** -- `NA`, an empty string or whitespace only. Not an error.
+#' * **unconvertible** -- present, but not one of the eight tokens below. An
+#'   import error; the value becomes `NA`.
+#'
+#' The tokens are case-sensitive and matched exactly, without trimming the
+#' value: `TRUE`, `T`, `true`, `True` read as `TRUE` and `FALSE`, `F`, `false`,
+#' `False` as `FALSE`. These are what `as.logical()` accepts, minus its
+#' acceptance of the text `NA` -- which here is a value that is not a token, so
+#' unconvertible, like `yes`, `1`, `" TRUE"` or `tRuE`.
+#'
+#' An already logical vector is returned as it is, and a factor is read through
+#' its labels.
+#' @param x A vector taken from a table column.
+#' @return A list with `values` (logical), `source` (`x` itself), `missing` and
+#'   `unconvertible` (logical, each the length of `x`).
+#' @keywords internal
+dta_as_logical_strict <- function(x) {
+  if (is.logical(x)) {
+    return(list(
+      values = x,
+      source = x,
+      missing = is.na(x),
+      unconvertible = rep(FALSE, length(x))
+    ))
+  }
+
+  text <- if (is.character(x)) x else as.character(x)
+  tokens <- c(
+    "TRUE", "T", "true", "True",
+    "FALSE", "F", "false", "False"
+  )
+  hit <- match(text, tokens)
+  values <- c(rep(TRUE, 4L), rep(FALSE, 4L))[hit]
+
+  missing <- is.na(text)
+  # A blank never matches a token, so blank rows are a subset of the unmatched
+  # ones -- reclassified on that subset only, as the numeric reader does.
+  failed <- is.na(hit) & !missing
+  if (any(failed)) {
+    idx <- which(failed)
+    missing[idx[trimws(text[idx]) %in% ""]] <- TRUE
+  }
+
+  list(
+    values = values,
+    source = x,
+    missing = missing,
+    unconvertible = is.na(hit) & !missing
+  )
+}
+
+#' @title Read Text as a Logical Token
+#' @description
+#' The values of [dta_as_logical_strict()]: `TRUE`, `FALSE`, or `NA` for a blank
+#' or for text that is not one of the eight tokens. Used wherever text has to be
+#' compared with a logical column -- a rule's operand -- without the
+#' missing/unconvertible distinction import needs.
+#' @param x A vector of text, or of logicals.
+#' @return A logical vector the length of `x`.
+#' @keywords internal
+dta_as_logical_token <- function(x) {
+  dta_as_logical_strict(x)$values
+}
+
 #' @title Coerce One Column to Its Declared R Type
 #' @description
 #' Converts a single column to the type its spec declares, reporting the values
 #' that could not be represented.
 #'
-#' Only numeric targets are converted. Everything else -- `"character"` in
-#' particular -- is returned untouched, which is what keeps a `SAS Char`
-#' `SUBJECT_ID` of `"007"` from ever being round-tripped through a number.
+#' Only numeric and logical targets are converted. Everything else --
+#' `"character"` in particular -- is returned untouched, which is what keeps a
+#' `SAS Char` `SUBJECT_ID` of `"007"` from ever being round-tripped through a
+#' number.
 #'
 #' A column that is already numeric is left alone: there is nothing to parse, so
 #' no value can fail to parse. This is also what stops the import axis from
-#' inventing errors on a clean file.
+#' inventing errors on a clean file. The same holds for a logical target and a
+#' column that is already logical, numeric, `Date` or `POSIXt`: the column spec
+#' check reports a value of the wrong class, import has nothing to parse.
 #'
 #' An `Int` target is always stored as R `integer`: the declaration decides the
 #' storage, never the values in hand, so the same column types identically
@@ -367,6 +440,10 @@ dta_compile_spec_types <- function(specs) {
 #' stored as declared -- fractional, non-finite, or outside the int32 range --
 #' becomes `NA` and is an import error (reason `"not_whole"` or
 #' `"out_of_range"`), with its raw text kept.
+#'
+#' A `logical` target reads the eight tokens of [dta_as_logical_strict()] and
+#' stores R `logical`; blank values are missing, anything else is an import
+#' error (reason `"not_convertible"`).
 #' @param values A column vector taken from the table.
 #' @param target Character. The target R type, from [as_r_type()].
 #' @return `NULL` when the column is left untouched, otherwise a list with the
@@ -376,7 +453,7 @@ dta_compile_spec_types <- function(specs) {
 #'   is `as.character(source[i])`, i.e. [dta_numeric_raw()].
 #' @keywords internal
 dta_coerce_column <- function(values, target) {
-  if (!isTRUE(target %in% c("double", "integer"))) {
+  if (!isTRUE(target %in% c("double", "integer", "logical"))) {
     return(NULL)
   }
 
@@ -386,10 +463,26 @@ dta_coerce_column <- function(values, target) {
     return(NULL)
   }
 
+  # Nor is there anything to parse in a column that is already logical.
+  if (identical(target, "logical") && is.logical(values)) {
+    return(NULL)
+  }
+
   # An all-missing column (Arrow reads an empty column as `null`) carries no
   # value that could have failed to convert.
   if (length(values) == 0 || all(is.na(values))) {
     return(NULL)
+  }
+
+  if (identical(target, "logical")) {
+    parsed <- dta_as_logical_strict(values)
+    offending <- which(parsed$unconvertible)
+    return(list(
+      values = parsed$values,
+      offending = offending,
+      reason = rep("not_convertible", length(offending)),
+      source = values
+    ))
   }
 
   converted <- dta_as_numeric_strict(values)
