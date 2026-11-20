@@ -22,13 +22,16 @@ is \code{as.character(source[i])}, i.e. \code{\link[=dta_numeric_raw]{dta_numeri
 Converts a single column to the type its spec declares, reporting the values
 that could not be represented.
 
-Only numeric targets are converted. Everything else -- \code{"character"} in
-particular -- is returned untouched, which is what keeps a \verb{SAS Char}
-\code{SUBJECT_ID} of \code{"007"} from ever being round-tripped through a number.
+Only numeric and logical targets are converted. Everything else --
+\code{"character"} in particular -- is returned untouched, which is what keeps a
+\verb{SAS Char} \code{SUBJECT_ID} of \code{"007"} from ever being round-tripped through a
+number.
 
 A column that is already numeric is left alone: there is nothing to parse, so
 no value can fail to parse. This is also what stops the import axis from
-inventing errors on a clean file.
+inventing errors on a clean file. The same holds for a logical target and a
+column that is already logical, numeric, \code{Date} or \code{POSIXt}: the column spec
+check reports a value of the wrong class, import has nothing to parse.
 
 An \code{Int} target is always stored as R \code{integer}: the declaration decides the
 storage, never the values in hand, so the same column types identically
@@ -36,5 +39,9 @@ whether it is converted whole or batch by batch. A value that cannot be
 stored as declared -- fractional, non-finite, or outside the int32 range --
 becomes \code{NA} and is an import error (reason \code{"not_whole"} or
 \code{"out_of_range"}), with its raw text kept.
+
+A \code{logical} target reads the eight tokens of \code{\link[=dta_as_logical_strict]{dta_as_logical_strict()}} and
+stores R \code{logical}; blank values are missing, anything else is an import
+error (reason \code{"not_convertible"}).
 }
 \keyword{internal}

@@ -449,7 +449,7 @@ write_template_guide <- function(
     list("Variant", "A choice that changes which datasets, columns or rules the DTA gets.", has(e[["variants"]])),
     list("Dataset", "One data table that is transferred, usually one file.", length(e[["datasets"]]) > 0),
     list("Column", "One field of a dataset, such as a subject identifier or a date.", length(e[["datasets"]]) > 0),
-    list("Type", "How the value is stored, for example 'SAS Char $50.' = text of up to 50 characters; 'SAS Num' = a number.", length(e[["datasets"]]) > 0),
+    list("Type", "How the value is stored, for example 'SAS Char $50.' = text of up to 50 characters; 'SAS Num' = a number. A type may also be written in R's vocabulary, for example 'R character' = text, 'R numeric' = a number, 'R Date %Y-%m-%d' = a date written like 2025-08-15.", length(e[["datasets"]]) > 0),
     list("Required", "Yes means every row needs a value; No means a value may be left blank.", length(e[["datasets"]]) > 0),
     list("Allowed values", "The only values a column may contain. 'Any' means no restriction.", length(e[["datasets"]]) > 0),
     list("Rule", "A check the data must pass, for example that a value is within a range or that no row is repeated.", any(vapply(e[["datasets"]], function(d) .tg_n(d[["rules"]]) > 0L, logical(1)))),

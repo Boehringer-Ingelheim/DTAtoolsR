@@ -14,11 +14,13 @@ DTAColumnSpecStructureFactory(type = NULL, format = NULL, length = NULL)
 \item{length}{Integer or NULL. The length specification for the column (optional).}
 }
 \value{
-An object of class \code{DTAColumnSpecStructureSAS}.
+An object of class \code{DTAColumnSpecStructureSAS} for the
+\code{SAS} backend, or \code{DTAColumnSpecStructureR} for the \code{R}
+backend.
 }
 \description{
-Constructs a DTAColumnSpecStructure object for a specified backend (currently
-only SAS), based on the provided type, format, and length. The function
+Constructs a DTAColumnSpecStructure object for a specified backend (\code{SAS}
+or \code{R}), based on the provided type, format, and length. The function
 validates that the
 prefixes of type and format are supported and match, then dispatches to the appropriate
 backend-specific constructor.
@@ -31,7 +33,11 @@ The backend is determined by the prefix of \code{type} or \code{format}.
 \examples{
 DTAColumnSpecStructureFactory(type = "SAS Char", format = "SAS $10.", length = 10)
 
+# The R backend: an R Date with no format gets the default one.
+DTAColumnSpecStructureFactory(type = "R Date")
+
 }
 \seealso{
-\code{\link{DTAColumnSpecStructureSAS}}
+\code{\link{DTAColumnSpecStructureSAS}},
+\code{\link{DTAColumnSpecStructureR}}
 }

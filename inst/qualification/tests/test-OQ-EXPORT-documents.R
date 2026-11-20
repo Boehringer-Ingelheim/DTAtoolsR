@@ -1091,6 +1091,27 @@ test_that("OQ-EXPORT-026 | columns_specs_from_word reads back the table export_s
     "ids with spaces come back as they were written",
     c("Subject ID", "Visit Date (UTC)"), names(spaced_back@columns)
   )
+
+  # The same round trip for a specification written in the R vocabulary: the
+  # type cell carries the backend, and the format of a date, a datetime and a
+  # time (the stored default of the second included) is written and read back.
+  r_coll <- DTAColumnSpecCollection(columns = list(
+    NAME = DTAColumnSpec(id = "NAME", label = "Name", type = "R character", length = 12, nullable = FALSE),
+    AGE = DTAColumnSpec(id = "AGE", label = "Age", type = "R numeric", nullable = TRUE),
+    COUNT = DTAColumnSpec(id = "COUNT", label = "Count", type = "R integer", nullable = FALSE),
+    FLAG = DTAColumnSpec(id = "FLAG", label = "Flag", type = "R logical", nullable = TRUE, values = c("TRUE", "FALSE")),
+    DAY = DTAColumnSpec(id = "DAY", label = "Day", type = "R Date", format = "R %d.%m.%Y", nullable = TRUE),
+    STAMP = DTAColumnSpec(id = "STAMP", label = "Stamp", type = "R POSIXct", nullable = TRUE),
+    TOD = DTAColumnSpec(id = "TOD", label = "Time", type = "R hms", format = "R %H:%M", nullable = TRUE)
+  ))
+  r_path <- file.path(dir, "roundtrip_r.docx")
+  export_specs_table(r_coll, file = r_path, quiet = TRUE)
+  r_back <- tryCatch(columns_specs_from_word(r_path), error = function(e) e)
+  qa_check("a table of R columns is read back without error", !inherits(r_back, "condition"))
+  qa_step(
+    "every R column's backend, type, format, length, nullability and values survive the round trip",
+    facts(r_coll), facts(r_back)
+  )
 })
 
 # ---- document exports write atomically ---------------------------------------

@@ -707,3 +707,19 @@ requirements:
       Detection is sound, not complete: a conflict is reported only when a
       generated example file name shows it, so an undetected overlap is
       asked about at delivery (REQ-CONT-020) instead (LIM-022).
+
+  - id: REQ-CONT-033
+    text: >
+      A variable of a SAS transport member (.xpt) that SAS stores as a date,
+      declared R Date, shall be read as the text of the date in the column's
+      format (%Y-%m-%d when none was named), and declared R numeric as the
+      SAS number of days since 1960-01-01, exactly as the same variable of a
+      .sas7bdat file is (REQ-FILE-037).
+    risk: medium
+    category: functional
+    covers: [load_delivery, DTAFileXPT, read_file]
+    source: R/DTAFileXPT-class.R; R/DTAFileSAS7BDAT-class.R (dta_sas7bdat_normalise)
+    notes: >
+      A transport file and a SAS dataset share one normalisation. The fixture
+      sdtm.xpt holds the VS variable VSDT as the SAS days 23968, 23968 and
+      23969, which are 2025-08-15, 2025-08-15 and 2025-08-16 (REQ-FILE-037).

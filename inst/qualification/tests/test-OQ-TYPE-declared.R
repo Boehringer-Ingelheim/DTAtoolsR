@@ -1,9 +1,10 @@
-# Declared types and typing at read. REQ-TYPE-001 .. REQ-TYPE-011.
+# Declared types and typing at read. REQ-TYPE-001 .. REQ-TYPE-016.
 #
 # Two mappings are exhaustively enumerated here, straight from the source
 # rather than from what a user might expect: the six-value type vocabulary
 # `DTAColumnSpecStructureSAS` accepts (and the SAS format strings that infer
-# one of them), and the two things a declared type is turned into --
+# one of them; the R backend's seven types are the last test case), and the
+# two things a declared type is turned into --
 # `as_r_type()` for storage, `get_arrow_type()` for the Arrow schema. The rest
 # of the file is about the boundary between "typed at read" and "typed in R":
 # what a written file preserves and drops, what the reader is allowed to do to
@@ -116,11 +117,11 @@ test_that("OQ-TYPE-007 | the declared-type vocabulary is matched case-insensitiv
   qa_step("uppercase 'DATETIME' normalises to 'DateTime'", "DateTime", DTAColumnSpec(id = "X", type = "SAS DATETIME")@structure@type)
 })
 
-test_that("OQ-TYPE-008 | a type outside the six-value vocabulary is rejected | REQ-TYPE-003", {
+test_that("OQ-TYPE-008 | a SAS type outside the six-value SAS vocabulary is rejected | REQ-TYPE-003", {
   # "Bool" is handled by as_r_type()'s and as_json_schema_type()'s switch()
   # statements (both fall to a "logical"/"boolean" case) but is absent from
   # the validator's own supported_types list -- so it is dead code for the
-  # only backend this package implements, not a usable sixth type. Also
+  # SAS backend, not a usable seventh type. Also
   # exercised by OQ-TYPE-023, from the other direction.
   err <- tryCatch(
     {
@@ -309,12 +310,13 @@ test_that("OQ-TYPE-022 | an integer64 column reaches the same rule verdict as it
   qa_step("...and the file path agrees", c(ok = FALSE, columnspec = 0L, rule = 1L, import = 0L), td_axis(ds))
 })
 
-test_that("OQ-TYPE-023 | a native logical column fails the type check against every declarable column type | REQ-TYPE-011", {
-  # The mirror image of OQ-TYPE-008: "Bool" cannot be declared, so no schema
-  # this package can generate ever names JSON type "boolean" -- which is
+test_that("OQ-TYPE-023 | a native logical column fails the type check against every SAS type and every R type but R logical, and passes it against R logical | REQ-TYPE-011", {
+  # The mirror image of OQ-TYPE-008: "Bool" cannot be declared in the SAS
+  # vocabulary, so no SAS schema ever names JSON type "boolean" -- which is
   # exactly the type dta_base_json_type() gives a logical column. A logical
-  # value therefore fails type checking against a Char column even though it
-  # would satisfy a values= codelist of "TRUE"/"FALSE" if it were text.
+  # value therefore fails type checking against a SAS Char column even though
+  # it would satisfy a values= codelist of "TRUE"/"FALSE" if it were text. Only
+  # R logical maps to "boolean", and it is the last block of this case (LIM-005).
   specs <- DTAColumnSpecCollection(columns = list(
     ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
     FLAG = DTAColumnSpec(id = "FLAG", type = "SAS Char", length = 5, nullable = FALSE, values = c("TRUE", "FALSE"))
@@ -335,6 +337,32 @@ test_that("OQ-TYPE-023 | a native logical column fails the type check against ev
   dir <- qa_tempdir()
   ds <- td_check(c("ID,FLAG", "A001,TRUE", "A002,FALSE"), specs, dir)
   qa_step("the same values, read as text from a file, validate cleanly", c(ok = TRUE, columnspec = 0L), c(ok = validation_status(ds)$ok, columnspec = as.integer(validation_status(ds)$n_columnspec_errors)))
+
+  # The same two logical values against every other declarable type: the six SAS
+  # types and the six R types that are not R logical each fail on both rows, and
+  # R logical alone passes.
+  flags <- data.frame(FLAG = c(TRUE, FALSE))
+  failing <- c(
+    "SAS Char", "SAS Num", "SAS Int", "SAS Date", "SAS Time", "SAS DateTime",
+    "R character", "R numeric", "R integer", "R Date", "R POSIXct", "R hms"
+  )
+  verdict <- function(type) {
+    one <- DTAColumnSpecCollection(columns = list(
+      FLAG = DTAColumnSpec(id = "FLAG", type = type, nullable = FALSE)
+    ))
+    det <- validate_table_detailed(one, flags, verbose = FALSE)
+    c(ok = det$ok, columnspec = det$n_columnspec_errors)
+  }
+  for (type in failing) {
+    qa_step(
+      paste("a logical column fails against", type, "on both rows"),
+      c(ok = FALSE, columnspec = 2L), verdict(type)
+    )
+  }
+  qa_step(
+    "a logical column passes against R logical",
+    c(ok = TRUE, columnspec = 0L), verdict("R logical")
+  )
 })
 
 # ---- Int narrowing ------------------------------------------------------------
@@ -424,4 +452,56 @@ test_that("OQ-TYPE-025 | the whole-column and per-batch engines type the same de
     "the batches together report the same one import error",
     c(0L, 1L), vapply(batch_results, function(r) nrow(r$issues), integer(1))
   )
+})
+
+# ---- the R backend ------------------------------------------------------------
+
+test_that("OQ-TYPE-026 | the R backend declares seven types in canonical spelling, stores default formats and rejects what it does not support | REQ-TYPE-003 REQ-TYPE-016", {
+  spelled <- c("CHARACTER", "Numeric", "iNTEGER", "logical", "date", "POSIXCT", "Hms")
+  stored <- vapply(
+    spelled,
+    function(t) DTAColumnSpec(id = "X", type = paste("R", t))@structure@type,
+    character(1),
+    USE.NAMES = FALSE
+  )
+  qa_step(
+    "every mixed-case spelling is stored in its canonical spelling",
+    c("character", "numeric", "integer", "logical", "Date", "POSIXct", "hms"),
+    stored
+  )
+  qa_step(
+    "'double' is accepted as a synonym of numeric",
+    "numeric", DTAColumnSpec(id = "X", type = "R double")@structure@type
+  )
+
+  formats <- vapply(
+    c("R Date", "R POSIXct", "R hms"),
+    function(t) DTAColumnSpec(id = "X", type = t)@structure@format,
+    character(1),
+    USE.NAMES = FALSE
+  )
+  qa_step(
+    "a Date, POSIXct and hms column that names no format store their default format",
+    c("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%H:%M:%S"), formats
+  )
+  qa_step(
+    "the default format is written out with the type when the specification is saved",
+    list(type = "R Date", format = "R %Y-%m-%d"),
+    as.list(DTAColumnSpec(id = "X", type = "R Date")@structure)
+  )
+
+  refused <- function(...) {
+    inherits(tryCatch(
+      {
+        DTAColumnSpec(id = "X", ...)
+        NULL
+      },
+      error = function(e) e
+    ), "condition")
+  }
+  qa_check("'R Char', a SAS-only spelling, is rejected", refused(type = "R Char"))
+  qa_check("a format on an R numeric column is rejected", refused(type = "R numeric", format = "R %Y-%m-%d"))
+  qa_check("a month-name directive is rejected", refused(type = "R Date", format = "R %d %b %Y"))
+  qa_check("a length on an R integer column is rejected", refused(type = "R integer", length = 4))
+  qa_check("a format of another family than the type is rejected", refused(type = "R Date", format = "R %H:%M"))
 })

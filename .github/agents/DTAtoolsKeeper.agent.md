@@ -41,6 +41,15 @@ checks, docs) says it's done.
   `DTAContainer`) → `DTADataSet` (abstract) → `DTADataSetTabular` (with the
   subclass `DTADataSetMatrix`) / `DTADataSetFile`. Column specs:
   `DTAColumnSpecCollection` (named list of `DTAColumnSpec` + optional rules).
+  A column's declared type is a `DTAColumnSpecStructure` with one child per
+  type system, `DTAColumnSpecStructureSAS` (`SAS Char`, `SAS Num`, ...) and
+  `DTAColumnSpecStructureR` (`R character`, `R numeric`, `R integer`,
+  `R logical`, `R Date`, `R POSIXct`, `R hms`); the prefix of `type:` and
+  `format:` picks it in `DTAColumnSpecStructureFactory()` and a bare type is
+  refused. Ask what kind of column a type is through `dta_type_family()`
+  (text, number, integer, logical, temporal), not by comparing type names, and
+  never check an R date/time format with `strptime()` or `as.Date()`: the
+  grammar and its checker live in `rTemporalFormat.R`.
   Rules: `DTARule` → `DTARuleColCondition` / `DTARuleColRange` /
   `DTARuleColUnique` / `DTARuleGroupCondition`. File handlers: `DTAFile` →
   `DTAFileTabular` → `DTAFileCSV` / `DTAFileTSV` / `DTAFileDelim`,

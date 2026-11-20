@@ -40,6 +40,7 @@ exports:
   - DTAColumnSpecCollection
   - DTAColumnSpecStructure
   - DTAColumnSpecStructureFactory
+  - DTAColumnSpecStructureR
   - DTAColumnSpecStructureSAS
   - DTAContainer
   - DTADataSet

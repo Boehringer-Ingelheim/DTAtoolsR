@@ -14,9 +14,15 @@ A character string representing the Arrow schema type.
 }
 \description{
 Returns the corresponding Arrow schema type for a given DTAColumnSpec
-object based on its \code{type} property.
+object based on its \code{type} property. The lookup depends on the structure's
+backend: a SAS \code{Char}, \code{Num} and \code{Int} give \code{"utf8"}, \code{"double"} and
+\code{"int32"}, and an R \code{character}, \code{numeric}, \code{integer} and \code{logical} give
+\code{"utf8"}, \code{"double"}, \code{"int32"} and \code{"bool"}. The temporal types of either
+backend (they are validated as text) have no Arrow type and give
+\code{NA_character_}, as does any other backend.
 }
 \examples{
 col <- DTAColumnSpec(id = "AGE", type = "SAS Char")
 get_arrow_type(col)
+get_arrow_type(DTAColumnSpec(id = "AGE", type = "R numeric"))
 }

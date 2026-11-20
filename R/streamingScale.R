@@ -191,6 +191,11 @@ dta_stream_unique_arrow_enabled <- function() {
 #'   validated against the per-batch path -- and it costs nothing but speed: an
 #'   ineligible source takes the per-batch path, which answers the rule
 #'   correctly either way.
+#' * no key column is declared logical. The per-batch accumulator keys a logical
+#'   column on its coerced `TRUE`/`FALSE`, where `T`, `true` and `TRUE` are one
+#'   key; Arrow groups the raw text, which would call them three. There is no
+#'   Arrow-side normalisation of the logical tokens, so such a rule is
+#'   ineligible and the per-batch path answers it.
 #'
 #' A key column's DECLARED type decides how it is grouped, not whether it is
 #' eligible. The schema type alone cannot tell a genuine text column from a
@@ -244,6 +249,18 @@ dta_arrow_unique_eligible <- function(rule, source, specs = NULL) {
         logical(1)
       ))
       if (!types_ok) {
+        return(ineligible)
+      }
+
+      # A logical key is keyed on its coerced values by the per-batch path, and
+      # grouping the raw text here would tell `T` and `TRUE` apart.
+      logical_key <- any(vapply(
+        cols,
+        function(col) identical(dta_spec_r_type(specs, col), "logical"),
+        logical(1),
+        USE.NAMES = FALSE
+      ))
+      if (logical_key) {
         return(ineligible)
       }
 

@@ -977,10 +977,10 @@ RULE_READING_GUIDE_TITLE <- "How to read the rules"
     "Missing cells" = if (isTRUE(cl$nullable)) "allowed" else "not allowed",
     "Cell values" = if (!is.null(cl$values)) paste(unlist(cl$values), collapse = ", "),
     "Cell pattern" = cl$pattern,
-    "Cell length" = if (!is.null(cl$length) && identical(dta_cell_type(dataset@matrix@cells), "Char")) paste("at most", num(cl$length), "characters"),
+    "Cell length" = if (!is.null(cl$length) && identical(dta_cell_family(dataset@matrix@cells), "text")) paste("at most", num(cl$length), "characters"),
     "Cell format" = cl$format,
     "Cell range" = range_txt,
-    "Infinite values" = if (identical(dta_cell_type(dataset@matrix@cells), "Num") && !is.null(cl$infinite)) {
+    "Infinite values" = if (identical(dta_cell_family(dataset@matrix@cells), "number") && !is.null(cl$infinite)) {
       if (isTRUE(cl$infinite)) "allowed" else "not allowed"
     }
   )

@@ -14,7 +14,8 @@ dta_equality_bound(x, value)
 }
 \value{
 \code{value} as numeric when \code{x} is numeric and every element of
-\code{value} parses as a number; \code{value} unchanged otherwise.
+\code{value} parses as a number; \code{value} as logical (or canonical text, see
+\code{\link[=dta_logical_bound]{dta_logical_bound()}}) when \code{x} is logical; \code{value} unchanged otherwise.
 }
 \description{
 \code{equals}/\code{not_equals}/\verb{in}/\code{not_in} compare \code{value} against the raw
@@ -27,5 +28,11 @@ decisions. This coerces \code{value} to numeric first, but only against a
 numeric column, and only when every element of \code{value} parses; a bound
 that does not parse, or a non-numeric column, is returned unchanged so the
 comparison stays textual exactly as before.
+
+Against a \strong{logical} column the text operands are read as logical tokens
+instead (see \code{\link[=dta_logical_bound]{dta_logical_bound()}}): \code{equals: T} has to match a \code{TRUE}, which
+\code{TRUE == "T"} never does. The test is on the column's class at evaluation
+time -- what it holds, not what its spec declares -- so a text column of
+\code{"T"} that nothing has coerced keeps comparing as text.
 }
 \keyword{internal}

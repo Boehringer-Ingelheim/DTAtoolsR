@@ -328,6 +328,55 @@ test_that(".report_columnspec_expected_text covers every columnspec keyword the 
   )
 })
 
+test_that(".report_columnspec_expected_text calls an R date/time format by that name and keeps the SAS wording", {
+  row_for <- function(columnspec) {
+    data.frame(
+      columnspec_keyword = "format", columnspec_columnspec = columnspec,
+      columnspec_message = "generic validator message", stringsAsFactors = FALSE
+    )
+  }
+
+  # A `%` is what tells the two apart: no SAS format has one.
+  expect_identical(
+    .report_columnspec_expected_text(row_for("%Y-%m-%d"), html = FALSE),
+    "Must fit the R date/time format: %Y-%m-%d."
+  )
+  expect_identical(
+    .report_columnspec_expected_text(row_for("%Y-%m-%dT%H:%M:%SZ")),
+    "Must fit the R date/time format: %Y-%m-%dT%H:%M:%SZ."
+  )
+  expect_match(
+    .report_columnspec_expected_text(row_for("DATE9."), html = FALSE),
+    "Must fit the SAS format: DATE9.",
+    fixed = TRUE
+  )
+  expect_identical(
+    .report_columnspec_expected_text(row_for("8.2")),
+    "Must fit the SAS format: 8.2."
+  )
+})
+
+test_that("a failed R date format reaches the report as the R date/time wording", {
+  details <- validate_table_detailed(
+    DTAColumnSpecCollection(columns = list(
+      D = DTAColumnSpec(id = "D", type = "R Date", format = "R %d/%m/%Y", nullable = FALSE)
+    )),
+    data.frame(D = "2024-01-05"),
+    verbose = FALSE
+  )
+  row <- details$columnspec_errors$full_error
+  row1 <- data.frame(
+    columnspec_keyword = row$keyword[[1]],
+    columnspec_columnspec = row$columnspec[[1]]
+  )
+
+  expect_identical(row1$columnspec_keyword, "format")
+  expect_identical(
+    .report_columnspec_expected_text(row1, html = FALSE),
+    "Must fit the R date/time format: %d/%m/%Y."
+  )
+})
+
 test_that(".report_import_expected_text/.report_import_actual_text show the declared type and raw value", {
   row1 <- data.frame(
     import_column = "BMI", import_raw = "unknown", import_declared_type = "number",

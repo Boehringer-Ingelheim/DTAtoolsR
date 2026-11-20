@@ -378,3 +378,50 @@ test_that("OQ-RULE-035 | validate_rules reports every violated rule at once | RE
   ))
   qa_step("a satisfied rule set raises nothing", "no condition", clean)
 })
+
+# ---- a uniqueness rule on a logical column ------------------------------------------------
+
+test_that("OQ-RULE-055 | T, TRUE, true and True are one key in an R logical column, held in memory or scanned in batches, and two in a character one | REQ-RULE-036", {
+  # Seven rows. As logical values they are T, T, F, missing, missing, F, T: three
+  # keys, so 7 - 3 = 4 rows repeat a key (the missing rows repeat one, REQ-RULE-019).
+  lines <- c("ID,FLAG", "a,T", "b,TRUE", "c,F", "d,yes", "e,", "f,false", "g,True")
+  path <- file.path(qa_tempdir(), "flag_keys.csv")
+  writeLines(lines, path)
+
+  rule <- DTARuleColUnique(id = "flag_unique", columns = "FLAG")
+  duplicates <- function(flag_type, stream, batch_rows = NULL) {
+    specs <- DTAColumnSpecCollection(
+      columns = list(
+        ID = DTAColumnSpec(id = "ID", type = "R character", nullable = FALSE),
+        FLAG = DTAColumnSpec(id = "FLAG", type = flag_type, nullable = TRUE)
+      ),
+      rules = list(rule)
+    )
+    ds <- DTADataSetTabular(id = "k", specs = specs, files = list(DTAFileCSV(filename = "flag_keys.csv")))
+    ds <- load_file(ds, file = path, handler_index = 1, stream = stream)
+    ds <- if (is.null(batch_rows)) {
+      check(ds, persist = FALSE, quiet = TRUE)
+    } else {
+      check(ds, persist = FALSE, quiet = TRUE, batch_rows = batch_rows)
+    }
+    msgs <- as.data.frame(messages(ds))
+    found <- msgs$message[msgs$source == "rule" & msgs$rule_id %in% "flag_unique"]
+    if (length(found) == 0L) 0L else rt_violations(list(valid = FALSE, message = found[[1L]]))
+  }
+
+  qa_step("held in memory, four rows repeat a key", 4L, duplicates("R logical", "never"))
+  for (rows in c(1L, 2L, 3L, 100L)) {
+    qa_step(
+      sprintf("scanned in batches of %d rows, the same four", rows),
+      4L, duplicates("R logical", "always", rows)
+    )
+  }
+  qa_step(
+    "declared as text, T and TRUE are two keys and nothing repeats, held in memory",
+    0L, duplicates("R character", "never")
+  )
+  qa_step(
+    "...and scanned in batches of two rows",
+    0L, duplicates("R character", "always", 2L)
+  )
+})

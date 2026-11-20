@@ -57,10 +57,16 @@ hold), \code{container_duplicate} (an id or file name used twice, or more than o
 \code{default: true}) and \code{file_container_unknown} (a file entry's \code{container}
 names an id the document's \code{containers} do not define).
 
+On an \verb{R logical} column a rule operand must be \code{true} or \code{false}, or one of
+the texts \code{TRUE}, \code{T}, \code{true}, \code{True}, \code{FALSE}, \code{F}, \code{false}, \code{False}; any
+other operand is a \code{rule_condition_value_unfit} error, and a \code{pattern}
+operator on such a column (its values are not text, so it never matches) is a
+\code{rule_condition_operator_invalid} error.
+
 Warnings: \code{rules_without_columns}, \code{rule_not_checkable},
-\code{rule_condition_numeric_on_text} when the column is not \verb{SAS Char} but is
-read as text (a date), \code{rule_condition_value_unfit} when a number is written
-where the column holds text,
+\code{rule_condition_numeric_on_text} when the column is not text (\verb{SAS Char},
+\verb{R character}) but is read as text (a date), \code{rule_condition_value_unfit}
+when a number is written where the column holds text,
 \code{format_narrower_than_length}, \code{column_id_shadows_field} (a column \verb{X.<field>}
 beside a column \code{X}, where \verb{<field>} is a column field such as \code{values}: a
 template path \verb{columns.X.<field>} is read as that field of \code{X}, so a seal or

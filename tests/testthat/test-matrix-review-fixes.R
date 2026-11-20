@@ -205,3 +205,25 @@ test_that("row labels of a dataset written without a type keep their header out 
 test_that("row labels that are not a list are refused with the class of a matrix without row labels", {
   expect_error(dta_row_label_specs("GENE_ID"), class = "dta_matrix_invalid_row_labels")
 })
+
+# ---- the R vocabulary ------------------------------------------------------------
+
+test_that("a matrix typed in the R vocabulary is current and keeps its types through as.list()", {
+  ds <- mrf_ds(
+    row_labels = list(list(id = "G", type = "R character", nullable = FALSE)),
+    matrix = list(cells = list(type = "R numeric", nullable = FALSE, range = list(min = 0), infinite = TRUE))
+  )
+  expect_false(dta_is_stale(ds))
+  expect_identical(ds@specs@columns[["G"]]@structure@backend, "R")
+  label <- as.list(ds@specs@columns[["G"]])
+  settings <- as.list(ds@matrix)
+  expect_identical(label$type, "R character")
+  expect_identical(settings$cells$type, "R numeric")
+  expect_true(settings$cells$infinite)
+  again <- DTADataSetFactory(
+    type = "matrix", id = "m", files = list(type = "tsv", filename = "m.tsv"),
+    row_labels = list(label), matrix = settings
+  )
+  expect_identical(as.list(again@matrix), settings)
+  expect_identical(again@specs@columns[["G"]]@structure@type, "character")
+})

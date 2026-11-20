@@ -902,10 +902,11 @@ messages(dta)</code></pre>
     </div>
 
     <!-- ===== COLUMN TYPES ===== -->
-    <h3 id="section-2-2">🏷️ Column Types — What does "SAS Char" mean?</h3>
+    <h3 id="section-2-2">🏷️ Column Types — What does "SAS Char" or "R Date" mean?</h3>
     <p>
-      DTAtools uses SAS-style type names. This controls how values are <em>read</em> from the raw text
-      of your CSV file, not just how they are validated.
+      A column type always starts with the name of its type system: <code>SAS</code> (SAS-style names) or
+      <code>R</code> (R's own names, see below). Both are always available, and one dataset may mix them.
+      The type controls how values are <em>read</em> from the raw text of your CSV file, not just how they are validated.
     </p>
 
     <div class="table-wrap">
@@ -922,6 +923,43 @@ messages(dta)</code></pre>
           <tr><td><code>SAS DateTime</code></td><td>Text (validated by pattern)</td><td><code>"2024-06-19T14:30:00"</code></td></tr>
         </tbody>
       </table>
+    </div>
+
+    <p>
+      The same kinds of column in the <code>R</code> type system. <code>R</code> is written in capitals; the type after it
+      is not case-sensitive. A bare <code>Char</code> or <code>character</code> is refused.
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Type</th><th>Stored as</th><th>What is checked</th><th>Example values</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>R character</code></td><td>Text (character)</td><td>Any text; <code>length</code> is the maximum number of characters</td><td><code>"SUBJ001"</code></td></tr>
+          <tr><td><code>R numeric</code></td><td>Number (double)</td><td>Parsed strictly, as <code>SAS Num</code></td><td><code>72.5</code></td></tr>
+          <tr><td><code>R integer</code></td><td>Integer</td><td>A whole number within the 32-bit range</td><td><code>42</code></td></tr>
+          <tr><td><code>R logical</code></td><td>Logical (TRUE/FALSE)</td><td><code>TRUE</code> <code>T</code> <code>true</code> <code>True</code> or <code>FALSE</code> <code>F</code> <code>false</code> <code>False</code>; blank is missing; anything else (<code>yes</code>, <code>1</code>) is an import error</td><td><code>TRUE</code>, <code>F</code></td></tr>
+          <tr><td><code>R Date</code></td><td>Text (must fit the format)</td><td>Default format <code>%Y-%m-%d</code>, written into the spec</td><td><code>"2024-06-19"</code></td></tr>
+          <tr><td><code>R POSIXct</code></td><td>Text (must fit the format)</td><td>Default format <code>%Y-%m-%d %H:%M:%S</code></td><td><code>"2024-06-19 14:30:00"</code></td></tr>
+          <tr><td><code>R hms</code></td><td>Text (must fit the format)</td><td>A time of day, default format <code>%H:%M:%S</code></td><td><code>"14:30:00"</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout callout-tip">
+      <div class="callout-icon">💡</div>
+      <div class="callout-body">
+        <strong>R date and time formats</strong>
+        <p>An <code>R Date</code>, <code>R POSIXct</code> or <code>R hms</code> column can carry a <code>format</code> built from
+        <code>%Y %m %d %H %M %S</code>, <code>%OS1</code> to <code>%OS6</code> (seconds with a fraction), <code>%F</code> and <code>%T</code>,
+        plus a space, <code>- / . , : ; _</code> and the letters <code>T</code> and <code>Z</code>:
+        <code>format: R %d/%m/%Y</code> or <code>format: R %Y-%m-%dT%H:%M:%SZ</code>. Fields have a fixed width and a value in a CSV
+        file must match exactly (<code>2024-1-5</code> and <code>2023-02-29</code> fail <code>%Y-%m-%d</code>). Month names, AM/PM, two-digit years and
+        time zones are not supported; use <code>SAS Date</code> with <code>SAS DATE9.</code> for <code>15AUG2025</code>. Quote a format
+        that contains a colon followed by a space (<code>'R %H: %M'</code>). On an <code>R logical</code> column, quote the
+        <code>values</code>: <code>["TRUE", "FALSE"]</code>.</p>
+      </div>
     </div>
 
     <div class="callout callout-warn">
@@ -1856,7 +1894,7 @@ datasets:
       type: csv               # csv, tsv, sas7bdat or xpt
     columns:
       - id: COLUMN_NAME       # must match exact CSV header
-        type: SAS Char        # SAS Char / SAS Num / SAS Int / SAS Date
+        type: SAS Char        # SAS Char / SAS Num / SAS Int / SAS Date, or R character / R numeric / R Date ...
         nullable: false       # true = empty values allowed
         # Add ONE of these optional constraints:
         # values: [VALUE1, VALUE2, VALUE3]   # allowed value list

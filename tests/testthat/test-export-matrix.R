@@ -282,3 +282,82 @@ test_that("DATASET_COLUMN_COUNT of a matrix counts its row-label columns", {
   vars <- .tv_dataset_variables(exm_matrix())
   expect_equal(vars[["{DATASET_COLUMN_COUNT}"]], "2")
 })
+
+# ---- the R vocabulary ------------------------------------------------------------
+# A matrix of R cells is described by the same layout rows as its SAS twin; only
+# the type text differs.
+
+# The layout rows without the one that names the type.
+exm_without_type <- function(rows) rows[rows$key != "Cell type", , drop = FALSE]
+
+exm_twin <- function(sas, r) {
+  list(
+    sas = .matrix_layout_rows(exm_rows(cells = sas)),
+    r = .matrix_layout_rows(exm_rows(cells = r))
+  )
+}
+
+test_that("R numeric cells state the range and infinite rows a SAS Num cell states", {
+  both <- exm_twin(
+    list(type = "SAS Num", nullable = FALSE, range = list(min = 0, max = 1), infinite = TRUE),
+    list(type = "R numeric", nullable = FALSE, range = list(min = 0, max = 1), infinite = TRUE)
+  )
+  expect_equal(exm_value(both$sas, "Cell type"), "SAS Num")
+  expect_equal(exm_value(both$r, "Cell type"), "R numeric")
+  expect_equal(exm_value(both$r, "Cell range"), "0 to 1 (both included)")
+  expect_equal(exm_value(both$r, "Infinite values"), "allowed")
+  expect_equal(exm_without_type(both$r)$value, exm_without_type(both$sas)$value)
+  expect_equal(exm_without_type(both$r)$key, exm_without_type(both$sas)$key)
+  # unwritten means not allowed, as for SAS Num
+  expect_equal(
+    exm_value(.matrix_layout_rows(exm_rows(cells = list(type = "R numeric"))), "Infinite values"),
+    "not allowed"
+  )
+})
+
+test_that("R integer cells state a range and no infinite row, like SAS Int", {
+  rows <- .matrix_layout_rows(exm_rows(cells = list(type = "R integer", range = list(min = 0))))
+  expect_equal(exm_value(rows, "Cell type"), "R integer")
+  expect_equal(exm_value(rows, "Cell range"), "at least 0")
+  expect_false("Infinite values" %in% rows$key)
+})
+
+test_that("the cell length row is for R character cells too, and for no other R type", {
+  chr <- .matrix_layout_rows(exm_rows(cells = list(type = "R character", length = 8)))
+  expect_equal(exm_value(chr, "Cell type"), "R character")
+  expect_equal(exm_value(chr, "Cell length"), "at most 8 characters")
+  expect_false("Infinite values" %in% chr$key)
+  for (type in c("R numeric", "R integer")) {
+    rows <- .matrix_layout_rows(exm_rows(cells = list(type = type)))
+    expect_false("Cell length" %in% rows$key, info = type)
+  }
+})
+
+test_that("a document of an R matrix names the R types, and a % in a format survives", {
+  ds <- dta_dataset_from_list(list(
+    id = "r_counts", type = "matrix", files = list(filename = "r.tsv", type = "tsv"),
+    row_labels = list(
+      list(id = "SAMPLE", header = "", type = "R character", length = 12, nullable = FALSE),
+      list(id = "TAKEN", type = "R Date", format = "R %d.%m.%Y", nullable = TRUE)
+    ),
+    matrix = list(
+      columns = list(pattern = "^G[0-9]+$"),
+      cells = list(type = "R numeric", nullable = FALSE, range = list(min = 0), infinite = FALSE)
+    )
+  ))
+  out <- tempfile(fileext = ".md")
+  docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(c(out, docx), force = TRUE), add = TRUE)
+  write_dataset_metadata(ds, file = out, format = "md", overwrite = TRUE, quiet = TRUE)
+  md <- .md_unescape(paste(readLines(out, warn = FALSE), collapse = "\n"))
+  for (text in c(
+    "Row label columns", "Matrix layout", "R character", "R Date", "R numeric",
+    "%d.%m.%Y", "Infinite values", "Cell range", "at least 0"
+  )) {
+    expect_match(md, text, fixed = TRUE)
+  }
+  write_dataset_metadata(ds, file = docx, format = "docx", overwrite = TRUE, quiet = TRUE)
+  text <- .docx_paragraphs(docx)
+  expect_true(all(c("Row label columns", "Matrix layout", "Infinite values") %in% text))
+  expect_true("at least 0" %in% text)
+})

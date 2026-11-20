@@ -358,3 +358,56 @@ requirements:
       an error at evaluation time but a silently wrong verdict: equals with two
       values compared row by row with recycling, making the result depend on
       row order, and range with three values dropped the third bound.
+
+  - id: REQ-RULE-034
+    text: >
+      The operators equals, not_equals, in and not_in (and the aliases equal and
+      not_equal), applied to a column holding R logical values, shall read an
+      operand written as one of the texts TRUE, T, true, True, FALSE, F, false
+      or False, or as a YAML true or false, as that logical value, whatever
+      its spelling, so that equals T and equals true select the rows equals
+      TRUE selects. An operand that is no logical token shall select no row
+      with equals and in and every row holding a value with not_equals, and
+      shall not raise a condition. A missing value shall not be selected by
+      equals, not_equals or in and shall be selected by not_in, as it is for
+      every other column type (REQ-RULE-003).
+    risk: high
+    category: functional
+    covers: [rule_check_col_condition, DTARuleColCondition]
+    source: R/evaluateRules.R (dta_logical_bound, dta_equality_bound)
+    notes: >
+      A numeric operator on the same column reads TRUE as 1 and FALSE as 0
+      (LIM-032).
+
+  - id: REQ-RULE-035
+    text: >
+      Which operand reading a rule applies shall be decided by the values the
+      column holds when the rule is evaluated, never by the type its
+      specification declares: a column holding text, such as a table that
+      nothing has typed, shall be compared as text, so that equals T selects
+      the text T and not the text TRUE, and the same column read from a file
+      and typed by its declaration R logical shall have equals T select every
+      row spelled as a TRUE token.
+    risk: high
+    category: functional
+    covers: [rule_check_col_condition, check, load_file, validation_status]
+    source: R/evaluateRules.R (dta_equality_bound); R/importConversion.R
+    notes: >
+      validate_table() types nothing, so a text column of T and TRUE declared
+      R logical is judged as text there; a file loaded by load_file() is typed
+      first and judged as logical.
+
+  - id: REQ-RULE-036
+    text: >
+      A uniqueness rule on a column declared R logical shall count the
+      spellings of one logical value as one key, T, TRUE, true and True being
+      one key and F, FALSE, false and False another, and every missing value
+      a third, with the table held in memory and scanned in batches alike and
+      whatever the batch size.
+    risk: medium
+    category: functional
+    covers: [rule_check_unique, check, load_file, validation_status, messages]
+    source: R/streamingScale.R (dta_arrow_unique_eligible); R/evaluateRules.R
+    notes: >
+      The same file with the column declared R character has no duplicate
+      among the spellings: T and TRUE are two keys there.

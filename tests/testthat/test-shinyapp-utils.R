@@ -139,7 +139,7 @@ test_that("dta_rule_summary gives the plain-English sentence of the package, not
 
 test_that("dta_supported_types / dta_supported_backends / dta_sas_types return the real package sets", {
   expect_equal(app_fn("dta_supported_types")(), c("tabular", "file", "matrix"))
-  expect_equal(app_fn("dta_supported_backends")(), "SAS")
+  expect_equal(app_fn("dta_supported_backends")(), c("SAS", "R"))
   expect_equal(
     app_fn("dta_sas_types")(),
     c("Char", "Num", "Int", "Date", "Time", "DateTime")

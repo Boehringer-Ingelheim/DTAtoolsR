@@ -360,3 +360,76 @@ test_that("the same YAML with id SAMPLE_ID and header 'Sample ID' loads", {
   expect_identical(label@id, "SAMPLE_ID")
   expect_identical(label@header, "Sample ID")
 })
+
+# ---- the R vocabulary ------------------------------------------------------------
+
+mxl_r <- function(cells = list(type = "R numeric", nullable = FALSE), ...) {
+  mxl_matrix(
+    row_labels = list(list(id = "ID", header = "", type = "R character", nullable = FALSE)),
+    matrix = list(cells = cells), ...
+  )
+}
+
+test_that("a matrix with R row labels and R cells lints clean, as a list and as an object", {
+  for (cells in list(
+    list(type = "R numeric", nullable = FALSE, range = list(min = 0), infinite = FALSE),
+    list(type = "R integer", nullable = TRUE, values = list(0, 1, 2)),
+    list(type = "R character", length = 8, pattern = "^[A-Z]+$")
+  )) {
+    d <- mxl_r(cells)
+    expect_identical(nrow(lint_dta(d)), 0L, info = cells$type)
+    expect_identical(nrow(lint_dta(dta_dataset_from_list(d))), 0L, info = cells$type)
+  }
+  # the two vocabularies mix freely between row labels and cells
+  expect_identical(nrow(lint_dta(mxl_matrix(matrix = list(cells = list(type = "R numeric"))))), 0L)
+  expect_identical(nrow(lint_dta(mxl_r(list(type = "SAS Num")))), 0L)
+})
+
+test_that("an R cell that is not a number or text is matrix_cells_type, as a SAS one is", {
+  for (type in c("R logical", "R Date", "R POSIXct", "R hms", "SAS Date", "SAS Time", "SAS DateTime")) {
+    expect_identical(mxl_codes(mxl_r(list(type = type))), "matrix_cells_type", info = type)
+  }
+})
+
+test_that("a range or infinite on an R cell that does not take it is the code a SAS cell gets", {
+  expect_identical(
+    mxl_codes(mxl_r(list(type = "R character", range = list(min = 1)))), "cell_range_type"
+  )
+  expect_identical(
+    mxl_codes(mxl_r(list(type = "R integer", infinite = TRUE))), "cell_finite_type"
+  )
+  expect_identical(
+    mxl_codes(mxl_r(list(type = "R character", infinite = FALSE))), "cell_finite_type"
+  )
+  expect_identical(
+    mxl_codes(mxl_r(list(type = "R integer", range = list(min = 5, max = 1)))), "cell_range_invalid"
+  )
+  expect_identical(nrow(lint_dta(mxl_r(list(type = "R numeric", infinite = TRUE)))), 0L)
+})
+
+test_that("rules on the R row labels of a matrix are judged by family, logical operands included", {
+  labels <- list(
+    list(id = "ID", header = "", type = "R character", nullable = FALSE),
+    list(id = "FLAG", type = "R logical", nullable = TRUE),
+    list(id = "N", type = "R integer", nullable = TRUE)
+  )
+  rule <- function(col, op, value, then = "ID") {
+    list(
+      id = paste(col, op), type = "col_condition",
+      condition = stats::setNames(list(stats::setNames(list(value), op)), col),
+      then = stats::setNames(list(list(empty = FALSE)), then)
+    )
+  }
+  d <- function(r) mxl_matrix(row_labels = labels, rules = list(r))
+  expect_identical(nrow(lint_dta(d(rule("FLAG", "equals", "T")))), 0L)
+  expect_identical(nrow(lint_dta(d(rule("FLAG", "equals", TRUE)))), 0L)
+  expect_identical(mxl_codes(d(rule("FLAG", "equals", "maybe"))), "rule_condition_value_unfit")
+  expect_identical(mxl_codes(d(rule("N", "greater", "abc"))), "rule_condition_numeric_on_text")
+  expect_identical(mxl_codes(d(rule("ID", "greater", 3))), "rule_condition_numeric_on_text")
+  expect_identical(
+    mxl_codes(mxl_matrix(row_labels = labels, rules = list(
+      list(id = "r", type = "col_range", columns = "FLAG", min = 0, max = 1)
+    ))),
+    "rule_range_non_numeric"
+  )
+})
