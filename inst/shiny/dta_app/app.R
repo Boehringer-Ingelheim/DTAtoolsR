@@ -10585,22 +10585,36 @@ server <- function(input, output, session) {
   # after a run and goes stale with the next edit.
   findings_now <- reactive(dv_findings(rv$dta))
 
-  # The block shows for every document with a dataset: it also holds the
-  # sidebar's way into the container manager, which a one-dataset document needs
-  # as much as any. A flag the conditionalPanel reads, not a uiOutput:
-  # re-rendering the block would rebuild its fileInput and lose the binding. It
-  # is never suspended -- the panel is hidden when it is FALSE, and a suspended
+  # Two flags the conditionalPanels read, not a uiOutput: re-rendering the drop
+  # area would rebuild its fileInput and lose the binding. Neither is ever
+  # suspended -- the panel is hidden while its flag is FALSE, and a suspended
   # output would never tell the client it became TRUE.
-  delivery_zone_on <- reactive({
+  #  * delivery_zone: the drop area. Only a document that names containers
+  #    (explicit, or implied by a file entry) has a delivery to drop.
+  #  * delivery_block: the Delivery section around it. It also holds the sidebar's
+  #    way into the container manager, which a document without containers needs
+  #    to get its first one -- so it shows in edit mode even when the drop area
+  #    does not, and shows nothing at all in view mode.
+  delivery_has_dataset <- reactive({
     !is.null(rv$dta) && length(dta_dataset_names(rv$dta)) > 0
+  })
+  delivery_zone_on <- reactive({
+    delivery_has_dataset() && length(dta_container_rows(rv$dta)) > 0
+  })
+  delivery_block_on <- reactive({
+    delivery_has_dataset() && (delivery_zone_on() || editing())
   })
   # A render function proper (not `output$x <- reactive()`): a test session reads
   # an output through its two-argument call, which a bare reactive does not take.
-  output$delivery_zone <- shiny::markRenderFunction(
-    uiFunc = function(...) NULL,
-    renderFunc = function(shinysession, name, ...) delivery_zone_on()
-  )
-  outputOptions(output, "delivery_zone", suspendWhenHidden = FALSE)
+  delivery_flag <- function(id, flag) {
+    output[[id]] <- shiny::markRenderFunction(
+      uiFunc = function(...) NULL,
+      renderFunc = function(shinysession, name, ...) flag()
+    )
+    outputOptions(output, id, suspendWhenHidden = FALSE)
+  }
+  delivery_flag("delivery_zone", delivery_zone_on)
+  delivery_flag("delivery_block", delivery_block_on)
 
   output$delivery_panel <- renderUI({
     req(rv$dta)
@@ -10637,6 +10651,21 @@ server <- function(input, output, session) {
   )) {
     outputOptions(output, sidebar_output, suspendWhenHidden = FALSE)
   }
+
+  # The line above a dataset's slots. The sidebar's Delivery zone exists only for
+  # a document that names containers, so the line must not send the user to a drop
+  # area that is not there. It reads the document, which output$dataset_detail
+  # below must not (a re-render would rebuild the slots' file inputs): hence its
+  # own output.
+  output$dataset_hint <- renderUI({
+    div(
+      class = "msg-hint", style = "margin:-4px 0 10px;",
+      paste0(
+        "Drop this dataset's files below.",
+        if (delivery_zone_on()) " To load a whole delivery for every dataset, drop it on Delivery in the sidebar."
+      )
+    )
+  })
 
   # --- dataset detail (structure only -> stable file inputs) --------------
   output$dataset_detail <- renderUI({
@@ -10768,10 +10797,7 @@ server <- function(input, output, session) {
       #  "Uploads are validated against the file handler as you add them."
       # ),
       # tags$h5("Expected files"),
-      div(
-        class = "msg-hint", style = "margin:-4px 0 10px;",
-        "Drop this dataset's files below. To load a whole delivery for every dataset, drop it on Delivery in the sidebar."
-      ),
+      uiOutput("dataset_hint"),
       slots,
       card(
         card_header(
@@ -10874,18 +10900,23 @@ server <- function(input, output, session) {
           uiOutput("add_dataset_ui"),
           # Under the datasets it feeds, before the check that reads them: the
           # sidebar reads top to bottom as what is expected, load it, check it.
-          # Shown for every document with a dataset. The drop zone is static:
-          # only the flag behind the panel changes.
+          # The drop zone is offered only to a document that names containers; the
+          # block around it also shows, in edit mode, for the way into the
+          # container manager. The drop zone is static: only the flags behind the
+          # two panels change.
           conditionalPanel(
-            "output.delivery_zone",
+            "output.delivery_block",
             div(
               class = "delivery-block",
               div(class = "section-label", "Delivery"),
-              div(
-                class = "dropzone delivery-drop",
-                fileInput("delivery_files",
-                  label = "Drop or choose the whole delivery",
-                  multiple = TRUE, width = "100%"
+              conditionalPanel(
+                "output.delivery_zone",
+                div(
+                  class = "dropzone delivery-drop",
+                  fileInput("delivery_files",
+                    label = "Drop or choose the whole delivery",
+                    multiple = TRUE, width = "100%"
+                  )
                 )
               ),
               uiOutput("delivery_panel")
