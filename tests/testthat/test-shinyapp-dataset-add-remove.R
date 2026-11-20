@@ -290,7 +290,7 @@ test_that("the sidebar outputs opt out of suspendWhenHidden", {
     for (id in c(
       "workspace_header", "summary_metrics", "dataset_nav_ui",
       "add_dataset_ui", "validation_report_ui",
-      "delivery_panel", "delivery_zone"
+      "delivery_panel", "delivery_zone", "delivery_block"
     )) {
       expect_false(
         isTRUE(outputOptions(output, id)$suspendWhenHidden),
