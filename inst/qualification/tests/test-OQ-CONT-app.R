@@ -613,31 +613,38 @@ test_that("OQ-CONT-056 | a loose file on a dataset's zone is the individual chec
   })
 })
 
-test_that("OQ-CONT-057 | the Delivery zone is offered for every document with a dataset, loads the whole delivery and opens a Delivery view that names every file | REQ-CONT-030", {
+test_that("OQ-CONT-057 | the Delivery zone is offered only to a document that names containers, loads the whole delivery and opens a Delivery view that names every file | REQ-CONT-030", {
   app <- qapp_skip_unless_app_installed()
   qapp_clean_session_files()
   ap_notes()
   ap_tabs()
 
-  # The zone is offered for every document with a dataset: one plain dataset,
-  # two datasets, one dataset with a container.
+  # The zone is offered only to a document that names a container: one plain
+  # dataset and two datasets with none are not offered it; one dataset with a
+  # container record, and a document whose file entry names a container with no
+  # record, are.
   one_container <- ap_yaml(c(
     AP_META, AP_DEFAULT, "datasets:", ap_ds("ae", "{filename: ae.csv, type: csv}", AP_AE_COLS)
   ))
   two <- ap_spec()
+  implied <- ap_spec_container()
   ap_serve(app, {
     qa_step("no document is offered no Delivery zone", FALSE, output$delivery_zone)
     session$setInputs(dta_file = qapp_file_input("clinical_dta.yaml"))
     qa_step("a document with one dataset and no container has one dataset", 1L, length(rv$structure))
-    qa_step("and is offered the Delivery zone", TRUE, output$delivery_zone)
+    qa_step("and is offered no Delivery zone", FALSE, output$delivery_zone)
   })
   ap_serve(app, {
     session$setInputs(dta_file = cont_fi(two, "spec.yaml"))
-    qa_step("a document with two datasets is offered the Delivery zone", TRUE, output$delivery_zone)
+    qa_step("a document with two datasets and no container is offered none either", FALSE, output$delivery_zone)
   })
   ap_serve(app, {
     session$setInputs(dta_file = cont_fi(one_container, "spec.yaml"))
-    qa_step("so is a document with one dataset and a container", TRUE, output$delivery_zone)
+    qa_step("a document with one dataset and a container record is offered the Delivery zone", TRUE, output$delivery_zone)
+  })
+  ap_serve(app, {
+    session$setInputs(dta_file = cont_fi(implied, "spec.yaml"))
+    qa_step("so is a document whose file entry names a container that has no record", TRUE, output$delivery_zone)
   })
 
   # A drop binds every dataset, records the delivery and opens the view. vs

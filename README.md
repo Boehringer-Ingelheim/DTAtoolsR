@@ -527,11 +527,12 @@ the summary `load_delivery()` prints and its `last_delivery` table do, and the
 report's inputs table has a Container column. The exported agreement gets a
 Containers section (container, description, files) after Process Information.
 
-**In the app**, a Delivery zone in the sidebar takes containers and loose
-files for the whole document and opens a Delivery view; ambiguous files are
-asked in a dialog. A container manager (Metadata tab, or the sidebar) edits
-containers and assigns files, and the file editor's "Delivered inside" is a
-select. A dataset's own upload zone takes only that dataset's files.
+**In the app**, once the document names containers, a Delivery zone in the
+sidebar takes containers and loose files for the whole document and opens a
+Delivery view; ambiguous files are asked in a dialog. A container manager
+(Metadata tab, or the sidebar) edits containers and assigns files, and the file
+editor's "Delivered inside" is a select. A dataset's own upload zone takes only
+that dataset's files.
 
 ### Validating a file too large to load
 
