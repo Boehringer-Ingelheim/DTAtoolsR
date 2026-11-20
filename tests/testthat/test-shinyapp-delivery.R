@@ -462,9 +462,11 @@ test_that("the slot card, the dataset hint and the loaded-files list name the co
       fixed = TRUE
     ))
     expect_true(grepl("Drop or choose a file", detail, fixed = TRUE))
+    # The line above the slots is its own output (it reads the document).
+    expect_true(grepl('id="dataset_hint"', detail, fixed = TRUE))
     expect_true(grepl(
       "Drop this dataset's files below. To load a whole delivery for every dataset, drop it on Delivery in the sidebar.",
-      detail,
+      ui_text(output$dataset_hint),
       fixed = TRUE
     ))
     expect_true(grepl("from sdtm_csv.zip", ui_text(output$loaded_files), fixed = TRUE))

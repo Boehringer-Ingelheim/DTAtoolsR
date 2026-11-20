@@ -115,6 +115,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - The app's list of type systems (`dta_supported_backends()`) now includes `R`,
   so the column editor offers both.
 
+### Changed
+
+- The app's sidebar Delivery zone (the drop area for the whole delivery) is
+  offered only to a document that names containers, in its containers section
+  or in the container reference of a file entry. A document without any shows
+  no drop area; in edit mode the sidebar still offers the Containers… link to
+  the container manager, and the drop area appears as soon as the first
+  container is added. A dataset's own drop zone is unchanged, and its hint
+  names the sidebar zone only when there is one.
+
 ### Fixed
 
 - `validate_template()` reported a concrete template with a required party
