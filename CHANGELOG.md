@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- `create_template_repo()` writes two JSON Schemas to `schemas/`
+  (`dta-template-library.schema.json` for the four template file kinds,
+  `dta-app.schema.json` for `dta-app.yaml`) and a `.vscode/settings.json` that
+  points the Red Hat YAML extension at them, whatever `examples` says. The
+  editor then marks a wrong `kind`, an unquoted `version`, a misspelt key, an
+  invalid `role` and the wrong shape of options, slots and vocabulary columns
+  while a template is written. The schemas check the shape of one file only;
+  `validate_template()` stays the authority. The generated `README.md`
+  documents where the two differ. `jsonvalidate` is a new suggested package,
+  used only by the tests.
 - `create_template_repo()` writes an agent skill to
   `.claude/skills/dta-template-authoring/` (new argument `agent_skill`,
   default `TRUE`). It gives coding agents the working method for a template

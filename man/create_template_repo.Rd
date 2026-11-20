@@ -23,7 +23,8 @@ writes the four starter templates into \verb{templates/}, \verb{parties/} and
 \verb{vocabulary/} beneath \code{path}, plus the commented-out \code{dta-app.yaml} and
 \code{export-templates/README.md}. \code{README.md} stays at the repository root.
 When \code{FALSE}, only \code{README.md},
-\code{.gitignore} and (if \code{ci} asks for any provider) its CI file(s) are
+\code{.gitignore}, the JSON Schemas with their editor setting and (if \code{ci}
+asks for any provider) its CI file(s) are
 written -- no template files, for a caller who wants the scaffolding
 without the worked example. Such a repository has no templates yet, so
 \code{\link[=validate_template]{validate_template()}} reports the error \code{no_templates} and the generated
@@ -94,6 +95,9 @@ at the root and one folder per kind of file:
 <path>/parties/starter_supplier.dta-party.yaml
 <path>/vocabulary/starter_terms.dta-vocabulary.yaml
 <path>/export-templates/README.md              (drop Word .docx templates here)
+<path>/schemas/dta-template-library.schema.json (JSON Schema for the four template file kinds)
+<path>/schemas/dta-app.schema.json             (JSON Schema for dta-app.yaml)
+<path>/.vscode/settings.json                   (points VS Code's YAML extension at the schemas)
 <path>/.github/workflows/validate-templates.yml  (ci = "github", default)
 <path>/bitbucket-pipelines.yml                 (ci = "bitbucket")
 <path>/Jenkinsfile                             (ci = "jenkins")
@@ -104,6 +108,14 @@ at the root and one folder per kind of file:
 Only the selected CI files are written. \code{\link[=validate_template]{validate_template()}} detects the
 layout from the repository root: point it (and the app's template sources)
 at \verb{<path>} itself, never at one of the folders inside it.
+
+The two JSON Schemas and \code{.vscode/settings.json} are always written, whatever
+\code{examples} says. With the Red Hat YAML extension installed and the
+repository folder opened as the VS Code workspace, they flag a wrong \code{kind},
+an unquoted \code{version}, a misspelt key or an invalid \code{role} while you type.
+They check the shape of one file only: \code{\link[=validate_template]{validate_template()}} stays the
+authority on everything else, and is stricter or looser in a few places
+that the repository's \code{README.md} lists.
 }
 \examples{
 dir <- file.path(tempdir(), "my-templates")

@@ -53,6 +53,11 @@ repository/
 │   └── starter_terms.dta-vocabulary.yaml
 ├── export-templates/
 │   └── README.md
+├── schemas/
+│   ├── dta-template-library.schema.json
+│   └── dta-app.schema.json
+├── .vscode/
+│   └── settings.json
 ├── .github/
 │   └── workflows/
 │       └── validate-templates.yml
@@ -73,6 +78,7 @@ Each kind of file lives in its own folder, directly inside it:
 | `parties/` | Party profiles (`*.dta-party.yaml`). |
 | `vocabulary/` | Controlled vocabularies (`*.dta-vocabulary.yaml`). |
 | `export-templates/` | Word templates (`*.docx` containing `{PLACEHOLDER}` markers) used for Word export. |
+| `schemas/` | JSON Schemas that give an editor completion and error markers for the files above; DTAtools itself never reads them (see "Editor support"). |
 | repository root | The optional `dta-app.yaml` app configuration, plus README, CI files, scripts, tests, Docker files, charts, and deployment configuration. |
 
 Keep README, CI files, scripts, tests, Docker files, charts, and deployment configuration at the repository root or in their own repository
@@ -1542,6 +1548,36 @@ The app reads the configuration together with the template index: after "Refresh
 | `app_config_duplicate` | error | Both `dta-app.yaml` and `dta-app.yml` in the library. Keep one. |
 | `app_config_misplaced` | error | A `dta-app.yaml` anywhere but the library root, for example inside `templates/`. Move it to the root. |
 | `export_template_invalid` | warning | A file in `export-templates/` that is not a `.docx`; it is ignored. |
+
+## Editor support
+
+`schemas/` holds two JSON Schemas, and `.vscode/settings.json` tells VS Code to apply them:
+`schemas/dta-template-library.schema.json` to every `*.dta-template.yaml`, `*.dta-dataset-template.yaml`, `*.dta-party.yaml` and
+`*.dta-vocabulary.yaml`, and `schemas/dta-app.schema.json` to `dta-app.yaml`. Install the Red Hat YAML extension (`redhat.vscode-yaml`) and
+open **this repository's folder as the workspace root**: the relative paths in `.vscode/settings.json` resolve against it, so the schemas
+are not found when you open a parent folder. The editor then marks a missing or unknown `kind`, an unquoted `version`, a misspelt key at the top
+of a file, an invalid `role` or vocabulary `type`, and the wrong shape for options, slots and `columns:` while you type, and completes
+the keys it knows. For another editor, point its YAML schema setting at the same two files.
+
+A schema checks the shape of one file. `validate_template()` stays the authority: it resolves `extends:` and `mixins:`, detects cycles and
+unknown `${...}` tokens, notices a `kind:` that disagrees with the file suffix or a file in the wrong folder, and dry-runs each concrete
+template. Run it as described under "Validating" before you commit.
+
+Where the editor and the validator differ:
+
+- **Stricter.** The keys at the top of each file kind and the sections of `dta-app.yaml` are closed, so a misspelt key is marked.
+  DTAtools itself ignores an unknown key at the top of a file, and only warns about one in `dta-app.yaml`. An unknown `kind:` is marked, where
+  the validator only warns (`kind_unknown`). A `version` must look like a version (digits separated by `.` or `-`); the validator only warns
+  about one it cannot compare. An abstract creation template with no `base:` is marked; the validator accepts it, but the app cannot load it
+  as a parent.
+- **Looser.** A dataset (`dataset:` in a dataset template, or one written out in `datasets:`) is checked for its outline only: `id`, `type`,
+  `files` and `columns`. Its columns and rules are not described by the schema.
+- **YAML 1.2 against YAML 1.1.** The editor reads `yes`, `no`, `on` and `off` as plain strings; DTAtools reads them as booleans. Where a
+  boolean is expected the schema therefore also accepts a string. Write `true` and `false`.
+- **`.vscode/settings.json` is replaced** when you re-run `create_template_repo()` with `overwrite = TRUE`. Keep your own editor settings
+  outside that file, or merge the `yaml.schemas` entry back in by hand.
+- **A copy.** The schemas are copies from the DTAtools version that created this repository. A later version may accept more than they do. To
+  refresh them, copy the two files from `system.file("extdata", "schemas", package = "DTAtools")` over the ones in `schemas/`.
 
 ## Validating
 
