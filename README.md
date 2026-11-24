@@ -1328,7 +1328,10 @@ Supported operators in both `condition` and `then`:
 - `in`: List of strings / numbers
 - `not_in`: List of strings / numbers
 - `empty`: Boolean
-- `pattern`: Regex string
+- `pattern`: Regex string. A missing value and an empty string never match
+  (not even `^$` or `.*`; use `empty` to test for them), and a number is matched
+  as its plain decimal text, `100000` and not `1e+05` (a fraction keeps at most
+  15 significant digits)
 
 ```yaml
 rules:

@@ -1,6 +1,7 @@
 # The condition operator vocabulary. REQ-RULE-001 .. REQ-RULE-010, the
-# number of values each operator takes, REQ-RULE-033, and the operators on a
-# column of R logical values, REQ-RULE-034 and REQ-RULE-035.
+# number of values each operator takes, REQ-RULE-033, the operators on a
+# column of R logical values, REQ-RULE-034 and REQ-RULE-035, and what a
+# pattern makes of a number, REQ-RULE-037.
 #
 # One test case per operator. Each builds a table holding a row the operator
 # selects, a row it does not, and a row whose value is missing, so that the
@@ -172,12 +173,87 @@ test_that("OQ-RULE-011 | pattern matches PCRE and rejects missing and empty | RE
     1L, ro_selected("pattern", "^[A-Z]{3}[0-9]{3}$", values)
   )
 
-  # An empty string and a missing value both fail to match. A rule author
-  # writing "the code must look like this" would otherwise have to remember
-  # that absent values quietly satisfy it.
+  # An empty string and a missing value both fail to match, whatever the
+  # expression (REQ-RULE-007). A rule author writing "the code must look like
+  # this" would otherwise have to remember that absent values quietly satisfy
+  # it. Every column below holds an empty string AND a missing value, and each
+  # expected count is the number of rows that hold some text and fit the
+  # expression, counted by hand from the values.
   qa_step(
-    "an empty string and a missing value do not match a pattern",
-    0L, ro_selected("pattern", "^$", c("x", NA))
+    "^$, which only an empty string fits, selects nothing: not the empty string, not the missing value",
+    0L, ro_selected("pattern", "^$", c("x", "", NA, ""))
+  )
+  qa_step(
+    ".*, which fits any text, selects the rows that hold text and neither the empty string nor the missing value",
+    1L, ro_selected("pattern", ".*", c("x", "", NA))
+  )
+  qa_step(
+    "an expression that allows no characters at all still selects only the text that fits it",
+    1L, ro_selected("pattern", "^[A-Z]*$", c("", NA, "ABC", "abc"))
+  )
+  qa_step(
+    "an optional group that fits an empty value selects only the value that fills it",
+    1L, ro_selected("pattern", "^(AB1)?$", c("", NA, "AB1", "x"))
+  )
+
+  # Text of spaces only is not an empty string: `empty` is the operator that
+  # counts blanks (REQ-RULE-008), and a pattern that asks for spaces gets them.
+  qa_step(
+    "text of spaces only is matched like any other text",
+    2L, ro_selected("pattern", "^ +$", c(" ", "  ", ""))
+  )
+
+  # The THEN side: a row the IF selects must satisfy the pattern, and a value
+  # that cannot match fails it. Three rows are all in scope; only "x" holds text.
+  then_rule <- DTARuleColCondition(
+    id = "then_pattern",
+    condition = list(GRP = list(equals = "a")),
+    then = list(V = list(pattern = ".*"))
+  )
+  then_frame <- data.frame(GRP = "a", V = c("x", "", NA), stringsAsFactors = FALSE)
+  then_result <- rule_check_col_condition(then_rule, then_frame)
+  qa_step(
+    "a THEN pattern fails the empty string and the missing value and passes the text, so two of three rows violate",
+    2L, as.integer(sub("^.*: ([0-9]+) rows.*$", "\\1", then_result$message))
+  )
+})
+
+test_that("OQ-RULE-056 | pattern matches a number as its plain decimal text, whatever it is stored as | REQ-RULE-037", {
+  # R writes the double 100000 as 1e+05 and 0.00001 as 1e-05. The requirement
+  # says the number is matched as its plain decimal text, so the expected
+  # counts below follow from how the numbers are written in decimal, not from
+  # how R prints them.
+  qa_step(
+    "100000 held as a double is selected by a pattern for its six digits",
+    1L, ro_selected("pattern", "^100000$", c(100000, 100001))
+  )
+  qa_step(
+    "the same number held as an integer is selected too",
+    1L, ro_selected("pattern", "^100000$", c(100000L, 100001L))
+  )
+  qa_step(
+    "and so is the same number held as text",
+    1L, ro_selected("pattern", "^100000$", c("100000", "100001"))
+  )
+  qa_step(
+    "0.00001 is selected by a pattern for its decimal digits",
+    1L, ro_selected("pattern", "^0[.]00001$", c(0.00001, 0.0001, 1))
+  )
+  qa_step(
+    "a whole number of fifteen zeros and a one is written out in full",
+    1L, ro_selected("pattern", "^1000000000000000$", c(1e15, 1e14))
+  )
+  qa_step(
+    "a negative number keeps its sign",
+    1L, ro_selected("pattern", "^-5$", c(-5, 5))
+  )
+  qa_step(
+    "no number is written with an exponent, so a pattern that looks for one selects nothing",
+    0L, ro_selected("pattern", "e[+-]", c(100000, 0.00001, 1e15))
+  )
+  qa_step(
+    "a missing value of a numeric column, NA or NaN, matches nothing, and .* selects the one number",
+    1L, ro_selected("pattern", ".*", c(1, NA, NaN))
   )
 })
 

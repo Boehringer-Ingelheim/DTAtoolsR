@@ -228,6 +228,26 @@ test_that("OQ-VAL-008 | a value not matching the declared pattern is reported | 
     vs_expect("columnspec", 2L, "CODE", "pattern"),
     vs_found(ds)
   )
+
+  # LIM-036: a column's pattern asks whether a value may stand in the column, so
+  # an empty string is matched like any other text and `^[A-Z]*$` accepts it. The
+  # rule operator pattern answers another question and never matches an empty
+  # string (REQ-RULE-007). A file cannot deliver an empty string (an empty field
+  # is read as missing, REQ-FILE-004), so this one case hands a table built in R
+  # to the engine instead of writing a file. Zero capital letters satisfy
+  # `^[A-Z]*$`, so the expected number of findings is zero.
+  held <- DTADataSetTabular(
+    id = "qual",
+    specs = vs_specs(list(
+      DTAColumnSpec(id = "CODE", type = "SAS Char", length = 6, nullable = FALSE, pattern = "^[A-Z]*$")
+    )),
+    tables = list(t = data.frame(CODE = c("", "AB"), stringsAsFactors = FALSE))
+  )
+  held <- check(held, persist = FALSE, quiet = TRUE)
+  qa_step(
+    "LIM-036: an empty string in a table built in R fits a column pattern that allows no characters",
+    0L, nrow(vs_found(held))
+  )
 })
 
 test_that("OQ-VAL-009 | a missing value in a nullable column is not an error | REQ-VAL-010", {
