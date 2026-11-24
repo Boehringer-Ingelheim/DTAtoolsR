@@ -50,7 +50,7 @@ pipeline {
 
                 // rocker/r-ver:4.4 pins its default `repos` to a Posit Package
                 // Manager snapshot dated 2025-04-10, which predates `zip >= 3.0.0`
-                // and `S7 >= 0.2.2` (both required by DTAtools). Every install
+                // and `S7 >= 1.0.0` (both required by DTAtools). Every install
                 // below therefore sets the `latest` noble binary mirror (noble is
                 // that image's Ubuntu release) instead of trusting the default;
                 // a newer image tag alone would only move the snapshot date.

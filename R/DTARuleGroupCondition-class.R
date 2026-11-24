@@ -294,6 +294,7 @@ method(check, DTARuleGroupCondition) <- function(x, tab) {
 
 #' @export
 #' @name as.list
+#' @usage NULL
 method(as.list, DTARuleGroupCondition) <- function(x, ...) {
   list(
     id = x@id,

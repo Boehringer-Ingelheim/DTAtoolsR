@@ -983,7 +983,7 @@ ct_age <- function(obj, drop = c("containers", "provenance", "file_handlers")) {
     return(obj)
   }
   if (inherits(obj, "S7_object")) {
-    cur <- attr(obj, "S7_class", exact = TRUE)
+    cur <- S7::S7_class(obj)
     if (!identical(cur@package, "DTAtools")) {
       return(obj)
     }
@@ -991,7 +991,7 @@ ct_age <- function(obj, drop = c("containers", "provenance", "file_handlers")) {
       attr(obj, p) <- ct_age(attr(obj, p), drop)
     }
     for (p in intersect(drop, names(cur@properties))) attr(obj, p) <- NULL
-    attr(obj, "S7_class") <- ct_old_shape_class(cur, drop)
+    obj <- stamp_old_class(obj, ct_old_shape_class(cur, drop))
     return(obj)
   }
   if (is.list(obj)) {

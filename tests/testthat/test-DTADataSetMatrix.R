@@ -950,11 +950,11 @@ test_that("an older-shaped matrix is upgraded, fails its check legibly and loads
   path <- mxd_file("\tS1\tS2\nr1\t1\t2\n")
   d <- load_file(mxd_ds(), file = path, stream = "never")
   old <- d
-  cls <- attr(old, "S7_class")
+  cls <- S7::S7_class(old)
   props <- attr(cls, "properties")
   props$heads <- NULL
   attr(cls, "properties") <- props
-  attr(old, "S7_class") <- cls
+  old <- stamp_old_class(old, cls)
   attr(old, "heads") <- NULL
 
   expect_true(dta_is_stale(old))

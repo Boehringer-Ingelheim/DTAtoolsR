@@ -8,40 +8,6 @@
 \name{as.list}
 \alias{as.list}
 \title{Convert a DTAtools Object to a List}
-\usage{
-## S7 method for class <DTAtools::DTAColumnSpec>
-as.list(x, ...)
-
-## S7 method for class <DTAtools::DTAColumnSpecCollection>
-as.list(x, ...)
-
-## S7 method for class <DTAtools::DTAColumnSpecStructure>
-as.list(x, ...)
-
-## S7 method for class <DTAtools::DTAColumnSpecStructureSAS>
-as.list(x, ...)
-
-## S7 method for class <DTAtools::DTAColumnSpecStructureR>
-as.list(x, ...)
-
-## S7 method for class <DTAtools::DTAMetaData>
-as.list(x, ...)
-
-## S7 method for class <DTAtools::DTARule>
-as.list(x, ...)
-
-## S7 method for class <DTAtools::DTARuleColCondition>
-as.list(x, ...)
-
-## S7 method for class <DTAtools::DTARuleColRange>
-as.list(x, ...)
-
-## S7 method for class <DTAtools::DTARuleColUnique>
-as.list(x, ...)
-
-## S7 method for class <DTAtools::DTARuleGroupCondition>
-as.list(x, ...)
-}
 \arguments{
 \item{x}{A DTAtools object: a \code{\link{DTAColumnSpec}},
 \code{\link{DTAColumnSpecCollection}},
