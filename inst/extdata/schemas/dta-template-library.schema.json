@@ -1,0 +1,581 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DTAtools template library file",
+  "description": "Shape of the four YAML file kinds of a DTAtools template library (creation template, dataset template, party profile, vocabulary), selected by `kind`. An editor aid only: validate_template() and lint_template_repo() stay authoritative for everything that needs more than the shape of one file (inheritance, cycles, tokens, file placement, the dry run).",
+  "$comment": "Hand-written from the readers in inst/shiny/dta_app/R (template_core.R, dataset_template.R, party_profiles.R, vocabulary.R, template_inherit.R). The kinds come from dta_template_all_kinds() in template_index.R. Closed (additionalProperties: false) only at the root of each kind and where the engine itself closes; open wherever the engine reads keys by name without checking the rest. Booleans accept a string as well because R reads yes/no/on/off as booleans (YAML 1.1) while editors read them as strings (YAML 1.2). Tests: tests/testthat/test-templateLibrarySchema.R.",
+  "type": "object",
+  "required": ["kind"],
+  "properties": {
+    "kind": {
+      "description": "Which kind of library file this is. The file name suffix must agree (.dta-template.yaml, .dta-dataset-template.yaml, .dta-party.yaml, .dta-vocabulary.yaml); validate_template() reports a mismatch.",
+      "enum": ["dta_creation_template", "dta_dataset_template", "dta_party_profile", "dta_vocabulary"]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["kind"], "properties": { "kind": { "const": "dta_creation_template" } } },
+      "then": { "$ref": "#/definitions/creation_template" }
+    },
+    {
+      "if": { "required": ["kind"], "properties": { "kind": { "const": "dta_dataset_template" } } },
+      "then": { "$ref": "#/definitions/dataset_template" }
+    },
+    {
+      "if": { "required": ["kind"], "properties": { "kind": { "const": "dta_party_profile" } } },
+      "then": { "$ref": "#/definitions/party_profile" }
+    },
+    {
+      "if": { "required": ["kind"], "properties": { "kind": { "const": "dta_vocabulary" } } },
+      "then": { "$ref": "#/definitions/vocabulary" }
+    }
+  ],
+  "definitions": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier. Together with `version` it names a library file."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+([.-][0-9]+)*$",
+      "description": "Quoted version string such as \"1.0\". Unquoted, YAML reads 1.10 as the number 1.1, which validate_template() rejects (version_unquoted)."
+    },
+    "ref": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Reference to another library file: <id>, <id>@<version> or <id>@latest."
+    },
+    "flag": {
+      "enum": [
+        true, false,
+        "true", "True", "TRUE", "false", "False", "FALSE",
+        "yes", "Yes", "YES", "no", "No", "NO", "y", "Y", "n", "N",
+        "on", "On", "ON", "off", "Off", "OFF"
+      ],
+      "description": "true or false. R reads the string spellings as booleans (YAML 1.1); an editor reads them as strings."
+    },
+    "string_list": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "id_or_list": {
+      "type": ["string", "array", "null"],
+      "items": { "type": "string" }
+    },
+    "option_entries": {
+      "type": ["array", "object", "null"],
+      "description": "Entries to add or change: a list, or a single entry.",
+      "if": { "type": "array" },
+      "then": { "items": { "$ref": "#/definitions/option" } },
+      "else": { "if": { "type": "object" }, "then": { "$ref": "#/definitions/option" } }
+    },
+    "dataset_entries": {
+      "type": ["array", "object", "null"],
+      "description": "Entries to add: a list, or a single entry.",
+      "if": { "type": "array" },
+      "then": { "items": { "$ref": "#/definitions/dataset_entry" } },
+      "else": { "if": { "type": "object" }, "then": { "$ref": "#/definitions/dataset_entry" } }
+    },
+    "dataset_partials": {
+      "type": ["array", "object", "null"],
+      "description": "Partial entries (the `as` or `id` of a dataset and the fields to change): a list, or a single entry.",
+      "if": { "type": "array" },
+      "then": { "items": { "type": "object" } }
+    },
+    "party_slot_entries": {
+      "type": ["array", "object", "null"],
+      "description": "Entries to add or change: a list, or a single entry.",
+      "if": { "type": "array" },
+      "then": { "items": { "$ref": "#/definitions/party_slot" } },
+      "else": { "if": { "type": "object" }, "then": { "$ref": "#/definitions/party_slot" } }
+    },
+    "vocabulary_slot_entries": {
+      "type": ["array", "object", "null"],
+      "description": "Entries to add or change: a list, or a single entry.",
+      "if": { "type": "array" },
+      "then": { "items": { "$ref": "#/definitions/vocabulary_slot" } },
+      "else": { "if": { "type": "object" }, "then": { "$ref": "#/definitions/vocabulary_slot" } }
+    },
+
+    "creation_template": {
+      "type": "object",
+      "required": ["id", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "dta_creation_template" },
+        "id": { "$ref": "#/definitions/id" },
+        "version": { "$ref": "#/definitions/version" },
+        "label": { "type": ["string", "null"], "description": "Display name. Defaults to the id; inherited unless null." },
+        "description": { "type": ["string", "null"], "description": "What this template is for." },
+        "date": { "description": "Release date of this version, YYYY-MM-DD. Never inherited." },
+        "abstract": { "$ref": "#/definitions/flag", "description": "true: a base for other templates to extend, not offered for creating documents." },
+        "extends": { "type": ["string", "null"], "minLength": 1, "description": "The parent template this one inherits from (<id>, <id>@<version> or <id>@latest)." },
+        "mixins": {
+          "type": ["string", "array", "null"],
+          "minLength": 1,
+          "items": { "$ref": "#/definitions/ref" },
+          "description": "Reusable fragments merged in, listed in order."
+        },
+        "base": {
+          "type": ["object", "null"],
+          "description": "Starting content of a created document. Absent inherits the parent's base; {} replaces it with nothing; null drops it.",
+          "properties": {
+            "metadata": { "$ref": "#/definitions/metadata" },
+            "datasets": { "$ref": "#/definitions/datasets" }
+          }
+        },
+        "datasets": { "$ref": "#/definitions/datasets" },
+        "options": { "$ref": "#/definitions/options" },
+        "variants": { "$ref": "#/definitions/variants" },
+        "party_slots": { "$ref": "#/definitions/party_slots" },
+        "vocabulary_slots": { "$ref": "#/definitions/vocabulary_slots" },
+        "sealed": {
+          "$ref": "#/definitions/id_or_list",
+          "description": "Dotted paths that descendants may not change."
+        },
+        "required": {
+          "$ref": "#/definitions/id_or_list",
+          "description": "Metadata paths that must be filled when a document is created."
+        },
+        "order": {
+          "$ref": "#/definitions/id_or_list",
+          "description": "Option ids in the order they should appear; consumed during inheritance."
+        },
+        "prior_versions": { "$ref": "#/definitions/prior_versions" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "not": { "anyOf": [{ "required": ["extends"] }, { "required": ["mixins"] }] }
+          },
+          "then": { "required": ["base"] }
+        },
+        {
+          "if": {
+            "not": {
+              "anyOf": [
+                { "required": ["extends"] },
+                { "required": ["mixins"] },
+                { "required": ["variants"] },
+                {
+                  "required": ["abstract"],
+                  "properties": {
+                    "abstract": { "enum": [true, "true", "True", "TRUE", "yes", "Yes", "YES", "y", "Y", "on", "On", "ON"] }
+                  }
+                }
+              ]
+            }
+          },
+          "then": {
+            "anyOf": [
+              { "required": ["datasets"] },
+              { "required": ["base"], "properties": { "base": { "required": ["datasets"] } } }
+            ]
+          }
+        }
+      ]
+    },
+
+    "dataset_template": {
+      "type": "object",
+      "required": ["id", "version", "dataset"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "dta_dataset_template" },
+        "id": { "$ref": "#/definitions/id" },
+        "version": { "$ref": "#/definitions/version" },
+        "label": { "type": ["string", "null"] },
+        "description": { "type": ["string", "null"] },
+        "date": { "description": "Release date of this version, YYYY-MM-DD." },
+        "options": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/definitions/option" },
+          "description": "Choices that write into the dataset; their `target` starts with `dataset.`."
+        },
+        "dataset": { "$ref": "#/definitions/dataset_body" }
+      }
+    },
+
+    "party_profile": {
+      "type": "object",
+      "required": ["id", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "dta_party_profile" },
+        "id": { "$ref": "#/definitions/id" },
+        "version": { "$ref": "#/definitions/version" },
+        "role": {
+          "enum": ["supplier", "receiver", "any", null],
+          "description": "Which side of a transfer this profile can fill. Default any."
+        },
+        "label": { "type": ["string", "null"] },
+        "description": { "type": ["string", "null"] },
+        "date": { "description": "Release date of this version, YYYY-MM-DD." },
+        "affiliation": { "type": ["object", "null"], "description": "Organisation name, address, country." },
+        "contacts": {
+          "type": ["array", "null"],
+          "items": { "type": "object" },
+          "description": "Contacts; each entry is a mapping with named fields (name, role, email, signature, ...)."
+        }
+      }
+    },
+
+    "vocabulary": {
+      "type": "object",
+      "required": ["id", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "dta_vocabulary" },
+        "id": { "$ref": "#/definitions/id" },
+        "version": { "$ref": "#/definitions/version" },
+        "label": { "type": ["string", "null"] },
+        "description": { "type": ["string", "null"] },
+        "date": { "description": "Release date of this version, YYYY-MM-DD." },
+        "type": { "enum": ["text", "number", "integer"], "description": "Type of the codes. Default text." },
+        "extends": { "$ref": "#/definitions/ref", "description": "Parent vocabulary whose terms are inherited." },
+        "terms": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/definitions/term" },
+          "description": "The permitted terms, in the order they are offered. Required unless `extends` is set; when both are present these replace the inherited terms."
+        },
+        "add_terms": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/definitions/term" },
+          "description": "Terms added to (or replacing, by code) the inherited ones."
+        },
+        "remove_terms": {
+          "type": ["array", "string", "number", "boolean", "null"],
+          "items": { "type": ["string", "number", "boolean"] },
+          "description": "Codes removed from the inherited terms."
+        },
+        "columns": {
+          "type": ["array", "object", "null"],
+          "description": "Columns bound to this vocabulary, each with a field (code or label).",
+          "if": { "type": "array" },
+          "then": { "items": { "$ref": "#/definitions/vocabulary_column" } },
+          "else": { "if": { "type": "object" }, "then": { "$ref": "#/definitions/vocabulary_column" } }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "not": { "required": ["extends"] } },
+          "then": { "required": ["terms"] }
+        }
+      ]
+    },
+
+    "term": {
+      "type": ["string", "number", "boolean", "object"],
+      "description": "A bare code, or a mapping with a code, label and description.",
+      "if": { "type": "object" },
+      "then": {
+        "required": ["code"],
+        "properties": {
+          "code": { "type": ["string", "number", "boolean"] },
+          "label": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+
+    "vocabulary_column": {
+      "type": ["string", "object"],
+      "description": "A column id, or {id, field}. Any other key is an error.",
+      "if": { "type": "object" },
+      "then": {
+        "required": ["id"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "field": { "enum": ["code", "label"] }
+        }
+      }
+    },
+
+    "metadata": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "description": "Document metadata. Only the fields of a data transfer document are accepted.",
+      "properties": {
+        "title": { "type": ["string", "null"] },
+        "version": { "type": ["string", "null"] },
+        "date": { "description": "Date, or ${today}." },
+        "header": { "type": ["string", "null"] },
+        "version_history": { "type": ["array", "null"], "items": { "type": "object" } },
+        "receiver": { "type": ["object", "null"] },
+        "supplier": { "type": ["object", "null"] },
+        "transmission": { "type": ["object", "null"] },
+        "error_handling": { "type": ["string", "null"] },
+        "authorized_for_corrections": { "description": "Text, or a list of contacts." },
+        "study": { "type": ["object", "null"], "description": "id and protocol_id are available as ${study.id} and ${study.protocol_id}." },
+        "sections": { "type": ["object", "null"] }
+      }
+    },
+
+    "verbs": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Edits to an inherited list: inherit, then remove, add, modify, order.",
+      "properties": {
+        "inherit": {
+          "$ref": "#/definitions/id_or_list",
+          "description": "all (default), none, or the ids to keep."
+        },
+        "remove": { "$ref": "#/definitions/id_or_list", "description": "Ids to drop." },
+        "add": { "description": "Complete entries to append." },
+        "modify": { "description": "Partial entries (an id and the fields to change) merged by id." },
+        "order": { "$ref": "#/definitions/id_or_list", "description": "Ids in the order they should appear." }
+      }
+    },
+
+    "options": {
+      "type": ["array", "object", "null"],
+      "description": "Choices the document author makes when creating from this template. A list of complete entries, or the verbs inherit / remove / add / modify / order.",
+      "if": { "type": "array" },
+      "then": { "items": { "$ref": "#/definitions/option" } },
+      "else": {
+        "if": { "type": "object" },
+        "then": {
+          "allOf": [
+            { "$ref": "#/definitions/verbs" },
+            {
+              "properties": {
+                "add": { "$ref": "#/definitions/option_entries" },
+                "modify": { "$ref": "#/definitions/option_entries" }
+              }
+            }
+          ]
+        }
+      }
+    },
+
+    "option": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "label": { "type": "string" },
+        "description": { "type": "string" },
+        "help": { "type": "string" },
+        "type": {
+          "type": "string",
+          "description": "How the option is entered: text (default), select, boolean, textarea or number."
+        },
+        "default": { "description": "Starting value. Without one the value already at `target` is used." },
+        "choices": {
+          "type": ["array", "null"],
+          "items": {
+            "type": ["string", "number", "boolean", "object"],
+            "if": { "type": "object" },
+            "then": { "required": ["value"] }
+          },
+          "description": "Suggested values, or {value, label} entries."
+        },
+        "allow_custom": { "$ref": "#/definitions/flag", "description": "Whether a value outside `choices` is accepted. Default: only for non-select options." },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Where the value is written: metadata.<field> in a creation template, dataset.<path> in a dataset template."
+        },
+        "effects": { "type": "object", "description": "Longhand alternative to `target`: the fields each value sets." },
+        "effects_all": { "type": ["array", "object", "null"], "description": "Operations applied whatever the value." }
+      }
+    },
+
+    "variants": {
+      "type": ["object", "null"],
+      "required": ["id", "choices"],
+      "additionalProperties": false,
+      "description": "A structural choice: each choice supplies a complete dataset list.",
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "label": { "type": "string" },
+        "choices": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["value", "datasets"],
+            "additionalProperties": false,
+            "properties": {
+              "value": { "type": "string", "minLength": 1 },
+              "label": { "type": "string" },
+              "source": { "type": "object" },
+              "base": { "type": "object" },
+              "options": { "$ref": "#/definitions/options" },
+              "datasets": { "type": "array", "minItems": 1 }
+            }
+          }
+        }
+      }
+    },
+
+    "prior_versions": {
+      "type": ["array", "null"],
+      "description": "Released versions that are no longer kept as files, each with what changed.",
+      "items": {
+        "type": "object",
+        "required": ["version", "changes"],
+        "additionalProperties": false,
+        "properties": {
+          "version": { "type": ["string", "number"], "description": "Version of the older release; quote it." },
+          "date": { "description": "Release date, YYYY-MM-DD." },
+          "changes": { "type": "string" }
+        }
+      }
+    },
+
+    "datasets": {
+      "type": ["array", "object", "null"],
+      "description": "The datasets a created document starts with. A list of complete entries, or the verbs inherit / remove / add / modify / order.",
+      "if": { "type": "array" },
+      "then": { "items": { "$ref": "#/definitions/dataset_entry" } },
+      "else": {
+        "if": { "type": "object" },
+        "then": {
+          "allOf": [
+            { "$ref": "#/definitions/verbs" },
+            {
+              "properties": {
+                "add": { "$ref": "#/definitions/dataset_entries" },
+                "modify": { "$ref": "#/definitions/dataset_partials" }
+              }
+            }
+          ]
+        }
+      }
+    },
+
+    "dataset_entry": {
+      "description": "A dataset: a file path, {source}, {template, as, options, patch} that imports a dataset template, or a dataset written out in full.",
+      "type": ["string", "object"],
+      "if": { "type": "string" },
+      "then": { "minLength": 1 },
+      "else": {
+        "if": { "required": ["template"] },
+        "then": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "template": { "$ref": "#/definitions/ref" },
+            "as": { "$ref": "#/definitions/id", "description": "Rename the imported dataset." },
+            "options": { "description": "Values for the dataset template's options." },
+            "patch": { "type": "object", "description": "Edits to the imported dataset: columns, remove_columns, add_columns, modify_columns, set." },
+            "remove": { "$ref": "#/definitions/flag", "description": "true drops this dataset from the inherited list." }
+          }
+        },
+        "else": {
+          "if": { "required": ["source"] },
+          "then": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "source": { "type": "string", "minLength": 1, "description": "Path to a dataset YAML file." },
+              "as": { "$ref": "#/definitions/id", "description": "Rename the dataset." },
+              "remove": { "$ref": "#/definitions/flag", "description": "true drops this dataset from the inherited list." }
+            }
+          },
+          "else": {
+            "if": { "required": ["as"], "not": { "required": ["id"] } },
+            "then": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "An entry keyed by `as`, merged into the inherited dataset of that name.",
+              "properties": {
+                "as": { "$ref": "#/definitions/id" },
+                "options": { "description": "Values for the dataset template's options." },
+                "patch": { "type": "object" },
+                "remove": { "$ref": "#/definitions/flag", "description": "true drops this dataset from the inherited list." }
+              }
+            },
+            "else": { "$ref": "#/definitions/dataset_body" }
+          }
+        }
+      }
+    },
+
+    "dataset_body": {
+      "type": "object",
+      "required": ["id"],
+      "description": "A dataset specification. Only its outline is checked here; the full grammar is in DTA_YAML_GUIDE.md and checked by lint_dta().",
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "type": { "enum": ["tabular", "file", "matrix"] },
+        "files": { "type": ["object", "array"] },
+        "columns": { "type": ["array", "null"] }
+      }
+    },
+
+    "party_slots": {
+      "type": ["array", "object", "null"],
+      "description": "Dropdowns that fill metadata.supplier or metadata.receiver from a party profile. A list of complete entries, or the verbs inherit / remove / add / modify / order.",
+      "if": { "type": "array" },
+      "then": { "items": { "$ref": "#/definitions/party_slot" } },
+      "else": {
+        "if": { "type": "object" },
+        "then": {
+          "allOf": [
+            { "$ref": "#/definitions/verbs" },
+            {
+              "properties": {
+                "add": { "$ref": "#/definitions/party_slot_entries" },
+                "modify": { "$ref": "#/definitions/party_slot_entries" }
+              }
+            }
+          ]
+        }
+      }
+    },
+
+    "party_slot": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "label": { "type": "string" },
+        "target": { "enum": ["metadata.supplier", "metadata.receiver"] },
+        "profiles": { "$ref": "#/definitions/id_or_list", "description": "Allow-list of party profile ids; omit to offer every profile whose role fits." },
+        "required": { "$ref": "#/definitions/flag" }
+      }
+    },
+
+    "vocabulary_slots": {
+      "type": ["array", "object", "null"],
+      "description": "Pickers that fill a column's permitted values from a vocabulary. A list of complete entries, or the verbs inherit / remove / add / modify / order.",
+      "if": { "type": "array" },
+      "then": { "items": { "$ref": "#/definitions/vocabulary_slot" } },
+      "else": {
+        "if": { "type": "object" },
+        "then": {
+          "allOf": [
+            { "$ref": "#/definitions/verbs" },
+            {
+              "properties": {
+                "add": { "$ref": "#/definitions/vocabulary_slot_entries" },
+                "modify": { "$ref": "#/definitions/vocabulary_slot_entries" }
+              }
+            }
+          ]
+        }
+      }
+    },
+
+    "vocabulary_slot": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "label": { "type": "string" },
+        "description": { "type": "string" },
+        "target": { "type": "string", "minLength": 1, "description": "datasets.<dataset>.columns.<column>.values (or .row_labels.<column>.values)." },
+        "vocabulary": { "$ref": "#/definitions/ref" },
+        "mode": { "enum": ["closed", "open"], "description": "closed (default): only the vocabulary's terms; open: free text allowed too." },
+        "field": { "enum": ["code", "label"] },
+        "include": { "type": ["string", "number", "array"] },
+        "exclude": { "type": ["string", "number", "array"] },
+        "default": { "type": ["string", "number", "array"] },
+        "min": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

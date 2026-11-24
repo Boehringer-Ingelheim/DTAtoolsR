@@ -10,7 +10,6 @@
 ^doc$
 ^Meta$
 .github
-.vscode
 img
 .pre-commit-config.yaml
 ^\.github$

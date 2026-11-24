@@ -82,6 +82,37 @@
   dir
 }
 
+# The JSON Schemas for the library's YAML files, and the VS Code setting that
+# points the YAML extension at them, ship with every repository -- `examples`
+# or not, since they matter most to someone writing their first template. The
+# schemas live beside the other bundled assets, not in template-repo-skeleton/,
+# so they are not an "example file"; and `.vscode/settings.json` is copied from
+# a non-dotted source folder for the reason the agent skill is.
+# Every file listed below has to survive `R CMD build`: an .Rbuildignore line
+# that matches one drops it silently, every test that loads the source tree
+# still passes, and only an installed package fails. test-createTemplateRepo.R
+# applies the file to everything under inst/ to catch that.
+# Named character vector: destination in the new repository = path beneath
+# inst/extdata/.
+.dta_create_repo_editor_assets <- c(
+  "schemas/dta-template-library.schema.json" = "schemas/dta-template-library.schema.json",
+  "schemas/dta-app.schema.json" = "schemas/dta-app.schema.json",
+  ".vscode/settings.json" = "editor/yaml-schema-mapping.json"
+)
+
+# Locate one of the assets above. Same failure mode and fix as the CI assets.
+.dta_create_repo_editor_asset_file <- function(asset) {
+  file <- system.file("extdata", asset, package = "DTAtools")
+  if (!nzchar(file) || !file.exists(file)) {
+    cli::cli_abort(c(
+      "Could not locate the bundled editor asset ({.file inst/extdata/{asset}}).",
+      "i" = "This usually means a development checkout is missing {.file inst/},
+        or DTAtools was installed from a broken build."
+    ))
+  }
+  file
+}
+
 # `.gitignore` is generated here, not shipped as a skeleton file, because a
 # dotfile (and, for the same reason, a dot-prefixed directory like `.github/`)
 # is not reliably carried through `R CMD build` from `inst/` -- the packaged
@@ -168,6 +199,12 @@
     targets <- c(targets, stats::setNames(file.path(skeleton_dir, example_files), example_files))
   }
 
+  for (dest in names(.dta_create_repo_editor_assets)) {
+    targets <- c(targets, stats::setNames(
+      .dta_create_repo_editor_asset_file(.dta_create_repo_editor_assets[[dest]]), dest
+    ))
+  }
+
   for (provider in ci_providers) {
     spec <- .dta_create_repo_ci_asset_targets[[provider]]
     targets <- c(targets, stats::setNames(.dta_create_repo_ci_asset_file(spec[["asset"]]), spec[["dest"]]))
@@ -216,6 +253,9 @@
 #' <path>/parties/starter_supplier.dta-party.yaml
 #' <path>/vocabulary/starter_terms.dta-vocabulary.yaml
 #' <path>/export-templates/README.md              (drop Word .docx templates here)
+#' <path>/schemas/dta-template-library.schema.json (JSON Schema for the four template file kinds)
+#' <path>/schemas/dta-app.schema.json             (JSON Schema for dta-app.yaml)
+#' <path>/.vscode/settings.json                   (points VS Code's YAML extension at the schemas)
 #' <path>/.github/workflows/validate-templates.yml  (ci = "github", default)
 #' <path>/bitbucket-pipelines.yml                 (ci = "bitbucket")
 #' <path>/Jenkinsfile                             (ci = "jenkins")
@@ -226,6 +266,14 @@
 #' Only the selected CI files are written. [validate_template()] detects the
 #' layout from the repository root: point it (and the app's template sources)
 #' at `<path>` itself, never at one of the folders inside it.
+#'
+#' The two JSON Schemas and `.vscode/settings.json` are always written, whatever
+#' `examples` says. With the Red Hat YAML extension installed and the
+#' repository folder opened as the VS Code workspace, they flag a wrong `kind`,
+#' an unquoted `version`, a misspelt key or an invalid `role` while you type.
+#' They check the shape of one file only: [validate_template()] stays the
+#' authority on everything else, and is stricter or looser in a few places
+#' that the repository's `README.md` lists.
 #' @param path A single non-empty character string: the directory to create
 #'   the repository in. Created recursively when it does not already exist.
 #'   Aborts via [cli::cli_abort()] if `path` names an existing file rather
@@ -235,7 +283,8 @@
 #'   `vocabulary/` beneath `path`, plus the commented-out `dta-app.yaml` and
 #'   `export-templates/README.md`. `README.md` stays at the repository root.
 #'   When `FALSE`, only `README.md`,
-#'   `.gitignore` and (if `ci` asks for any provider) its CI file(s) are
+#'   `.gitignore`, the JSON Schemas with their editor setting and (if `ci`
+#'   asks for any provider) its CI file(s) are
 #'   written -- no template files, for a caller who wants the scaffolding
 #'   without the worked example. Such a repository has no templates yet, so
 #'   [validate_template()] reports the error `no_templates` and the generated

@@ -491,7 +491,8 @@ requirements:
     text: >
       create_template_repo(path, examples = TRUE, ci = TRUE, overwrite =
       FALSE, agent_skill = TRUE) shall write .gitignore and README.md at the
-      repository root, the agent skill of REQ-TMPL-060,
+      repository root, the editor assets of REQ-TMPL-066, the agent skill of
+      REQ-TMPL-060,
       and -- when examples is TRUE -- every file of the bundled skeleton
       inst/extdata/template-repo-skeleton/ at the same relative path,
       discovered from the skeleton rather than a hard-coded list: dta-app.yaml
@@ -500,9 +501,9 @@ requirements:
       starter_supplier.dta-party.yaml in parties/,
       starter_terms.dta-vocabulary.yaml in vocabulary/, and README.md in
       export-templates/. examples = FALSE shall write only the scaffolding
-      (.gitignore, README.md, any CI file ci asks for, and the agent skill
-      when agent_skill is TRUE), with no dta-app.yaml and no folder of any
-      template kind.
+      (.gitignore, README.md, the editor assets, any CI file ci asks for, and
+      the agent skill when agent_skill is TRUE), with no dta-app.yaml and no
+      folder of any template kind.
     risk: medium
     category: functional
     covers: [create_template_repo]
@@ -610,6 +611,36 @@ requirements:
     source: >
       R/validateTemplate.R (.dta_template_own_entries, own_slots in .dta_template_check_creation);
       inst/shiny/dta_app/R/template_inherit.R (dta_template_verb_entries)
+
+  - id: REQ-TMPL-066
+    text: >
+      create_template_repo() shall write, whatever examples, ci and
+      agent_skill say, the two JSON Schemas bundled under
+      inst/extdata/schemas/ -- schemas/dta-template-library.schema.json and
+      schemas/dta-app.schema.json -- and .vscode/settings.json, copied from
+      inst/extdata/editor/yaml-schema-mapping.json, each byte-identical to its
+      bundled source. Both schemas shall be valid JSON that declares the
+      draft-07 meta-schema in "$schema". The "yaml.schemas" setting in
+      .vscode/settings.json shall name exactly those two schema files, each by
+      a path of the form ./schemas/<file>, relative to the repository root,
+      that resolves to a file of the written repository; it shall assign the library schema the file name
+      patterns **/*.dta-template.y*ml, **/*.dta-dataset-template.y*ml,
+      **/*.dta-party.y*ml and **/*.dta-vocabulary.y*ml (the four template file
+      kinds, .yaml or .yml, in any folder) and the app schema the pattern
+      dta-app.y*ml. The three files are subject to the overwrite guard of
+      REQ-TMPL-028.
+    risk: low
+    category: functional
+    covers: [create_template_repo]
+    source: >
+      R/createTemplateRepo.R (.dta_create_repo_editor_assets,
+      .dta_create_repo_editor_asset_file, .dta_create_repo_targets);
+      inst/extdata/schemas/; inst/extdata/editor/yaml-schema-mapping.json
+    notes: >
+      What the schemas accept and reject is covered by the developer suite
+      (tests/testthat/test-templateLibrarySchema.R), which needs the optional
+      jsonvalidate package. This requirement covers what is shipped, so the
+      qualification run does not depend on an optional package.
 
   - id: REQ-TMPL-030
     text: >

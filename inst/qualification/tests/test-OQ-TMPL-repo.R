@@ -1,6 +1,6 @@
 # create_template_repo(): scaffolding a new template repository, and the
 # guarantee that both it and every packaged example validate cleanly.
-# REQ-TMPL-026 .. REQ-TMPL-030, REQ-TMPL-060.
+# REQ-TMPL-026 .. REQ-TMPL-030, REQ-TMPL-060, REQ-TMPL-066.
 #
 # Every call here writes into qa_tempdir() -- never into the package's own
 # inst/extdata/ -- and every create_template_repo() call is wrapped in
@@ -9,9 +9,14 @@
 
 tmpl_fixture <- function(...) file.path(qa_suite_root(), "fx", "t", ...)
 
-# Expected scaffold paths below are written from REQ-TMPL-026 and
-# REQ-TMPL-060, not discovered from the installed skeleton or the function
+# Expected scaffold paths below are written from REQ-TMPL-026, REQ-TMPL-060
+# and REQ-TMPL-066, not discovered from the installed skeleton or the function
 # under qualification.
+editor_files <- c(
+  "schemas/dta-template-library.schema.json",
+  "schemas/dta-app.schema.json",
+  ".vscode/settings.json"
+)
 skill_files <- file.path(
   ".claude/skills/dta-template-authoring",
   c(
@@ -36,6 +41,7 @@ test_that("OQ-TMPL-049 | the defaults write the scaffolding, the skeleton librar
     "dta-app.yaml",
     "export-templates/README.md",
     ".github/workflows/validate-templates.yml",
+    editor_files,
     skill_files
   ))
   qa_step("exactly the documented default file set is written", expected, written)
@@ -54,8 +60,8 @@ test_that("OQ-TMPL-050 | examples = FALSE omits the library files but keeps the 
 
   written <- sort(list.files(dir, recursive = TRUE, all.files = TRUE, no.. = TRUE))
   qa_step(
-    "only .gitignore, README.md, the default GitHub workflow and the agent skill remain",
-    sort(c(".gitignore", "README.md", ".github/workflows/validate-templates.yml", skill_files)), written
+    "only .gitignore, README.md, the editor assets, the default GitHub workflow and the agent skill remain",
+    sort(c(".gitignore", "README.md", editor_files, ".github/workflows/validate-templates.yml", skill_files)), written
   )
 })
 
@@ -66,7 +72,7 @@ test_that("OQ-TMPL-051 | ci = FALSE writes no CI file and no .github directory |
   suppressMessages(create_template_repo(dir, examples = FALSE, ci = FALSE, agent_skill = FALSE))
 
   written <- sort(list.files(dir, recursive = TRUE, all.files = TRUE, no.. = TRUE))
-  qa_step("only the two scaffolding files", sort(c(".gitignore", "README.md")), written)
+  qa_step("only the scaffolding files and the editor assets", sort(c(".gitignore", "README.md", editor_files)), written)
   qa_check("no .github directory was created at all", !dir.exists(file.path(dir, ".github")))
 })
 
@@ -80,7 +86,7 @@ test_that("OQ-TMPL-052 | ci accepts a combination of providers, each to its own 
   written <- sort(list.files(dir, recursive = TRUE, all.files = TRUE, no.. = TRUE))
   expected <- sort(c(
     ".gitignore", "README.md", "bitbucket-pipelines.yml", "Jenkinsfile",
-    ".github/workflows/validate-templates.yml"
+    ".github/workflows/validate-templates.yml", editor_files
   ))
   qa_step("each provider's file lands at its own documented path", expected, written)
 })
@@ -105,7 +111,7 @@ test_that("OQ-TMPL-138 | the agent skill is written byte-identical, with the fro
   written <- sort(list.files(dir, recursive = TRUE, all.files = TRUE, no.. = TRUE))
   qa_step(
     "examples = FALSE and ci = FALSE still write the skill beside the scaffolding",
-    sort(c(".gitignore", "README.md", skill_files)), written
+    sort(c(".gitignore", "README.md", editor_files, skill_files)), written
   )
 
   bundled <- system.file("extdata", "agent-skills", "dta-template-authoring", package = "DTAtools")
@@ -159,6 +165,99 @@ test_that("OQ-TMPL-140 | a pre-existing skill file is a conflict under the overw
   qa_step(
     "overwrite = TRUE replaces it with the bundled SKILL.md",
     unname(tools::md5sum(bundled)), unname(tools::md5sum(skill_md))
+  )
+})
+
+# ---- REQ-TMPL-066: the editor assets ----------------------------------------
+
+test_that("OQ-TMPL-157 | the JSON Schemas and the VS Code setting are written byte-identical, whatever examples, ci and agent_skill say | REQ-TMPL-066", {
+  bundled <- c(
+    system.file("extdata", "schemas", "dta-template-library.schema.json", package = "DTAtools"),
+    system.file("extdata", "schemas", "dta-app.schema.json", package = "DTAtools"),
+    system.file("extdata", "editor", "yaml-schema-mapping.json", package = "DTAtools")
+  )
+  qa_check("the three bundled sources are installed", all(nzchar(bundled)))
+
+  defaults <- qa_tempdir()
+  suppressMessages(create_template_repo(defaults))
+  qa_step(
+    "with the defaults every editor asset is byte-identical to its bundled source",
+    unname(tools::md5sum(bundled)), unname(tools::md5sum(file.path(defaults, editor_files)))
+  )
+
+  bare <- qa_tempdir()
+  suppressMessages(create_template_repo(bare, examples = FALSE, ci = FALSE, agent_skill = FALSE))
+  qa_step(
+    "and with examples, ci and agent_skill all off",
+    unname(tools::md5sum(bundled)), unname(tools::md5sum(file.path(bare, editor_files)))
+  )
+})
+
+test_that("OQ-TMPL-158 | both schemas declare draft-07 and the setting assigns each its file name patterns by paths that resolve | REQ-TMPL-066", {
+  dir <- qa_tempdir()
+  suppressMessages(create_template_repo(dir, examples = FALSE, ci = FALSE, agent_skill = FALSE))
+
+  for (name in c("dta-template-library.schema.json", "dta-app.schema.json")) {
+    text <- paste(readLines(file.path(dir, "schemas", name), warn = FALSE, encoding = "UTF-8"), collapse = "\n")
+    qa_check(paste(name, "is valid JSON"), jsonlite::validate(text))
+    qa_step(
+      paste(name, "declares the draft-07 meta-schema"),
+      "http://json-schema.org/draft-07/schema#",
+      jsonlite::fromJSON(text, simplifyVector = FALSE)[["$schema"]]
+    )
+  }
+
+  schemas <- jsonlite::fromJSON(
+    file.path(dir, ".vscode", "settings.json"),
+    simplifyVector = FALSE
+  )[["yaml.schemas"]]
+  qa_step(
+    "yaml.schemas names exactly the two schema files, relative to the repository root",
+    c("./schemas/dta-app.schema.json", "./schemas/dta-template-library.schema.json"),
+    sort(names(schemas))
+  )
+  qa_check(
+    "and each name resolves to a file of the written repository",
+    all(file.exists(file.path(dir, names(schemas))))
+  )
+
+  # The patterns are checked as written, not by emulating an editor's glob
+  # dialect: what an editor does with them is outside this suite.
+  qa_step(
+    "the library schema is assigned the pattern of each of the four template kinds",
+    c(
+      "**/*.dta-dataset-template.y*ml", "**/*.dta-party.y*ml",
+      "**/*.dta-template.y*ml", "**/*.dta-vocabulary.y*ml"
+    ),
+    sort(unlist(schemas[["./schemas/dta-template-library.schema.json"]]))
+  )
+  qa_step(
+    "and the app schema the pattern of dta-app.yaml and dta-app.yml",
+    "dta-app.y*ml",
+    unlist(schemas[["./schemas/dta-app.schema.json"]])
+  )
+})
+
+test_that("OQ-TMPL-159 | a pre-existing .vscode/settings.json is a conflict under the overwrite guard | REQ-TMPL-066 REQ-TMPL-028", {
+  dir <- qa_tempdir()
+  settings <- file.path(dir, ".vscode", "settings.json")
+  dir.create(dirname(settings), recursive = TRUE)
+  writeLines("team edit", settings)
+
+  err <- tryCatch(create_template_repo(dir), error = function(e) e)
+  qa_check("without overwrite, a condition is raised", inherits(err, "condition"))
+  qa_check("naming the conflicting settings.json", grepl("settings.json", conditionMessage(err), fixed = TRUE))
+  qa_step("the existing file is left as it was", "team edit", readLines(settings))
+  qa_step(
+    "and nothing else is written",
+    ".vscode/settings.json", list.files(dir, recursive = TRUE, all.files = TRUE, no.. = TRUE)
+  )
+
+  suppressMessages(create_template_repo(dir, overwrite = TRUE))
+  bundled <- system.file("extdata", "editor", "yaml-schema-mapping.json", package = "DTAtools")
+  qa_step(
+    "overwrite = TRUE replaces it with the bundled setting",
+    unname(tools::md5sum(bundled)), unname(tools::md5sum(settings))
   )
 })
 

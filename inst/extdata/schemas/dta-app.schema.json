@@ -1,0 +1,196 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DTAtools app configuration (dta-app.yaml)",
+  "description": "Shape of dta-app.yaml, the optional configuration at the root of a template library. An editor aid only: validate_template() reports what the app would reject, and a bad value never stops the app.",
+  "$comment": "Hand-written from parse_dta_app_config() in inst/shiny/dta_app/R/app_config.R. Unknown keys are only warnings there; this schema closes every section so a misspelt key is flagged while typing. `kind` is optional in the file, so this schema is separate from the template-library schema, which requires it. Tests: tests/testthat/test-templateLibrarySchema.R.",
+  "type": ["object", "null"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "dta_app_config",
+      "description": "Optional; if present it must be dta_app_config."
+    },
+    "organisation": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "Organisation shown in the footer; empty shows none." },
+        "unit": { "type": "string", "description": "Department or group, appended to the name." }
+      }
+    },
+    "document": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "description": "What this library calls its documents. Each key is one string or a list of one to three; when both are lists they must have the same length.",
+      "properties": {
+        "name": { "$ref": "#/definitions/one_to_three" },
+        "abbreviation": {
+          "type": ["string", "array"],
+          "maxLength": 12,
+          "minItems": 1,
+          "maxItems": 3,
+          "items": { "type": "string", "maxLength": 12 },
+          "description": "Replaces DTA in the app's buttons and messages; at most 12 characters each."
+        }
+      }
+    },
+    "branding": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "app_title": { "type": "string" },
+        "app_subtitle": { "type": "string" },
+        "window_title": { "type": "string" },
+        "footer_label": { "type": "string" },
+        "logo": { "type": "string", "description": "Image file in the repository root (png, jpg, jpeg, gif, svg, webp; at most 1 MB)." },
+        "logo_alt": { "type": "string" },
+        "landing_headline": { "type": "string" },
+        "landing_lede": { "type": "string" }
+      }
+    },
+    "header_tag": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "maxLength": 32, "description": "Text of the tag, for example GxP; empty shows no tag." },
+        "color": { "$ref": "#/definitions/hex_color" }
+      }
+    },
+    "colors": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "description": "Hex colours only, always quoted: an unquoted #00625B is a YAML comment and the value becomes empty.",
+      "properties": {
+        "primary": { "$ref": "#/definitions/hex_color" },
+        "primary_dark": { "$ref": "#/definitions/hex_color" },
+        "primary_light": { "$ref": "#/definitions/hex_color" },
+        "accent": { "$ref": "#/definitions/hex_color" },
+        "text": { "$ref": "#/definitions/hex_color" },
+        "muted": { "$ref": "#/definitions/hex_color" },
+        "page_background": { "$ref": "#/definitions/hex_color" },
+        "surface": { "$ref": "#/definitions/hex_color" },
+        "warning": { "$ref": "#/definitions/hex_color" },
+        "warning_dark": { "$ref": "#/definitions/hex_color" },
+        "nodata_border": { "$ref": "#/definitions/hex_color" },
+        "unknown": { "$ref": "#/definitions/hex_color" },
+        "pass": { "$ref": "#/definitions/hex_color" },
+        "pass_bg": { "$ref": "#/definitions/hex_color" },
+        "pass_border": { "$ref": "#/definitions/hex_color" },
+        "fail": { "$ref": "#/definitions/hex_color" },
+        "fail_bg": { "$ref": "#/definitions/hex_color" },
+        "fail_border": { "$ref": "#/definitions/hex_color" },
+        "pending": { "$ref": "#/definitions/hex_color" },
+        "pending_bg": { "$ref": "#/definitions/hex_color" },
+        "pending_border": { "$ref": "#/definitions/hex_color" }
+      }
+    },
+    "links": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "description": "http(s):// or mailto: URLs; false hides a link.",
+      "properties": {
+        "report_issue": { "$ref": "#/definitions/link" },
+        "about": { "$ref": "#/definitions/link" },
+        "repository": { "$ref": "#/definitions/link" },
+        "documentation": { "$ref": "#/definitions/link" }
+      }
+    },
+    "features": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "load_example": { "$ref": "#/definitions/flag" },
+            "create_from_template": { "$ref": "#/definitions/flag" },
+            "create_blank": { "$ref": "#/definitions/flag" }
+          }
+        },
+        "raw_yaml_tab": { "$ref": "#/definitions/flag" },
+        "raw_yaml_editable": { "$ref": "#/definitions/flag" },
+        "dataset_yaml_download": { "$ref": "#/definitions/flag" },
+        "dta_yaml_download": { "$ref": "#/definitions/flag" },
+        "editing": { "$ref": "#/definitions/flag", "description": "false makes the app read-only." }
+      }
+    },
+    "data_types": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "description": "Which type system new columns start with. Both stay available, and a type in a template or DTA file is read the same either way.",
+      "properties": {
+        "default": {
+          "type": "string",
+          "pattern": "^\\s*([Ss][Aa][Ss]|[Rr])\\s*$",
+          "description": "SAS or R, in any letter case. Anything else is an error in the app, which keeps SAS."
+        }
+      }
+    },
+    "exports": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "document": {
+          "type": ["array", "string"],
+          "description": "Formats offered under Export (a list, or one format); [] hides the button.",
+          "if": { "type": "string" },
+          "then": { "enum": ["markdown", "markdown_pdf", "word", "word_template"] },
+          "else": { "items": { "enum": ["markdown", "markdown_pdf", "word", "word_template"] } }
+        },
+        "default_document": { "type": "string", "description": "Preselected format; must be one of `document`." },
+        "word_templates": {
+          "type": ["array", "null"],
+          "description": "Optional label and order for the .docx files in export-templates/.",
+          "items": {
+            "type": "object",
+            "required": ["file"],
+            "additionalProperties": false,
+            "properties": {
+              "file": { "type": "string", "pattern": "\\.[Dd][Oo][Cc][Xx]$", "description": "Path relative to the repository root; no .. and no absolute path." },
+              "label": { "type": "string" }
+            }
+          }
+        },
+        "bundled_word_templates": { "$ref": "#/definitions/flag" },
+        "validation_messages": {
+          "type": ["array", "string"],
+          "description": "Download buttons for validation messages (a list, or one format); [] hides them.",
+          "if": { "type": "string" },
+          "then": { "enum": ["csv", "tsv", "xlsx", "html"] },
+          "else": { "items": { "enum": ["csv", "tsv", "xlsx", "html"] } }
+        },
+        "validation_summary": { "$ref": "#/definitions/flag" }
+      }
+    }
+  },
+  "definitions": {
+    "hex_color": {
+      "type": "string",
+      "pattern": "^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$",
+      "description": "#RGB or #RRGGBB, quoted."
+    },
+    "link": {
+      "anyOf": [
+        { "const": false },
+        { "type": "null", "description": "An empty link is hidden, like false." },
+        { "type": "string", "pattern": "^([Hh][Tt][Tt][Pp][Ss]?://|[Mm][Aa][Ii][Ll][Tt][Oo]:)" }
+      ]
+    },
+    "flag": {
+      "enum": [
+        true, false,
+        "true", "True", "TRUE", "false", "False", "FALSE",
+        "yes", "Yes", "YES", "no", "No", "NO", "y", "Y", "n", "N",
+        "on", "On", "ON", "off", "Off", "OFF"
+      ],
+      "description": "true or false. R reads the string spellings as booleans (YAML 1.1); an editor reads them as strings."
+    },
+    "one_to_three": {
+      "type": ["string", "array"],
+      "minItems": 1,
+      "maxItems": 3,
+      "items": { "type": "string" }
+    }
+  }
+}
