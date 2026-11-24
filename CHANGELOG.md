@@ -18,6 +18,109 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `validate_template()` stays the authority. The generated `README.md`
   documents where the two differ. `jsonvalidate` is a new suggested package,
   used only by the tests.
+- **File-name forms of the study tokens.** `${study.id_underscore}` and
+  `${study.protocol_id_underscore}` are the study ID and protocol ID with every
+  hyphen written as an underscore and nothing else changed, so `1001-0190`
+  becomes `1001_0190`. They work wherever `${study.id}` and
+  `${study.protocol_id}` do -- in a dataset body, including a `filename:` and
+  its pattern, and in the document metadata -- are escaped inside a regular
+  expression in the same way, and fail in the same way when the document has
+  no value for the identifier. The study identity stored in the document keeps
+  its hyphens. `validate_template()` treats them as known placeholders, counts
+  one as a use of the study field it comes from (`study_token_unanswered`),
+  and names the stand-in as the token writes it (`STUDY_ID`) when a dry run
+  fails on it; the template guide spells them out.
+- A specification's `metadata:` now records which DTAtools release wrote it, in
+  a new `dtatools_version` field (new last argument of `DTAMetaData()`). The
+  app sets it every time it saves the YAML, so it names the release that last
+  saved the file; a file the app has not saved has none, and nothing is
+  filled in retroactively. It is machine-owned like `template`: a template can
+  neither set nor carry it over, it never shows up as a change in a version
+  summary or a rebase, and the linters accept it only as a bare version
+  number. A document with no other metadata is not stamped. A DTAtools release
+  that predates the field rejects it as an unknown metadata key, so a file the
+  app has saved is not readable by one until the line is deleted.
+
+### Fixed
+
+- `dta_is_stale()` now looks at a document's metadata as well as the document
+  and its datasets. A `DTA` saved with `saveRDS()` by an older release has
+  metadata without the properties added since, and no entry point noticed: the
+  metadata could not be read or written until `upgrade_dta()` was called by
+  hand. The app was not affected, because it upgrades a restored session
+  unconditionally.
+- **"None" in a vocabulary slot of the "Create from template" dialog now does
+  what it says.** Emptying a slot (the **None** link, or clearing the chips)
+  showed "0 of n selected", but the document still came out with every term of
+  the vocabulary the template had bound the column to, which is more terms than
+  the default the author had just cleared. An emptied slot and a slot nobody
+  had touched were reported as the same "nothing to do", so the column kept its
+  `values_from:` binding. The column is now built with no permitted values at
+  all (no `values:`, no `values_from:`, nothing else about it changed), so no
+  value is checked against a list; this holds for an imported dataset template,
+  an inline dataset and a matrix row label. A slot with `min:` above 0 still
+  refuses to create the document while it is empty, and the dialog stays open.
+- **An `open` vocabulary slot given only the author's own terms no longer adds
+  the whole vocabulary.** Typing `UNSCHED` into an open slot and selecting
+  nothing else produced every term of the vocabulary plus `UNSCHED`, even the
+  terms the slot's own `include:` had left out of its menu. The column now gets
+  exactly `UNSCHED`.
+
+### Changed
+
+- **A vocabulary slot with no `default:` that the author leaves empty now builds
+  its column with no permitted values.** The options dialog reports a control
+  holding nothing the same way whether the author cleared it or never filled
+  it, so such a slot used to leave the column bound to the dataset template's
+  whole vocabulary and now removes that list check, as "None" does. Give the slot
+  `min: 1` to keep the column constrained; the document is then not created
+  until a term is chosen. No bundled template is affected.
+
+## [0.30.0] - 2026-11-23
+
+### Changed
+
+- **DTAtools now requires S7 1.0.0 or later, and R 4.2.0 or later.** S7 1.0.0
+  (CRAN, 2026-11-19) renamed the first argument of `new_object()` and the
+  attribute in which an object keeps its class, and itself needs R 4.2.0. The
+  lockfile and the Connect manifest record S7 1.0.0, and CI no longer pins S7
+  to 0.2.2. An object saved with `saveRDS()` by this version can no longer be
+  read under an S7 older than 1.0.0; objects saved by earlier versions are read
+  and upgraded as before.
+
+### Fixed
+
+- **Ten classes could not be built under S7 1.0.0.** They passed their
+  parent to `new_object()` by the name `.parent`, which S7 1.0.0 no longer
+  has: constructing a file handler, a dataset, a column structure or a rule
+  failed with `argument "_parent" is missing`. The parent is now passed by
+  position, which every S7 version accepts.
+- **`upgrade_dta()` and the upgrade the entry points run by themselves saw
+  nothing to do under S7 1.0.0.** The class an object was saved with is read
+  and re-stamped through S7 instead of through the attribute `S7_class`, which
+  S7 1.0.0 stores as `_S7_class`; an object restored from an older version is
+  detected as stale and upgraded as it was before.
+- **Removing a container, or clearing a file entry's container reference,
+  failed under S7 1.0.0** with `invalid type of argument[3]: 'symbol'`: S7
+  1.0.0 stores an unset (`NULL`) property as a symbol, which the document's
+  container check read as a container id.
+- **`names`, `print` and `labels` no longer leave placeholder objects in the
+  package namespace** (S7 1.0.0 creates them for every method registered on a
+  base generic; the package now removes them when it is built).
+- The app no longer shows a dataset as passed, and its validation summary no
+  longer reads "VALIDATION PASSED", while a table bound to it has not been
+  validated. One validated table was enough for the status map to call the
+  whole dataset passed: after a second file was uploaded, a file replaced or a
+  delivery added to a dataset that had already passed, the next check of any
+  other dataset turned it green again and offered the certifying summary,
+  although "Loaded files" still listed the new table as not validated yet. A
+  dataset now reads "pending" until every table bound to it has been
+  validated; a failing table still reads "fail".
+
+## [0.29.0] - 2026-11-23
+
+### Added
+
 - `create_template_repo()` writes an agent skill to
   `.claude/skills/dta-template-authoring/` (new argument `agent_skill`,
   default `TRUE`). It gives coding agents the working method for a template
@@ -5497,7 +5600,9 @@ All of the following belong to the manifest verification work above.
 
 - Initial internal release
 
-[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.29.0...v0.30.0
+[0.29.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.25.0...v0.26.0

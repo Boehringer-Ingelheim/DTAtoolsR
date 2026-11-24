@@ -825,7 +825,7 @@ test_that("overwrite = FALSE conflict message shows braces in a path literally",
 
 test_that("the Bitbucket and Jenkins assets install from a current repository, not a dated snapshot", {
   # rocker/r-ver:4.4's default repos is frozen at 2025-04-10, before zip 3.0.0
-  # and S7 0.2.2 existed; the written CI files must override it.
+  # and S7 1.0.0 existed; the written CI files must override it.
   dir <- withr::local_tempdir()
   create_template_repo(dir, examples = FALSE, ci = c("bitbucket", "jenkins"))
   repos <- "options(repos = c(CRAN = \"https://p3m.dev/cran/__linux__/noble/latest\"))"

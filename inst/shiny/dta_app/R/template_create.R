@@ -364,7 +364,7 @@ carry_over_default_fields <- function() {
 
 # Copy `fields` of `source_meta` (a DTAMetaData) onto `dta`.
 #
-# `dta_metadata_machine_fields()` (import_issues, template) are silently
+# `dta_metadata_machine_fields()` (import_issues, template, dtatools_version) are silently
 # dropped from `fields` before anything else runs -- NEVER an error, so that
 # carry_over_default_fields() (or any future default list) stays safe to
 # extend without every caller having to remember to exclude them by hand.

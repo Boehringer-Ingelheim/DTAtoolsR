@@ -1081,8 +1081,9 @@ test_that("a slot falls back to its default, and enforces min", {
   expect_identical(slot_values(slot, NULL, resolver), c("SCR", "C1D1"))
   expect_identical(slot_values(slot, "EOT", resolver), "EOT")
 
-  # No selection, no default: the column is left exactly as the dataset
-  # template left it, rather than silently emptied.
+  # No selection at all and no default: the column is left exactly as the
+  # dataset template left it. (A caller that says nothing; the options dialog
+  # always reports a selection for the slots it offers.)
   bare <- normalise(list(vocab_slot_def()))[[1]]
   expect_null(slot_values(bare, NULL, resolver))
 
@@ -1342,11 +1343,13 @@ test_that("build_template_index() picks up a vocabulary file", {
   expect_identical(rows$version, "1.0")
 })
 
-test_that("an explicitly empty selection means none, and does not fall back to the default", {
+test_that("an explicitly empty selection is its own answer, distinct from silence", {
   # NULL and character(0) are not the same answer. Every empty selection used
   # to fall back to `default:`, which made a slot WITH a default impossible to
   # empty on purpose -- the author's "none" was silently overruled by the
-  # template's suggestion.
+  # template's suggestion. The first fix made the two answers different inside
+  # this function and then collapsed them again on the way out (both returned
+  # NULL), so the consumer still could not tell "None" from "never touched".
   normalise <- app_fn("normalise_vocabulary_slots")
   slot_values <- app_fn("vocabulary_slot_values")
   dir <- withr::local_tempdir()
@@ -1357,10 +1360,123 @@ test_that("an explicitly empty selection means none, and does not fall back to t
 
   # Silence: the key was never supplied, so the default stands.
   expect_identical(slot_values(slot, NULL, resolver), c("SCR", "C1D1"))
-  # Engagement: an explicitly empty selection means no terms at all.
-  expect_null(slot_values(slot, character(0), resolver))
+  # Engagement: an explicitly empty selection is a zero-length vector, which is
+  # NOT NULL -- NULL is what "leave the column alone" is spelled.
+  expect_identical(slot_values(slot, character(0), resolver), character(0))
   # A blank string is the same engagement, spelled the way a UI submits it.
-  expect_null(slot_values(slot, "", resolver))
+  expect_identical(slot_values(slot, "", resolver), character(0))
+  expect_identical(slot_values(slot, NA_character_, resolver), character(0))
+
+  # Silence without a default is still "leave the column alone".
+  bare <- normalise(list(vocab_slot_def()))[[1]]
+  expect_null(slot_values(bare, NULL, resolver))
+  # ...and engagement without a default is still an answer, not silence.
+  expect_identical(slot_values(bare, character(0), resolver), character(0))
+})
+
+test_that("an open slot given only its own terms yields exactly those terms", {
+  # The vocabulary's own terms leaked in whenever no OFFERED term was selected:
+  # the empty list of known terms read as "absent" and was replaced by the whole
+  # vocabulary -- including terms the slot's own include: had left out of the
+  # menu.
+  normalise <- app_fn("normalise_vocabulary_slots")
+  slot_values <- app_fn("vocabulary_slot_values")
+  dir <- withr::local_tempdir()
+  write_vocabulary_fixture(dir)
+  resolver <- vocab_resolver_for(dir)
+
+  open <- normalise(list(vocab_slot_def(mode = "open", include = c("SCR", "C1D1"))))[[1]]
+
+  expect_identical(slot_values(open, "UNSCHED", resolver), "UNSCHED")
+  expect_identical(slot_values(open, c("UNSCHED", "RETEST"), resolver), c("UNSCHED", "RETEST"))
+  # An offered term and an own one: the offered one first, as always.
+  expect_identical(slot_values(open, c("UNSCHED", "SCR"), resolver), c("SCR", "UNSCHED"))
+
+  # The same through the decodes: an own term is its own label.
+  labelled <- normalise(list(vocab_slot_def(mode = "open", field = "label")))[[1]]
+  expect_identical(slot_values(labelled, "Unscheduled", resolver), "Unscheduled")
+})
+
+test_that("vocabulary_values() takes an empty term list as no terms, not as every term", {
+  vocabulary_values <- app_fn("vocabulary_values")
+  dir <- withr::local_tempdir()
+  write_vocabulary_fixture(dir)
+  vocab <- vocab_resolver_for(dir)("visit@1.0")
+
+  # Not given at all: every term of the vocabulary.
+  expect_identical(vocabulary_values(vocab), c("SCR", "C1D1", "EOT"))
+  expect_identical(
+    vocabulary_values(vocab, field = "label"),
+    c("Screening", "Cycle 1 Day 1", "End of treatment")
+  )
+  # Given and empty: nothing. The app's `%||%` reads a zero-length value as
+  # absent, which is what turned this into "every term".
+  expect_null(vocabulary_values(vocab, list()))
+  expect_null(vocabulary_values(vocab, list(), field = "label"))
+})
+
+test_that("resolving overrides keeps an emptied slot and drops only an untouched one", {
+  normalise <- app_fn("normalise_vocabulary_slots")
+  resolve <- app_fn("resolve_vocabulary_slot_overrides")
+  dir <- withr::local_tempdir()
+  write_vocabulary_fixture(dir)
+  resolver <- vocab_resolver_for(dir)
+
+  slots <- normalise(list(
+    vocab_slot_def(id = "with_default", target = "datasets.ds1.columns.A.values", default = "SCR"),
+    vocab_slot_def(id = "bare", target = "datasets.ds1.columns.B.values")
+  ))
+
+  # Nothing supplied: the slot with a default writes it, the bare one writes
+  # nothing at all.
+  untouched <- resolve(slots, list(), resolver)
+  expect_length(untouched, 1L)
+  expect_identical(untouched[[1]]$column, "A")
+  expect_identical(untouched[[1]]$values, "SCR")
+
+  # Both emptied on purpose: BOTH are written, each as an empty answer. A slot
+  # that was engaged and left empty is an instruction to clear its column; the
+  # untouched case above is the one that must write nothing.
+  emptied <- resolve(slots, list(with_default = character(0), bare = character(0)), resolver)
+  expect_length(emptied, 2L)
+  expect_identical(vapply(emptied, function(o) o$column, character(1)), c("A", "B"))
+  for (o in emptied) {
+    expect_identical(o$values, character(0))
+  }
+})
+
+test_that("an empty override removes the column's constraint and its vocabulary binding", {
+  apply_overrides <- app_fn("apply_vocabulary_slot_overrides")
+
+  ds <- vocab_dataset_body(list(
+    list(id = "VISIT", type = "SAS Char", values_from = "visit@1.0"),
+    list(id = "ARM", type = "SAS Char", values = c("A", "B")),
+    list(id = "OTHER", type = "SAS Char", values = "keep me")
+  ))
+
+  out <- apply_overrides(ds, list(
+    list(dataset = "ds1", column = "VISIT", values = character(0), slot = "s1"),
+    list(dataset = "ds1", column = "ARM", values = character(0), slot = "s2")
+  ))
+
+  # Written out, not abbreviated: a column that is neither permitted-values nor
+  # bound is the unconstrained column the author asked for. A zero-length
+  # `values` left in place would be a different thing again (an empty list of
+  # permitted values), so the key has to be gone.
+  expect_identical(names(out$columns[[1]]), c("id", "type"))
+  expect_identical(names(out$columns[[2]]), c("id", "type"))
+  expect_identical(out$columns[[3]]$values, "keep me")
+
+  # A matrix dataset's row label is cleared the same way, and a row label with
+  # no values is an ordinary row label.
+  matrix_ds <- list(
+    id = "counts", type = "matrix",
+    row_labels = list(list(id = "GENE", type = "SAS Char", values = c("TP53", "KRAS")))
+  )
+  cleared <- apply_overrides(matrix_ds, list(
+    list(dataset = "counts", column = "GENE", values = character(0), slot = "s1", segment = "row_labels")
+  ))
+  expect_identical(names(cleared$row_labels[[1]]), c("id", "type"))
 })
 
 test_that("an explicitly empty selection still has to satisfy min", {
@@ -1376,4 +1492,149 @@ test_that("an explicitly empty selection still has to satisfy min", {
   needs_one <- normalise(list(vocab_slot_def(min = 1, default = "SCR")))[[1]]
 
   expect_vocab_error_contains(slot_values(needs_one, character(0), resolver), "at least 1")
+})
+
+
+# ---- "None": an emptied slot, end to end -----------------------------------
+
+# The creation template "with_slot" of `dir`, built the way the options dialog
+# builds it: `selections` is what collect_vocab_selections() hands over. Returns
+# the create_dta_from_template() result unchanged, so a test can look at a
+# refusal as readily as at a document.
+create_with_slot <- function(dir, selections, template = "with_slot@1.0") {
+  withr::local_envvar(
+    c(
+      DTATOOLS_TEMPLATE_SOURCES = paste0("t=dir:", dir),
+      DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = ""
+    ),
+    .local_envir = parent.frame()
+  )
+  app_fn("dta_template_index_invalidate")()
+  idx <- app_fn("build_template_index")(refresh = TRUE)
+  loaded <- app_fn("load_template_definition")(template, index = idx)
+  expect_true(isTRUE(loaded$ok), info = loaded$error)
+  app_fn("create_dta_from_template")(
+    loaded$value$def, loaded$value$path,
+    index = idx, vocab_selections = selections
+  )
+}
+
+test_that("choosing None for a bound column leaves it with no permitted values", {
+  # The slot's default is [SCR, C1D1] and the dataset template binds VISIT to
+  # the whole vocabulary [SCR, C1D1, EOT]. Clearing the control used to leave
+  # the binding in place, so the document listed EVERY visit code -- more than
+  # the default, the opposite of "none".
+  dir <- vocab_slot_source_dir(c(
+    "vocabulary_slots:",
+    "  - id: visit_choice",
+    "    label: Visits",
+    "    target: datasets.ds1.columns.VISIT.values",
+    "    vocabulary: visit@1.0",
+    "    default: [SCR, C1D1]"
+  ))
+
+  built <- create_with_slot(dir, list(visit_choice = character(0)))
+  expect_true(isTRUE(built$ok), info = built$error)
+
+  spec <- built$value@datasets[[1]]@specs@columns[[1]]
+  # No `values` of any kind: not the default, not the vocabulary, not an empty
+  # list that would read as "nothing is allowed".
+  expect_null(spec@values)
+  # The column is otherwise untouched.
+  expect_identical(spec@id, "VISIT")
+  expect_identical(as.list(spec)$type, "SAS Char")
+
+  # The document that leaves the application is the YAML, so read it back. (The
+  # authoring-only `values_from:` cannot reach a column object at all, which is
+  # why only `values` is asserted here; the binding's removal is pinned on the
+  # plain dataset list in the apply_vocabulary_slot_overrides() test above.)
+  txt <- app_fn("dta_to_yaml_text")(built$value)
+  expect_true(isTRUE(txt$ok), info = txt$error)
+  parsed <- yaml::yaml.load(txt$value)
+  col <- parsed$datasets[[1]]$columns[[1]]
+  expect_identical(col$id, "VISIT")
+  expect_null(col$values)
+})
+
+test_that("choosing None clears an inline dataset's bound column the same way", {
+  # build_template_datasets() has two places a slot is applied: a `template:`
+  # entry (above) and an inline dataset body. An inline column is expanded
+  # first and overridden second, so a skipped override would leave the
+  # vocabulary's terms behind just the same.
+  dir <- withr::local_tempdir()
+  write_vocabulary_fixture(dir)
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: inline_slot",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Inline",
+      "datasets:",
+      "  - id: ds1",
+      "    type: tabular",
+      "    files: {filename: x.csv, type: csv}",
+      "    columns:",
+      "      - id: VISIT",
+      "        type: SAS Char",
+      "        values_from: visit@1.0",
+      "vocabulary_slots:",
+      "  - id: visit_choice",
+      "    target: datasets.ds1.columns.VISIT.values",
+      "    vocabulary: visit@1.0",
+      "    default: [SCR]"
+    ),
+    lib_path(dir, "inline_slot.dta-template.yaml")
+  )
+
+  # Default first, so the fixture is shown to constrain the column at all.
+  defaulted <- create_with_slot(dir, NULL, "inline_slot@1.0")
+  expect_true(isTRUE(defaulted$ok), info = defaulted$error)
+  expect_identical(defaulted$value@datasets[[1]]@specs@columns[[1]]@values, "SCR")
+
+  emptied <- create_with_slot(dir, list(visit_choice = character(0)), "inline_slot@1.0")
+  expect_true(isTRUE(emptied$ok), info = emptied$error)
+  expect_null(emptied$value@datasets[[1]]@specs@columns[[1]]@values)
+})
+
+test_that("an open slot with only the author's own term builds exactly that term", {
+  dir <- vocab_slot_source_dir(c(
+    "vocabulary_slots:",
+    "  - id: visit_choice",
+    "    target: datasets.ds1.columns.VISIT.values",
+    "    vocabulary: visit@1.0",
+    "    mode: open",
+    "    include: [SCR, C1D1]",
+    "    default: [SCR, C1D1]"
+  ))
+
+  built <- create_with_slot(dir, list(visit_choice = "UNSCHED"))
+  expect_true(isTRUE(built$ok), info = built$error)
+  # Not c("SCR", "C1D1", "EOT", "UNSCHED"): neither the vocabulary nor even the
+  # slot's own menu is "plus" the author's term.
+  expect_identical(built$value@datasets[[1]]@specs@columns[[1]]@values, "UNSCHED")
+})
+
+test_that("a slot that requires a term refuses to create the document while it is empty", {
+  # The confirm button of the options dialog is this call: a refusal here is
+  # what keeps the dialog open on the author's choices.
+  dir <- vocab_slot_source_dir(c(
+    "vocabulary_slots:",
+    "  - id: visit_choice",
+    "    target: datasets.ds1.columns.VISIT.values",
+    "    vocabulary: visit@1.0",
+    "    default: [SCR]",
+    "    min: 1"
+  ))
+
+  refused <- create_with_slot(dir, list(visit_choice = character(0)))
+  expect_false(isTRUE(refused$ok))
+  expect_match(gsub("\\s+", " ", refused$error), "at least 1", fixed = TRUE)
+
+  # The same slot is satisfied by any one term, so the refusal is about the
+  # emptiness and not about the slot.
+  accepted <- create_with_slot(dir, list(visit_choice = "EOT"))
+  expect_true(isTRUE(accepted$ok), info = accepted$error)
+  expect_identical(accepted$value@datasets[[1]]@specs@columns[[1]]@values, "EOT")
 })

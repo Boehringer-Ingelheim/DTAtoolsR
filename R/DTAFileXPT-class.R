@@ -83,7 +83,7 @@ DTAFileXPT <- S7::new_class(
     container = NULL
   ) {
     new_object(
-      .parent = DTAFileSAS7BDAT(
+      DTAFileSAS7BDAT(
         filename = filename,
         pattern = pattern,
         pattern_description = pattern_description,

@@ -189,7 +189,7 @@ as an error; none may stay.
 | `vocab_slot_invalid` | error | Target must be `datasets.<as>.columns.<column id>.values` of a dataset the template builds, or, for a matrix dataset, `datasets.<as>.row_labels.<row label id>.values` -- the id may contain spaces or dots and is read whole; `mode` `closed`/`open`; `include`/`exclude`/`default` codes must exist; `min` a whole number. |
 | `vocabulary_extends_failed` | error | Vocabulary inheritance failed: a cycle, or `remove_terms` naming a code the parent does not have. |
 | `target_invalid` | warning | An option `target` or effect `path` is not a real field. Use a supported metadata field (README "base: metadata") or a `dataset.` path that resolves. |
-| `target_machine_owned` | error | Never target `metadata.template` or `metadata.import_issues`. Remove it. |
+| `target_machine_owned` | error | Never target `metadata.template`, `metadata.import_issues` or `metadata.dtatools_version`. Remove it. |
 | `prior_versions_invalid` | error | Each entry needs `version` and `changes`, an optional `YYYY-MM-DD` `date`, no repeats, and must be older than the first library version. |
 
 ### The build
@@ -198,8 +198,8 @@ as an error; none may stay.
 | --- | --- | --- |
 | `instantiate_failed` | error | The concrete template (or one `[choice]` of its variants) cannot be built. Fix any other finding for it first; then read the message. Frequent causes: a `required:` path nothing fills ("1 required field not filled … base.metadata.…": set it in this template or mix in a block that provides it); a sealed path changed; no datasets after inheritance; a patch that does not apply. If it reports a required party slot with no profile selected, no profile in the library can fill that slot: add one with the slot's role, or name an existing one in its `profiles:`. |
 | `file_name_conflict` | error | File entries of two different datasets can take the same file name. Make the file names or patterns distinct. Unlike the other `lint_dta()` pass-through codes below, this one is an error here, not a warning. |
-| `token_unknown` | warning | A `${...}` placeholder other than `${today}`, `${version}`, `${study.id}` and `${study.protocol_id}` in a creation or dataset template, or a `${version}` inside a dataset, is left in the document as literal text. Correct the spelling, or move `${version}` out of the dataset. |
-| `study_token_unanswered` | warning | A dataset or metadata value uses `${study.id}` or `${study.protocol_id}`, but no option and no base metadata supplies that study field, so a new document cannot be created from it. Add an option, or a base value, for `metadata.study.id` / `metadata.study.protocol_id`. |
+| `token_unknown` | warning | A `${...}` placeholder other than `${today}`, `${version}`, `${study.id}`, `${study.protocol_id}`, `${study.id_underscore}` and `${study.protocol_id_underscore}` in a creation or dataset template, or a `${version}` inside a dataset, is left in the document as literal text. Correct the spelling, or move `${version}` out of the dataset. |
+| `study_token_unanswered` | warning | A dataset or metadata value uses `${study.id}`, `${study.protocol_id}` or an `_underscore` form of either, but no option and no base metadata supplies that study field, so a new document cannot be created from it. Add an option, or a base value, for `metadata.study.id` / `metadata.study.protocol_id`. |
 | `lint_dta()` codes | warning | The DTA built, but its columns and rules have a weakness (a format narrower than the length, a rule that cannot be checked). Fix the dataset template or the patch. The `lint_dta()` *errors* never appear as rows of their own: a DTA with such an error cannot be built, so they arrive inside an `instantiate_failed` message ("(rule_condition_value_outside_values) Rule 'x' … uses value(s) 'LOST' …", "(rule_column_undeclared) …"). |
 
 ## Beyond the linter

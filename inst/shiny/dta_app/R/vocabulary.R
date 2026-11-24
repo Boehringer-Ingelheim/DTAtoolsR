@@ -477,9 +477,18 @@ vocabulary_terms <- function(vocab, include = NULL, exclude = NULL) {
 #
 # A label vector is ALWAYS character: the type coercion applies to codes only.
 # A numeric vocabulary's decodes are display text, not numbers.
+#
+# `terms` is NULL ("every term of the vocabulary") or a term list. A term list
+# with no entry is NO terms, and the result is NULL. It must not be defaulted
+# with `%||%`: this app's `%||%` reads a zero-length value as absent, so an
+# empty list would silently become the whole vocabulary -- and a slot in
+# `mode: open` whose author selected only their own terms would get every term
+# of the vocabulary as well.
 vocabulary_values <- function(vocab, terms = NULL, field = c("code", "label")) {
   field <- match.arg(field)
-  terms <- terms %||% vocab$terms %||% list()
+  if (is.null(terms)) {
+    terms <- vocab$terms
+  }
   if (length(terms) == 0) {
     return(NULL)
   }
@@ -635,6 +644,25 @@ normalise_values_from <- function(x, column_id = "<column>") {
 #       default: [SCR, C1D1]        # pre-ticked
 #       min: 1                      # optional cardinality floor
 #
+# What the author's choice does to the target column:
+#
+#   * terms chosen    -> exactly those terms become its permitted `values:`
+#                        (in `mode: open`, the author's own terms count, and a
+#                        selection of only their own is exactly those);
+#   * None (nothing   -> the column is left with no permitted values at all: its
+#     selected)          `values:` and its `values_from:` binding are removed,
+#                        so no value is checked against a list. A slot with
+#                        `min:` above 0 refuses this, and the document is not
+#                        created. The options dialog reports an empty control
+#                        as None whether the author cleared it or never filled
+#                        it, so a slot with no `default:` that is left alone
+#                        is None too;
+#   * no choice made  -> only for a caller that supplied no entry for the slot
+#     at all             (the options dialog supplies one for every slot whose
+#                        vocabulary resolved): the slot's `default:`, and with
+#                        no default the column is left as its dataset template
+#                        left it.
+#
 # This is deliberately the party_slots: shape, one concept over: a slot, a
 # target, an optional allow-list narrowing what the dropdown offers, and a
 # selection re-validated on the way in.
@@ -776,24 +804,34 @@ vocabulary_slot_choices <- function(slot, resolve_vocab) {
   )
 }
 
-# The permitted-values vector one slot's selection produces, or NULL when the
-# slot was left alone.
+# What one slot's selection does to its column, as one of three answers:
+#
+#   * a character vector of permitted values -- the terms chosen (plus, in
+#     `mode: open`, the author's own), to be written as the column's `values:`;
+#   * character(0) -- "None": the author emptied the slot on purpose, so the
+#     column is to have NO permitted values at all. The caller removes `values:`
+#     and the `values_from:` binding; the column is then unconstrained. It is
+#     not "an empty list of permitted values" (which would read as "nothing is
+#     allowed"), and it is not the vocabulary either;
+#   * NULL -- the slot was left alone: leave the column exactly as the dataset
+#     template left it.
+#
+# The two empty answers must never be the same value, and for a while they were
+# (both NULL), which is what made "None" put the whole vocabulary back. NULL is
+# only ever returned for silence.
 #
 # An ABSENT selection (NULL) falls back to the slot's `default:`; when that is
-# empty too the result is NULL, meaning "leave the column exactly as the
-# dataset template left it". Same reasoning as apply_party_selections()
-# skipping an unselected slot: a slot the author did not engage with must not
-# silently rewrite something.
+# empty too the result is NULL. Same reasoning as apply_party_selections()
+# skipping an unselected slot: a caller that said nothing about a slot must not
+# silently rewrite something. (The options dialog never says nothing: it reports
+# every rendered slot, so for it an untouched control is an empty selection.)
 #
-# An EXPLICITLY EMPTY selection is a different answer and does not fall back:
-# it means no terms. Collapsing the two is what used to make a slot WITH a
-# default impossible to empty on purpose.
+# An EXPLICITLY EMPTY selection is a different answer and does not fall back to
+# the default. Collapsing the two is what used to make a slot WITH a default
+# impossible to empty on purpose. It still has to satisfy `min:`: a slot that
+# requires a term refuses it, which makes create_dta_from_template() fail, so
+# the options dialog stays open on the author's choices.
 vocabulary_slot_values <- function(slot, selection, resolve_vocab) {
-  # NULL and character(0) are not the same answer, and treating them as one is
-  # what made "deliberately no terms" inexpressible: every empty selection fell
-  # back to `default:`, so a slot with a default could never be emptied. NULL
-  # is silence (the key was never supplied) and still takes the default; an
-  # explicitly empty vector is an engagement that means none.
   engaged <- !is.null(selection)
   selection <- as.character(selection %||% character(0))
   selection <- selection[!is.na(selection) & nzchar(selection)]
@@ -807,7 +845,7 @@ vocabulary_slot_values <- function(slot, selection, resolve_vocab) {
     )
   }
   if (length(selection) == 0) {
-    return(NULL)
+    return(if (engaged) character(0) else NULL)
   }
 
   choices <- vocabulary_slot_choices(slot, resolve_vocab)
@@ -853,6 +891,12 @@ vocabulary_slot_values <- function(slot, selection, resolve_vocab) {
 # Turn slot definitions + the author's selections into a flat list of
 # list(dataset=, column=, values=) overrides, ready for
 # apply_vocabulary_slot_overrides().
+#
+# Only a slot left ALONE (NULL from vocabulary_slot_values()) writes no
+# override. A slot emptied on purpose writes one with `values = character(0)`,
+# which apply_vocabulary_slot_overrides() reads as "remove the column's
+# permitted values": skipping it too would leave the dataset template's own
+# `values:` or `values_from:` binding in place.
 resolve_vocabulary_slot_overrides <- function(slots, selections, resolve_vocab) {
   selections <- selections %||% list()
   out <- list()
@@ -917,7 +961,11 @@ apply_vocabulary_slot_overrides <- function(ds, overrides) {
         "Vocabulary slot {.val {o$slot}} targets column {.val {o$column}}, which sets a {.field pattern}; a column takes permitted values or a pattern, never both."
       )
     }
-    col$values <- o$values
+    # A zero-length `values` is "None", and means no permitted values at all:
+    # the key is removed rather than written empty, because a zero-length
+    # `values:` would read as "nothing is allowed", which is not what "None"
+    # says.
+    col$values <- if (length(o$values) > 0) o$values else NULL
     # A slot's choice supersedes whatever binding the dataset template had.
     col$values_from <- NULL
     columns[[hit]] <- col

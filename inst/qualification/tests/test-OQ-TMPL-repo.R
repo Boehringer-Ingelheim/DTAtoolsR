@@ -1,6 +1,6 @@
 # create_template_repo(): scaffolding a new template repository, and the
 # guarantee that both it and every packaged example validate cleanly.
-# REQ-TMPL-026 .. REQ-TMPL-030, REQ-TMPL-060, REQ-TMPL-065.
+# REQ-TMPL-026 .. REQ-TMPL-030, REQ-TMPL-060, REQ-TMPL-066.
 #
 # Every call here writes into qa_tempdir() -- never into the package's own
 # inst/extdata/ -- and every create_template_repo() call is wrapped in
@@ -10,7 +10,7 @@
 tmpl_fixture <- function(...) file.path(qa_suite_root(), "fx", "t", ...)
 
 # Expected scaffold paths below are written from REQ-TMPL-026, REQ-TMPL-060
-# and REQ-TMPL-065, not discovered from the installed skeleton or the function
+# and REQ-TMPL-066, not discovered from the installed skeleton or the function
 # under qualification.
 editor_files <- c(
   "schemas/dta-template-library.schema.json",
@@ -168,9 +168,9 @@ test_that("OQ-TMPL-140 | a pre-existing skill file is a conflict under the overw
   )
 })
 
-# ---- REQ-TMPL-065: the editor assets ----------------------------------------
+# ---- REQ-TMPL-066: the editor assets ----------------------------------------
 
-test_that("OQ-TMPL-151 | the JSON Schemas and the VS Code setting are written byte-identical, whatever examples, ci and agent_skill say | REQ-TMPL-065", {
+test_that("OQ-TMPL-157 | the JSON Schemas and the VS Code setting are written byte-identical, whatever examples, ci and agent_skill say | REQ-TMPL-066", {
   bundled <- c(
     system.file("extdata", "schemas", "dta-template-library.schema.json", package = "DTAtools"),
     system.file("extdata", "schemas", "dta-app.schema.json", package = "DTAtools"),
@@ -193,7 +193,7 @@ test_that("OQ-TMPL-151 | the JSON Schemas and the VS Code setting are written by
   )
 })
 
-test_that("OQ-TMPL-152 | both schemas declare draft-07 and the setting assigns each its file name patterns by paths that resolve | REQ-TMPL-065", {
+test_that("OQ-TMPL-158 | both schemas declare draft-07 and the setting assigns each its file name patterns by paths that resolve | REQ-TMPL-066", {
   dir <- qa_tempdir()
   suppressMessages(create_template_repo(dir, examples = FALSE, ci = FALSE, agent_skill = FALSE))
 
@@ -238,7 +238,7 @@ test_that("OQ-TMPL-152 | both schemas declare draft-07 and the setting assigns e
   )
 })
 
-test_that("OQ-TMPL-153 | a pre-existing .vscode/settings.json is a conflict under the overwrite guard | REQ-TMPL-065 REQ-TMPL-028", {
+test_that("OQ-TMPL-159 | a pre-existing .vscode/settings.json is a conflict under the overwrite guard | REQ-TMPL-066 REQ-TMPL-028", {
   dir <- qa_tempdir()
   settings <- file.path(dir, ".vscode", "settings.json")
   dir.create(dirname(settings), recursive = TRUE)

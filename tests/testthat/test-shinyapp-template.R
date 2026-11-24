@@ -203,13 +203,14 @@ test_that("dta_template_metadata_fields() is derived from the S7 class, not mirr
   expect_false(any(machine() %in% fields()))
 })
 
-test_that("the machine-owned metadata fields are exactly import_issues and template", {
+test_that("the machine-owned metadata fields are exactly import_issues, template and dtatools_version", {
   machine <- app_fn("dta_metadata_machine_fields")
   # import_issues records how a file was read; template records which template
-  # produced the document. A template that could set either could forge its own
-  # provenance, which is what the rebase feature would then trust. Pinning the
-  # exact set makes adding a third one a deliberate act.
-  expect_setequal(machine(), c("import_issues", "template"))
+  # produced the document; dtatools_version records which release last saved it.
+  # A template that could set any of them could forge its own provenance, which
+  # is what the rebase feature would then trust. Pinning the exact set makes
+  # adding another one a deliberate act.
+  expect_setequal(machine(), c("import_issues", "template", "dtatools_version"))
 })
 
 test_that("dta_template_list_fields() names the container metadata fields", {

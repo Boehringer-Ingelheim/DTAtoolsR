@@ -1,6 +1,6 @@
 Package: DTAtools
 Title: Validation and Authoring Tools for Data Transfer Agreements (DTAs) and Data Transmission Specifications (DTS)
-Version: 0.28.0
+Version: 0.30.0
 Authors@R: c(
 	person("Thomas", "Schwarzl", email = "thomas.schwarzl@boehringer-ingelheim.com",
 		role = c("aut", "cre"), comment = c(ORCID = "0000-0001-7697-7000")),
@@ -41,8 +41,8 @@ Imports:
 	zip (>= 3.0.0),
 	haven (>= 2.5.2)
 Depends:
-	R (>= 4.1.0),
-	S7 (>= 0.2.2)
+	R (>= 4.2.0),
+	S7 (>= 1.0.0)
 Suggests:
 	knitr,
 	rmarkdown,

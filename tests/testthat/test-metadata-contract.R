@@ -46,7 +46,9 @@ test_that("empty agreement fields leave legacy serialization and positional API 
     "supplier", "transmission", "error_handling", "authorized_for_corrections",
     "template"
   )
-  expect_identical(names(formals(DTAMetaData)), c(old_names, "study", "sections"))
+  # New formals go LAST: a positional call written against an earlier release
+  # must keep meaning what it meant.
+  expect_identical(names(formals(DTAMetaData)), c(old_names, "study", "sections", "dtatools_version"))
   positional <- do.call(DTAMetaData, old_args)
   named <- do.call(DTAMetaData, stats::setNames(old_args, old_names))
   expect_identical(as.list(positional), as.list(named))
@@ -178,7 +180,12 @@ test_that("package and app YAML roundtrips preserve section order and literal te
   expect_true(saved$ok)
   loaded <- app_fn("dta_read_yaml_text")(saved$value)
   expect_true(loaded$ok)
-  expect_identical(as.list(loaded$value@metadata), as.list(md))
+  # The app is what writes dtatools_version; md was built without one, so the
+  # reloaded copy differs by exactly that key and by nothing else.
+  reloaded <- as.list(loaded$value@metadata)
+  expect_identical(reloaded$dtatools_version, as.character(utils::packageVersion("DTAtools")))
+  reloaded$dtatools_version <- NULL
+  expect_identical(reloaded, as.list(md))
 })
 
 test_that("YAML rejects malformed study and section mappings", {

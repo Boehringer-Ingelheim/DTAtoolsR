@@ -474,7 +474,7 @@ test_that("OQ-CONT-047 | upgrade_dta() gives an object saved by an older version
 
   # An object as 0.27.0 saved it: its DTA class has no `containers`. The class
   # object is what saveRDS() keeps, so the round trip restores the old shape.
-  cur <- attr(d, "S7_class")
+  cur <- S7::S7_class(d)
   old_class <- S7::new_class(
     "DTA",
     package = "DTAtools", parent = cur@parent,
@@ -484,6 +484,9 @@ test_that("OQ-CONT-047 | upgrade_dta() gives an object saved by an older version
   # (An Arrow table does not survive saveRDS(), so the old object holds none.)
   old <- cont_doc(cont_csv_ds("ae"), cont_csv_ds("dm"))
   attr(old, "containers") <- NULL
+  # S7 before 1.0.0 stored the class as `S7_class`; 1.0.0 stores `_S7_class`.
+  attr(old, "_S7_class") <- NULL
+  attr(old, "_S7_version") <- NULL
   attr(old, "S7_class") <- old_class
   f <- file.path(qa_tempdir(), "old.rds")
   saveRDS(old, f)

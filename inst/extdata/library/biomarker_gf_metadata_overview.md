@@ -11,7 +11,7 @@ Goal:
   editable in the Shiny app metadata editor)
 
 > The fields listed in the "Canonical `DTAMetaData` fields" sections below are
-> the ones this template sets (`DTAMetaData` has further properties: `study`, `sections`, `template`, `import_issues`). The template's `base.metadata` and every option
+> the ones this template sets (`DTAMetaData` has further properties: `study`, `sections`, `template`, `import_issues`, `dtatools_version`). The template's `base.metadata` and every option
 > `effect` write to those fields only. GF-specific concepts that `DTAMetaData`
 > does not (yet) model are collected in the appendix as free text / future work,
 > not as invented `transmission.*` keys.

@@ -256,7 +256,7 @@ ordinary DTA definition. The template engine checks the top-level names; a missp
 `study` is an optional mapping with `id` and `protocol_id`. Supplied identifiers
 must be nonblank strings. They describe the agreement; a dataset reuses them
 only where its body says so, with the `${study.id}` and `${study.protocol_id}`
-tokens (see the expression tokens below). `header` remains a presentation field.
+tokens and their `_underscore` forms (see the expression tokens below). `header` remains a presentation field.
 
 `sections` is an ordered mapping with stable identifiers as keys, not an
 unnamed sequence. Keys start with a letter and contain only letters, digits
@@ -323,8 +323,8 @@ standalone `{STUDY_TABLE}`, `{AGREEMENT_SECTIONS}` and `{CONTAINERS_TABLE}` bloc
 of the document, and is omitted when it has none).
 The library does not alter user-supplied Word templates automatically.
 
-The machine-owned fields `template` and `import_issues` cannot be set by a template. The validator reports a template attempting to target either
-with `target_machine_owned` when the field is reached through an option target.
+The machine-owned fields `template`, `import_issues` and `dtatools_version` cannot be set by a template. The validator reports a template attempting to
+target any of them with `target_machine_owned` when the field is reached through an option target.
 
 The app resolves these expression tokens in template data:
 
@@ -348,11 +348,15 @@ base:
 nothing about the template's own versions: those are listed in the template picker, computed from the library (see "Template version
 history" below). Do not record template changes here.
 
-Two more tokens reuse the study identity, in a **dataset body** (a dataset template's `dataset:`, or an inline entry of a creation template's
+Four more tokens reuse the study identity, in a **dataset body** (a dataset template's `dataset:`, or an inline entry of a creation template's
 `datasets:`) and in the document metadata (a title, a clause):
 
 - `${study.id}` becomes the document's `metadata.study.id`.
 - `${study.protocol_id}` becomes the document's `metadata.study.protocol_id`.
+- `${study.id_underscore}` and `${study.protocol_id_underscore}` are the same two values with every hyphen (`-`) written as an underscore
+  (`_`) and nothing else changed: `1001-0190` becomes `1001_0190`. They are meant for file names, which are often named with underscores
+  (`filename: ^s${study.id_underscore}_<<yyyyMMddHHmm>>\.csv$`), and are resolved, escaped and checked exactly like the plain tokens. The
+  document's own `metadata.study.id` keeps the hyphens.
 
 `${version}` is filled in only in the document metadata, not in a dataset.
 
@@ -387,11 +391,12 @@ dataset:
 - Use the token in `examples:` too when the column has a `pattern:` built from it; a literal example cannot match every study.
 - `path:`/`source:` dataset entries are finished specification files and are not substituted.
 - `validate_template()`, the template guide and the template history build a template without anyone entering a study identity. They use
-  the first `choices:` suggestion of the option that asks for the field, else the stand-ins `STUDY-ID` and `PROT-ID`, and a guide shows
+  the first `choices:` suggestion of the option that asks for the field, else the stand-ins `STUDY-ID` and `PROT-ID` (`STUDY_ID` and
+  `PROT_ID` for an `_underscore` token), and a guide shows
   that value where a dataset uses a study token. If a dataset constrains the identifier's shape (a numeric or narrow column, a pattern),
   give the option a realistic first suggestion: a suggestion is never filled in for the person creating a document, unlike a `default:`.
-- `validate_template()` warns with `study_token_unanswered` when a template uses a study token but neither an option nor its base metadata
-  supplies that field: a new document could never be created from it.
+- `validate_template()` warns with `study_token_unanswered` when a template uses a study token (an `_underscore` form counts as a use of
+  the field it comes from) but neither an option nor its base metadata supplies that field: a new document could never be created from it.
 
 These tokens are not general-purpose environment-variable substitution. `validate_template()` reports any other `${...}` token in a creation
 or dataset template, and a `${version}` inside a dataset, as `token_unknown` (a warning), because it would reach the document as literal text.
@@ -599,6 +604,13 @@ addressable there; such a target is reported as `vocab_slot_invalid`.
 `mode` is `closed` or `open`. `closed` only offers vocabulary terms; `open` also permits the author to type additional terms. The final document
 still receives the selected values as its permitted-value list. `include` and `exclude` narrow the terms offered by the vocabulary, and
 `default` selects initial terms. `min` is a non-negative whole number that sets a minimum selection count; it is not a numeric-input lower bound.
+
+If the author selects no term at all (the **None** link, or the chips cleared), the column is built with no permitted values: neither `values:` nor
+a `values_from:` binding, whatever the slot's `default` or the dataset template bound the column to, so no value is checked against a list (the
+column's type, length and `nullable` still are). The dialog cannot tell a control that was cleared from one that never held a term, so a slot with
+no `default` that the author leaves alone builds its column the same way. A slot with `min` above 0 does not allow this: the document is not created
+until enough terms are selected. Give the slot `min: 1` when its column must stay constrained. In an `open` slot, a selection of only the author's
+own terms gives exactly those terms.
 
 `field` may be `code` or `label` and selects which vocabulary field populates the column values. The default is `code`. A vocabulary slot must
 name an existing vocabulary and a valid target. Invalid slot definitions produce `vocab_slot_invalid`; an unresolved vocabulary produces
@@ -1702,7 +1714,7 @@ It also passes on the `lint_dta()` codes of the columns and rules it builds (`?v
 | `template_misplaced` | error | A template file is outside the folder for its kind, for example at the repository root, or a party profile in `templates/`. | Move it into `templates/`, `parties/` or `vocabulary/` as its kind requires, and update related paths. |
 | `library_subfolder_given` | error | The path given to the validator is itself `templates/`, `parties/` or `vocabulary/`. | Validate its parent, the library root; if it is a flat library, move its files into the kind sub-folders instead. |
 | `target_invalid` | warning | An option target is unknown, malformed, or does not resolve in its dataset body. | Correct the target path and use a supported metadata or dataset field. |
-| `target_machine_owned` | error | An option targets `metadata.template` or `metadata.import_issues`. | Remove the option/effect; these fields are written by DTAtools. |
+| `target_machine_owned` | error | An option targets `metadata.template`, `metadata.import_issues` or `metadata.dtatools_version`. | Remove the option/effect; these fields are written by DTAtools. |
 | `prior_versions_invalid` | error | A `prior_versions:` entry lacks a version or changes text, has a bad date or unknown key, repeats a version, or is not older than the template's first version in the library. | Fix the entry; see "Versions from before the library: `prior_versions:`". |
 | `party_slot_invalid` | warning | A party slot is malformed or names a profile ID not found in the library. | Check target, slot fields, role, and profile IDs. |
 | `party_profile_invalid` | error | A party profile cannot be read the way the app reads it, for example because of an unknown `role`; the app skips it. The message is the reader's own. | Correct the field the message names. May appear next to `id_missing` or `version_missing`. |
@@ -1716,8 +1728,8 @@ It also passes on the `lint_dta()` codes of the columns and rules it builds (`?v
 | `dataset_no_files` | warning | A dataset template's body, or a dataset a non-abstract creation template builds, declares no files (no `files:` entry, or an empty one), so nothing can be loaded into it. A patch may still supply them. | Add a `files:` entry with a `filename` and a `type`. |
 | `column_spec_invalid` | error | A column of a dataset template is rejected by the column specification, for example an example longer than its declared length. | Correct the column as the message says. |
 | `file_name_conflict` | error | File entries of different datasets can take the same file name. | Make the file names or patterns distinct; see "File handlers and non-tabular deliverables". |
-| `token_unknown` | warning | A `${...}` placeholder other than `${today}`, `${version}`, `${study.id}` and `${study.protocol_id}`, or a `${version}` inside a dataset; it is left in the document as literal text. | Correct the spelling, or move `${version}` out of the dataset. |
-| `study_token_unanswered` | warning | A dataset or metadata value uses `${study.id}` or `${study.protocol_id}`, but no option and no base metadata supplies that study field, so a new document cannot be created. | Add an option or a base value for `metadata.study.id` / `metadata.study.protocol_id`. |
+| `token_unknown` | warning | A `${...}` placeholder other than `${today}`, `${version}`, `${study.id}`, `${study.protocol_id}`, `${study.id_underscore}` and `${study.protocol_id_underscore}`, or a `${version}` inside a dataset; it is left in the document as literal text. | Correct the spelling, or move `${version}` out of the dataset. |
+| `study_token_unanswered` | warning | A dataset or metadata value uses `${study.id}`, `${study.protocol_id}` or an `_underscore` form of either, but no option and no base metadata supplies that study field, so a new document cannot be created. | Add an option or a base value for `metadata.study.id` / `metadata.study.protocol_id`. |
 | `values_and_values_from` | warning | One column defines both literal values and a vocabulary binding. | Remove one; the vocabulary binding takes precedence. |
 | `values_from_pattern` | error | A column combines `values_from` and `pattern`. | Choose a vocabulary-backed permitted-value list or a pattern. |
 | `values_from_invalid` | error | The vocabulary binding is malformed or cannot be read. | Use a valid reference or mapping and a supported field. |

@@ -1032,3 +1032,38 @@ requirements:
       The application cannot make an R Date, POSIXct or hms column without a
       format: the one the author did not write is stored and then written
       (LIM-034).
+
+  - id: REQ-APP-061
+    text: >
+      A dataset shall be reported pass only while every table bound to it has
+      been validated and none of them failed. While a table bound to it has not
+      been validated -- because it was bound, replaced or delivered after the
+      last check -- and none has failed, the dataset shall be reported
+      pending, however many checks of other datasets follow. A table that
+      failed shall still make the dataset fail.
+    risk: high
+    category: integrity
+    covers: [run_dta_app, validation_status]
+    source: inst/shiny/dta_app/R/utils_dta.R dta_status_map()
+    notes: >
+      A green status is what the application's validation summary certifies,
+      so "pass" over a table nobody validated would certify unchecked data.
+      REQ-APP-010 gives the four status values; this fixes when a dataset may
+      read pass.
+
+  - id: REQ-APP-062
+    text: >
+      Every specification text the application saves shall record the DTAtools
+      release that wrote it as metadata.dtatools_version, replacing any release
+      the document already named, so that the value names the last writer.
+      Reading the saved text back shall give that release, and saving the
+      document again shall give identical text. A document with no metadata of
+      its own shall be saved without a metadata block and so without the value.
+    risk: medium
+    category: integrity
+    covers: [run_dta_app, read_dta_from_yaml]
+    source: inst/shiny/dta_app/R/utils_dta.R (dta_to_list, dta_tool_version)
+    notes: >
+      The value is the installed package version, which is what reads the file
+      back; a hosted bundle's own version can differ from it. A template
+      cannot target the value (REQ-TMPL-012).

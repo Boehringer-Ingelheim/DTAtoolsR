@@ -158,6 +158,7 @@ method(check, DTARuleColCondition) <- function(x, tab) {
 
 #' @export
 #' @name as.list
+#' @usage NULL
 method(as.list, DTARuleColCondition) <- function(x, ...) {
   list(
     id = x@id,
