@@ -250,7 +250,7 @@ ordinary DTA definition. The template engine checks the top-level names; a missp
 `study` is an optional mapping with `id` and `protocol_id`. Supplied identifiers
 must be nonblank strings. They describe the agreement; a dataset reuses them
 only where its body says so, with the `${study.id}` and `${study.protocol_id}`
-tokens (see the expression tokens below). `header` remains a presentation field.
+tokens and their `_underscore` forms (see the expression tokens below). `header` remains a presentation field.
 
 `sections` is an ordered mapping with stable identifiers as keys, not an
 unnamed sequence. Keys start with a letter and contain only letters, digits
@@ -342,11 +342,15 @@ base:
 nothing about the template's own versions: those are listed in the template picker, computed from the library (see "Template version
 history" below). Do not record template changes here.
 
-Two more tokens reuse the study identity, in a **dataset body** (a dataset template's `dataset:`, or an inline entry of a creation template's
+Four more tokens reuse the study identity, in a **dataset body** (a dataset template's `dataset:`, or an inline entry of a creation template's
 `datasets:`) and in the document metadata (a title, a clause):
 
 - `${study.id}` becomes the document's `metadata.study.id`.
 - `${study.protocol_id}` becomes the document's `metadata.study.protocol_id`.
+- `${study.id_underscore}` and `${study.protocol_id_underscore}` are the same two values with every hyphen (`-`) written as an underscore
+  (`_`) and nothing else changed: `1001-0190` becomes `1001_0190`. They are meant for file names, which are often named with underscores
+  (`filename: ^s${study.id_underscore}_<<yyyyMMddHHmm>>\.csv$`), and are resolved, escaped and checked exactly like the plain tokens. The
+  document's own `metadata.study.id` keeps the hyphens.
 
 `${version}` is filled in only in the document metadata, not in a dataset.
 
@@ -381,11 +385,12 @@ dataset:
 - Use the token in `examples:` too when the column has a `pattern:` built from it; a literal example cannot match every study.
 - `path:`/`source:` dataset entries are finished specification files and are not substituted.
 - `validate_template()`, the template guide and the template history build a template without anyone entering a study identity. They use
-  the first `choices:` suggestion of the option that asks for the field, else the stand-ins `STUDY-ID` and `PROT-ID`, and a guide shows
+  the first `choices:` suggestion of the option that asks for the field, else the stand-ins `STUDY-ID` and `PROT-ID` (`STUDY_ID` and
+  `PROT_ID` for an `_underscore` token), and a guide shows
   that value where a dataset uses a study token. If a dataset constrains the identifier's shape (a numeric or narrow column, a pattern),
   give the option a realistic first suggestion: a suggestion is never filled in for the person creating a document, unlike a `default:`.
-- `validate_template()` warns with `study_token_unanswered` when a template uses a study token but neither an option nor its base metadata
-  supplies that field: a new document could never be created from it.
+- `validate_template()` warns with `study_token_unanswered` when a template uses a study token (an `_underscore` form counts as a use of
+  the field it comes from) but neither an option nor its base metadata supplies that field: a new document could never be created from it.
 
 These tokens are not general-purpose environment-variable substitution. `validate_template()` reports any other `${...}` token in a creation
 or dataset template, and a `${version}` inside a dataset, as `token_unknown` (a warning), because it would reach the document as literal text.
@@ -1687,8 +1692,8 @@ It also passes on the `lint_dta()` codes of the columns and rules it builds (`?v
 | `dataset_no_files` | warning | A dataset template's body, or a dataset a non-abstract creation template builds, declares no files (no `files:` entry, or an empty one), so nothing can be loaded into it. A patch may still supply them. | Add a `files:` entry with a `filename` and a `type`. |
 | `column_spec_invalid` | error | A column of a dataset template is rejected by the column specification, for example an example longer than its declared length. | Correct the column as the message says. |
 | `file_name_conflict` | error | File entries of different datasets can take the same file name. | Make the file names or patterns distinct; see "File handlers and non-tabular deliverables". |
-| `token_unknown` | warning | A `${...}` placeholder other than `${today}`, `${version}`, `${study.id}` and `${study.protocol_id}`, or a `${version}` inside a dataset; it is left in the document as literal text. | Correct the spelling, or move `${version}` out of the dataset. |
-| `study_token_unanswered` | warning | A dataset or metadata value uses `${study.id}` or `${study.protocol_id}`, but no option and no base metadata supplies that study field, so a new document cannot be created. | Add an option or a base value for `metadata.study.id` / `metadata.study.protocol_id`. |
+| `token_unknown` | warning | A `${...}` placeholder other than `${today}`, `${version}`, `${study.id}`, `${study.protocol_id}`, `${study.id_underscore}` and `${study.protocol_id_underscore}`, or a `${version}` inside a dataset; it is left in the document as literal text. | Correct the spelling, or move `${version}` out of the dataset. |
+| `study_token_unanswered` | warning | A dataset or metadata value uses `${study.id}`, `${study.protocol_id}` or an `_underscore` form of either, but no option and no base metadata supplies that study field, so a new document cannot be created. | Add an option or a base value for `metadata.study.id` / `metadata.study.protocol_id`. |
 | `values_and_values_from` | warning | One column defines both literal values and a vocabulary binding. | Remove one; the vocabulary binding takes precedence. |
 | `values_from_pattern` | error | A column combines `values_from` and `pattern`. | Choose a vocabulary-backed permitted-value list or a pattern. |
 | `values_from_invalid` | error | The vocabulary binding is malformed or cannot be read. | Use a valid reference or mapping and a supported field. |

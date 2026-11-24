@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **File-name forms of the study tokens.** `${study.id_underscore}` and
+  `${study.protocol_id_underscore}` are the study ID and protocol ID with every
+  hyphen written as an underscore and nothing else changed, so `1001-0190`
+  becomes `1001_0190`. They work wherever `${study.id}` and
+  `${study.protocol_id}` do -- in a dataset body, including a `filename:` and
+  its pattern, and in the document metadata -- are escaped inside a regular
+  expression in the same way, and fail in the same way when the document has
+  no value for the identifier. The study identity stored in the document keeps
+  its hyphens. `validate_template()` treats them as known placeholders, counts
+  one as a use of the study field it comes from (`study_token_unanswered`),
+  and names the stand-in as the token writes it (`STUDY_ID`) when a dry run
+  fails on it; the template guide spells them out.
 - A specification's `metadata:` now records which DTAtools release wrote it, in
   a new `dtatools_version` field (new last argument of `DTAMetaData()`). The
   app sets it every time it saves the YAML, so it names the release that last

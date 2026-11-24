@@ -133,8 +133,10 @@ Each has bitten someone; the reason is why it is not a style preference.
   oversight. Party-slot `profiles:` are the exception: they take plain ids
   only, and `id@1.0` there silently never matches.
 - **Do not invent**: no `metadata.template`, `metadata.import_issues` or
-  `metadata.dtatools_version` (the app owns them), no `${…}` token other than `${today}`, `${version}`,
-  `${study.id}` and `${study.protocol_id}` (`${version}` is filled in only in
+  `metadata.dtatools_version` (the app owns them), no `${…}` token other than
+  `${today}`, `${version}`, `${study.id}`, `${study.protocol_id}` and their
+  file-name forms `${study.id_underscore}` and `${study.protocol_id_underscore}`
+  (the same value with every `-` written as `_`; `${version}` is filled in only in
   the document metadata, not in a dataset), no `example:` (it is
   `examples:`), no option-level `required`/`min`/`order`, no bare column type
   (`Char`, `character`): a `type` and its `format` start with `SAS ` or `R `,
