@@ -1,5 +1,5 @@
 # A library-supplied .docx is untrusted input. utils::unzip() only neutralises
-# '..' members from R 4.5.1 on, and the package supports R >= 4.1.0, so both
+# '..' members from R 4.5.1 on, and the package supports R >= 4.2.0, so both
 # extraction sites (the package's .replace_docx_placeholders() and the app's
 # template_has_placeholders()) refuse hostile member names *before* extracting.
 # The tests therefore watch whether extraction was reached at all, which does

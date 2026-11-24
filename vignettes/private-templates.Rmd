@@ -1425,9 +1425,16 @@ underneath, and searching a word from the description finds the term too.
 Chosen terms are shown as removable chips inside the box. "All",
 "None" and "Default" links fill or clear the selection in one click, next to
 a live "n of m selected" count. `min:` is shown as "Choose at least n." and
-is enforced when the document is created. An emptied slot means no terms,
-not "back to the default": the control opens holding the default, and
-whatever it holds when the document is created is what is applied. `target:` is always
+is enforced when the document is created. An emptied slot is not "back to
+the default": the control opens holding the default, and whatever it holds
+when the document is created is what is applied. A control holding nothing
+("None", or the chips cleared) builds the column with no permitted values at
+all, neither `values:` nor a `values_from:` binding, so no value is checked
+against a list (the column's type, length and `nullable` still are). The
+dialog cannot tell a control that was cleared from one that never held a term,
+so a slot with no `default:` that the author leaves alone builds its column the
+same way. A slot whose column must stay constrained says `min: 1`, and then
+cannot be created empty. `target:` is always
 `datasets.<dataset id>.columns.<column>.values`; a slot whose target names a
 dataset or column the template does not build fails loudly rather than
 silently doing nothing.
@@ -1441,7 +1448,9 @@ closed `enum` in the produced document. There is deliberately no "advisory"
 mode that would let non-conforming data through: the only way to express that
 today is to emit no `values:` at all, which turns the check for that column
 completely off, and a check that is silently absent is worse than the problem
-it would solve.
+it would solve. An author who empties a slot ("0 of n selected"), or leaves a
+slot with no `default:` empty, does switch that column's list check off for
+their document, which is why a template that must not allow it says `min: 1`.
 
 ### Where a binding may be written
 

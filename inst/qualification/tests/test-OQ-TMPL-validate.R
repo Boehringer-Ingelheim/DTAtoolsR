@@ -1531,7 +1531,7 @@ test_that("OQ-TMPL-137 | the dry run flags a study placeholder nothing can answe
   qa_step("with a fitting first suggestion the dry run builds", 0L, sum(with$code == "instantiate_failed"))
 })
 
-test_that("OQ-TMPL-152 | the _underscore study placeholders are known, count as a use of their study field, and the dry run names the stand-in as they write it | REQ-TMPL-058 REQ-TMPL-059", {
+test_that("OQ-TMPL-155 | the _underscore study placeholders are known, count as a use of their study field, and the dry run names the stand-in as they write it | REQ-TMPL-058 REQ-TMPL-059", {
   # No option and no base metadata sets the protocol id.
   unanswered <- qa_tempdir()
   tmpl_put(unanswered, "templates/u.dta-template.yaml", c(

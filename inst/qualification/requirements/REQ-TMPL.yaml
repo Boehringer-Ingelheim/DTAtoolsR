@@ -1508,3 +1508,46 @@ requirements:
       The key chooses the type system the application preselects for new
       columns and new matrix cells and nothing else: a type written in YAML
       keeps its mandatory prefix and both vocabularies stay available.
+
+  - id: REQ-TMPL-065
+    text: >
+      A vocabulary slot of a creation template shall decide the permitted values
+      of the column, or matrix row label, it targets from the selection the
+      document is created with. The terms selected shall become exactly that
+      column's values, in the vocabulary's order, followed, in a slot whose mode
+      is open, by the terms the author typed that the vocabulary does not have,
+      in the order entered; so that a selection of only the author's own terms
+      gives exactly those terms and none of the vocabulary's. A selection of no
+      term at all (an emptied control, "None", a selection of length zero) shall
+      build the column with no permitted values, that is neither a values list
+      nor a values_from binding, whatever the slot's default and whatever the
+      dataset template bound the column to, and shall change nothing else about
+      the column. When the document is created with no selection for a slot at
+      all, the slot's default shall apply, and a slot with no default shall
+      leave the column as its dataset template made it. A slot whose min exceeds
+      the number of terms selected, zero included, shall refuse to create the
+      document, with a message naming the slot and the minimum, and no document
+      shall result. All of this applies alike to a dataset a creation template
+      imports from a dataset template, to one it writes inline, and to a matrix
+      dataset's row label. The options dialog of the application shall give every
+      slot it offers a selection, the terms its control holds, so that a control
+      holding no term builds its column with no permitted values, whether or not
+      the slot has a default.
+    risk: high
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      inst/shiny/dta_app/R/vocabulary.R (vocabulary_slot_values,
+      resolve_vocabulary_slot_overrides, apply_vocabulary_slot_overrides,
+      vocabulary_values); inst/shiny/dta_app/R/template_core.R
+      (create_dta_from_template); inst/shiny/dta_app/app.R (collect_vocab_selections)
+    notes: >
+      Once "None" left the column bound to the whole vocabulary: an emptied slot
+      and an untouched one were both reported as nothing to do, so the document
+      listed more terms than the default the author had just emptied. Every
+      expected value in OQ-TMPL-151 to OQ-TMPL-153 is derived by hand from the
+      sentences above, never from the engine's output. The dialog cannot tell a
+      control the author cleared from one never filled (both report no term), so
+      a slot with no default that is left alone builds its column with no
+      permitted values; a template that needs the column constrained gives the
+      slot a min of 1.

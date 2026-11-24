@@ -246,7 +246,7 @@ transfer, before submission rather than after failure.*
 
 ## Software architecture
 
-DTAtools is an R package (R ≥ 4.1.0) built on the S7 object system. A
+DTAtools is an R package (R ≥ 4.2.0) built on the S7 object system. A
 top-level `DTA` object holds a `DTAMetaData` (title, version, contacts,
 transmission schedule), a named list of datasets and, optionally, a list of
 delivery containers. Three dataset classes implement the kinds of deliverable
