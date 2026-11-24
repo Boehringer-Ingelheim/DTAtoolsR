@@ -1,0 +1,11 @@
+{
+  "yaml.schemas": {
+    "./schemas/dta-template-library.schema.json": [
+      "**/*.dta-template.y*ml",
+      "**/*.dta-dataset-template.y*ml",
+      "**/*.dta-party.y*ml",
+      "**/*.dta-vocabulary.y*ml"
+    ],
+    "./schemas/dta-app.schema.json": ["dta-app.y*ml"]
+  }
+}

@@ -35,6 +35,11 @@ export-templates/    Word layouts                            (export dialog)
 dta-app.yaml         app branding, features, exports
 ```
 
+`schemas/` and `.vscode/settings.json` are editor support, not library content:
+JSON Schemas that mark the shape of each file as it is written. DTAtools never
+reads them and `validate_template()` does not check them, so leave them as they
+are, and never treat an editor marker as the verdict: the validator decides.
+
 The rules that make this maintainable:
 
 1. **Each fact lives in one file.** A clause every DTA carries belongs in the
