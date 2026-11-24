@@ -53,6 +53,101 @@ test_that("dta_status_map and dta_table_status_map classify a failing validated 
   expect_equal(unname(tstat["clinical_data_error_all"]), "fail")
 })
 
+# A dataset reads "pass" only when EVERY table bound to it was validated. The
+# fixture is the bundled multi-file clinical specification: one dataset behind a
+# pattern handler that takes one or two files (clinical_data.*.csv$).
+ops_multi_dta <- function() {
+  spec_path <- system.file("extdata", "clinical_dta_multiple_files.yaml", package = "DTAtools")
+  expect_true(nzchar(spec_path), info = "clinical_dta_multiple_files.yaml missing from extdata")
+  read_dta_from_yaml(spec_path)
+}
+
+# A second delivery file the handler accepts: a byte-for-byte copy of the clean
+# clinical file under another name, so it is valid exactly when the first is.
+ops_second_file <- function(env = parent.frame()) {
+  dest <- file.path(withr::local_tempdir(.local_envir = env), "clinical_data_b.csv")
+  expect_true(file.copy(app_fixture_path("clinical_data.csv"), dest))
+  dest
+}
+
+test_that("dta_status_map reads a validated dataset as pending once a second table is bound and not yet validated", {
+  status_fn <- app_fn("dta_status_map")
+  load_fn <- app_fn("dta_load_file")
+  check_fn <- app_fn("dta_check")
+  second <- ops_second_file()
+
+  first <- load_fn(ops_multi_dta(), "clinical_data", app_fixture_path("clinical_data.csv"), handler_index = 1)
+  expect_true(first$ok)
+  checked <- check_fn(first$value, dataset = "clinical_data")
+  expect_true(checked$ok)
+  # Precondition: the one bound table is clean and validated.
+  expect_identical(unname(status_fn(checked$value)[["clinical_data"]]), "pass")
+
+  # A second file arrives; nothing has validated it. "pass" would certify a
+  # table nobody checked.
+  both <- load_fn(checked$value, "clinical_data", second, handler_index = 1)
+  expect_true(both$ok)
+  expect_setequal(names(datasets(both$value, "clinical_data")@tables), c("clinical_data", "clinical_data_b"))
+  expect_identical(unname(status_fn(both$value)[["clinical_data"]]), "pending")
+
+  # Validating the dataset again covers both tables and it passes.
+  rechecked <- check_fn(both$value, dataset = "clinical_data")
+  expect_true(rechecked$ok)
+  expect_identical(unname(status_fn(rechecked$value)[["clinical_data"]]), "pass")
+})
+
+test_that("dta_status_map reads a validated dataset as pending after one of its tables is overwritten and not yet validated", {
+  status_fn <- app_fn("dta_status_map")
+  load_fn <- app_fn("dta_load_file")
+  check_fn <- app_fn("dta_check")
+  clear_fn <- app_fn("dta_clear_validation")
+  second <- ops_second_file()
+
+  dta <- load_fn(ops_multi_dta(), "clinical_data", app_fixture_path("clinical_data.csv"), handler_index = 1)$value
+  dta <- load_fn(dta, "clinical_data", second, handler_index = 1)$value
+  dta <- check_fn(dta, dataset = "clinical_data")$value
+  # Precondition: both tables validated, both clean.
+  expect_identical(unname(status_fn(dta)[["clinical_data"]]), "pass")
+
+  # The app's overwrite flow: bind the replacement under the same table name,
+  # then clear that table's stale validation.
+  replaced <- load_fn(dta, "clinical_data", second, handler_index = 1)
+  expect_true(replaced$ok)
+  cleared <- clear_fn(replaced$value, "clinical_data", tables = "clinical_data_b")
+  expect_true(cleared$ok)
+  expect_identical(unname(status_fn(cleared$value)[["clinical_data"]]), "pending")
+})
+
+test_that("dta_status_map keeps a failing table as fail beside a table that is not validated yet", {
+  status_fn <- app_fn("dta_status_map")
+  load_fn <- app_fn("dta_load_file")
+  check_fn <- app_fn("dta_check")
+  second <- ops_second_file()
+
+  dta <- load_fn(ops_multi_dta(), "clinical_data", app_fixture_path("clinical_data_error_all.csv"), handler_index = 1)$value
+  dta <- check_fn(dta, dataset = "clinical_data")$value
+  expect_identical(unname(status_fn(dta)[["clinical_data"]]), "fail")
+
+  dta <- load_fn(dta, "clinical_data", second, handler_index = 1)$value
+  expect_identical(unname(status_fn(dta)[["clinical_data"]]), "fail")
+})
+
+test_that("the validation report reads incomplete, never passed, while a bound table is not validated", {
+  status_fn <- app_fn("dta_status_map")
+  load_fn <- app_fn("dta_load_file")
+  check_fn <- app_fn("dta_check")
+  build <- app_fn("dta_build_validation_report")
+  second <- ops_second_file()
+
+  dta <- load_fn(ops_multi_dta(), "clinical_data", app_fixture_path("clinical_data.csv"), handler_index = 1)$value
+  dta <- check_fn(dta, dataset = "clinical_data")$value
+  dta <- load_fn(dta, "clinical_data", second, handler_index = 1)$value
+
+  html <- build(dta, status = status_fn(dta))
+  expect_match(html, "VALIDATION INCOMPLETE", fixed = TRUE)
+  expect_false(grepl("VALIDATION PASSED", html, fixed = TRUE))
+})
+
 # ---- Dataset readiness -------------------------------------------------------
 
 test_that("dta_dataset_readiness flips from not-ready to ready once data is bound", {
