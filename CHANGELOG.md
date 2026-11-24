@@ -4,6 +4,37 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **"None" in a vocabulary slot of the "Create from template" dialog now does
+  what it says.** Emptying a slot (the **None** link, or clearing the chips)
+  showed "0 of n selected", but the document still came out with every term of
+  the vocabulary the template had bound the column to, which is more terms than
+  the default the author had just cleared. An emptied slot and a slot nobody
+  had touched were reported as the same "nothing to do", so the column kept its
+  `values_from:` binding. The column is now built with no permitted values at
+  all (no `values:`, no `values_from:`, nothing else about it changed), so no
+  value is checked against a list; this holds for an imported dataset template,
+  an inline dataset and a matrix row label. A slot with `min:` above 0 still
+  refuses to create the document while it is empty, and the dialog stays open.
+- **An `open` vocabulary slot given only the author's own terms no longer adds
+  the whole vocabulary.** Typing `UNSCHED` into an open slot and selecting
+  nothing else produced every term of the vocabulary plus `UNSCHED`, even the
+  terms the slot's own `include:` had left out of its menu. The column now gets
+  exactly `UNSCHED`.
+
+### Changed
+
+- **A vocabulary slot with no `default:` that the author leaves empty now builds
+  its column with no permitted values.** The options dialog reports a control
+  holding nothing the same way whether the author cleared it or never filled
+  it, so such a slot used to leave the column bound to the dataset template's
+  whole vocabulary and now removes that list check, as "None" does. Give the slot
+  `min: 1` to keep the column constrained; the document is then not created
+  until a term is chosen. No bundled template is affected.
+
 ## [0.29.0] - 2026-11-23
 
 ### Added

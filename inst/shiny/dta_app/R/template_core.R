@@ -1030,9 +1030,14 @@ apply_template_expressions <- function(dta, study_fallback = NULL) {
 #                    all -- exactly the pre-existing behaviour, since
 #                    @template did not exist as a settable concept before this
 #                    file's own history.
-#   vocab_selections named list, vocabulary slot id -> chosen vocabulary.
+#   vocab_selections named list, vocabulary slot id -> the codes chosen for it.
 #                    NULL (default) selects nothing, so every slot keeps its
 #                    declared default (see resolve_vocabulary_slot_overrides()).
+#                    An entry of character(0) is "None": the slot's target
+#                    column is built with no permitted values (neither
+#                    `values:` nor a `values_from:` binding), and a slot with
+#                    `min:` above 0 refuses it. It is NOT the same as leaving
+#                    the entry out, which keeps the default.
 #   study_fallback   list(id, protocol_id) the ${study.id} /
 #                    ${study.protocol_id} tokens in a dataset body resolve to
 #                    when steps 2-5 settle no study identity. It is NEVER
