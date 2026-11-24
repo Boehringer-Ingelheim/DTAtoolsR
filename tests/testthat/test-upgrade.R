@@ -28,7 +28,7 @@ age_object <- function(obj, drop = c("containers", "provenance", "file_handlers"
     return(obj)
   }
   if (inherits(obj, "S7_object")) {
-    cur <- attr(obj, "S7_class", exact = TRUE)
+    cur <- S7::S7_class(obj)
     if (!identical(cur@package, "DTAtools")) {
       return(obj)
     }
@@ -36,7 +36,7 @@ age_object <- function(obj, drop = c("containers", "provenance", "file_handlers"
       attr(obj, p) <- age_object(attr(obj, p), drop, validators)
     }
     for (p in intersect(drop, names(cur@properties))) attr(obj, p) <- NULL
-    attr(obj, "S7_class") <- old_shape_class(cur, drop, validators)
+    obj <- stamp_old_class(obj, old_shape_class(cur, drop, validators))
     return(obj)
   }
   if (is.list(obj)) {
@@ -49,6 +49,30 @@ roundtrip <- function(x) {
   f <- withr::local_tempfile(fileext = ".rds", .local_envir = parent.frame())
   saveRDS(x, f)
   readRDS(f)
+}
+
+# `obj` with every DTAtools object inside it pointing at the current class
+# reference. A round-tripped object carries a deserialised copy of that
+# reference, so comparing it with an upgraded one makes waldo walk the whole
+# class chain down to S7's own base class - closures whose environments are
+# loaded lazily from the installed S7 package and are gone once the check
+# sandbox has removed its library. What a test compares is the content, so it
+# pins the class first; the class itself is tested on its own.
+pin_class <- function(obj) {
+  if (is.environment(obj) || is.data.frame(obj)) {
+    return(obj)
+  }
+  if (inherits(obj, "S7_object")) {
+    for (p in setdiff(names(attributes(obj)), c("class", "_S7_class", "S7_class", "_S7_version"))) {
+      attr(obj, p) <- pin_class(attr(obj, p))
+    }
+    attr(obj, "_S7_class") <- dta_class_storage(dta_current_class(obj))
+    return(obj)
+  }
+  if (is.list(obj)) {
+    for (i in seq_along(obj)) if (!is.null(obj[[i]])) obj[[i]] <- pin_class(obj[[i]])
+  }
+  obj
 }
 
 current_dta <- function() {
@@ -68,7 +92,7 @@ test_that("an old-shaped object fails without help, and is stale", {
   old <- roundtrip(age_object(current_dta()))
   # The stored (old) classes lack the properties, so reading them fails; judged
   # by the class's property list, never by S7's (translatable) error text.
-  stored_props <- function(o) names(attr(attr(o, "S7_class"), "properties"))
+  stored_props <- function(o) names(attr(S7::S7_class(o), "properties"))
   expect_false("containers" %in% stored_props(old))
   expect_false("provenance" %in% stored_props(old@datasets$ae))
   expect_false("file_handlers" %in% stored_props(old@datasets$docs))
@@ -80,9 +104,10 @@ test_that("an old-shaped object fails without help, and is stale", {
 test_that("a document whose metadata lacks a newer property is stale and upgrades to its default", {
   # Only the metadata is aged: the DTA and its datasets keep every property.
   old <- roundtrip(age_object(current_dta(), drop = "dtatools_version"))
-  stored <- names(attr(attr(old@metadata, "S7_class"), "properties"))
+  stored_props <- function(o) names(attr(S7::S7_class(o), "properties"))
+  stored <- stored_props(old@metadata)
   expect_false("dtatools_version" %in% stored)
-  expect_true("containers" %in% names(attr(attr(old, "S7_class"), "properties")))
+  expect_true("containers" %in% stored_props(old))
 
   expect_true(dta_is_stale(old))
   up <- upgrade_dta(old)
@@ -130,12 +155,12 @@ test_that("a current object comes back with every property unchanged", {
   rt <- roundtrip(d)
   expect_false(dta_is_stale(rt))
   up <- upgrade_dta(rt)
-  expect_identical(up@datasets, rt@datasets)
-  expect_identical(up@metadata, rt@metadata)
-  expect_identical(up@containers, rt@containers)
+  expect_identical(pin_class(up@datasets), pin_class(rt@datasets))
+  expect_identical(pin_class(up@metadata), pin_class(rt@metadata))
+  expect_identical(pin_class(up@containers), pin_class(rt@containers))
   expect_identical(dta_provenance(datasets(up, "ae")), dta_provenance(datasets(rt, "ae")))
   expect_identical(up@datasets$ae@id, d@datasets$ae@id)
-  expect_identical(up@datasets$ae@files, d@datasets$ae@files)
+  expect_identical(pin_class(up@datasets$ae@files), pin_class(d@datasets$ae@files))
 })
 
 test_that("check() upgrades an aged dataset with a bound path by itself", {
@@ -154,13 +179,37 @@ test_that("a re-stamp also rebuilds class(), so a changed hierarchy dispatches",
   OldXPT <- S7::new_class("DTAFileXPT", package = "DTAtools", parent = DTAFile, properties = list())
   fresh <- DTAFileXPT("ae.xpt")
   aged <- fresh
-  attr(aged, "S7_class") <- OldXPT
+  aged <- stamp_old_class(aged, OldXPT)
   class(aged) <- c("DTAtools::DTAFileXPT", "DTAtools::DTAFile", "S7_object")
   aged <- roundtrip(aged)
   expect_false(inherits(aged, "DTAtools::DTAFileSAS7BDAT"))
   up <- dta_upgrade(aged)
   expect_identical(class(up), class(fresh))
   expect_true(inherits(up, "DTAtools::DTAFileSAS7BDAT"))
+})
+
+test_that("the stored class is read under both S7 attribute names and re-stamped under the new one", {
+  # S7 < 1.0.0 stored `S7_class`; S7 1.0.0 stores `_S7_class`. An object built
+  # now carries the new name, so reading `S7_class` directly would see nothing.
+  fresh <- DTAFileCSV("ae.csv")
+  expect_null(attr(fresh, "S7_class", exact = TRUE))
+  expect_identical(dta_current_class(fresh)@name, "DTAFileCSV")
+
+  old <- roundtrip(age_object(current_dta()))
+  csv <- old@datasets$ae@files[[1]]
+  expect_null(attr(csv, "_S7_class", exact = TRUE))
+  expect_false(is.null(attr(csv, "S7_class", exact = TRUE)))
+  expect_true(dta_is_stale(old))
+  expect_identical(dta_current_class(csv)@name, "DTAFileCSV")
+
+  up <- upgrade_dta(old)
+  upcsv <- up@datasets$ae@files[[1]]
+  expect_null(attr(upcsv, "S7_class", exact = TRUE))
+  # the very reference S7 stores on an object it builds (same environment, not
+  # an equal copy: expect_identical() compares environments by content)
+  expect_true(identical(attr(upcsv, "_S7_class", exact = TRUE), attr(fresh, "_S7_class", exact = TRUE)))
+  expect_true(identical(attr(up, "_S7_class", exact = TRUE), attr(current_dta(), "_S7_class", exact = TRUE)))
+  expect_false(dta_is_stale(up))
 })
 
 test_that("upgrading restores defaults and keeps what was there", {

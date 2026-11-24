@@ -118,6 +118,7 @@
 
 
 #' @name as.list
+#' @usage NULL
 #' @export
 # MAINTENANCE: this method is hand-written field by field rather than iterating
 # S7 properties, so it does NOT pick up a new DTAMetaData property

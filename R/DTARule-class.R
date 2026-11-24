@@ -149,6 +149,7 @@ DTARuleFactory <- function(id, type, ...) {
 
 #' @export
 #' @name as.list
+#' @usage NULL
 method(as.list, DTARule) <- function(x, ...) {
   list(
     id = x@id,

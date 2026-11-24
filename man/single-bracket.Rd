@@ -4,9 +4,6 @@
 \alias{single-bracket}
 \alias{[}
 \title{Extract multiple datasets with [}
-\usage{
-x[i]
-}
 \arguments{
 \item{x}{An object of class \code{DTA}.}
 
