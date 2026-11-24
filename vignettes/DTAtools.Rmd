@@ -231,8 +231,8 @@ directly to a column entry in a YAML specification.
 |---------------|----------|-----------------------------------------------------------|
 | `id`          | ✔        | Column name (must match the data frame header exactly, case and inner spaces included; may contain spaces and punctuation) |
 | `label`       |          | Human-readable label for documentation                   |
-| `type`        |          | SAS-style type: `SAS Char`, `SAS Num`, `SAS Int`, `SAS Date`, `SAS Time`, `SAS DateTime` |
-| `format`      |          | SAS format string, e.g. `SAS $10.`, `SAS 8.`            |
+| `type`        |          | Type, always prefixed with its type system: `SAS Char`, `SAS Num`, `SAS Int`, `SAS Date`, `SAS Time`, `SAS DateTime`, or `R character`, `R numeric`, `R integer`, `R logical`, `R Date`, `R POSIXct`, `R hms` (see [The `R` Type System](#the-r-type-system)) |
+| `format`      |          | Format string with the same prefix as the type: a SAS format, e.g. `SAS $10.`, `SAS 8.`, or an R date/time format, e.g. `R %d/%m/%Y` |
 | `length`      |          | Maximum character length (`maxLength` in JSON Schema)     |
 | `nullable`    |          | `TRUE`/`FALSE` — whether the column may be empty/NA      |
 | `values`      |          | Closed list of allowed values (`enum` in JSON Schema)    |
@@ -306,6 +306,132 @@ ae_col <- DTAColumnSpec(
 )
 print(ae_col)
 ```
+
+### The `R` Type System
+
+A type always starts with the name of its type system. Next to `SAS`, a column
+can be declared in R's own vocabulary: `R character`, `R numeric` (`R double` is
+accepted), `R integer`, `R logical`, `R Date`, `R POSIXct` and `R hms`. Write `R`
+in capitals; the type after it is not case-sensitive (`R date` is `R Date`).
+The two systems are always both available, a dataset may mix them, and a bare
+`character` or `Char` is refused. `as_r_type()` reports how each `R` type is
+read:
+
+```{r r_type_mapping}
+r_types <- c("character", "numeric", "integer", "logical", "Date", "POSIXct", "hms")
+vapply(
+  r_types,
+  function(t) as_r_type(DTAColumnSpecStructureR(type = t)),
+  character(1)
+)
+```
+
+| Type | Validated as | What is checked |
+|------|--------------|-----------------|
+| `R character` | string | Any text; `length` is the maximum number of characters |
+| `R numeric` | number | Parsed strictly, as `SAS Num` |
+| `R integer` | integer | A whole number within the 32-bit range, as `SAS Int` |
+| `R logical` | boolean | `TRUE`, `T`, `true`, `True` or `FALSE`, `F`, `false`, `False`; a blank is missing, anything else (`yes`, `1`) is an import error; the text `NA` is already missing in a CSV or TSV file, and an import error from a `.sas7bdat` or `.xpt` file |
+| `R Date`, `R POSIXct`, `R hms` | string | Text that fits the `format`, which is kept as text after import |
+
+`R logical` text is converted to logical when a file is loaded or a dataset is
+checked, in memory and in streamed batches alike. The three date/time types are
+validated as text against a `format` and stay text, like the `SAS` date types.
+Only they take a `format`, and only `R character` takes a `length`.
+
+A format is built from the directives `%Y` (four digits), `%m`, `%d`, `%H`, `%M`
+and `%S` (two digits each, in range, with the day checked against its month),
+`%OS1` to `%OS6` (seconds with an optional fraction of one to n digits), and the
+shorthands `%F` (`%Y-%m-%d`) and `%T` (`%H:%M:%S`). Besides directives only a
+space, `- / . , : ; _` and the capital letters `T` and `Z` may appear, standing
+for themselves, so ISO 8601 is `%Y-%m-%dT%H:%M:%SZ`. Every field has a fixed
+width, each of year, month, day, hour and minute may appear once, and a `Date`
+format needs year, month and day, a `POSIXct` format also hour and minute, and
+an `hms` format hour and minute and no date. An `hms` is a time of day
+(`00:00:00` to `23:59:59`), where `SAS Time` accepts longer times. A value from
+a text source (CSV, TSV) is matched exactly, neither trimmed nor case-folded as
+a SAS display value is; a `.sas7bdat` or `.xpt` value is rendered under the
+format first (see below). Month names, AM/PM, two-digit years and time zones
+are refused when the specification is built, and leap seconds have no
+directive: a seconds field of `60` is simply a value that does not fit `%S`
+and is reported as a `format` finding (use `SAS Date` with `SAS DATE9.` for
+`15AUG2025`).
+
+When no `format` is given, the default of the type is written into the
+specification, so whoever reads it sees what is enforced:
+
+```{r r_default_format}
+visit_date <- DTAColumnSpec(id = "VISITDT", type = "R Date", nullable = FALSE)
+visit_date@structure@format
+```
+
+Two dates, one flag. The first date uses the default format, the second a
+day-first one, and the flag takes the tokens above:
+
+```{r r_check_demo}
+r_specs <- DTAColumnSpecCollection(columns = list(
+  VISITDT = DTAColumnSpec(id = "VISITDT", type = "R Date", nullable = FALSE),
+  DOSEDT = DTAColumnSpec(
+    id = "DOSEDT", type = "R Date", format = "R %d/%m/%Y", nullable = FALSE
+  ),
+  ITT = DTAColumnSpec(id = "ITT", type = "R logical", nullable = TRUE)
+))
+
+r_data <- data.frame(
+  VISITDT = c("2025-08-15", "2025-02-30", "15AUG2025"),
+  DOSEDT  = c("15/08/2025", "31/04/2025", "2025-08-15"),
+  ITT     = c("TRUE", "T", "yes")
+)
+
+ds_r <- DTADataSetTabular(
+  id = "r_demo", specs = r_specs, tables = list(demo = r_data)
+)
+ds_r <- check(ds_r, quiet = TRUE)
+
+messages(ds_r)[, c("source", "column", "row", "keyword")]
+as.data.frame(get_table(ds_r, "demo"))$ITT
+```
+
+`2025-02-30` and `31/04/2025` are not dates, `15AUG2025` and `2025-08-15` do not
+fit the format their column declares, and `yes` is not a logical token, so it
+becomes `NA` and is reported as an import error. A bare type, a format of the
+wrong kind or an unsupported directive is refused when the specification is
+built (`FALSE` below); ISO 8601 is accepted:
+
+```{r r_refusals}
+accepted <- function(...) {
+  tryCatch(
+    {
+      DTAColumnSpec(id = "X", ...)
+      TRUE
+    },
+    error = function(e) FALSE
+  )
+}
+c(
+  iso_8601 = accepted(type = "R POSIXct", format = "R %Y-%m-%dT%H:%M:%SZ"),
+  bare_type = accepted(type = "Date"),
+  month_name = accepted(type = "R Date", format = "R %d %b %Y"),
+  wrong_kind = accepted(type = "R Date", format = "R %H:%M"),
+  format_on_numeric = accepted(type = "R numeric", format = "R %Y"),
+  pattern_on_logical = accepted(type = "R logical", pattern = "^T")
+)
+```
+
+On an `R logical` column, `values` and `examples` must be quoted
+(`values: ["TRUE", "FALSE"]`, because YAML reads a bare `true` as a boolean),
+`pattern` is refused, and a rule's `equals`, `equal`, `not_equals`, `not_equal`,
+`in` and `not_in` take `true`, `false` or one of the eight tokens, so
+`equals: T` matches `TRUE`. A rule condition with the `pattern` operator on an
+`R logical` column is refused when the specification is checked, since it could
+never match a logical value. In YAML, a format that holds a colon followed by a
+space (`%H: %M`) must be quoted: `format: 'R %H: %M'`.
+
+Not covered: a typed `Date`, `POSIXct` or `hms` vector in memory is not
+class-checked against its declared type and skips the format check. In a CSV or
+TSV file the text `NA` is already a missing marker, so an `R logical` column
+raises no finding for it; read from a `.sas7bdat` or `.xpt` file it is not one
+of the tokens and is an import error.
 
 ### The `DTAColumnSpecCollection` Object
 
@@ -782,7 +908,7 @@ Four reasons are reported:
 
 | `reason` / `keyword` | Meaning                                                                 |
 |----------------------|-------------------------------------------------------------------------|
-| `not_convertible`    | No part of the value fits the declared type, e.g. `"unknown"` as a number |
+| `not_convertible`    | No part of the value fits the declared type, e.g. `"unknown"` as a number, or `"yes"` in an `R logical` column |
 | `trailing_residue`   | A prefix of the value fits and the remainder would be dropped, e.g. `"2026-12-31 at the earliest"` in a metadata date field |
 | `not_whole`          | A number in a declared integer column is fractional or not finite, e.g. `"8.5"` |
 | `out_of_range`       | A whole number in a declared integer column lies outside the 32-bit integer range, e.g. `"5000000000"` |
@@ -1184,6 +1310,17 @@ What the reader does with a SAS dataset:
   seconds since 1960-01-01. A date stored without a SAS date format is
   indistinguishable from any other number, so it arrives as a number and a
   `SAS Date` declaration fails.
+- **The same columns declared in the `R` type system arrive as text in the R
+  format.** `R Date`, `R POSIXct` and `R hms` show a SAS date, datetime or time
+  under the declared `R` format, or the default of the type when none is
+  declared (`2025-08-15` under `%Y-%m-%d`; a datetime in UTC). The typed value
+  is rendered under that format, so anything finer than it is cut (`14:30:45`
+  under `R %H:%M` reads `14:30`, `.1234` under `%OS3` reads `.123`) and then
+  passes, as under `SAS TIME5.`. This applies only when the declared type is
+  the kind SAS stored: `R Date` for a date,
+  `R POSIXct` for a datetime, `R hms` for a time. Any other pairing arrives as
+  ISO 8601 text, which then fails the format. Declared `R numeric`,
+  `R integer`, `R character` or `R logical`, the column stays the SAS number.
 - **Do not declare `length` on a SAS date, datetime or time column.** It is
   checked against the text above; the `length: 8` that `PROC CONTENTS` reports
   for the 8-byte numeric storage fails every row.
@@ -1944,8 +2081,9 @@ A matrix dataset has two blocks instead of `columns:`:
     or `values`, `length`), how many data columns there may be (`count`), and a
     `label` and `description` for the exported document. Optional.
   - `rows`: the `key` and a `count` of rows. Optional.
-  - `cells`: what every cell may hold: `type` (required), `nullable`,
-    `range`, `infinite`, `values`, `pattern`.
+  - `cells`: what every cell may hold: `type` (required: `SAS Num`,
+    `SAS Int`, `SAS Char`, or `R numeric`, `R integer`, `R character`),
+    `nullable`, `range`, `infinite`, `values`, `pattern`.
 
 A `count` is a whole number for exactly that many, or `{ min: …, max: … }`
 with either side optional. The defaults ask for at least one data column and
@@ -2023,14 +2161,18 @@ included.
 ### What a cell can be
 
 A cell is typed exactly like a tabular column of the same type; the matrix adds
-`range` and `infinite`.
+`range` and `infinite`. The cell types are `SAS Num`, `SAS Int` and `SAS Char`
+or their counterparts `R numeric`, `R integer` and `R character`; a date, time
+or logical type (`SAS Date`, `R Date`, `R logical`, ...) is refused. `range`
+applies to the numeric types and `infinite` to `SAS Num` and `R numeric`. The
+row labels may use either type system, independently of the cells.
 
 | Raw cell | Result |
 |---|---|
 | empty, `NA`, quoted `""` or `"NA"`, a token in `files.missing_values` | missing: allowed only with `nullable: Yes` |
-| whitespace only | missing for `SAS Num` and `SAS Int`, text for `SAS Char` |
+| whitespace only | missing for `SAS Num`, `SAS Int`, `R numeric` and `R integer`, text for `SAS Char` and `R character` |
 | `12`, ` 12 `, `+12`, `012`, `1e3`, `0x1F` | a number (hex is accepted package-wide, as in tabular data) |
-| `1.5` in a `SAS Int` matrix | import error (not whole) |
+| `1.5` in a `SAS Int` or `R integer` matrix | import error (not whole) |
 | `NaN` | never a value: an import error, unless declared in `files.missing_values`, which makes it missing |
 | `Inf`, `-Inf` | rejected (`finite`) unless `infinite: true` |
 | `N/A`, `NULL`, `abc`, `1,5` | import error; not missing unless declared in `files.missing_values` |
@@ -2608,9 +2750,54 @@ columns:
     description: Adverse event verbatim term, empty if no event
 ```
 
+The same columns in the `R` type system, with the two kinds of date format:
+
+```yaml
+columns:
+  - id: SUBJECT
+    type: R character
+    length: 12
+    nullable: false
+
+  - id: AGE
+    type: R integer
+    nullable: false
+
+  # YAML reads a bare true/yes/Y as a boolean, so quote the values
+  - id: ITT
+    type: R logical
+    nullable: false
+    values: ["TRUE", "FALSE"]
+
+  # No format: the default %Y-%m-%d is written into the specification
+  - id: VISITDT
+    type: R Date
+    nullable: false
+
+  # A day-first date
+  - id: BIRTHDT
+    type: R Date
+    format: R %d/%m/%Y
+    nullable: true
+
+  # ISO 8601 with a literal T and Z
+  - id: STARTDTM
+    type: R POSIXct
+    format: R %Y-%m-%dT%H:%M:%SZ
+    nullable: false
+```
+
 **Supported types:** `SAS Char`, `SAS Num`, `SAS Int`, `SAS Date`, `SAS Time`,
-`SAS DateTime`. The type decides how the column is read as well as how it is
-validated — see [Column Specifications](#the-dtacolumnspec-object).
+`SAS DateTime` and `R character`, `R numeric` (`R double`), `R integer`,
+`R logical`, `R Date`, `R POSIXct`, `R hms`. A type always carries its prefix; a
+bare `Char` or `character` is refused. The type decides how the column is read
+as well as how it is validated — see
+[Column Specifications](#the-dtacolumnspec-object) and
+[The `R` Type System](#the-r-type-system). A format with a colon followed by a
+space (`%H: %M`) must be quoted in YAML: `format: 'R %H: %M'`. Which type
+system the Shiny app starts new columns with is a library setting,
+`data_types.default` in `dta-app.yaml`; see
+`vignette("private-templates")`.
 
 **Nullable values:** `true`/`false` or `Yes`/`No`
 

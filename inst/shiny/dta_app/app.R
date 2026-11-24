@@ -3104,6 +3104,7 @@ server <- function(input, output, session) {
 
   output$add_ds_body <- renderUI({
     rv$add_ds_token
+    add_cell_types <- dta_matrix_cell_types(dta_default_backend(cfg))
     tagList(
       textInput("add_ds_id", "ID",
         value = "", width = "100%",
@@ -3154,9 +3155,13 @@ server <- function(input, output, session) {
             value = "", width = "100%", placeholder = "e.g. gene_id"
           )
         ),
+        # The cell types of the type system the library starts new matrices with
+        # (data_types.default); nothing is preselected, as ever. The other
+        # system's cells are not offered here, but a matrix written in YAML
+        # may use either.
         radioButtons("add_ds_mx_cells", "Cell type",
-          choiceNames = list("SAS Num (decimal numbers)", "SAS Int (whole numbers)", "SAS Char (text)"),
-          choiceValues = c("SAS Num", "SAS Int", "SAS Char"),
+          choiceNames = as.list(names(add_cell_types)),
+          choiceValues = unname(add_cell_types),
           selected = character(0), width = "100%"
         ),
         div(
@@ -5615,6 +5620,11 @@ server <- function(input, output, session) {
   # A single modal with two swappable views (list <-> form) so only ONE popup
   # is ever open. rv$col_view drives which view renders; rv$col_token forces a
   # re-render. The form pre-fills from rv$col_prefill (never stale inputs).
+
+  # The backend the column form on screen was rendered with: what the Backend
+  # observer below compares the select's reported value against.
+  col_shown_backend <- reactiveVal(NULL)
+
   observeEvent(input$edit_cols, {
     req(editing())
     req(rv$active)
@@ -5735,6 +5745,19 @@ server <- function(input, output, session) {
     } else {
       pf <- isolate(rv$col_prefill) %||% list()
       g <- function(k, d = "") pf[[k]] %||% d
+      # An existing column keeps its own backend; a NEW one starts with the
+      # library's default (data_types.default), which hides nothing: the
+      # Backend select offers every supported one. The form is built from the
+      # prefill and this alone, never from the live inputs, which a re-opened
+      # modal reports stale. The backend it was built with is remembered so the
+      # Backend observer can tell a switch by the user from the echo of this
+      # very render.
+      bk <- g("backend", "")
+      if (!bk %in% dta_supported_backends()) bk <- dta_default_backend(cfg)
+      col_shown_backend(bk)
+      ty <- g("type", "")
+      if (!ty %in% dta_backend_types(bk)) ty <- dta_text_type(bk)
+      fmt_hint <- dta_format_hint(bk)
       tagList(
         div(
           class = "spec-form",
@@ -5771,21 +5794,24 @@ server <- function(input, output, session) {
             col_widths = c(3, 3, 3, 3),
             selectInput("col_backend", "Backend",
               choices = dta_supported_backends(),
-              selected = g("backend", dta_supported_backends()[1]), width = "100%"
+              selected = bk, width = "100%"
             ),
             selectInput("col_type", "Type",
-              choices = dta_sas_types(),
-              selected = g("type", "Char"), width = "100%"
+              choices = dta_backend_types(bk),
+              selected = ty, width = "100%"
             ),
             textInput("col_format", "Format",
               value = g("format"), width = "100%",
-              placeholder = "e.g. $9. / 8.2"
+              placeholder = dta_format_placeholder(bk)
             ),
             textInput("col_length", "Length",
               value = g("length"), width = "100%",
               placeholder = "e.g. 8"
             )
           ),
+          if (nzchar(fmt_hint)) {
+            div(class = "msg-hint", style = "margin:-8px 0 12px;", fmt_hint)
+          },
           checkboxInput("col_nullable", "Nullable (missing values allowed)",
             value = if (is.null(pf$nullable)) TRUE else isTRUE(pf$nullable)
           ),
@@ -5883,7 +5909,11 @@ server <- function(input, output, session) {
 
   observeEvent(input$col_add, {
     rv$col_edit_id <- NULL
-    rv$col_prefill <- list()
+    # A new row label of a matrix starts in the matrix's OWN backend (its text
+    # type), whatever the library prefers; any other new column is left to the
+    # form, which starts it with the library's default.
+    mb <- dta_matrix_backend(isolate(rv$dta), isolate(rv$editor_dataset))
+    rv$col_prefill <- if (is.na(mb)) list() else list(backend = mb)
     rv$col_msg <- NULL
     rv$col_view <- "form"
     rv$col_token <- rv$col_token + 1
@@ -5919,6 +5949,39 @@ server <- function(input, output, session) {
       header_text = input$col_header_text %||% ""
     )
   }
+
+  # The Backend select of the column form. A switch by the user maps the type to
+  # the other backend's type of the same kind, clears the format and, unless the
+  # new type is text, the length (dta_switch_backend()), and re-renders the form
+  # from that remapped snapshot -- the same snapshot-and-render the vocabulary
+  # picker uses, so the type choices, the Format placeholder and the hint all
+  # follow the backend.
+  #
+  # It acts ONLY on a value that differs from the backend the form was RENDERED
+  # with (col_shown_backend). Every render of the form is echoed back by the
+  # client as a "change" of col_backend, and a re-opened modal first reports its
+  # previous, stale inputs; neither is a switch, and treating one as such would
+  # clear the format of the column just opened, or overwrite the type of a new
+  # column with the previous column's.
+  observeEvent(input$col_backend, {
+    req(editing(), identical(rv$col_view, "form"))
+    to <- input$col_backend
+    from <- isolate(col_shown_backend())
+    req(
+      is.character(to), length(to) == 1L, to %in% dta_supported_backends(),
+      !is.null(from), !identical(to, from)
+    )
+    pf <- snapshot_col_form()
+    m <- dta_switch_backend(from, to, pf$type, pf$format, pf$length)
+    pf$backend <- to
+    pf$type <- m$type
+    pf$format <- m$format
+    pf$length <- m$length
+    rv$col_prefill <- pf
+    rv$col_msg <- NULL
+    rv$col_token <- rv$col_token + 1
+    if (!is.null(m$notice)) showNotification(m$notice, type = "warning")
+  })
 
   # The column's current permitted values, as the form holds them: one per line.
   value_lines <- function(x) {
@@ -6136,7 +6199,7 @@ server <- function(input, output, session) {
     if (length(idx) != 1 || is.na(idx) || idx < 1 || idx > length(ids)) {
       return()
     }
-    f <- dta_column_fields(isolate(rv$dta), ed, ids[[idx]])
+    f <- dta_column_fields(isolate(rv$dta), ed, ids[[idx]], default_backend = dta_default_backend(cfg))
     if (is.null(f)) {
       return()
     }
@@ -6912,7 +6975,7 @@ server <- function(input, output, session) {
         ),
         div(
           class = "cond-hint",
-          "A range rule checks ONE numeric (Num or Int) column against a minimum and/or maximum."
+          "A range rule checks ONE numeric column (SAS Num or Int, R numeric or integer) against a minimum and/or maximum."
         )
       )
     } else if (identical(rt, "col_unique")) {
@@ -7611,6 +7674,15 @@ server <- function(input, output, session) {
     # numericInput(value = NA) renders value="NA", which the browser warns about
     # once per field; NULL renders an empty field that still reports NA.
     blank_na <- function(v) if (length(v) == 0L || is.na(v)) NULL else v
+    # The cell types on offer are those of the backend the matrix's own cell type
+    # is written with: a matrix always has one (cells.type is required), so the
+    # configured default plays no part here. Nothing a form can change turns a
+    # SAS matrix into an R one or back.
+    cell_backend <- dta_split_type(pf$cell_type)$backend
+    if (is.na(cell_backend)) cell_backend <- dta_default_backend(cfg)
+    cell_types <- dta_matrix_cell_types(cell_backend)
+    cell_cond <- dta_matrix_cell_conditions(cell_backend)
+    cell_format_label <- dta_matrix_cell_format_label(cell_backend)
     tagList(
       div(
         class = "spec-form",
@@ -7673,15 +7745,15 @@ server <- function(input, output, session) {
           value = pf$cell_description, width = "100%", rows = 2
         ),
         radioButtons("mx_cell_type", "Cell type",
-          choiceNames = list("SAS Num (decimal numbers)", "SAS Int (whole numbers)", "SAS Char (text)"),
-          choiceValues = c("SAS Num", "SAS Int", "SAS Char"),
+          choiceNames = as.list(names(cell_types)),
+          choiceValues = unname(cell_types),
           selected = pf$cell_type, inline = TRUE, width = "100%"
         ),
         checkboxInput("mx_cell_nullable", "A cell may be missing (empty, NA, or a missing-value token of the file entry)",
           value = pf$cell_nullable, width = "100%"
         ),
         conditionalPanel(
-          "input.mx_cell_type != 'SAS Char'",
+          cell_cond$range,
           layout_columns(
             col_widths = c(6, 6),
             numericInput("mx_range_min", "Lowest allowed value (empty = open)",
@@ -7693,7 +7765,7 @@ server <- function(input, output, session) {
           )
         ),
         conditionalPanel(
-          "input.mx_cell_type == 'SAS Num'",
+          cell_cond$infinite,
           checkboxInput("mx_infinite", "Allow Inf and -Inf", value = pf$infinite)
         ),
         textAreaInput("mx_cell_values", "Allowed values (one per line; empty = any value of the type)",
@@ -7702,11 +7774,23 @@ server <- function(input, output, session) {
         textInput("mx_cell_pattern", "Every cell must match the pattern (regex)",
           value = pf$cell_pattern, width = "100%"
         ),
-        layout_columns(
-          col_widths = c(6, 6),
-          textInput("mx_cell_length", "Maximum length (characters)", value = pf$cell_length, width = "100%"),
-          textInput("mx_cell_format", "SAS format (e.g. 8.2)", value = pf$cell_format, width = "100%")
-        )
+        if (is.null(cell_format_label)) {
+          # A backend whose cells take no format (R) has no such field: a field
+          # that is not on the page keeps what the matrix has, see mx_save.
+          tagList(
+            textInput("mx_cell_length", "Maximum length (characters)", value = pf$cell_length, width = "100%"),
+            div(
+              class = "msg-hint", style = "margin:-8px 0 12px;",
+              "A length applies to character cells only; it is dropped when the cell type changes to a number."
+            )
+          )
+        } else {
+          layout_columns(
+            col_widths = c(6, 6),
+            textInput("mx_cell_length", "Maximum length (characters)", value = pf$cell_length, width = "100%"),
+            textInput("mx_cell_format", cell_format_label, value = pf$cell_format, width = "100%")
+          )
+        }
       ),
       uiOutput("mx_msg_ui"),
       tags$hr(),
@@ -7737,7 +7821,14 @@ server <- function(input, output, session) {
     # A NULL input is a field that is not on the page: keep the prefill. The
     # row key is the exception -- a checkbox group reports NULL when emptied.
     form <- list(row_labels = pf$row_labels)
-    for (nm in setdiff(names(pf), c("row_labels", "row_key"))) {
+    # A matrix whose cells take no format (R) has no Format field, and Shiny
+    # keeps a removed input's last value: what a SAS matrix's form left in
+    # input$mx_cell_format must not be read as this form's.
+    skip <- c("row_labels", "row_key")
+    if (is.null(dta_matrix_cell_format_label(dta_split_type(pf$cell_type)$backend))) {
+      skip <- c(skip, "cell_format")
+    }
+    for (nm in setdiff(names(pf), skip)) {
       v <- input[[paste0("mx_", nm)]]
       form[[nm]] <- if (is.null(v)) pf[[nm]] else v
     }
@@ -8151,7 +8242,7 @@ server <- function(input, output, session) {
         r[["columnspec_params.pattern"]],
         r[["columnspec_columnspec"]]
       )),
-      format = paste0("fit SAS format ", .first_nonempty(r[["columnspec_columnspec"]])),
+      format = dta_format_expected_text(.first_nonempty(r[["columnspec_columnspec"]])),
       required = "the value must be present (not missing)",
       additionalProperties = "no such column to be present: the specs do not declare it",
       # Matrix findings: the bound limit sits in columnspec_columnspec and the
@@ -10494,22 +10585,36 @@ server <- function(input, output, session) {
   # after a run and goes stale with the next edit.
   findings_now <- reactive(dv_findings(rv$dta))
 
-  # The block shows for every document with a dataset: it also holds the
-  # sidebar's way into the container manager, which a one-dataset document needs
-  # as much as any. A flag the conditionalPanel reads, not a uiOutput:
-  # re-rendering the block would rebuild its fileInput and lose the binding. It
-  # is never suspended -- the panel is hidden when it is FALSE, and a suspended
+  # Two flags the conditionalPanels read, not a uiOutput: re-rendering the drop
+  # area would rebuild its fileInput and lose the binding. Neither is ever
+  # suspended -- the panel is hidden while its flag is FALSE, and a suspended
   # output would never tell the client it became TRUE.
-  delivery_zone_on <- reactive({
+  #  * delivery_zone: the drop area. Only a document that names containers
+  #    (explicit, or implied by a file entry) has a delivery to drop.
+  #  * delivery_block: the Delivery section around it. It also holds the sidebar's
+  #    way into the container manager, which a document without containers needs
+  #    to get its first one -- so it shows in edit mode even when the drop area
+  #    does not, and shows nothing at all in view mode.
+  delivery_has_dataset <- reactive({
     !is.null(rv$dta) && length(dta_dataset_names(rv$dta)) > 0
+  })
+  delivery_zone_on <- reactive({
+    delivery_has_dataset() && length(dta_container_rows(rv$dta)) > 0
+  })
+  delivery_block_on <- reactive({
+    delivery_has_dataset() && (delivery_zone_on() || editing())
   })
   # A render function proper (not `output$x <- reactive()`): a test session reads
   # an output through its two-argument call, which a bare reactive does not take.
-  output$delivery_zone <- shiny::markRenderFunction(
-    uiFunc = function(...) NULL,
-    renderFunc = function(shinysession, name, ...) delivery_zone_on()
-  )
-  outputOptions(output, "delivery_zone", suspendWhenHidden = FALSE)
+  delivery_flag <- function(id, flag) {
+    output[[id]] <- shiny::markRenderFunction(
+      uiFunc = function(...) NULL,
+      renderFunc = function(shinysession, name, ...) flag()
+    )
+    outputOptions(output, id, suspendWhenHidden = FALSE)
+  }
+  delivery_flag("delivery_zone", delivery_zone_on)
+  delivery_flag("delivery_block", delivery_block_on)
 
   output$delivery_panel <- renderUI({
     req(rv$dta)
@@ -10546,6 +10651,21 @@ server <- function(input, output, session) {
   )) {
     outputOptions(output, sidebar_output, suspendWhenHidden = FALSE)
   }
+
+  # The line above a dataset's slots. The sidebar's Delivery zone exists only for
+  # a document that names containers, so the line must not send the user to a drop
+  # area that is not there. It reads the document, which output$dataset_detail
+  # below must not (a re-render would rebuild the slots' file inputs): hence its
+  # own output.
+  output$dataset_hint <- renderUI({
+    div(
+      class = "msg-hint", style = "margin:-4px 0 10px;",
+      paste0(
+        "Drop this dataset's files below.",
+        if (delivery_zone_on()) " To load a whole delivery for every dataset, drop it on Delivery in the sidebar."
+      )
+    )
+  })
 
   # --- dataset detail (structure only -> stable file inputs) --------------
   output$dataset_detail <- renderUI({
@@ -10677,10 +10797,7 @@ server <- function(input, output, session) {
       #  "Uploads are validated against the file handler as you add them."
       # ),
       # tags$h5("Expected files"),
-      div(
-        class = "msg-hint", style = "margin:-4px 0 10px;",
-        "Drop this dataset's files below. To load a whole delivery for every dataset, drop it on Delivery in the sidebar."
-      ),
+      uiOutput("dataset_hint"),
       slots,
       card(
         card_header(
@@ -10783,18 +10900,23 @@ server <- function(input, output, session) {
           uiOutput("add_dataset_ui"),
           # Under the datasets it feeds, before the check that reads them: the
           # sidebar reads top to bottom as what is expected, load it, check it.
-          # Shown for every document with a dataset. The drop zone is static:
-          # only the flag behind the panel changes.
+          # The drop zone is offered only to a document that names containers; the
+          # block around it also shows, in edit mode, for the way into the
+          # container manager. The drop zone is static: only the flags behind the
+          # two panels change.
           conditionalPanel(
-            "output.delivery_zone",
+            "output.delivery_block",
             div(
               class = "delivery-block",
               div(class = "section-label", "Delivery"),
-              div(
-                class = "dropzone delivery-drop",
-                fileInput("delivery_files",
-                  label = "Drop or choose the whole delivery",
-                  multiple = TRUE, width = "100%"
+              conditionalPanel(
+                "output.delivery_zone",
+                div(
+                  class = "dropzone delivery-drop",
+                  fileInput("delivery_files",
+                    label = "Drop or choose the whole delivery",
+                    multiple = TRUE, width = "100%"
+                  )
                 )
               ),
               uiOutput("delivery_panel")

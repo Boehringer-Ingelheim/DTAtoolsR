@@ -14,10 +14,12 @@ A length-1 character, or \code{NULL}.
 }
 \description{
 The \code{format} keyword \code{as_json_schema()} emits for a column, or \code{NULL} when it
-emits none. A format is emitted only for a SAS structure, never for \code{BESTw.}
+emits none. For a SAS structure a format is emitted except for \code{BESTw.}
 (adaptive width, so it constrains nothing), and for \verb{$w.} only when the
 declared \code{length} is absent or larger than \code{w} -- otherwise \code{maxLength}
 already rejects everything the format would, and the streaming engine need
-not pay for a second length pass.
+not pay for a second length pass. For an R \code{Date}, \code{POSIXct} or \code{hms} the
+stored format is emitted as it is (the constructor stores the default when
+none was declared); the other R types have none.
 }
 \keyword{internal}

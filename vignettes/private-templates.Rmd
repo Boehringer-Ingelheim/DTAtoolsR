@@ -369,6 +369,15 @@ every page of the app; `header_tag.color` fills it, and the text colour is
 picked for contrast automatically. The tag is not added to exports or the
 browser tab title.
 
+`data_types.default` (`SAS`, the default, or `R`, in any case) is the type
+system the app preselects for **new** columns and new matrix cells. It is only
+the starting choice: the column editor still offers both type systems, an
+existing column or matrix keeps its own, and a type written in YAML keeps its
+mandatory prefix (`SAS Char`, `R character`), so existing templates and DTA
+files read exactly as before. A **new** matrix is created with the cell types of
+the default system; a matrix of the other system can be written in YAML. Any
+other value is reported as `app_config_invalid`, and the app keeps `SAS`.
+
 Links must be `http`, `https` or `mailto` URLs. The logo and Word templates are
 files in the library, named by a path relative to `dta-app.yaml` that must not
 leave the library root.

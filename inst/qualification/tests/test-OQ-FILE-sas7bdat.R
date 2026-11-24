@@ -1,5 +1,6 @@
-# The SAS dataset (.sas7bdat) reader. REQ-FILE-034 .. REQ-FILE-040, with
-# REQ-FILE-011, REQ-FILE-012 and REQ-VAL-031 touched on the way.
+# The SAS dataset (.sas7bdat) reader. REQ-FILE-034 .. REQ-FILE-040 and
+# REQ-FILE-047, with REQ-FILE-011, REQ-FILE-012 and REQ-VAL-031 touched on the
+# way. The last two cases declare the same variables in the R vocabulary.
 #
 # Every expected value in this file is written down from SAS semantics or taken
 # from a source that is not the reader: the iris data set, literal values, and
@@ -572,5 +573,181 @@ test_that("OQ-FILE-064 | a gzip-compressed SAS dataset matches the plain declara
     "reading left the compressed file as it was",
     md5_before,
     unname(tools::md5sum(gz))
+  )
+})
+
+# ---- the same variables declared in the R vocabulary -------------------------------------
+#
+# REQ-FILE-037 (the R half) and REQ-FILE-047. The epoch arithmetic is the one
+# stated at the top of this file: SAS day 0 is 1960-01-01, 23968 is 2025-08-15,
+# -1 is 1959-12-31, 14669 is 2000-02-29 and 3653 is 1970-01-01; the datetime
+# seconds are those days counted in seconds, plus the time of day.
+
+# delivery.sas7bdat with every variable declared as an R type. A NULL format
+# stores the default of the type.
+fs_delivery_r_specs <- function(date = "R Date", datetime = "R POSIXct", time = "R hms",
+                                date_format = NULL, datetime_format = NULL, time_format = NULL) {
+  fs_specs(list(
+    DTAColumnSpec(id = "SUBJID", type = "R character", nullable = TRUE),
+    DTAColumnSpec(id = "AGE", type = "R numeric", nullable = TRUE),
+    DTAColumnSpec(id = "VISDT", type = date, format = date_format, nullable = TRUE),
+    DTAColumnSpec(id = "VISDTM", type = datetime, format = datetime_format, nullable = TRUE),
+    DTAColumnSpec(id = "VISTM", type = time, format = time_format, nullable = TRUE)
+  ))
+}
+
+test_that("OQ-FILE-072 | SAS dates, datetimes and times declared R Date, R POSIXct and R hms read as text in the column's format, and as the SAS number under any other R type | REQ-FILE-037", {
+  path <- fs_fx("delivery.sas7bdat")
+
+  # No format named: the default of each type.
+  default <- fs_check(fs_load(path, fs_delivery_r_specs()))
+  default_df <- fs_table(default)
+  qa_step(
+    "dates under R Date read as %Y-%m-%d",
+    c("1960-01-01", "2025-08-15", NA, "1959-12-31", "2000-02-29", "1970-01-01"),
+    as.character(default_df$VISDT)
+  )
+  qa_step(
+    "datetimes under R POSIXct read as %Y-%m-%d %H:%M:%S",
+    c(
+      "1960-01-01 00:00:00", "2025-08-15 14:30:00", NA, "1959-12-31 23:59:59",
+      "2000-02-29 12:00:00", "1970-01-01 00:00:00"
+    ),
+    as.character(default_df$VISDTM)
+  )
+  qa_step(
+    "times under R hms read as %H:%M:%S, the hour padded to two digits",
+    c("00:00:00", "14:30:00", NA, "23:59:59", "12:00:00", "01:00:00"),
+    as.character(default_df$VISTM)
+  )
+  qa_step("the text satisfies the formats it was written under", fs_clean, fs_verdict(default))
+
+  # A format named on the column is the one the text is written in.
+  named <- fs_check(fs_load(path, fs_delivery_r_specs(
+    date_format = "R %d/%m/%Y", datetime_format = "R %Y-%m-%dT%H:%M:%SZ", time_format = "R %H:%M"
+  )))
+  named_df <- fs_table(named)
+  qa_step(
+    "dates under R %d/%m/%Y",
+    c("01/01/1960", "15/08/2025", NA, "31/12/1959", "29/02/2000", "01/01/1970"),
+    as.character(named_df$VISDT)
+  )
+  qa_step(
+    "datetimes under R %Y-%m-%dT%H:%M:%SZ",
+    c(
+      "1960-01-01T00:00:00Z", "2025-08-15T14:30:00Z", NA, "1959-12-31T23:59:59Z",
+      "2000-02-29T12:00:00Z", "1970-01-01T00:00:00Z"
+    ),
+    as.character(named_df$VISDTM)
+  )
+  qa_step(
+    "times under R %H:%M",
+    c("00:00", "14:30", NA, "23:59", "12:00", "01:00"),
+    as.character(named_df$VISTM)
+  )
+  qa_step("and the verdict is clean", fs_clean, fs_verdict(named))
+
+  # Any other R type is the SAS number, days or seconds from 1960-01-01.
+  numbers <- fs_check(fs_load(path, fs_delivery_r_specs(date = "R numeric", datetime = "R numeric", time = "R integer")))
+  numbers_df <- fs_table(numbers)
+  qa_step(
+    "dates under R numeric are days since 1960-01-01",
+    c(0, 23968, NA, -1, 14669, 3653), as.numeric(numbers_df$VISDT)
+  )
+  qa_step(
+    "datetimes under R numeric are seconds since 1960-01-01 00:00:00",
+    c(0, 2070887400, NA, -1, 1267444800, 315619200), as.numeric(numbers_df$VISDTM)
+  )
+  qa_step(
+    "times under R integer are seconds since midnight",
+    c(0, 52200, NA, 86399, 43200, 3600), as.numeric(numbers_df$VISTM)
+  )
+  qa_step("the numbers satisfy a numeric declaration", fs_clean, fs_verdict(numbers))
+
+  for (type in c("R character", "R logical")) {
+    other <- fs_table(fs_load(path, fs_delivery_r_specs(date = type)))
+    qa_step(
+      paste("dates under", type, "are still the SAS number"),
+      c(0, 23968, NA, -1, 14669, 3653), as.numeric(other$VISDT)
+    )
+  }
+})
+
+test_that("OQ-FILE-073 | an R date or time is written in UTC and to the fraction the format shows, cut and never rounded, and a mismatched kind shows ISO text the format reports | REQ-FILE-047 | tags: white-box", {
+  normalise <- function(x, ...) DTAtools:::dta_sas7bdat_normalise(data.frame(X = x), fs_specs(list(DTAColumnSpec(id = "X", ...))))$X
+
+  base <- as.POSIXct("2025-08-15 14:30:00", tz = "UTC")
+  qa_step(
+    "a datetime held in another time zone is written as the UTC time of the same instant",
+    "2025-08-15 14:30:00",
+    normalise(structure(base, tzone = "Asia/Tokyo"), type = "R POSIXct")
+  )
+
+  # 0.3 seconds is .300, which format(x, "%OS3") would print as .299.
+  qa_step(
+    "%OS3 shows the stored fraction to three digits: 0.3, 0.5 and 0.123456 seconds",
+    c("2025-08-15 14:30:00.300", "2025-08-15 14:30:00.500", "2025-08-15 14:30:00.123"),
+    normalise(base + c(0.3, 0.5, 0.123456), type = "R POSIXct", format = "R %Y-%m-%d %H:%M:%OS3")
+  )
+  qa_step(
+    "%OS1 cuts 0.19 seconds to .1 and 0.96 seconds to .9, never rounding up",
+    c("2025-08-15 14:30:00.1", "2025-08-15 14:30:00.9"),
+    normalise(base + c(0.19, 0.96), type = "R POSIXct", format = "R %Y-%m-%d %H:%M:%OS1")
+  )
+  tod <- function(seconds) structure(seconds, class = c("hms", "difftime"), units = "secs")
+  qa_step(
+    "a time of 52200.5 and 52200.123 seconds under %H:%M:%OS3",
+    c("14:30:00.500", "14:30:00.123"),
+    normalise(tod(c(52200.5, 52200.123)), type = "R hms", format = "R %H:%M:%OS3")
+  )
+
+  # A time past a day keeps its real hour count, and the R hms format reports it.
+  long <- normalise(tod(c(90000, 86399)), type = "R hms")
+  qa_step("25 hours is written 25:00:00", c("25:00:00", "23:59:59"), long)
+  report <- validate_table(
+    fs_specs(list(DTAColumnSpec(id = "X", type = "R hms", nullable = TRUE))),
+    data.frame(X = long),
+    verbose = FALSE
+  )
+  qa_step(
+    "...and only that one value fails the time-of-day format",
+    "1 format", paste(report$full_error$row, report$full_error$keyword)
+  )
+
+  # LIM-035: what the format does not show is cut, so a typed value finer than
+  # its format is written as the format shows it and then passes the format
+  # check; matching is exact for text sources only. 52245 seconds is 14:30:45
+  # and 52245.1234 is 14:30:45.1234, stated from the clock, not from the renderer.
+  fine <- normalise(tod(c(52245, 52245.1234)), type = "R hms", format = "R %H:%M")
+  qa_step("LIM-035: 14:30:45 under %H:%M is written 14:30, and so is 14:30:45.1234", c("14:30", "14:30"), fine)
+  finer <- normalise(tod(52245.1234), type = "R hms", format = "R %H:%M:%OS3")
+  qa_step("LIM-035: 14:30:45.1234 under %H:%M:%OS3 is written 14:30:45.123", "14:30:45.123", finer)
+  # The same for a SAS time: TIME5. is hh:mm, so 14:30:45 is written 14:30.
+  qa_step(
+    "LIM-035: 14:30:45 declared SAS Time with TIME5. is written 14:30, as under R %H:%M",
+    "14:30", normalise(tod(52245), type = "SAS Time", format = "SAS TIME5.")
+  )
+  qa_step(
+    "LIM-035: the cut text passes the format check, whatever was cut",
+    0L,
+    length(validate_table(
+      fs_specs(list(DTAColumnSpec(id = "X", type = "R hms", format = "R %H:%M", nullable = TRUE))),
+      data.frame(X = fine),
+      verbose = FALSE
+    )$full_error$row)
+  )
+
+  # A declaration that is not the kind of variable SAS stored.
+  day <- as.Date("2025-08-15")
+  qa_step("a date declared R POSIXct is shown as ISO text", "2025-08-15", normalise(day, type = "R POSIXct"))
+  qa_step("a date declared R hms is shown as ISO text", "2025-08-15", normalise(day, type = "R hms"))
+  qa_step("a datetime declared R Date is shown as ISO text", "2025-08-15T14:30:00", normalise(base, type = "R Date"))
+  qa_step("a time declared R Date is shown as ISO text", "14:30:00", normalise(tod(52200), type = "R Date"))
+
+  # In a file, the five dates of the delivery then fail the datetime format.
+  mismatch <- fs_check(fs_load(fs_fx("delivery.sas7bdat"), fs_delivery_r_specs(date = "R POSIXct")))
+  qa_step(
+    "the five dates that are not missing are five format findings, and nothing else is reported",
+    list(ok = FALSE, columnspec = 5L, rule = 0L, import = 0L), fs_verdict(mismatch)
   )
 })

@@ -318,6 +318,26 @@ dta_check_column_spec <- function(column_name, col_spec, x) {
     )
   }
 
+  # An R date/time format (`%Y-%m-%d`, ...): not a SAS format, and told apart by
+  # its `%`, which no SAS format contains. Text columns only, and the value is
+  # matched exactly -- no trimming, case-sensitive. A typed Date/POSIXct/difftime
+  # vector carries no display text to match, so it is skipped HERE and nowhere
+  # else (the SAS branch above is unchanged); a numeric column is not skipped
+  # silently, the `type` check above has already reported it.
+  if (is.null(fmt_parts) && !is.null(fmt) && length(fmt) == 1 && !is.na(fmt) &&
+    grepl("%", fmt, fixed = TRUE) && base_type == "string" &&
+    !inherits(x, c("Date", "POSIXt", "difftime"))) {
+    present <- if (has_na) which(!na_mask()) else seq_len(n)
+    bad <- present[dta_r_temporal_bad(string_text()[present], fmt)]
+
+    parts[[length(parts) + 1]] <- dta_columnspec_error_rows(
+      bad, column_name, "format",
+      paste0("must fit format \"", fmt, "\""),
+      as.character(fmt),
+      as_text(bad)
+    )
+  }
+
   # finite / minimum / maximum --------------------------------------------------
   # Cell specs of a matrix dataset only (DTAColumnSpecCell). NA and NaN are never
   # range findings: missing is the type/nullable check's business. An infinite
@@ -475,16 +495,24 @@ dta_sas_temporal_regex <- function(family, d) {
 #' @title The Format a Column Schema Carries
 #' @description
 #' The `format` keyword `as_json_schema()` emits for a column, or `NULL` when it
-#' emits none. A format is emitted only for a SAS structure, never for `BESTw.`
+#' emits none. For a SAS structure a format is emitted except for `BESTw.`
 #' (adaptive width, so it constrains nothing), and for `$w.` only when the
 #' declared `length` is absent or larger than `w` -- otherwise `maxLength`
 #' already rejects everything the format would, and the streaming engine need
-#' not pay for a second length pass.
+#' not pay for a second length pass. For an R `Date`, `POSIXct` or `hms` the
+#' stored format is emitted as it is (the constructor stores the default when
+#' none was declared); the other R types have none.
 #' @param x A `DTAColumnSpec`.
 #' @return A length-1 character, or `NULL`.
 #' @keywords internal
 dta_columnspec_emitted_format <- function(x) {
   s <- x@structure
+  if (!is.null(s) && identical(s@backend, "R")) {
+    if (!identical(dta_type_family(s), "temporal") || !.structure_value_is_set(s@format)) {
+      return(NULL)
+    }
+    return(as.character(s@format))
+  }
   if (is.null(s) || !identical(s@backend, "SAS") || !.structure_value_is_set(s@format)) {
     return(NULL)
   }
@@ -1392,7 +1420,9 @@ dta_spec_value_problems <- function(spec) {
     }
 
     x <- raw
-    if (target %in% c("double", "integer")) {
+    # A logical target is read exactly as an import would read it (the tokens
+    # TRUE T true True / FALSE F false False), so "yes" is a mismatch here too.
+    if (target %in% c("double", "integer", "logical")) {
       coerced <- dta_coerce_column(as.character(raw), target)
       bad <- if (is.null(coerced)) integer(0) else coerced$offending
       if (length(bad) > 0) {

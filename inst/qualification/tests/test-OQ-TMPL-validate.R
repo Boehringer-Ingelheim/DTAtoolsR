@@ -1528,3 +1528,75 @@ test_that("OQ-TMPL-137 | the dry run flags a study placeholder nothing can answe
   with <- narrow(', choices: ["1001"]')
   qa_step("with a fitting first suggestion the dry run builds", 0L, sum(with$code == "instantiate_failed"))
 })
+
+# ---- REQ-TMPL-064: data_types.default in dta-app.yaml ------------------------
+
+test_that("OQ-TMPL-148 | data_types.default of SAS or R, in any letter case and with blanks around it, adds no rows | REQ-TMPL-064", {
+  qa_step(
+    "the fixture, which writes the lower-case r, is not reported",
+    0L, nrow(validate_template(tmpl_fixture("appconfig", "data_types_valid")))
+  )
+
+  for (value in c("SAS", "R", "sas", "Sas", "'  R  '", "' sAs'")) {
+    lib <- file.path(qa_tempdir(), "dtlib")
+    dir.create(file.path(lib, "templates"), recursive = TRUE)
+    file.copy(tmpl_fixture("appconfig", "data_types_valid", "templates", "t.dta-template.yaml"), file.path(lib, "templates"))
+    writeLines(c("kind: dta_app_config", "data_types:", paste0("  default: ", value)), file.path(lib, "dta-app.yaml"))
+    qa_step(sprintf("default: %s adds no rows", value), 0L, nrow(validate_template(lib)))
+  }
+})
+
+test_that("OQ-TMPL-149 | any other data_types.default is app_config_invalid naming the key, once, and strict validation aborts | REQ-TMPL-064 REQ-TMPL-037", {
+  result <- validate_template(tmpl_fixture("appconfig", "data_types_invalid"))
+  rows <- result[result$code == "app_config_invalid", , drop = FALSE]
+  qa_step("Python is one rejected value", 1L, nrow(rows))
+  qa_step("at severity error", "error", rows$severity)
+  qa_check("naming data_types.default", grepl("data_types.default", rows$message, fixed = TRUE))
+  qa_step("and nothing else is reported", character(0), setdiff(result$code, "app_config_invalid"))
+  qa_step(
+    "strict validation aborts on it", "aborted",
+    tryCatch(
+      {
+        validate_template(tmpl_fixture("appconfig", "data_types_invalid"), strict = TRUE)
+        "no condition"
+      },
+      error = function(e) "aborted"
+    )
+  )
+
+  # The other kinds of value the key can be given: a number, an empty text, a
+  # blank one and a list.
+  for (value in c("3", "''", "'   '", "[]", "[SAS, R]")) {
+    lib <- file.path(qa_tempdir(), "dtlib")
+    dir.create(file.path(lib, "templates"), recursive = TRUE)
+    file.copy(tmpl_fixture("appconfig", "data_types_invalid", "templates", "t.dta-template.yaml"), file.path(lib, "templates"))
+    writeLines(c("kind: dta_app_config", "data_types:", paste0("  default: ", value)), file.path(lib, "dta-app.yaml"))
+    got <- validate_template(lib)
+    qa_step(
+      sprintf("default: %s is one app_config_invalid error naming the key", value),
+      list(code = "app_config_invalid", severity = "error", names_key = TRUE),
+      list(
+        code = unique(got$code), severity = unique(got$severity),
+        names_key = all(grepl("data_types.default", got$message, fixed = TRUE))
+      )
+    )
+    qa_step(sprintf("...and only one row, for %s", value), 1L, nrow(got))
+  }
+})
+
+test_that("OQ-TMPL-150 | an unknown key under data_types is an app_config_unknown_key warning naming it, and strict validation does not abort | REQ-TMPL-064", {
+  result <- validate_template(tmpl_fixture("appconfig", "data_types_unknown_key"))
+  qa_step("severity", "warning", tmpl_severity(result, "app_config_unknown_key"))
+  qa_check("naming the misspelled key under its section", grepl("data_types.defualt", tmpl_message(result, "app_config_unknown_key"), fixed = TRUE))
+  qa_step("and nothing else is reported", character(0), setdiff(result$code, "app_config_unknown_key"))
+  qa_step(
+    "strict validation does not abort on it", "no condition",
+    tryCatch(
+      {
+        validate_template(tmpl_fixture("appconfig", "data_types_unknown_key"), strict = TRUE)
+        "no condition"
+      },
+      error = function(e) "aborted"
+    )
+  )
+})

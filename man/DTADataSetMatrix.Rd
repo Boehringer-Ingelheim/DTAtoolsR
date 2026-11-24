@@ -82,6 +82,13 @@ In a specification the row-label columns are written under
       nullable: No
       range: { min: 0 }
 }
+
+The cells are \code{SAS Num}, \code{SAS Int} or \code{SAS Char}, or their
+counterparts in the R vocabulary, \code{R numeric}, \code{R integer} or
+\code{R character}: \code{range} applies to the numeric types and
+\code{infinite} to \code{SAS Num} and \code{R numeric}. A date, time or
+logical cell is not allowed. The row labels may use either vocabulary,
+independently of the cells.
 }
 \section{The header line}{
 
@@ -165,4 +172,14 @@ ds_csv <- DTADataSetFactory(
   matrix = list(cells = list(type = "SAS Int", nullable = FALSE, range = list(min = 0)))
 )
 ds_csv
+
+# The same layout in the R type vocabulary (R character, R integer, R numeric).
+ds_r <- DTADataSetFactory(
+  type = "matrix",
+  id = "counts",
+  files = list(type = "csv", filename = "counts.csv"),
+  row_labels = list(list(id = "GENE", header = "", type = "R character", nullable = FALSE)),
+  matrix = list(cells = list(type = "R integer", nullable = FALSE, range = list(min = 0)))
+)
+ds_r
 }

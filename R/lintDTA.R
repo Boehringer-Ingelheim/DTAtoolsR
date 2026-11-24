@@ -47,13 +47,30 @@ dta_condition_text <- function(e) {
 
 # ---- Cross-object checks -----------------------------------------------------
 
-# The declared SAS type of a column, `NA` when it declares none.
+# The bare declared type of a column (`Char`, `numeric`, ...), `NA` when it
+# declares none. Say which backend it belongs to with dta_column_label(); judge
+# what KIND of column it is with dta_column_family().
 dta_column_type <- function(spec) {
   s <- spec@structure
   if (is.null(s) || !.structure_value_is_set(s@type)) {
     return(NA_character_)
   }
   as.character(s@type)
+}
+
+# The family of a column's declared type: "text", "number", "integer",
+# "logical" or "temporal", the same for both backends. `NA` when it declares
+# none. Every type test in the lint goes through this, never a type name.
+dta_column_family <- function(spec) {
+  dta_type_family(spec@structure)
+}
+
+# How a declared type reads in a message. A SAS type keeps its bare name
+# (`Char`), as findings have always shown it; an R type is written `R character`
+# because `Date` alone would not say which vocabulary it is.
+dta_column_label <- function(spec) {
+  type <- dta_column_type(spec)
+  if (!is.na(type) && identical(spec@structure@backend, "R")) paste("R", type) else type
 }
 
 # Condition names a constraint list refers to that `conditions` does not define.
@@ -96,12 +113,22 @@ dta_operand_text <- function(v) {
   }
 }
 
+# What a rule operand means on a logical column: a logical stays as it is, text
+# is read as the logical tokens are everywhere else (TRUE, T, true, True,
+# FALSE, F, false, False), and anything else -- another text, a number -- is NA,
+# a value the column can never hold.
+dta_logical_operand <- function(vals) {
+  dta_as_logical_token(unlist(vals, use.names = FALSE))
+}
+
 # Does any of `vals` break the column's own type, length, format or pattern?
 # Reuses the evaluator behind the DTAColumnSpec validator by probing a copy of
 # the spec whose `values` are the operands.
 dta_operand_problems <- function(spec, vals) {
-  ctype <- dta_column_type(spec)
-  if (identical(ctype, "Bool")) {
+  # A logical column is not probed: what its operands may be (true, false or a
+  # logical token) is judged where the rule is read, and a logical column takes
+  # no pattern.
+  if (identical(dta_column_family(spec), "logical")) {
     return(character(0))
   }
   problems <- character(0)
@@ -185,16 +212,18 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
     }
   }
 
-  # Declared type per column, computed once: dta_column_type() is not free and
-  # the rule loop below would otherwise repeat it per operator.
-  col_types <- vapply(columns, dta_column_type, character(1), USE.NAMES = FALSE)
+  # Declared family and label per column, computed once: the rule loop below
+  # would otherwise repeat them per operator.
+  col_families <- vapply(columns, dta_column_family, character(1), USE.NAMES = FALSE)
+  col_labels <- vapply(columns, dta_column_label, character(1), USE.NAMES = FALSE)
 
-  # Char `$w.` narrower than the declared length: values would be truncated on
-  # display although they pass the length check.
+  # SAS Char `$w.` narrower than the declared length: values would be truncated
+  # on display although they pass the length check. A SAS format only: an R
+  # column holds no `$w.`.
   for (k in seq_along(columns)) {
     col <- columns[[k]]
     s <- col@structure
-    if (is.null(s) || !identical(col_types[[k]], "Char") ||
+    if (is.null(s) || !identical(s@backend, "SAS") || !identical(col_families[[k]], "text") ||
       is.null(s@length) || !.structure_value_is_set(s@format)) {
       next
     }
@@ -213,8 +242,10 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
 
   by_id <- columns
   names(by_id) <- col_ids
-  type_by_id <- col_types
-  names(type_by_id) <- col_ids
+  family_by_id <- col_families
+  names(family_by_id) <- col_ids
+  label_by_id <- col_labels
+  names(label_by_id) <- col_ids
   rule_ids <- vapply(rules, function(r) r@id[1], character(1), USE.NAMES = FALSE)
   for (id in unique(rule_ids[duplicated(rule_ids)])) {
     fb$add(
@@ -230,21 +261,25 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
     )
   }
 
-  numeric_types <- c("Num", "Int")
-  # Type of a declared column, NA when untyped or not declared (or broken).
-  type_of <- function(col_name) {
-    unname(type_by_id[col_name])
+  numeric_families <- c("number", "integer")
+  # Family and label of a declared column, NA when untyped or not declared (or
+  # broken).
+  family_of <- function(col_name) {
+    unname(family_by_id[col_name])
+  }
+  label_of <- function(col_name) {
+    unname(label_by_id[col_name])
   }
   non_numeric <- function(col_name) {
-    t <- type_of(col_name)
-    !is.na(t) && !t %in% numeric_types
+    f <- family_of(col_name)
+    !is.na(f) && !f %in% numeric_families
   }
-  # The engine reads Date/Time/DateTime as text (as_r_type() maps them to
+  # The engine reads every temporal type as text (as_r_type() maps them to
   # "character") and runs a numeric operator through a strict number
   # conversion, so every comparison on such a column is a false failure. A
-  # numeric operator is therefore wrong on Char and on the three SAS date types.
+  # numeric operator is therefore wrong on a text column and on a temporal one.
   text_typed <- function(col_name) {
-    type_of(col_name) %in% c("Char", "Date", "Time", "DateTime")
+    family_of(col_name) %in% c("text", "temporal")
   }
   probe_cache <- new.env(parent = emptyenv())
 
@@ -326,7 +361,7 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
 
           if (op %in% dta_numeric_condition_operators()) {
             if (text_typed(col_name)) {
-              is_char <- identical(type_of(col_name), "Char")
+              is_char <- identical(family_of(col_name), "text")
               # A date column is text only in file reads; an in-memory Date-class
               # table compares correctly, so that case warns instead of
               # refusing a spec the engine can run.
@@ -334,7 +369,7 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
                 "rule", rid, if (is_char) "error" else "warning", "rule_condition_numeric_on_text",
                 sprintf(
                   "%s compares numbers, but the column is %s, which is read as text%s.",
-                  where, type_of(col_name),
+                  where, label_of(col_name),
                   if (is_char) "" else ": file reads hold dates as text and a date is not a number, so compare with a quoted ISO value, and only on Date-class data"
                 )
               )
@@ -348,22 +383,55 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
             next
           }
 
+          # A pattern is matched against text. The engine coerces a logical
+          # column to logical values first, which hold no text, so a `pattern`
+          # on one never matches a single row.
+          if (identical(op, "pattern") && identical(family_of(col_name), "logical")) {
+            fb$add(
+              "rule", rid, "error", "rule_condition_operator_invalid",
+              sprintf(
+                "%s cannot be used: the column is %s, whose values are not text, so a pattern never matches. Compare it with equals or in.",
+                where, label_of(col_name)
+              )
+            )
+            next
+          }
           if (!op %in% c("equals", "equal", "in", "not_equals", "not_equal", "not_in") ||
             length(vals) == 0L) {
             next
           }
+          fam <- family_of(col_name)
           # YAML reads an unquoted Y/N/yes/no/on/off as a logical, which can
-          # never equal the text a non-Bool column holds. Reported for the
-          # negated operators too: `not_equals: N` then excludes nothing.
-          if (is.logical(vals) && !is.na(type_of(col_name)) && type_of(col_name) != "Bool") {
+          # never equal the text a column that is not logical holds. Reported
+          # for the negated operators too: `not_equals: N` then excludes nothing.
+          if (is.logical(vals) && !is.na(fam) && !identical(fam, "logical")) {
             fb$add(
               "rule", rid, "error", "rule_condition_value_unfit",
               sprintf(
                 "%s uses a logical value, but the column is %s. YAML reads an unquoted Y or N as TRUE or FALSE; quote it, e.g. equals: 'Y'.",
-                where, type_of(col_name)
+                where, label_of(col_name)
               )
             )
             next
+          }
+          # A logical column takes true/false and the text tokens of a logical;
+          # the engine reads an operand the same way when the column's values are
+          # logical, so any other operand can never match. Negated operators
+          # are reported too, as above.
+          as_logical <- NULL
+          if (identical(fam, "logical")) {
+            as_logical <- dta_logical_operand(vals)
+            if (anyNA(as_logical)) {
+              fb$add(
+                "rule", rid, "error", "rule_condition_value_unfit",
+                sprintf(
+                  "%s uses %s, which the column (%s) cannot hold. Use true or false, or one of TRUE, T, true, True, FALSE, F, false, False.",
+                  where, paste(sprintf("'%s'", dta_operand_text(vals[is.na(as_logical)])), collapse = ", "),
+                  label_of(col_name)
+                )
+              )
+              next
+            }
           }
           # A negated comparison against a value outside the codelist is always
           # true: pointless but harmless, so it is not reported.
@@ -373,7 +441,10 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
           if (is.null(spec)) next
 
           if (!is.null(spec@values)) {
-            if (!isTRUE(type_of(col_name) %in% numeric_types)) {
+            if (!is.null(as_logical)) {
+              # `T` and `TRUE` are the same value: compare what they mean.
+              outside <- !as_logical %in% dta_logical_operand(spec@values)
+            } else if (!isTRUE(fam %in% numeric_families)) {
               outside <- !dta_operand_text(vals) %in% dta_operand_text(spec@values)
             } else {
               outside <- !suppressWarnings(as.numeric(as.character(vals))) %in%
@@ -400,7 +471,7 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
             # A number against a text column: YAML has already dropped any
             # leading zero or trailing zero (`01` is 1, `1.10` is 1.1), so the
             # value no longer matches the text the data holds.
-            if (is.numeric(vals) && identical(type_of(col_name), "Char")) {
+            if (is.numeric(vals) && identical(fam, "text")) {
               fb$add(
                 "rule", rid, "warning", "rule_condition_value_unfit",
                 sprintf("%s: a number was written where the column holds text; YAML drops leading and trailing zeros, so quote the value.", where)
@@ -459,10 +530,16 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
 #' `default: true`) and `file_container_unknown` (a file entry's `container`
 #' names an id the document's `containers` do not define).
 #'
+#' On an `R logical` column a rule operand must be `true` or `false`, or one of
+#' the texts `TRUE`, `T`, `true`, `True`, `FALSE`, `F`, `false`, `False`; any
+#' other operand is a `rule_condition_value_unfit` error, and a `pattern`
+#' operator on such a column (its values are not text, so it never matches) is a
+#' `rule_condition_operator_invalid` error.
+#'
 #' Warnings: `rules_without_columns`, `rule_not_checkable`,
-#' `rule_condition_numeric_on_text` when the column is not `SAS Char` but is
-#' read as text (a date), `rule_condition_value_unfit` when a number is written
-#' where the column holds text,
+#' `rule_condition_numeric_on_text` when the column is not text (`SAS Char`,
+#' `R character`) but is read as text (a date), `rule_condition_value_unfit`
+#' when a number is written where the column holds text,
 #' `format_narrower_than_length`, `column_id_shadows_field` (a column `X.<field>`
 #' beside a column `X`, where `<field>` is a column field such as `values`: a
 #' template path `columns.X.<field>` is read as that field of `X`, so a seal or

@@ -174,13 +174,15 @@ dta_rule_list_rename <- function(l, old, new) {
   l
 }
 
-# Ids of the columns a range rule may target: numeric ones only.
+# Ids of the columns a range rule may target: numeric ones only, whichever
+# backend declares them (SAS Num / Int, R numeric / integer). Decided by the
+# type's family, never by a bare type name.
 dta_numeric_column_ids <- function(dta, dataset) {
   ds <- dta_get_dataset(dta, dataset)
   cols <- tryCatch(ds@specs@columns, error = function(e) NULL) %||% list()
   keep <- vapply(cols, function(c) {
-    ty <- tryCatch(as.character(c@structure@type)[1], error = function(e) "")
-    isTRUE(ty %in% c("Num", "Int"))
+    fam <- tryCatch(dta_pkg_type_family(c@structure), error = function(e) NA_character_)
+    isTRUE(fam %in% c("number", "integer"))
   }, logical(1))
   names(cols)[keep]
 }
@@ -2709,8 +2711,222 @@ dta_supported_backends <- function() {
   b %||% "SAS"
 }
 
-# Bare (backend-less) SAS storage types offered in the column editor.
-dta_sas_types <- function() c("Char", "Num", "Int", "Date", "Time", "DateTime")
+# ---- Type vocabulary of the backends ---------------------------------------
+# The package owns the vocabulary: one table of declared types per backend, each
+# type with its family (text, number, integer, logical, temporal). The app asks
+# for it by namespace and lists no type name of its own, except the one mapping
+# below that no table holds. Every helper here is a pure function of its
+# arguments: the configured default backend is passed in, never read.
+
+# The type names of one backend, in the order a picker shows them.
+dta_backend_types <- function(backend) {
+  get("dta_backend_types", envir = asNamespace("DTAtools"), inherits = FALSE)(backend)
+}
+
+# The family of one declared type (NA for an unknown one), and of a structure.
+dta_pkg_family_of <- function(backend, type) {
+  get("dta_family_of", envir = asNamespace("DTAtools"), inherits = FALSE)(backend, type)
+}
+dta_pkg_type_family <- function(structure) {
+  get("dta_type_family", envir = asNamespace("DTAtools"), inherits = FALSE)(structure)
+}
+
+# Bare (backend-less) SAS storage types. Kept for its callers and pinned by tests.
+dta_sas_types <- function() dta_backend_types("SAS")
+
+# Which type of one backend is the same kind of column as which type of the
+# other: row i of SAS and row i of R. Switching the Backend in the column editor
+# follows it. R `logical` has no SAS counterpart and is not listed. A test pins
+# every row to the package's own families, so a type cannot drift out of step.
+dta_backend_type_map <- function() {
+  data.frame(
+    SAS = c("Char", "Num", "Int", "Date", "DateTime", "Time"),
+    R = c("character", "numeric", "integer", "Date", "POSIXct", "hms"),
+    stringsAsFactors = FALSE
+  )
+}
+
+# The first type of `backend` whose family is `family`: "Char" and "character"
+# for "text". NA when the backend has none.
+dta_type_of_family <- function(backend, family) {
+  types <- dta_backend_types(backend)
+  fam <- vapply(types, function(t) dta_pkg_family_of(backend, t), character(1))
+  types[which(fam == family)[1]]
+}
+
+# The text type of a backend: what a new column or a new row label starts as.
+dta_text_type <- function(backend) dta_type_of_family(backend, "text")
+
+# The backend a matrix's cells are written with: what a new row label of it
+# starts as, whatever the library prefers. NA for anything that is not a matrix.
+dta_matrix_backend <- function(dta, dataset) {
+  ds <- dta_get_dataset(dta, dataset)
+  if (!dta_is_matrix_ds(ds)) {
+    return(NA_character_)
+  }
+  cells <- tryCatch(as.list(ds@matrix)[["cells"]], error = function(e) NULL)
+  dta_split_type(cells[["type"]])$backend
+}
+
+# The backend the app starts NEW columns and new matrix cells with
+# (data_types.default of dta-app.yaml): "SAS" unless the config names a supported
+# backend. It only decides what is preselected; it hides nothing, and a column
+# or matrix that exists keeps its own backend. Total over any input.
+dta_default_backend <- function(cfg = NULL) {
+  dt <- if (is.list(cfg)) cfg[["data_types"]] else NULL
+  d <- if (is.list(dt)) dt[["default"]] else NULL
+  if (is.character(d) && length(d) == 1L && !is.na(d) && d %in% dta_supported_backends()) d else "SAS"
+}
+
+# A prefixed type string ("R numeric") as list(backend, type, family). The
+# backend is matched in any letter case and returned canonical; the type must be
+# a canonical name of that backend. All three are NA for anything else, a bare
+# type included: whether to read a bare one as SAS is the caller's call.
+dta_split_type <- function(x) {
+  none <- list(backend = NA_character_, type = NA_character_, family = NA_character_)
+  x <- trimws(as.character(x %||% "")[1])
+  if (is.na(x) || !nzchar(x)) {
+    return(none)
+  }
+  m <- regmatches(x, regexec("^(\\S+)\\s+(.+)$", x))[[1]]
+  hit <- if (length(m) == 3L) match(toupper(m[2]), toupper(dta_supported_backends())) else NA_integer_
+  if (is.na(hit)) {
+    return(none)
+  }
+  backend <- dta_supported_backends()[hit]
+  type <- trimws(m[3])
+  list(backend = backend, type = type, family = dta_pkg_family_of(backend, type))
+}
+
+# The cell types a matrix offers for a backend, as a named vector: the value is
+# the prefixed type, the name its label. Number, integer and text cells only;
+# the SAS labels read exactly as they always did.
+dta_matrix_cell_types <- function(backend) {
+  kinds <- c(number = "decimal numbers", integer = "whole numbers", text = "text")
+  types <- vapply(names(kinds), function(f) dta_type_of_family(backend, f), character(1))
+  keep <- !is.na(types)
+  if (!any(keep)) {
+    return(character(0))
+  }
+  values <- paste(backend, types[keep])
+  stats::setNames(values, sprintf("%s (%s)", values, kinds[keep]))
+}
+
+# A client-side test that input `id` is one of `values` (or none of them), built
+# from the values a radio offers so no condition hard-codes a type name.
+dta_js_one_of <- function(id, values, negate = FALSE) {
+  sprintf(
+    "[%s].indexOf(input.%s) %s 0",
+    paste0("'", values, "'", collapse = ", "), id, if (negate) "<" else ">="
+  )
+}
+
+# What the Matrix layout form shows or hides by cell type, as conditionalPanel
+# conditions over the cell types of the matrix's own backend: the range for
+# anything but text, "Allow Inf" for the number cell.
+dta_matrix_cell_conditions <- function(backend) {
+  vals <- unname(dta_matrix_cell_types(backend))
+  fam <- vapply(vals, function(v) dta_split_type(v)$family, character(1))
+  list(
+    range = dta_js_one_of("mx_cell_type", vals[fam == "text"], negate = TRUE),
+    infinite = dta_js_one_of("mx_cell_type", vals[fam == "number"])
+  )
+}
+
+# The label of the matrix cell Format field, NULL for a backend whose cells take
+# no format (R number, integer and text cells never do).
+dta_matrix_cell_format_label <- function(backend) {
+  if (!is.character(backend) || length(backend) != 1L || is.na(backend)) {
+    return(NULL)
+  }
+  switch(backend,
+    SAS = "SAS format (e.g. 8.2)",
+    NULL
+  )
+}
+
+# The Format box's placeholder and the hint under the column editor's type row,
+# per backend ("" = none).
+dta_format_placeholder <- function(backend) {
+  if (!is.character(backend) || length(backend) != 1L || is.na(backend)) {
+    return("")
+  }
+  switch(backend,
+    SAS = "e.g. $9. / 8.2",
+    R = "e.g. %Y-%m-%d (Date, POSIXct, hms only)",
+    ""
+  )
+}
+dta_format_hint <- function(backend) {
+  if (!is.character(backend) || length(backend) != 1L || is.na(backend)) {
+    return("")
+  }
+  switch(backend,
+    R = paste(
+      "An R format is written with %Y %m %d %H %M %S, as in %Y-%m-%d, and applies to Date, POSIXct and hms only;",
+      "left empty it gets the type's default. Length applies to character only."
+    ),
+    ""
+  )
+}
+
+# What the Inspect panel says a value had to fit when a column's format check
+# failed. An R date/time format is told apart by its `%`, which no SAS format
+# has: the same rule the package's reports use.
+dta_format_expected_text <- function(format) {
+  fmt <- as.character(format %||% "")[1]
+  if (!is.na(fmt) && grepl("%", fmt, fixed = TRUE)) {
+    paste0("fit R date/time format ", fmt)
+  } else {
+    paste0("fit SAS format ", fmt)
+  }
+}
+
+# The type, format and length a column editor holds after its Backend is
+# switched from `from` to `to`. The type becomes the other backend's type of the
+# same kind (dta_backend_type_map()); one with no counterpart (R logical) becomes
+# the text type, with a `notice` to say so. The format is ALWAYS cleared, since a
+# SAS and a strptime format are not interchangeable, and the length goes unless
+# the new type is text. Switching to the backend it already has changes nothing.
+dta_switch_backend <- function(from, to, type, format = "", length = "") {
+  type <- as.character(type %||% "")[1]
+  if (is.na(type)) type <- ""
+  if (identical(from, to)) {
+    return(list(type = type, format = format, length = length, notice = NULL))
+  }
+  map <- dta_backend_type_map()
+  hit <- match(type, map[[from]])
+  new <- if (is.na(hit)) NA_character_ else map[[to]][[hit]]
+  notice <- NULL
+  if (is.na(new)) {
+    new <- dta_text_type(to)
+    if (nzchar(type)) {
+      notice <- sprintf("%s %s has no %s counterpart, so the type is now %s %s.", from, type, to, to, new)
+    }
+  }
+  list(
+    type = new,
+    format = "",
+    length = if (identical(dta_pkg_family_of(to, new), "text")) length else "",
+    notice = notice
+  )
+}
+
+# A backend prefix typed in front of a format ("R %Y-%m-%d"): list(backend, rest),
+# the backend NA when the first word is no known backend. dta_set_column() pastes
+# the real prefix itself, so a typed one is removed first.
+dta_split_format <- function(format) {
+  x <- sub("^\\s+", "", as.character(format %||% "")[1])
+  if (is.na(x)) {
+    return(list(backend = NA_character_, rest = ""))
+  }
+  m <- regmatches(x, regexec("^(\\S+)\\s+(.*)$", x))[[1]]
+  hit <- if (length(m) == 3L) match(toupper(m[2]), toupper(dta_supported_backends())) else NA_integer_
+  if (is.na(hit)) {
+    return(list(backend = NA_character_, rest = x))
+  }
+  list(backend = dta_supported_backends()[hit], rest = m[3])
+}
 
 # Condition operators offered in the rule editor (mirrors evaluateRules()).
 # Operators offered by the conditional-rule builder (IF / THEN). Named vector:
@@ -3469,15 +3685,21 @@ dta_add_dataset <- function(dta, id, type = "tabular", name = NULL, description 
       if (is.na(lbl) || !nzchar(lbl)) stop("A row-label column ID is required.")
       if (grepl("\\s", lbl)) stop("Row-label column ID cannot contain whitespace.")
       hdr <- dta_row_label_header_value(header_mode, header_text)
+      # A cell holds a number, a whole number or text, in either backend. The
+      # row label is a text column of the SAME backend as the cells.
       ct <- as.character(cell_type %||% "")[1]
-      if (is.na(ct) || !ct %in% c("SAS Num", "SAS Int", "SAS Char")) {
+      sp <- dta_split_type(ct)
+      if (!isTRUE(sp$family %in% c("number", "integer", "text"))) {
         stop("Choose the cell type.")
       }
+      ct <- paste(sp$backend, sp$type)
       DTAtools::DTADataSetMatrix(
         id = nm,
         specs = DTAtools::DTAColumnSpecCollection(columns = stats::setNames(
           list(dta_pkg_row_label(
-            DTAtools::DTAColumnSpec(id = lbl, type = "SAS Char", nullable = FALSE), hdr
+            DTAtools::DTAColumnSpec(
+              id = lbl, type = paste(sp$backend, dta_text_type(sp$backend)), nullable = FALSE
+            ), hdr
           )), lbl
         )),
         matrix = list(cells = list(type = ct, nullable = FALSE)),
@@ -3573,7 +3795,12 @@ dta_columns_overview_rows <- function(cols) {
 }
 
 # Editable fields of a single column (backend/type/format split out).
-dta_column_fields <- function(dta, dataset, id) {
+#
+# `default_backend` is the backend of a column that declares NO type, so the
+# editor opens it in the type system the library prefers (its text type is then
+# what the form preselects) rather than saving it as SAS on a label edit. A type
+# written without a backend ("Char") is a legacy SAS one and stays SAS.
+dta_column_fields <- function(dta, dataset, id, default_backend = "SAS") {
   ds <- dta_get_dataset(dta, dataset)
   cols <- tryCatch(ds@specs@columns, error = function(e) NULL) %||% list()
   col <- cols[[id]]
@@ -3582,7 +3809,7 @@ dta_column_fields <- function(dta, dataset, id) {
   }
   l <- dta_column_to_list(col)
   bt <- l$type %||% ""
-  backend <- "SAS"
+  backend <- if (nzchar(bt)) "SAS" else default_backend
   bare <- bt
   if (nzchar(bt) && grepl(" ", bt)) {
     sp <- strsplit(bt, " ", fixed = TRUE)[[1]]
@@ -3689,6 +3916,19 @@ dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
     existing <- cols[[if (renaming) old_id else id]]
 
     bk <- backend %||% "SAS"
+    # A backend typed in front of the format ("R %Y-%m-%d") is removed before
+    # the chosen one is pasted on. One that is not the chosen backend is
+    # refused: pasting either would give a format of the wrong backend.
+    typed <- dta_split_format(format)
+    if (!is.na(typed$backend)) {
+      if (!identical(typed$backend, bk)) {
+        stop(sprintf(
+          "The format starts with %s but the backend is %s: remove the prefix or change the backend.",
+          typed$backend, bk
+        ))
+      }
+      format <- typed$rest
+    }
     type_arg <- if (!is.null(type) && nzchar(type)) paste(bk, type) else NULL
     format_arg <- if (!is.null(format) && nzchar(format)) paste(bk, format) else NULL
     len_arg <- NULL
@@ -3909,8 +4149,11 @@ dta_matrix_fields <- function(dta, dataset) {
   }
   num <- function(x) if (is.null(x) || length(x) == 0L) NA_real_ else as.numeric(x)[1]
   max_or_na <- function(v) if (is.infinite(v)) NA_real_ else as.numeric(v)
+  # The cell type keeps the backend it is written with; only a bare type (no
+  # backend in front) is a SAS one.
   ctype <- txt(cl[["type"]])
-  ctype <- paste("SAS", sub("^SAS\\s+", "", ctype, ignore.case = TRUE))
+  sp <- dta_split_type(ctype)
+  ctype <- if (is.na(sp$backend)) paste("SAS", ctype) else paste(sp$backend, sp$type)
   cfmt <- txt(cl[["format"]])
   list(
     row_labels = ids,
@@ -4070,12 +4313,30 @@ dta_set_matrix <- function(dta, dataset, form) {
     }
 
     if (chg("cell_type")) {
+      # Whichever backend the type is written with is kept; a type with none in
+      # front is a SAS one, as it always was.
       ty <- trimws(as.character(fm("cell_type"))[1])
-      ty <- paste("SAS", sub("^SAS\\s+", "", ty, ignore.case = TRUE))
-      if (!ty %in% c("SAS Num", "SAS Int", "SAS Char")) stop("Choose the cell type.")
-      put("cells", "type", ty)
+      sp <- dta_split_type(ty)
+      if (is.na(sp$backend)) sp <- dta_split_type(paste("SAS", ty))
+      if (!isTRUE(sp$family %in% c("number", "integer", "text"))) stop("Choose the cell type.")
+      put("cells", "type", paste(sp$backend, sp$type))
     }
-    rt <- sub("^SAS\\s+", "", trimws(as.character(orig[["cells"]][["type"]])[1]), ignore.case = TRUE)
+    # What the RESULTING cell type is, by family: "number", "integer" or "text".
+    cur <- dta_split_type(orig[["cells"]][["type"]])
+    rf <- cur$family
+    as_numbers <- function(v) {
+      nv <- suppressWarnings(as.numeric(v))
+      if (anyNA(nv)) {
+        stop(sprintf(
+          "Allowed cell values must be numbers for %s cells.",
+          paste(
+            paste(cur$backend, c(dta_type_of_family(cur$backend, "number"), dta_type_of_family(cur$backend, "integer"))),
+            collapse = " and "
+          )
+        ))
+      }
+      lapply(nv, whole_or)
+    }
     if (chg("cell_nullable")) put("cells", "nullable", isTRUE(fm("cell_nullable")))
     if (chg("range_min") || chg("range_max")) {
       lo <- nnum(fm("range_min"))
@@ -4091,28 +4352,22 @@ dta_set_matrix <- function(dta, dataset, form) {
     if (chg("infinite")) put("cells", "infinite", isTRUE(fm("infinite")))
     if (chg("cell_values")) {
       v <- lines_of(fm("cell_values"))
-      if (length(v) > 0L && rt %in% c("Num", "Int")) {
-        nv <- suppressWarnings(as.numeric(v))
-        if (anyNA(nv)) stop("Allowed cell values must be numbers for SAS Num and SAS Int cells.")
-        v <- lapply(nv, whole_or)
-      }
+      if (length(v) > 0L && rf %in% c("number", "integer")) v <- as_numbers(v)
       put("cells", "values", if (length(v) > 0L) v else NULL)
     } else if (chg("cell_type") && length(orig$cells[["values"]]) > 0L) {
       # Untouched allowed values follow the new cell type.
       v <- unlist(orig$cells[["values"]])
-      if (identical(rt, "Char")) {
+      if (identical(rf, "text")) {
         put("cells", "values", as.list(as.character(v)))
-      } else if (rt %in% c("Num", "Int")) {
-        nv <- suppressWarnings(as.numeric(v))
-        if (anyNA(nv)) stop("Allowed cell values must be numbers for SAS Num and SAS Int cells.")
-        put("cells", "values", lapply(nv, whole_or))
+      } else if (rf %in% c("number", "integer")) {
+        put("cells", "values", as_numbers(v))
       }
     }
     if (chg("cell_pattern")) put("cells", "pattern", text_or_null(txt(fm("cell_pattern"))))
     if (chg("cell_length")) put("cells", "length", length_val(txt(fm("cell_length")), "Cell"))
     if (chg("cell_format")) {
       f <- txt(fm("cell_format"))
-      put("cells", "format", if (!nzchar(f)) NULL else if (grepl(" ", f)) f else paste("SAS", f))
+      put("cells", "format", if (!nzchar(f)) NULL else if (grepl(" ", f)) f else paste(cur$backend, f))
     }
     if (chg("cell_label")) put("cells", "label", text_or_null(txt(fm("cell_label"))))
     if (chg("cell_description")) put("cells", "description", text_or_null(txt(fm("cell_description"))))
@@ -4125,14 +4380,20 @@ dta_set_matrix <- function(dta, dataset, form) {
     }
 
     # What the RESULTING cell type cannot carry is removed, not refused.
-    if (!identical(rt, "Num") && !is.null(orig$cells[["infinite"]])) {
+    if (!identical(rf, "number") && !is.null(orig$cells[["infinite"]])) {
       if (isTRUE(orig$cells[["infinite"]])) dropped <- c(dropped, "Inf allowed")
       orig$cells[["infinite"]] <- NULL
     }
-    if (identical(rt, "Char") && length(orig$cells[["range"]]) > 0L) {
+    if (identical(rf, "text") && length(orig$cells[["range"]]) > 0L) {
       dropped <- c(dropped, "range")
     }
-    if (identical(rt, "Char")) orig$cells[["range"]] <- NULL
+    if (identical(rf, "text")) orig$cells[["range"]] <- NULL
+    # An R cell takes a length only as R character; a SAS cell keeps its length
+    # whatever its type, as it always did.
+    if (identical(cur$backend, "R") && !identical(rf, "text") && length(orig$cells[["length"]]) > 0L) {
+      dropped <- c(dropped, "length")
+      orig$cells[["length"]] <- NULL
+    }
 
     ds <- S7::set_props(ds, matrix = dta_pkg_matrix_spec_from_list(orig))
     dta@datasets[[dataset]] <- ds

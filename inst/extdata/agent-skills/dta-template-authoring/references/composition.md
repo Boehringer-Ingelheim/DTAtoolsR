@@ -302,11 +302,21 @@ dataset:
       format: SAS $12.
       nullable: No
       values_from: sample_status@latest   # follow: new statuses reach new DTAs
+    - id: COLLDT
+      label: Collection date
+      type: R Date                        # the R type system; SAS and R types may be mixed
+      format: R %d/%m/%Y                  # an R date format, prefixed like the type
+      nullable: Yes
   rules:
     - id: sample_unique
       type: col_unique
       columns: [SAMPLEID]
 ```
+
+A type and its format start with `SAS ` or `R `, and the two must match on one
+column. `COLLDT` is written in the `R` type system: `R Date` takes an R date
+format (`%Y %m %d`, with `%H %M %S` for `R POSIXct` and `R hms`); leave the
+format out and `%Y-%m-%d` is written in for you.
 
 `templates/company_dta.dta-template.yaml` (the head; its released `"1.0"` sits
 beside it, frozen, as `company_dta@1.0.dta-template.yaml`)

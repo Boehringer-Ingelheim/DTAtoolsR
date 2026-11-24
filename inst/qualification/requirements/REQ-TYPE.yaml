@@ -45,14 +45,16 @@ requirements:
 
   - id: REQ-TYPE-003
     text: >
-      A DTAColumnSpec's declared type shall accept only the backend-prefixed
-      values "SAS Char", "SAS Num", "SAS Int", "SAS Date", "SAS Time" and
-      "SAS DateTime", matched case-insensitively, and shall reject every
-      other value.
+      A DTAColumnSpec's declared type shall accept only a value prefixed with
+      a supported backend and naming one of that backend's types, matched
+      case-insensitively: for the SAS backend "SAS Char", "SAS Num",
+      "SAS Int", "SAS Date", "SAS Time" and "SAS DateTime", and for the R
+      backend "R character", "R numeric", "R integer", "R logical", "R Date",
+      "R POSIXct" and "R hms". It shall reject every other value.
     risk: medium
     category: functional
-    covers: [DTAColumnSpec, DTAColumnSpecStructureSAS]
-    source: R/DTAColumnSpecStructureSAS-class.R
+    covers: [DTAColumnSpec, DTAColumnSpecStructureSAS, DTAColumnSpecStructureR]
+    source: R/DTAColumnSpecStructureSAS-class.R, R/DTAColumnSpecStructureR-class.R
 
   - id: REQ-TYPE-004
     text: >
@@ -135,10 +137,10 @@ requirements:
 
   - id: REQ-TYPE-010
     text: >
-      A table already typed in R -- a factor, a Date, or (when bit64 is
-      installed) an integer64 column -- shall reach the same
-      column-specification and rule error counts as a file carrying an
-      equivalent textual representation of the same values.
+      A table already typed in R -- a factor, a Date, a time of day held as a
+      difftime, or (when bit64 is installed) an integer64 column -- shall
+      reach the same column-specification and rule error counts as a file
+      carrying an equivalent textual representation of the same values.
     risk: medium
     category: functional
     covers: [validate_table, check]
@@ -146,23 +148,29 @@ requirements:
     notes: >
       Compared on values the declared type can hold. A value beyond the int32
       range in a declared Int column is an import error when read from text
-      (REQ-TYPE-009).
+      (REQ-TYPE-009). A difftime of 52200 seconds is the equivalent of the
+      text 14:30:00; under a SAS Time column with a TIME8. format the file
+      holds a value that fits, and the typed column is reported (DEV-018).
 
   - id: REQ-TYPE-011
     text: >
       A column holding native R logical values shall fail the declared-type
-      check against every currently declarable column type.
+      check against every SAS column type (SAS Char, SAS Num, SAS Int, SAS
+      Date, SAS Time and SAS DateTime) and against every R type but R logical,
+      and shall pass it against R logical.
     risk: medium
     category: functional
     covers: [validate_table, DTAColumnSpec]
     source: R/columnSpecChecks.R
     notes: >
-      Pinned rather than endorsed: a logical value's JSON type is "boolean",
-      and no declared column type maps to "boolean" (SAS Bool is rejected at
-      construction; see REQ-TYPE-003), so a table built directly in R with a
-      logical flag column is invalid against any spec, while the same values
-      written as "TRUE"/"FALSE" or "1"/"0" text and read from a file
-      validate normally.
+      A logical value's JSON type is "boolean". Only R logical maps to it: the
+      SAS backend has no logical type (SAS Bool is rejected at construction;
+      see REQ-TYPE-003), so a table built directly in R with a logical flag
+      column is invalid against a SAS description of it, while the same values
+      written as "TRUE"/"FALSE" or "1"/"0" text and read from a file validate
+      normally against SAS Char. That half is a limitation of the SAS type
+      vocabulary, not a defect (LIM-005); a logical column that is to pass
+      declares R logical.
 
   # ---- strict numeric conversion ----------------------------------------------
 
@@ -209,3 +217,234 @@ requirements:
       is.na(NaN) is TRUE, so it is classified as unconvertible and reported
       on the import axis rather than treated as a missing value. Registered
       as LIM-002.
+
+  # ---- the R backend ------------------------------------------------------------
+
+  - id: REQ-TYPE-016
+    text: >
+      The R backend shall store a declared type as one of "character",
+      "numeric", "integer", "logical", "Date", "POSIXct" or "hms", whatever
+      the case it was written in ("double" being accepted as a synonym of
+      "numeric"); shall store the format "%Y-%m-%d", "%Y-%m-%d %H:%M:%S" or
+      "%H:%M:%S" on a Date, POSIXct or hms column that names none; and shall
+      reject a format on any other type, a format with a directive outside
+      the supported date and time directives, a length on any type but
+      character, and a SAS-only type spelling such as "R Char".
+    risk: medium
+    category: functional
+    covers: [DTAColumnSpec, DTAColumnSpecStructureR, DTAColumnSpecStructureFactory]
+    source: R/DTAColumnSpecStructureR-class.R; R/rTemporalFormat.R
+    notes: >
+      The supported directives are %Y, %m, %d, %H, %M, %S, %OS1 to %OS6, %F
+      and %T, with a space, - / . , : ; _ and the letters T and Z as the only
+      literals. The default format is written into the specification rather
+      than left implicit, so a reader of the specification sees what is
+      enforced.
+
+  - id: REQ-TYPE-017
+    text: >
+      A text value in a column declared R Date, R POSIXct or R hms shall fit
+      the column's format exactly, and otherwise shall be reported with the
+      keyword "format". It fits when it is made of the format's fields in the
+      format's order, each at its fixed width and in its range, with every
+      literal character of the format written as it is: %Y four digits 0000 to
+      9999, %m two digits 01 to 12, %d two digits 01 to 31, %H two digits 00 to
+      23, %M and %S two digits 00 to 59 (%F standing for %Y-%m-%d and %T for
+      %H:%M:%S). The value is not trimmed and letter case matters, so a field
+      with fewer or more digits than its width, a space or other text before
+      or after the value, and a t where the format has a T, do not fit. A
+      missing value shall never be reported for its format.
+    risk: high
+    category: functional
+    covers: [validate_table, check, DTAColumnSpec]
+    source: R/rTemporalFormat.R; R/columnSpecChecks.R
+    notes: >
+      The SAS formats behave differently on purpose: a SAS display value is
+      trimmed and a SAS format that is absent accepts anything. The R check
+      reads the text, never the date: a value is not parsed by strptime(),
+      which accepts 2024-1-5, trailing text and extra spaces. A typed Date,
+      POSIXct, difftime or hms vector holds no text to fit and is not matched
+      against the format (LIM-027).
+
+  - id: REQ-TYPE-018
+    text: >
+      A value in a column whose format holds %Y, %m and %d shall in addition
+      name a day of the Gregorian calendar, or be reported with the keyword
+      "format": the 29th of February only in a year divisible by 4 and not by
+      100, or divisible by 400 (year 0000 being divisible by 400), the 30th
+      and the 31st never in February, and the 31st only in a month of 31
+      days. So 2024-02-29, 2000-02-29 and 0000-02-29 fit and 2023-02-29,
+      1900-02-29, 0100-02-29, 2024-02-30 and 2024-04-31 do not.
+    risk: high
+    category: functional
+    covers: [validate_table, check]
+    source: R/rTemporalFormat.R (dta_r_temporal_bad)
+    notes: >
+      Expected values come from the calendar rule, not from the reader; the
+      case also compares the checker with a round trip through as.Date() and
+      format() over a seeded random sample of years 1000 to 9999.
+
+  - id: REQ-TYPE-019
+    text: >
+      %OSn in a format (n from 1 to 6) shall take the seconds 00 to 59
+      optionally followed by a decimal point and one to n digits, so a value
+      with seconds alone, or with a fraction of up to n digits, fits and one
+      with a decimal point and no digit, or with more than n digits, does not.
+      An R hms value shall be a time of day: the hours 00 to 23 and the
+      seconds 00 to 59, so 24:00:00, 100:00:00 and the leap second 23:59:60
+      shall be reported with the keyword "format", whereas 00:00:00 and
+      23:59:59 fit.
+    risk: medium
+    category: functional
+    covers: [validate_table, check]
+    source: R/rTemporalFormat.R (dta_r_temporal_regex)
+    notes: >
+      A SAS time (SAS Time) accepts hours beyond 23; R hms does not (LIM-030).
+      Leap seconds are not part of any R format (LIM-029).
+
+  - id: REQ-TYPE-020
+    text: >
+      A format on an R Date, R POSIXct or R hms column shall be refused when
+      the specification is built unless it is made of the supported
+      directives %Y %m %d %H %M %S %OS1 to %OS6 %F and %T and, as literal
+      characters, a space, - / . , : ; _ and the letters T and Z. Refused are:
+      any other directive (among them %b %B %a %A %p %I %y %j %z %Z %e and %%,
+      a bare %OS, %OS0, %OS7 and a lone % at the end); any other character
+      (a digit, another letter, a quote, a brace, a backslash); a year, month,
+      day, hour or minute written twice (%F %Y); seconds written twice (%T
+      %OS3); a decimal point or digit directly after %OSn; an empty or blank
+      format; and a format whose fields do not make the declared type, a Date
+      needing year, month and day and no time field, a POSIXct also hour and
+      minute, an hms hour and minute and no date field. When no type is
+      declared it shall be the type the format describes.
+    risk: high
+    category: functional
+    covers: [DTAColumnSpec, DTAColumnSpecStructureR, DTAColumnSpecStructureFactory]
+    source: R/rTemporalFormat.R (dta_r_format_parse)
+    notes: >
+      The refusal is a condition raised by the constructor; the cases check
+      that it is raised and that a format holding braces such as {x} is
+      refused as plain text, never evaluated as a template. Time zones, month
+      names, AM/PM and two-digit years have no directive (LIM-029).
+
+  - id: REQ-TYPE-021
+    text: >
+      A column declared R logical, read from delimited text, shall be stored as
+      R logical. The texts TRUE, T, true and True shall be TRUE and FALSE, F,
+      false and False shall be FALSE, matched in exactly that letter case and
+      without trimming; an empty field or one holding blanks only shall be
+      missing, without any finding; and every other text, among them yes, 1,
+      0, tRuE, " TRUE" and "T ", shall be stored as missing and be reported on
+      the import axis with the keyword not_convertible, at its row and its
+      column.
+    risk: high
+    category: functional
+    covers: [load_file, check, messages, validation_status]
+    source: R/importConversion.R (dta_as_logical_strict, dta_coerce_column)
+    notes: >
+      The eight texts are the ones as.logical() accepts. A logical column that
+      is already typed in R is left as it is.
+
+  - id: REQ-TYPE-022
+    text: >
+      The text NA shall be a missing value in a delimited-text file whatever
+      the column's type, and in a column declared R logical read from a SAS
+      dataset (.sas7bdat), where NA is an ordinary value, it shall be reported
+      on the import axis with the keyword not_convertible like any other text
+      that is not a logical token.
+    risk: medium
+    category: functional
+    covers: [load_file, check, messages, validation_status]
+    source: R/DTAFileSAS7BDAT-class.R; R/importConversion.R
+    notes: >
+      See LIM-028. The delimited-text reader removes NA before the typing
+      sees it (REQ-FILE-004), so the keyword is reachable from a SAS dataset or
+      a direct call only; the fixture delivery.sas7bdat holds the value NA in
+      its SUBJID variable (REQ-FILE-036).
+
+  - id: REQ-TYPE-023
+    text: >
+      A column declared R numeric shall be typed as a column declared SAS Num,
+      R integer as SAS Int and R character as SAS Char. Read from delimited
+      text, R numeric shall store R double and read 007 as 7, 1e3 as 1000 and
+      0x1F as 31; R integer shall store R integer, read 007 as 7, and report
+      1.5 with the import keyword not_whole and 2147483648 with the import
+      keyword out_of_range; both shall report abc with the import keyword
+      not_convertible and shall take an empty field as missing without a
+      finding; R character shall keep 007 as the text 007.
+    risk: high
+    category: functional
+    covers: [load_file, check, messages, validation_status]
+    source: R/importConversion.R (dta_coerce_column); R/DTAColumnSpecStructureR-class.R
+    notes: >
+      The strict numeric reading is the one REQ-TYPE-012 states; hexadecimal
+      and zero-padded numbers are accepted on purpose (LIM-025). An R numeric
+      or R integer column is not given a different reading than its SAS
+      counterpart because it is written in the other vocabulary.
+
+  - id: REQ-TYPE-024
+    text: >
+      as_json_schema_type() shall map R character, R Date, R POSIXct and R hms
+      to string, R numeric to number, R integer to integer and R logical to
+      boolean; as_r_type() shall map R character, R Date, R POSIXct and R hms
+      to character, R numeric to double, R integer to integer and R logical to
+      logical, and shall default an unset R type to character; and
+      get_arrow_type() shall map R character to utf8, R numeric to double, R
+      integer to int32 and R logical to bool, and give NA_character_ for R
+      Date, R POSIXct and R hms.
+    risk: medium
+    category: interface
+    covers: [as_json_schema_type, as_r_type, get_arrow_type, DTAColumnSpec]
+    source: R/DTAColumnSpecStructureR-class.R; R/DTAColumnSpec-class.R
+    notes: >
+      A date or time of the R backend is validated as text and stored as the
+      text that was read, as the SAS ones are (REQ-TYPE-004), so it has no
+      Arrow type either (REQ-TYPE-005).
+
+  - id: REQ-TYPE-025
+    text: >
+      The values and examples of an R logical column shall be logical tokens
+      written as text, and a specification with other text among them (yes,
+      1) shall be refused with a condition of class dta_spec_value_mismatch, one
+      with an unquoted YAML true or false, which is a logical value and not
+      text, with class dta_spec_logical_values, and one with a pattern with
+      class dta_spec_logical_pattern. A value list of exactly one token shall
+      report a row holding the other logical value with the keyword "const".
+    risk: medium
+    category: functional
+    covers: [DTAColumnSpec, validate_table]
+    source: R/DTAColumnSpec-class.R (dta_normalise_spec_values)
+    notes: >
+      A pattern is refused because the evaluator does not apply one to a
+      logical column, so it would be accepted and never enforced.
+
+  - id: REQ-TYPE-026
+    text: >
+      The declared type and format of an R column shall survive
+      write_columns_to_yaml() and import_specs_from_yaml() unchanged: the file
+      shall hold the type as "type: R <type>" and the format, the stored
+      default of an R Date, POSIXct or hms included, as "format: R <format>",
+      a format holding a colon followed by a space shall be read back
+      whole, and the list as.list() gives for a structure shall be the type
+      and the format, each with its R prefix.
+    risk: high
+    category: integrity
+    covers: [write_columns_to_yaml, import_specs_from_yaml, DTAColumnSpec, DTAColumnSpecStructureR]
+    source: R/DTAColumnSpecStructureR-class.R; R/DTAColumnSpecCollection-class.R
+    notes: >
+      The format of an R Date is written even when the author named none, so
+      the file shows what is enforced.
+
+  - id: REQ-TYPE-027
+    text: >
+      The whole-column engine and the per-batch engine shall type and judge a
+      column declared with an R type identically: the same storage type, and
+      the same findings, each with the same source, row, column and keyword
+      and the same axis counts, whatever the batch size.
+    risk: high
+    category: integrity
+    covers: [load_file, check, messages, validation_status]
+    source: R/importConversion.R (dta_coerce_table_to_specs); R/streamingValidation.R
+    notes: >
+      The same property REQ-TYPE-002 states for SAS Int, for the R types:
+      logical, numeric, integer and the text-validated Date.

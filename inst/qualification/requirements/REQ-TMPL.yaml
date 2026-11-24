@@ -490,7 +490,7 @@ requirements:
     text: >
       create_template_repo(path, examples = TRUE, ci = TRUE, overwrite =
       FALSE, agent_skill = TRUE) shall write .gitignore and README.md at the
-      repository root, the editor assets of REQ-TMPL-063, the agent skill of
+      repository root, the editor assets of REQ-TMPL-065, the agent skill of
       REQ-TMPL-060,
       and -- when examples is TRUE -- every file of the bundled skeleton
       inst/extdata/template-repo-skeleton/ at the same relative path,
@@ -611,7 +611,7 @@ requirements:
       R/validateTemplate.R (.dta_template_own_entries, own_slots in .dta_template_check_creation);
       inst/shiny/dta_app/R/template_inherit.R (dta_template_verb_entries)
 
-  - id: REQ-TMPL-063
+  - id: REQ-TMPL-065
     text: >
       create_template_repo() shall write, whatever examples, ci and
       agent_skill say, the two JSON Schemas bundled under
@@ -817,7 +817,8 @@ requirements:
       are lists), a header_tag.label that is not a single string of at most
       32 characters once its whitespace is collapsed, a feature
       flag such as features.raw_yaml_editable that is not true or false, a
-      wrong kind or YAML that does not parse -- validate_template() shall report
+      data_types.default that is not SAS or R (in any letter case; REQ-TMPL-064),
+      a wrong kind or YAML that does not parse -- validate_template() shall report
       app_config_invalid at severity "error", one row per rejected value naming
       its key. A key the app does not know shall be reported
       app_config_unknown_key at severity "warning". An app configuration file
@@ -1486,3 +1487,41 @@ requirements:
       R/validateTemplate.R (.dta_template_unknown_tokens, token_unknown,
       .dta_template_unanswered_study_tokens, study_token_unanswered);
       inst/shiny/dta_app/R/template_core.R (dta_template_known_tokens)
+
+  - id: REQ-TMPL-063
+    text: >
+      validate_template() and lint_template_repo() shall accept a creation
+      template whose columns are declared in the R vocabulary (R character, R
+      numeric, R integer, R logical, R Date, R POSIXct, R hms, with an R format
+      such as R %Y-%m-%d), and a matrix template whose row labels and cells are
+      R types, and shall report a cell type that a matrix cannot hold (R
+      logical) with the code matrix_cells_type and a column type the R
+      vocabulary does not have (R Char) with the code column_spec_invalid.
+    risk: medium
+    category: functional
+    covers: [validate_template, lint_template_repo]
+    source: R/validateTemplate.R; R/DTAColumnSpecStructureR-class.R; R/DTAMatrixSpec-class.R
+    notes: >
+      A template carries its columns as plain lists and the validator builds
+      them like any specification, so the two vocabularies are accepted
+      wherever one is.
+
+  - id: REQ-TMPL-064
+    text: >
+      The key data_types.default of a library's dta-app.yaml shall be one of
+      SAS or R, in any letter case and with surrounding blanks ignored, and
+      validate_template() shall add no row for such a value. Any other value
+      (Python, a number, an empty or blank text, a list) shall be reported
+      app_config_invalid at severity "error", once, naming data_types.default,
+      and strict validation shall abort on it; an unknown key under data_types
+      shall be reported app_config_unknown_key at severity "warning", naming
+      data_types.defualt for a misspelled default, and strict validation shall
+      not abort on it.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: inst/shiny/dta_app/R/app_config.R (.cfg_backend); R/validateTemplate.R
+    notes: >
+      The key chooses the type system the application preselects for new
+      columns and new matrix cells and nothing else: a type written in YAML
+      keeps its mandatory prefix and both vocabularies stay available.

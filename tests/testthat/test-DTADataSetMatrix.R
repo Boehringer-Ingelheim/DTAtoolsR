@@ -1069,3 +1069,121 @@ test_that("id SAMPLE_ID with header 'Sample ID' loads and validates against that
   wrong <- mxd_file("SAMPLE_ID\tG1\tG2\ns1\t1\t2\ns2\t3\t4\n")
   expect_false(validation_status(mxd_checked(ds, wrong, "never"))$ok)
 })
+
+# ---- the R vocabulary ------------------------------------------------------------
+# Row labels and cells may be typed in the R vocabulary; the validation is the one
+# the SAS types get, on both holdings.
+
+mxd_r <- function(cells, label_type = "R character", headers = "", ...) {
+  dta_dataset_from_list(list(
+    id = "m", type = "matrix",
+    files = list(filename = "m.tsv", type = "tsv"),
+    row_labels = list(list(id = "ID", header = headers, type = label_type, nullable = FALSE)),
+    matrix = list(cells = cells), ...
+  ))
+}
+
+test_that("R numeric cells: range and finiteness findings are those of SAS Num cells", {
+  ds <- mxd_r(list(type = "R numeric", nullable = FALSE, range = list(max = 10), infinite = FALSE))
+  expect_identical(ds@specs@columns[["ID"]]@structure@backend, "R")
+  expect_identical(ds@matrix@cells@structure@backend, "R")
+  path <- mxd_file("\tS1\tS2\nr1\t11\tInf\nr2\t1\t2\n")
+  mxd_both(ds, path, function(d, stream) {
+    f <- mxd_findings(d)
+    expect_identical(f$keyword, c("finite", "maximum"), info = stream)
+    expect_identical(f$column, c("S2", "S1"), info = stream)
+    expect_equal(f$row, c(1L, 1L), info = stream)
+  })
+  # infinite: yes drops the finite finding; Inf is then judged by the range, and
+  # is above the maximum like 11 is
+  open <- mxd_r(list(type = "R numeric", nullable = FALSE, range = list(max = 10), infinite = TRUE))
+  mxd_both(open, path, function(d, stream) {
+    f <- mxd_findings(d)
+    expect_identical(f$keyword, c("maximum", "maximum"), info = stream)
+    expect_identical(sort(f$column), c("S1", "S2"), info = stream)
+  })
+})
+
+test_that("R numeric cells with nothing written about infinite reject infinite values", {
+  ds <- mxd_r(list(type = "R numeric", nullable = FALSE))
+  mxd_both(ds, mxd_file("\tS1\tS2\nr1\t1\t-Inf\n"), function(d, stream) {
+    expect_identical(mxd_findings(d)$keyword, "finite", info = stream)
+  })
+  mxd_both(ds, mxd_file("\tS1\tS2\nr1\t1.5\t-2\n"), function(d, stream) {
+    expect_true(validation_status(d)$ok, info = stream)
+  })
+})
+
+test_that("R integer cells: a whole number passes, a fraction or text is an import finding", {
+  ds <- mxd_r(list(type = "R integer", nullable = FALSE, range = list(min = 0)))
+  mxd_both(ds, mxd_file("\tS1\tS2\nr1\t0\t7\nr2\t3\t4\n"), function(d, stream) {
+    expect_true(validation_status(d)$ok, info = stream)
+  })
+  mxd_both(ds, mxd_file("\tS1\tS2\nr1\t-1\t7\n"), function(d, stream) {
+    f <- mxd_findings(d)
+    expect_identical(f$keyword, "minimum", info = stream)
+    expect_identical(f$column, "S1", info = stream)
+  })
+  mxd_both(ds, mxd_file("\tS1\tS2\nr1\t1.5\tabc\n"), function(d, stream) {
+    expect_identical(validation_status(d)$n_import_errors, 2L, info = stream)
+  })
+})
+
+test_that("R character cells are text: length and pattern apply, a leading zero is kept", {
+  ds <- mxd_r(list(type = "R character", nullable = FALSE, length = 3))
+  mxd_both(ds, mxd_file("\tS1\tS2\nr1\t007\t1234\n"), function(d, stream) {
+    f <- mxd_findings(d)
+    expect_identical(f$column, "S2", info = stream)
+    expect_identical(f$keyword, "maxLength", info = stream)
+    expect_equal(f$row, 1L, info = stream)
+  })
+  never <- mxd_checked(ds, mxd_file("\tS1\tS2\nr1\t007\t12\n"), "never")
+  expect_true(validation_status(never)$ok)
+  expect_identical(as.data.frame(tables(never)[[1]])$S1, "007")
+})
+
+test_that("a matrix mixes SAS and R types freely between its row labels and its cells", {
+  path <- mxd_file("\tS1\tS2\nr1\t1\t2\nr2\t3\t4\n")
+  for (ds in list(
+    mxd_r(list(type = "SAS Int", nullable = FALSE)),
+    mxd_r(list(type = "R integer", nullable = FALSE), label_type = "SAS Char")
+  )) {
+    mxd_both(ds, path, function(d, stream) {
+      expect_true(validation_status(d)$ok, info = stream)
+    })
+  }
+})
+
+test_that("a repeated row key is the generated rule's error for an R matrix as for a SAS one", {
+  ds <- mxd_r(list(type = "R integer", nullable = FALSE))
+  mxd_both(ds, mxd_file("\tS1\nr1\t1\nr1\t2\nr2\t3\n"), function(d, stream) {
+    m <- as.data.frame(messages(d))
+    expect_identical(m$rule_id[m$source == "rule"], ".matrix:row_key", info = stream)
+    expect_identical(validation_status(d)$n_rule_errors, 1L, info = stream)
+  })
+  # a wrong header text is a finding in the R vocabulary too
+  wrong <- mxd_r(list(type = "R integer", nullable = FALSE), headers = "gene")
+  mxd_both(wrong, mxd_file("other\tS1\nr1\t1\n"), function(d, stream) {
+    expect_false(validation_status(d)$ok, info = stream)
+  })
+})
+
+test_that("an R matrix prints, round-trips through as.list() and is not stale", {
+  ds <- mxd_r(list(type = "R numeric", nullable = FALSE, range = list(min = 0)))
+  expect_false(dta_is_stale(ds))
+  spec <- as.list(ds@matrix)
+  expect_identical(spec$cells$type, "R numeric")
+  expect_identical(dta_matrix_spec_from_list(spec), ds@matrix)
+  out <- capture.output(print(ds), type = "message")
+  expect_true(any(grepl("<DTADataSetMatrix>", out, fixed = TRUE)))
+  expect_true(any(grepl("cells: numeric", out, fixed = TRUE)))
+})
+
+test_that("the factory refuses an R cell type that is not a number or text, by the class SAS gets", {
+  for (type in c("R logical", "R Date", "R POSIXct", "R hms")) {
+    expect_error(
+      mxd_r(list(type = type, nullable = FALSE)),
+      class = "dta_matrix_cells_type", info = type
+    )
+  }
+})

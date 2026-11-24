@@ -330,6 +330,26 @@ render_html <- function(tag) {
 # wrap it.
 flat_message <- function(x) gsub("\\s+", " ", x)
 
+# Run the rest of the calling test with a library holding `yaml_lines` as its
+# dta-app.yaml: the app config of every server started afterwards. Nothing here
+# evaluates `code`; the argument is kept so existing call sites read the same.
+with_app_library <- function(yaml_lines, code, .local_envir = parent.frame()) {
+  lib <- normalizePath(withr::local_tempdir(.local_envir = .local_envir), winslash = "/")
+  writeLines(yaml_lines, file.path(lib, "dta-app.yaml"))
+  withr::local_envvar(
+    c(
+      DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", lib),
+      DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = NA,
+      DTATOOLS_TEMPLATE_REFRESH_SECONDS = NA,
+      DTATOOLS_TEMPLATE_CACHE_DIR = NA
+    ),
+    .local_envir = .local_envir
+  )
+  withr::local_options(list(DTAtools.template_dir = NULL), .local_envir = .local_envir)
+  clean_session_file()
+  invisible(lib)
+}
+
 # Clear every DTATOOLS_TEMPLATE_* variable for the duration of each test.
 # WHY: a developer machine with DTATOOLS_TEMPLATE_SOURCES exported would flip
 # the app into private-only mode and fail unrelated tests confusingly.

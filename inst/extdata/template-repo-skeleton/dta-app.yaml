@@ -101,6 +101,15 @@ kind: dta_app_config
 #   dta_yaml_download: true       # Download button for the whole DTA YAML.
 #   editing: true                 # false makes the app read-only: no edit menu, no editing at all.
 
+# --- data_types: which type system new columns start with ---------------------
+# A column type in YAML always starts with its type system ("SAS Char",
+# "R character"); both are always available and this setting never changes how
+# a type in a template or DTA file is read. It only chooses which one the app
+# preselects for NEW columns and new matrix cells. Any other value is an error
+# and keeps SAS.
+# data_types:
+#   default: SAS                  # SAS or R (any case): the type system the app starts new columns with.
+
 # --- exports: documents and validation downloads ------------------------------
 # exports:
 #   document: [markdown, markdown_pdf, word, word_template]  # Formats offered under "Export DTA"; [] hides the button.

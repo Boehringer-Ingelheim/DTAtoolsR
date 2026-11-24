@@ -1,5 +1,6 @@
-# The condition operator vocabulary. REQ-RULE-001 .. REQ-RULE-010, and the
-# number of values each operator takes, REQ-RULE-033.
+# The condition operator vocabulary. REQ-RULE-001 .. REQ-RULE-010, the
+# number of values each operator takes, REQ-RULE-033, and the operators on a
+# column of R logical values, REQ-RULE-034 and REQ-RULE-035.
 #
 # One test case per operator. Each builds a table holding a row the operator
 # selects, a row it does not, and a row whose value is missing, so that the
@@ -262,4 +263,121 @@ test_that("OQ-RULE-051 | an empty YAML entry in an in or not_in list matches a m
   numbers <- yaml::yaml.load("v: [1, ~]")$v
   qa_step("in selects the 1 row and the missing row of a number column", 2L, ro_selected("in", numbers, c(1, NA, 2)))
   qa_step("not_in selects only the 2 row of a number column", 1L, ro_selected("not_in", numbers, c(1, NA, 2)))
+})
+
+# ---- a column of R logical values -----------------------------------------------------
+#
+# REQ-RULE-034 and REQ-RULE-035. A logical column holds TRUE, FALSE and missing,
+# and a rule operand written as text (equals: T) has to be read as the logical it
+# spells. Rows 1 and 4 below hold TRUE, rows 2 and 5 FALSE, rows 3 and 6 are
+# missing, so every operand selects a number of rows that is counted by hand.
+
+ro_flags <- c(TRUE, FALSE, NA, TRUE, FALSE, NA)
+
+# How many rows a conditional rule's message says failed its THEN clause.
+ro_rows <- function(message) as.integer(sub("^.*: ([0-9]+) rows.*$", "\\1", message))
+
+test_that("OQ-RULE-052 | equals, not_equals, in and not_in read T, true, True and a YAML true as the logical they spell, and a non-spelling matches nothing | REQ-RULE-034", {
+  for (spelling in list("T", "TRUE", "true", "True", TRUE)) {
+    qa_step(
+      sprintf("equals %s selects the two TRUE rows", format(spelling)),
+      2L, ro_selected("equals", spelling, ro_flags)
+    )
+  }
+  for (spelling in list("F", "FALSE", "false", "False", FALSE)) {
+    qa_step(
+      sprintf("equals %s selects the two FALSE rows", format(spelling)),
+      2L, ro_selected("equals", spelling, ro_flags)
+    )
+  }
+  qa_step("the alias equal reads T the same way", 2L, ro_selected("equal", "T", ro_flags))
+
+  qa_step("not_equals T selects the FALSE rows, and not the missing ones", 2L, ro_selected("not_equals", "T", ro_flags))
+  qa_step("the alias not_equal reads F the same way", 2L, ro_selected("not_equal", "F", ro_flags))
+  qa_step("not_equals true (a YAML true) selects the FALSE rows", 2L, ro_selected("not_equals", TRUE, ro_flags))
+
+  qa_step("in [T, F] selects all four rows that hold a value", 4L, ro_selected("in", c("T", "F"), ro_flags))
+  qa_step("in [T, False] written as a YAML list selects all four", 4L, ro_selected("in", list("T", "False"), ro_flags))
+  qa_step("in [true, F], a YAML logical beside a text", 4L, ro_selected("in", list(TRUE, "F"), ro_flags))
+  qa_step("in [T] selects the two TRUE rows", 2L, ro_selected("in", "T", ro_flags))
+
+  # As for every other column, not_in selects the missing values (REQ-RULE-003).
+  qa_step("not_in [T] selects the FALSE rows and the missing ones", 4L, ro_selected("not_in", "T", ro_flags))
+  qa_step("not_in [T, F] selects the two missing rows only", 2L, ro_selected("not_in", c("T", "F"), ro_flags))
+
+  # An operand that is no spelling of a logical value.
+  for (operand in c("yes", "1", " T", "T ", "tRuE", "maybe")) {
+    qa_step(sprintf("equals '%s' selects no row and raises nothing", operand), 0L, ro_selected("equals", operand, ro_flags))
+    qa_step(sprintf("in ['%s'] selects no row", operand), 0L, ro_selected("in", operand, ro_flags))
+    qa_step(
+      sprintf("not_equals '%s' selects every row that holds a value", operand),
+      4L, ro_selected("not_equals", operand, ro_flags)
+    )
+  }
+  qa_step(
+    "a set of a spelling and a non-spelling selects the rows of the spelling",
+    2L, ro_selected("in", list("T", "yes"), ro_flags)
+  )
+})
+
+test_that("OQ-RULE-053 | an ordering operator on a logical column reads TRUE as 1 and FALSE as 0 | REQ-RULE-004 REQ-RULE-034", {
+  # LIM-032: the ordering operators are numeric, and a logical value is a
+  # number in R, so greater: 0 means "is TRUE". Pinned as it is; the linter
+  # does not report it either (OQ-SPEC-062).
+  qa_step("greater 0 selects the two TRUE rows", 2L, ro_selected("greater", 0, ro_flags))
+  qa_step("less_equal 0 selects the two FALSE rows", 2L, ro_selected("less_equal", 0, ro_flags))
+  qa_step("greater_equal 1 selects the two TRUE rows", 2L, ro_selected("greater_equal", 1, ro_flags))
+})
+
+test_that("OQ-RULE-054 | the values a column holds decide how an operand is read, not the type its specification declares | REQ-RULE-035", {
+  # The same operand against the same spellings, held as text and held as logical.
+  qa_step(
+    "a text column of T, TRUE, F, true and a missing value: equals T selects the text T only",
+    1L, ro_selected("equals", "T", c("T", "TRUE", "F", "true", NA))
+  )
+  qa_step(
+    "the same spellings typed as logical values: equals T selects the three TRUE rows",
+    3L, ro_selected("equals", "T", c(TRUE, TRUE, FALSE, TRUE, NA))
+  )
+
+  # A rule that selects the TRUE rows and requires their ID to be a.
+  rule <- DTARuleColCondition(
+    id = "flagged",
+    condition = list(FLAG = list(equals = "T")),
+    then = list(ID = list(`in` = list("a")))
+  )
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "R character", nullable = FALSE),
+      FLAG = DTAColumnSpec(id = "FLAG", type = "R logical", nullable = TRUE)
+    ),
+    rules = list(rule)
+  )
+
+  # validate_table() types nothing. The column is text there whatever it
+  # declares (and its text is a type finding of its own), so only the text T
+  # meets the condition, and its row is the one allowed to be a.
+  raw <- data.frame(
+    ID = c("a", "b", "c", "d", "e"), FLAG = c("T", "TRUE", "F", "true", NA),
+    stringsAsFactors = FALSE
+  )
+  untyped <- validate_table(specs, raw, verbose = FALSE)
+  qa_step(
+    "validated as the text it is, the rule holds",
+    TRUE, isTRUE(untyped$rules_valid)
+  )
+
+  # A file is typed first: TRUE, TRUE, FALSE, TRUE, missing. Rows a, b and d meet
+  # the condition, b and d are not a, so the rule reports two rows.
+  path <- file.path(qa_tempdir(), "flags.csv")
+  writeLines(c("ID,FLAG", "a,T", "b,TRUE", "c,F", "d,true", "e,"), path)
+  ds <- DTADataSetTabular(id = "flags", specs = specs, files = list(DTAFileCSV(filename = "flags.csv")))
+  ds <- check(load_file(ds, file = path, handler_index = 1, stream = "never"), persist = FALSE, quiet = TRUE)
+  msgs <- as.data.frame(messages(ds))
+  qa_step("read from a file and typed by its declaration, the rule is violated once", 1L, as.integer(validation_status(ds)$n_rule_errors))
+  qa_step(
+    "and reports the two rows b and d",
+    2L,
+    ro_rows(msgs$message[msgs$source == "rule"])
+  )
 })

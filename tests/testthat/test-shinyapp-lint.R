@@ -278,6 +278,36 @@ test_that("dta_numeric_column_ids lists only Num and Int columns", {
   )
 })
 
+test_that("dta_numeric_column_ids also lists R numeric and R integer, and no R text, logical or date", {
+  dta <- app_fixture_dta()
+  set_col <- app_fn("dta_set_column")
+  for (spec in list(
+    c("R_NUM", "numeric"), c("R_INT", "integer"), c("R_CHR", "character"),
+    c("R_LGL", "logical"), c("R_DAT", "Date")
+  )) {
+    res <- set_col(dta, "clinical_data", id = spec[[1]], backend = "R", type = spec[[2]], nullable = TRUE)
+    expect_true(res$ok, info = res$error)
+    dta <- res$value
+  }
+
+  expect_setequal(
+    app_fn("dta_numeric_column_ids")(dta, "clinical_data"),
+    c("AGE", "HEIGHT", "WEIGHT", "BMI", "R_NUM", "R_INT")
+  )
+
+  # What the picker offers, the rule is accepted on; what it leaves out is refused.
+  rule <- function(col) {
+    app_fn("dta_set_rule")(
+      dta, "clinical_data",
+      id = paste0("range_", col), type = "col_range", columns = col, min = 0, max = 9
+    )
+  }
+  expect_true(rule("R_NUM")$ok, info = rule("R_NUM")$error)
+  expect_true(rule("R_INT")$ok, info = rule("R_INT")$error)
+  expect_false(rule("R_CHR")$ok)
+  expect_false(rule("R_LGL")$ok)
+})
+
 test_that("a range rule on a text column is refused with the reason in rv$rule_msg", {
   lint_clean_session()
 

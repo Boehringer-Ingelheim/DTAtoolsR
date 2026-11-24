@@ -47,7 +47,8 @@ dta_normalise_spec_values <- function(values) {
     cli_abort(
       c(
         "Permitted values or examples were read as logical, not as text.",
-        "i" = "YAML reads an unquoted {.code Y}, {.code N}, {.code yes} or {.code no} as a logical; quote them: {.code values: [\"Y\", \"N\"]}."
+        "i" = "YAML reads an unquoted {.code Y}, {.code N}, {.code yes} or {.code no} as a logical; quote them: {.code values: [\"Y\", \"N\"]}.",
+        "i" = "For an {.code R logical} column the values must be quoted as well: {.code values: [\"TRUE\", \"FALSE\"]}."
       ),
       class = "dta_spec_logical_values"
     )
@@ -219,6 +220,18 @@ DTAColumnSpec <- S7::new_class(
       )
     }
 
+    # The evaluator skips a pattern on a boolean column, so it would be
+    # accepted and then never enforced: refuse it instead.
+    if (!is.null(self@pattern) &&
+      !is.null(self@structure) &&
+      identical(self@structure@backend, "R") &&
+      identical(self@structure@type, "logical")) {
+      cli_abort(
+        "{self@id}: 'pattern' is not supported for an R logical column.",
+        class = "dta_spec_logical_pattern"
+      )
+    }
+
     # `self@id` (and, below, `ex`/`self@pattern`) are INTERPOLATED as
     # variables, never pre-resolved with glue::glue() and handed to cli_abort()
     # as a finished string: cli parses `{...}` in the literal message it is
@@ -319,13 +332,19 @@ DTAColumnSpec <- S7::new_class(
 #' @title Get Arrow Type
 #' @description
 #' Returns the corresponding Arrow schema type for a given DTAColumnSpec
-#' object based on its `type` property.
+#' object based on its `type` property. The lookup depends on the structure's
+#' backend: a SAS `Char`, `Num` and `Int` give `"utf8"`, `"double"` and
+#' `"int32"`, and an R `character`, `numeric`, `integer` and `logical` give
+#' `"utf8"`, `"double"`, `"int32"` and `"bool"`. The temporal types of either
+#' backend (they are validated as text) have no Arrow type and give
+#' `NA_character_`, as does any other backend.
 #' @importFrom glue glue
 #' @param x A DTAColumnSpec object.
 #' @return A character string representing the Arrow schema type.
 #' @examples
 #' col <- DTAColumnSpec(id = "AGE", type = "SAS Char")
 #' get_arrow_type(col)
+#' get_arrow_type(DTAColumnSpec(id = "AGE", type = "R numeric"))
 #' @export
 get_arrow_type <- function(x) {
   if (!inherits(x, "DTAtools::DTAColumnSpec")) {
@@ -338,11 +357,21 @@ get_arrow_type <- function(x) {
   if (is.null(type)) {
     cli::cli_abort("Type is not set for {x@id}.")
   }
-  switch(type,
-    "Char" = "utf8",
-    "Num" = "double",
-    "Int" = "int32",
-    "Bool" = "bool",
+  switch(x@structure@backend,
+    SAS = switch(type,
+      "Char" = "utf8",
+      "Num" = "double",
+      "Int" = "int32",
+      "Bool" = "bool",
+      NA_character_
+    ),
+    R = switch(type,
+      "character" = "utf8",
+      "numeric" = "double",
+      "integer" = "int32",
+      "logical" = "bool",
+      NA_character_
+    ),
     NA_character_
   )
 }
@@ -728,6 +757,8 @@ method(as_json_schema, DTAColumnSpec) <- function(x) {
           values <- c(values, NA)
         } else if ("integer" %in% schema$type) {
           values <- c(values, NA_integer_)
+        } else if ("boolean" %in% schema$type) {
+          values <- c(values, NA)
         }
       }
     }

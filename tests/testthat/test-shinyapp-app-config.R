@@ -72,6 +72,7 @@ test_that("defaults reproduce today's literals, with an empty organisation", {
   expect_null(d$links$documentation)
   expect_true("documentation" %in% names(d$links))
   expect_true(all(unlist(d$features)))
+  expect_identical(d$data_types, list(default = "SAS"))
   expect_identical(d$exports$default_document, "word")
   expect_identical(d$exports$validation_messages, c("csv", "tsv", "xlsx", "html"))
   expect_identical(nrow(d$exports$word_templates), 0L)
@@ -681,4 +682,159 @@ test_that("header_tag must be a mapping, and an unknown key under it is only a w
   expect_length(problem_keys(typo, "error"), 0)
   expect_null(typo$config$header_tag$color)
   expect_identical(typo$config$header_tag$label, "GxP")
+})
+
+# ---- data_types ----------------------------------------------------------------
+# data_types.default only picks the type system (backend) the app preselects for
+# new columns and new matrix cells. It never changes how types in YAML are read.
+
+test_that("data_types.default is SAS when the key, the section or the whole file is absent", {
+  for (lines in list(
+    character(0), "kind: dta_app_config", "branding: {app_title: X}",
+    "data_types:", "data_types: {}"
+  )) {
+    res <- parse_cfg(lines)
+    expect_identical(nrow(res$problems), 0L, info = paste(lines, collapse = " | "))
+    expect_identical(res$config$data_types, list(default = "SAS"), info = paste(lines, collapse = " | "))
+  }
+})
+
+test_that("data_types.default accepts SAS or R in any case, trims it and stores it canonical", {
+  cases <- list(
+    c("R", "R"), c("r", "R"), c("'  R  '", "R"), c("\"\\tr\\n\"", "R"),
+    c("SAS", "SAS"), c("sas", "SAS"), c("Sas", "SAS"), c("' sAs'", "SAS")
+  )
+  for (case in cases) {
+    res <- parse_cfg(c("data_types:", paste0("  default: ", case[[1]])))
+    expect_identical(nrow(res$problems), 0L, info = case[[1]])
+    expect_identical(res$config$data_types, list(default = case[[2]]), info = case[[1]])
+  }
+})
+
+test_that("any other data_types.default is one error and the default SAS is kept", {
+  # YAML spellings of: a typo, a number, empty and whitespace strings, an empty
+  # list, a mapping, null (an empty value, `~`), NA, a boolean, a two-word string.
+  for (value in c(
+    "Python", "R2", "3", "''", "'   '", "[]", "{a: 1}", "", "~", ".na", "yes",
+    "'S A S'", "[SAS, R]"
+  )) {
+    res <- parse_cfg(c("branding: {app_title: Kept}", "data_types:", paste0("  default: ", value)))
+    expect_identical(nrow(res$problems), 1L, info = value)
+    expect_identical(res$problems$key, "data_types.default", info = value)
+    expect_identical(res$problems$severity, "error", info = value)
+    expect_identical(res$problems$type, "value", info = value)
+    expect_identical(res$config$data_types, list(default = "SAS"), info = value)
+    # the rest of the file is still applied
+    expect_identical(res$config$branding$app_title, "Kept", info = value)
+  }
+})
+
+test_that("an unknown key beside a valid data_types.default does not lose it", {
+  res <- parse_cfg(c("data_types: {default: R, allowed: [SAS]}"))
+  expect_identical(problem_keys(res, "warning"), "data_types.allowed")
+  expect_length(problem_keys(res, "error"), 0)
+  expect_identical(res$config$data_types, list(default = "R"))
+})
+
+test_that("an unknown key under data_types or a misspelled section is only a warning", {
+  nested <- parse_cfg("data_types: {defualt: R}")
+  expect_identical(problem_keys(nested, "warning"), "data_types.defualt")
+  expect_identical(nested$problems$type, "unknown_key")
+  expect_length(problem_keys(nested, "error"), 0)
+  expect_identical(nested$config$data_types$default, "SAS")
+
+  section <- parse_cfg("data_type: {default: R}")
+  expect_identical(problem_keys(section, "warning"), "data_type")
+  expect_identical(section$problems$type, "unknown_key")
+  expect_identical(section$config$data_types$default, "SAS")
+})
+
+test_that("data_types must be a mapping", {
+  res <- parse_cfg("data_types: R")
+  expect_identical(problem_keys(res, "error"), "data_types")
+  expect_identical(res$config$data_types$default, "SAS")
+})
+
+test_that("an unusable file keeps data_types.default at SAS, like every other setting", {
+  # Wrong kind, unreadable YAML and a missing file all fail open to the defaults.
+  wrong_kind <- parse_cfg(c("kind: something_else", "data_types: {default: R}"))
+  expect_identical(problem_keys(wrong_kind, "error"), "kind")
+  expect_identical(wrong_kind$config$data_types, list(default = "SAS"))
+
+  bad_yaml <- parse_cfg(c("data_types: {default: R}", "organisation: [unclosed", "  : : :"))
+  expect_identical(bad_yaml$problems$severity, "error")
+  expect_identical(bad_yaml$config$data_types, list(default = "SAS"))
+
+  missing <- app_fn("parse_dta_app_config")(file.path(withr::local_tempdir(), "nope.yaml"))
+  expect_identical(missing$config$data_types, list(default = "SAS"))
+})
+
+test_that(".cfg_backend rejects values a YAML file cannot produce just as firmly", {
+  check <- app_fn(".cfg_backend")
+  expect_identical(check("r"), list(ok = TRUE, value = "R"))
+  expect_identical(check(" Sas "), list(ok = TRUE, value = "SAS"))
+  for (v in list(NULL, NA, NA_character_, 3L, TRUE, list(), list("R"), c("SAS", "R"), character(0), "")) {
+    r <- check(v)
+    expect_false(r$ok, info = deparse(v))
+    expect_match(r$msg, "SAS, R", fixed = TRUE, info = deparse(v))
+  }
+})
+
+test_that("the app config's backend literal is exactly the package's supported backends", {
+  # The parser also runs inside validate_template(), where it cannot ask the
+  # app's helpers, so it carries its own copy of the list. This pins the copy.
+  pkg <- get("__DTAtools_supported_backends__", envir = asNamespace("DTAtools"))
+  expect_identical(app_fn("dta_app_config_backends")()[[1]], "SAS")
+  expect_true(app_fn("dta_app_config_defaults")()$data_types$default %in% pkg)
+  expect_setequal(app_fn("dta_app_config_backends")(), pkg)
+})
+
+test_that("dta_app_config() hands the app the configured data_types.default and keeps SAS otherwise", {
+  local_clean_app_config_env()
+  lib <- normalizePath(withr::local_tempdir(), winslash = "/")
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", lib))
+  fn <- app_fn("dta_app_config")
+
+  # no file at all
+  expect_identical(fn(refresh = TRUE)$data_types, list(default = "SAS"))
+
+  writeLines("data_types: {default: r}", file.path(lib, "dta-app.yaml"))
+  expect_identical(fn(refresh = TRUE)$data_types, list(default = "R"))
+
+  # a bad value is warned about once, by key, and the default stays
+  writeLines("data_types: {default: Python}", file.path(lib, "dta-app.yaml"))
+  warned <- character(0)
+  cfg <- withCallingHandlers(fn(refresh = TRUE), warning = function(w) {
+    warned <<- c(warned, conditionMessage(w))
+    invokeRestart("muffleWarning")
+  })
+  expect_identical(cfg$data_types, list(default = "SAS"))
+  expect_true(any(grepl("data_types.default", warned, fixed = TRUE)))
+})
+
+test_that("the skeleton's dta-app.yaml documents every config section, data_types included", {
+  skeleton <- system.file("extdata", "template-repo-skeleton", "dta-app.yaml", package = "DTAtools")
+  expect_true(nzchar(skeleton))
+  lines <- readLines(skeleton, encoding = "UTF-8")
+
+  # Every key is commented out, and each top-level section has its own line.
+  # `source` is bookkeeping (where the file was found), not a setting.
+  sections <- setdiff(names(app_fn("dta_app_config_defaults")()), "source")
+  expect_true("data_types" %in% sections)
+  for (key in sections) {
+    expect_true(any(grepl(paste0("^# ", key, ":"), lines)), info = key)
+  }
+
+  # Uncommenting the data_types block as the file instructs gives its default.
+  start <- which(lines == "# data_types:")
+  expect_length(start, 1L)
+  end <- start
+  while (end < length(lines) && startsWith(lines[[end + 1L]], "#   ")) end <- end + 1L
+  expect_gt(end, start)
+  block <- sub("^# ", "", lines[start:end])
+  res <- parse_cfg(c("kind: dta_app_config", block))
+  expect_identical(nrow(res$problems), 0L)
+  expect_identical(res$config$data_types, list(default = "SAS"))
+  # ... and the documented value is the one the parser defaults to.
+  expect_match(block[[2]], "^  default: SAS\\b")
 })

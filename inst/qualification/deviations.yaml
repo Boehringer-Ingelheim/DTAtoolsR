@@ -438,6 +438,40 @@ deviations:
     opened: 2026-11-08
     closed: 2026-11-08
 
+  - id: DEV-018
+    title: A difftime column is matched against a SAS time format as its number of seconds
+    status: open
+    severity: minor
+    affects: [REQ-TYPE-010]
+    observed: >
+      A column held in R as a plain difftime and declared SAS Time with the
+      format TIME8. is reported once per non-missing value with the keyword
+      format: the check compares the text of the number of seconds, 52200,
+      with the format, and 52200 has no colons. A typed Date or POSIXct column
+      under DATE9. or DATETIME20. carries no display text and is skipped by the
+      same check, and so is a difftime of class hms.
+    expected: >
+      A difftime holding 52200 seconds is the equivalent of the text 14:30:00,
+      which fits TIME8. when it is read from a file, so the typed column is not
+      reported either; the format check skips every typed date and time
+      vector alike.
+    impact: >
+      Fails loudly and never passes a wrong value: a delivery built in R with a
+      time of day held as a plain difftime and described with a SAS time format
+      is rejected on every non-missing row although the same times as text
+      validate. The cost is a false format finding on the column-specification
+      axis for that one combination.
+    workaround: >
+      Hold the time of day as text (format it as hh:mm:ss) or as class hms
+      before validation, or declare the column R hms, whose format check skips
+      every typed time (LIM-027).
+    reference: >
+      R/columnSpecChecks.R (dta_check_column_spec, the SAS format branch);
+      inst/qualification/tests/test-OQ-TYPE-rbackend.R (OQ-TYPE-042);
+      tests/testthat/test-columnspec-format-r.R
+    opened: 2026-11-19
+    closed: null
+
 limitations:
   - id: LIM-001
     title: A row whose every field is empty is dropped by the CSV reader
@@ -489,17 +523,18 @@ limitations:
       rather than deferring it to the first scan.
 
   - id: LIM-005
-    title: A logical column built in R cannot satisfy any declarable column type
+    title: A logical column built in R can satisfy only an R logical declaration, never a SAS type
     affects: [REQ-TYPE-011]
     reference: inst/qualification/tests/test-OQ-TYPE-declared.R
     consequence: >
-      A logical value's JSON type is reported as "boolean", and no declarable
-      column type maps to it: the SAS backend rejects a Bool type at
-      construction. A table built in R with a logical flag column therefore
-      fails the type check on every row, while the same values read from a file
-      as the text TRUE and FALSE validate cleanly against a Char column. A
-      caller constructing tables in R must convert logical columns to text
-      first.
+      A logical value's JSON type is reported as "boolean", and only R logical
+      maps to it: the SAS backend has no logical type and rejects a Bool type
+      at construction. A table built in R with a logical flag column therefore
+      fails the type check on every row against a column declared SAS Char,
+      SAS Num or any other SAS type, while the same values read from a file as
+      the text TRUE and FALSE validate cleanly against a SAS Char column. A
+      caller constructing tables in R declares the flag R logical, or converts
+      the column to text first when the specification is written in SAS types.
 
   - id: LIM-004
     title: Benchmark metrics are unavailable when a dataset is checked directly
@@ -814,3 +849,131 @@ limitations:
       allowed. A specification cannot allow one and refuse the other, so a
       delivery in which an empty cell means "not measured" and NA means "not
       applicable" cannot have the two told apart by the validator.
+
+  - id: LIM-027
+    title: A typed date, time or difftime vector is not checked against an R Date, POSIXct or hms declaration
+    affects: [REQ-TYPE-017]
+    reference: R/columnSpecChecks.R (dta_check_column_spec); tests/test-OQ-TYPE-rbackend.R (OQ-TYPE-041)
+    consequence: >
+      The format of an R Date, R POSIXct or R hms is matched against text. A
+      table typed in R that holds a Date, POSIXct, difftime or hms vector in
+      such a column has no display text to match, so the format is not
+      checked, and the class is not compared with the declared type either: a
+      Date vector under R POSIXct, or a POSIXct vector under R hms, produces no
+      finding. Text read from a file is always checked. A caller building a
+      table in R that wants the format enforced converts the column to text
+      with format() first.
+
+  - id: LIM-028
+    title: The text NA is a missing value in a delimited file and an import error elsewhere
+    affects: [REQ-TYPE-021, REQ-TYPE-022]
+    reference: R/DTAFileTabular-class.R (dta_reader_na_values); R/importConversion.R; tests/test-OQ-TYPE-rbackend.R (OQ-TYPE-045)
+    consequence: >
+      The delimited-text readers treat NA as a missing value before any typing
+      sees it, so a CSV or TSV field holding NA in an R logical column is
+      missing and never an import error. The same text read from a SAS dataset
+      character variable, or handed to the typing directly, is ordinary text
+      that is not a logical token and is reported as not_convertible. A
+      delivery that must not contain NA in a logical column cannot rely on a
+      finding for it in a delimited file; it constrains the column as not
+      nullable, which reports the missing value instead.
+
+  - id: LIM-029
+    title: R date and time formats have no time zone, leap second, month name, AM/PM or two-digit year
+    affects: [REQ-TYPE-019, REQ-TYPE-020]
+    reference: R/rTemporalFormat.R; tests/test-OQ-TYPE-rbackend.R (OQ-TYPE-043)
+    consequence: >
+      An R format is built from fixed-width numeric fields and a closed set of
+      literal characters. A time zone (%z, %Z), a month or weekday name (%b,
+      %B, %a, %A), AM/PM (%p, %I) and a two-digit year (%y) are refused when
+      the specification is built, and the seconds 60 of a leap second never fit
+      (23:59:60 is a finding). A delivery that writes such dates describes them
+      with the SAS formats instead (SAS Date with DATE9. for 15AUG2025), or
+      constrains the text with a pattern.
+
+  - id: LIM-030
+    title: An R hms value is a time of day, not a duration
+    affects: [REQ-TYPE-019]
+    reference: R/rTemporalFormat.R; tests/test-OQ-TYPE-rbackend.R (OQ-TYPE-039)
+    consequence: >
+      A column declared R hms accepts 00:00:00 to 23:59:59 only. Hours of 24
+      or more, as in 24:00:00 or 100:00:00, are a format finding, where SAS Time
+      accepts them. A delivery that holds elapsed time beyond a day declares it
+      SAS Time, or R numeric in seconds.
+
+  - id: LIM-031
+    title: The column-label header of a matrix is a SAS Char column whatever the cells use
+    affects: [REQ-MATRIX-060]
+    reference: R/DTAMatrixSpec-class.R; tests/test-OQ-MATRIX-cells.R (OQ-MATRIX-058)
+    consequence: >
+      The specification of a matrix's data-column labels is built by the
+      package and is a SAS Char column even when every row label and cell is
+      declared in the R vocabulary. It is not a type the author declares and
+      nothing prints it, but a reader of the object (not of the YAML) finds the
+      backend SAS beside R cells.
+
+  - id: LIM-032
+    title: A numeric operator on an R logical column reads TRUE as 1 and FALSE as 0
+    affects: [REQ-RULE-034]
+    reference: R/evaluateRules.R; tests/test-OQ-RULE-operators.R (OQ-RULE-053)
+    consequence: >
+      A rule condition on an R logical column with greater, less, greater_equal,
+      less_equal, min or max compares TRUE as 1 and FALSE as 0, and the
+      specification linter accepts it, so greater: 0 selects the TRUE rows.
+      A range rule on the same column is refused (rule_range_non_numeric).
+      An author who means "is true" writes equals: true, which also reads
+      better; the numeric operators are not reported.
+
+  - id: LIM-033
+    title: The application offers a new matrix only the default type system's cell types, and an existing matrix only its own
+    affects: [REQ-APP-056, REQ-APP-057]
+    reference: >
+      inst/shiny/dta_app/app.R (add_ds_body, mx_modal_body);
+      tests/test-OQ-APP-backends.R (OQ-APP-067, OQ-APP-069, OQ-APP-070)
+    consequence: >
+      The Add dataset dialog lists the three cell types of the type system
+      that data_types.default names (SAS Num, SAS Int, SAS Char, or R numeric,
+      R integer, R character), and the matrix-layout editor lists the three of
+      the system the matrix's cell type is written in. Neither dialog offers
+      the other system, so the application has no form that creates a matrix
+      of the system the library does not prefer, or converts a matrix from one
+      system to the other. Such a matrix is written in the raw YAML editor of
+      the application, or comes from a template or a specification file; the
+      application then keeps it in its own system and edits it there. A client
+      that sends the other system's cell type for a new matrix is not refused
+      (REQ-APP-041).
+
+  - id: LIM-034
+    title: The application cannot make an R Date, POSIXct or hms column without a format
+    affects: [REQ-APP-060, REQ-TYPE-016]
+    reference: >
+      inst/shiny/dta_app/R/utils_dta.R (dta_set_column); R/DTAColumnSpecStructureR-class.R;
+      tests/test-OQ-APP-backends.R (OQ-APP-073)
+    consequence: >
+      An R Date, R POSIXct or R hms column always carries a format
+      (REQ-TYPE-016). A specification loaded without one is saved by the
+      application with the format of its type written in (R %Y-%m-%d, R
+      %Y-%m-%d %H:%M:%S, R %H:%M:%S), so the saved text differs from the text
+      that was loaded, and emptying the Format box of such a column in the
+      editor brings the default back instead of removing the format. The
+      default is the format the checks enforce all the same, so no verdict
+      changes; the difference is in the file only.
+
+  - id: LIM-035
+    title: A typed SAS date or time is cut to what its R format shows, and then passes the format check
+    affects: [REQ-FILE-047, REQ-CONT-033]
+    reference: >
+      R/DTAFileSAS7BDAT-class.R (dta_sas7bdat_normalise); R/rTemporalFormat.R
+      (dta_r_render_temporal); tests/test-OQ-FILE-sas7bdat.R (OQ-FILE-073)
+    consequence: >
+      A date, datetime or time that a .sas7bdat or .xpt variable holds as a
+      number and that is declared R Date, R POSIXct or R hms is written as the
+      text of the column's format, so a field the format does not show is
+      dropped: 14:30:45 declared R hms with the format R %H:%M reads 14:30,
+      and 14:30:45.1234 with %OS3 reads 14:30:45.123, cut and never rounded.
+      The text always fits the format it was made from, so the format check
+      cannot report a value that is finer than its format. A SAS time under
+      TIME5. behaves the same today. Text read from a delimited file is
+      matched exactly, and a typed vector in a table built in R is not matched
+      at all (LIM-027). A delivery in which the seconds or the fraction must
+      be present declares the format with them.
