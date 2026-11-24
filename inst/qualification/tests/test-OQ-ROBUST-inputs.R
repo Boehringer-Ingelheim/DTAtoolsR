@@ -179,33 +179,142 @@ test_that("OQ-ROBUST-011 | an awkwardly shaped delivery is validated on its cont
   qa_step("a very wide delivery is validated", "validated", wide_status$status)
 })
 
+# What load_file() and then check() made of one delivery, reduced to the facts
+# REQ-ROBUST-012 speaks about. `row` is the data row of the delivery whose ID
+# carries the bytes in question. An error condition from either entry point is a
+# refusal, and the entry point and the condition's classes are all that is
+# recorded; otherwise the verdict, whether any message names that row of column
+# ID, and the bytes of the ID that was read back.
+#
+# A refusal is recognised as an error and not by its class: the reader's
+# rejection of bytes that are not valid UTF-8 is Arrow's own, and carries only
+# generic classes (`rlang_error` or `simpleError`, then `error` and `condition`)
+# and no package class, and its text is not ours to match. The classes are
+# recorded as evidence only, so the report shows it if a package class is ever
+# added. That a refusal is about the bytes and not about something else the
+# case did wrong is shown by ri_bytes_outcome() being run on a delivery with
+# valid bytes as well.
+ri_bytes_outcome <- function(path, stream, row = 1L) {
+  loaded <- tryCatch(ri_load(path, stream), error = function(e) e)
+  if (inherits(loaded, "error")) {
+    return(list(refused_at = "load_file()", classes = class(loaded)))
+  }
+  checked <- tryCatch(check(loaded, persist = FALSE, quiet = TRUE), error = function(e) e)
+  if (inherits(checked, "error")) {
+    return(list(refused_at = "check()", classes = class(checked)))
+  }
+
+  messages_frame <- as.data.frame(messages(checked))
+  rows <- as.data.frame(tables(checked)[[1]])
+  read_back <- if (nrow(rows) < row || is.na(rows$ID[[row]])) NULL else charToRaw(rows$ID[[row]])
+  list(
+    refused_at = NULL,
+    ok = validation_status(checked)$ok,
+    names_row = any(messages_frame$column %in% "ID" & messages_frame$row %in% row),
+    id = read_back
+  )
+}
+
+# What an outcome looks like in the evidence: which branch of the contract it
+# took and the observed values behind it, so that a failing step shows what was
+# seen and not only that it failed.
+ri_outcome_detail <- function(outcome, row) {
+  if (!is.null(outcome$refused_at)) {
+    return(sprintf(
+      "refused by %s, condition class %s", outcome$refused_at,
+      paste(outcome$classes, collapse = "/")
+    ))
+  }
+  sprintf(
+    "read: ok = %s, a message names row %d of ID = %s, stored ID bytes = %s",
+    outcome$ok, row, outcome$names_row,
+    if (is.null(outcome$id)) "none" else paste(as.character(outcome$id), collapse = " ")
+  )
+}
+
 test_that("OQ-ROBUST-012 | bytes that are not valid in the declared encoding are reported | REQ-ROBUST-012", {
   dir <- qa_tempdir()
-  path <- file.path(dir, "bad-encoding.csv")
 
-  # A byte sequence that is not valid UTF-8. Reinterpreting it silently would
-  # change a value in the delivery without saying so, which is the one thing a
-  # transfer record must never do.
-  con <- file(path, open = "wb")
-  writeBin(charToRaw("ID,AGE\n"), con)
-  writeBin(c(charToRaw("A00000"), as.raw(c(0xff, 0xfe)), charToRaw(",30\n")), con)
-  close(con)
+  # The contract is the requirement's own sentence: bytes that are not valid in
+  # the declared encoding "shall be reported rather than silently
+  # reinterpreted". Two outcomes meet it, and the case accepts exactly those:
+  #   (a) an error condition, from load_file() or from check();
+  #   (b) a table that is read, but whose verdict is not ok and has a message
+  #       naming the row and column ID, and whose stored ID is the delivered
+  #       bytes and nothing else -- no U+FFFD, no dropped bytes, no NA.
+  # What it forbids is the third outcome, a table whose verdict is clean because
+  # the bytes were turned into something valid on the way in. That would change
+  # a value in the delivery without saying so, which is the one thing a transfer
+  # record must never do.
+  #
+  # The declared encoding is the default, UTF-8, and the bytes FF FE occur in no
+  # UTF-8 text.
+  delivered <- c(charToRaw("A00000"), as.raw(c(0xff, 0xfe)))
 
-  outcome <- tryCatch(
-    {
-      ds <- check(ri_load(path), persist = FALSE, quiet = TRUE)
-      status <- validation_status(ds)
-      if (nrow(status) == 0) "no table" else "validated"
-    },
-    error = function(e) "condition"
+  # The delivery as it was first written: its only data row holds the bytes.
+  only_row <- file.path(dir, "bad-only-row.csv")
+  writeBin(c(charToRaw("ID,AGE\n"), delivered, charToRaw(",30\n")), only_row)
+
+  # The same bytes in the last of 3001 data rows. Read in 1 KiB blocks (set
+  # below), the streaming reader has long left its first block by then, so the
+  # bytes reach the scan that check() runs and not the opening of the dataset.
+  valid_rows <- sprintf("A%07d,30\n", seq_len(3000L))
+  late_row <- file.path(dir, "bad-late-row.csv")
+  writeBin(
+    c(charToRaw("ID,AGE\n"), charToRaw(paste(valid_rows, collapse = "")), delivered, charToRaw(",30\n")),
+    late_row
   )
-  # Either answer is defensible; what is not is silently producing a different
-  # value. The outcome is pinned so a change is visible.
-  qa_step(
-    "invalid bytes are either refused or reported, never silently accepted as valid text",
-    TRUE, outcome %in% c("condition", "no table", "validated")
+  withr::local_options(DTAtools.stream_block_size = 1024L)
+
+  # The same delivery with every byte valid: the two bytes are U+00E9 instead.
+  # If this were refused, or came back with a different ID, a refusal of the
+  # files above would say nothing about their bytes.
+  valid_twin <- c(charToRaw("A00000"), as.raw(c(0xc3, 0xa9)))
+  control_path <- file.path(dir, "good-encoding.csv")
+  writeBin(c(charToRaw("ID,AGE\n"), valid_twin, charToRaw(",30\n")), control_path)
+
+  deliveries <- list(
+    list(what = "the only data row", path = only_row, row = 1L),
+    list(what = "data row 3001, after 3000 valid rows", path = late_row, row = 3001L)
   )
-  qa_check("the outcome is recorded for review", nzchar(outcome), detail = outcome)
+
+  # Both readers: the in-memory one and the streaming (dataset) one open and
+  # read the file by different code.
+  for (stream in c("never", "always")) {
+    route <- sprintf("stream = \"%s\"", stream)
+
+    control <- ri_bytes_outcome(control_path, stream)
+    qa_step(
+      sprintf("%s: the same delivery with valid bytes is read and validated clean", route),
+      TRUE, is.null(control$refused_at) && isTRUE(control$ok)
+    )
+    qa_step(
+      sprintf("%s: and its ID is read back as delivered", route),
+      valid_twin, control$id
+    )
+
+    for (delivery in deliveries) {
+      bad <- ri_bytes_outcome(delivery$path, stream, delivery$row)
+      refused <- !is.null(bad$refused_at)
+      detail <- ri_outcome_detail(bad, delivery$row)
+      qa_check(
+        sprintf(
+          "%s, invalid bytes in %s: refused, or reported against row %d of ID",
+          route, delivery$what, delivery$row
+        ),
+        refused || (isFALSE(bad$ok) && isTRUE(bad$names_row)),
+        detail = detail
+      )
+      qa_check(
+        sprintf(
+          "%s, invalid bytes in %s: no value other than the delivered bytes is stored",
+          route, delivery$what
+        ),
+        refused || identical(bad$id, delivered),
+        detail = detail
+      )
+    }
+  }
 })
 
 test_that("OQ-ROBUST-013 | a truncated compressed delivery is refused | REQ-ROBUST-013", {

@@ -65,6 +65,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   nothing else produced every term of the vocabulary plus `UNSCHED`, even the
   terms the slot's own `include:` had left out of its menu. The column now gets
   exactly `UNSCHED`.
+- **The qualification case `OQ-ROBUST-012` can now fail.** It is the only case
+  for `REQ-ROBUST-012` (bytes that are not valid in the declared encoding "shall
+  be reported rather than silently reinterpreted"), and its assertions accepted
+  every outcome the case could produce, including a reader that replaced the
+  bytes with U+FFFD and validated the delivery clean, so the requirement was
+  recorded as verified whatever `load_file()` and `check()` did with them. The
+  case now accepts an error condition, or a table whose verdict is not ok, with
+  a message naming the row and column `ID`, and whose stored ID is the delivered
+  bytes unchanged, and nothing else. It runs on the in-memory and the streaming
+  reader, with the bytes in the only row and in a row after the streaming
+  reader's first read block (where the refusal comes from `check()`), and reads
+  a delivery of valid multi-byte text through both as a control, so a refusal
+  can be attributed to the bytes. The package is unchanged: it refuses the bytes
+  today.
 - **A rule's `pattern` no longer matches an empty string.** The documented
   behaviour (a missing value and an empty string do not match a pattern) held
   for a missing value only: `""` matched `^$`, `.*` and every other expression
