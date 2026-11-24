@@ -109,8 +109,8 @@ dta_class_chain <- function(cls) {
   c(out, "S7_object")
 }
 
-# TRUE when `obj` (a DTA or a dataset) lacks a property its CURRENT class
-# defines. Entry points (load_file(), check(), load_delivery(), ...) upgrade only
+# TRUE when `obj` (a DTA or a dataset) -- or the metadata of a DTA -- lacks a
+# property its CURRENT class defines. Entry points (load_file(), check(), load_delivery(), ...) upgrade only
 # then. A restored 0.27.0 object always qualifies (no `containers`, no
 # `provenance`), so its handlers get re-stamped with it.
 #
@@ -138,6 +138,11 @@ dta_is_stale <- function(obj) {
     return(TRUE)
   }
   if (inherits(obj, "DTAtools::DTA")) {
+    # The metadata is part of the document: a property it gained (such as
+    # dtatools_version) is otherwise unreadable on an object saved before it.
+    if (lacks(attr(obj, "metadata", exact = TRUE))) {
+      return(TRUE)
+    }
     return(any(vapply(
       obj@datasets, function(d) inherits(d, "S7_object") && (lacks(d) || dta_is_old_matrix(d)), logical(1)
     )))

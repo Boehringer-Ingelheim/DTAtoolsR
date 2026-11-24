@@ -213,7 +213,8 @@ requirements:
     text: >
       An option (on a creation template or a dataset template) whose target
       resolves to a metadata field the engine itself owns (metadata.template,
-      metadata.import_issues) shall be reported target_machine_owned at
+      metadata.import_issues, metadata.dtatools_version) shall be reported
+      target_machine_owned at
       severity "error"; one that resolves to no known metadata field at all,
       or -- for a dataset template -- is not rooted at "dataset.", shall be
       reported target_invalid at severity "warning". For a dataset template

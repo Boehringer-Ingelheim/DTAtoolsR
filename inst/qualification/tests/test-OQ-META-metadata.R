@@ -55,7 +55,8 @@ qmeta_full <- function() {
     study = list(id = "DEMO-001", protocol_id = "PROTOCOL-01"),
     sections = list(
       responsibilities = list(title = "Responsibilities", text = "Review files.\n\nReport discrepancies.")
-    )
+    ),
+    dtatools_version = "1.2.3"
   )
 }
 
@@ -404,7 +405,7 @@ test_that("OQ-META-017 | a full metadata document survives a YAML round trip | R
   yaml::write_yaml(as_list, path)
 
   expected_keys <- c(
-    "authorized_for_corrections", "date", "error_handling", "header", "receiver",
+    "authorized_for_corrections", "date", "dtatools_version", "error_handling", "header", "receiver",
     "sections", "study", "supplier", "template", "title", "transmission", "version", "version_history"
   )
   qa_step("every accepted key the fixture set is written", expected_keys, sort(names(as_list)))
@@ -429,6 +430,7 @@ test_that("OQ-META-017 | a full metadata document survives a YAML round trip | R
   qa_step("receiver survives, contacts and all", original@receiver, restored@receiver)
   qa_step("supplier survives", original@supplier, restored@supplier)
   qa_step("template survives - it is machine-owned provenance and must round-trip exactly", original@template, restored@template)
+  qa_step("dtatools_version survives as the same text", "1.2.3", restored@dtatools_version)
   qa_step(
     "transmission's own dates survive, once read back through the same date parser that wrote them",
     format(original@transmission$date_first_transfer, "%Y-%m-%d"),
@@ -478,4 +480,60 @@ test_that("OQ-META-018 | import_issues is never written to YAML, but the origina
     "the date itself still resolves to 2026-12-31",
     "2026-12-31", format(restored@transmission$date_last_transfer, "%Y-%m-%d")
   )
+})
+
+# ---- the tool version stamp --------------------------------------------------------
+
+test_that("OQ-META-023 | dtatools_version accepts a bare version number and nothing else, is written before template, and a two-part value stays text | REQ-META-023", {
+  for (ok in c("0.29.0", "1", "1.0", "0.29.0.9000", "1.2-3")) {
+    qa_step(paste0("'", ok, "' is accepted unchanged"), ok, DTAMetaData(dtatools_version = ok)@dtatools_version)
+  }
+  qa_step("an unset value stays NULL", NULL, DTAMetaData()@dtatools_version)
+
+  bad <- list(
+    "empty" = "", "blank" = " ", "trailing space" = "0.29.0 ", "trailing newline" = "1.0\n",
+    "leading v" = "v0.29", "not a number" = "abc", "trailing dot" = "0.29.",
+    "NA" = NA_character_, "two strings" = c("1.0", "2.0"), "a double" = 0.29,
+    "an integer" = 1L, "a logical" = TRUE
+  )
+  for (label in names(bad)) {
+    err <- tryCatch(DTAMetaData(dtatools_version = bad[[label]]), error = function(e) e)
+    qa_check(
+      paste("a value that is", label, "is rejected, naming the field"),
+      inherits(err, "error") && grepl("dtatools_version", conditionMessage(err), fixed = TRUE)
+    )
+  }
+
+  stamped <- as.list(DTAMetaData(
+    title = "T", version = "1.0", template = list(id = "tpl", version = "1"),
+    dtatools_version = "0.1.0"
+  ))
+  qa_step("the stamp is written", "0.1.0", stamped$dtatools_version)
+  qa_check(
+    "and sits before template",
+    match("dtatools_version", names(stamped)) < match("template", names(stamped))
+  )
+  qa_check(
+    "an unset stamp is omitted, not written empty",
+    !"dtatools_version" %in% names(as.list(DTAMetaData(title = "T", version = "1.0")))
+  )
+
+  # "1.0" would read back as the number 1 if the writer left it unquoted.
+  path <- file.path(qa_tempdir(), "stamp.yaml")
+  two_part <- DTAMetaData(title = "T", version = "1.0", dtatools_version = "1.0")
+  yaml::write_yaml(list(metadata = as.list(two_part)), path)
+  qa_step("a two-part value is written as text", "1.0", qa_read_yaml(path)$metadata$dtatools_version)
+  qa_step(
+    "and reads back as the same text",
+    "1.0", read_dta_from_yaml(path)@metadata@dtatools_version
+  )
+
+  # The linter vets the same field. Unquoted, YAML reads 0.29 as a number.
+  lint_path <- file.path(qa_tempdir(), "stamp_lint.yaml")
+  writeLines(c("metadata:", "  title: T", "  version: '1'", "  dtatools_version: 0.29"), lint_path)
+  found <- lint_dta(lint_path)
+  row <- found[found$code == "metadata_invalid", ]
+  qa_step("a non-text stamp is one metadata_invalid finding", 1L, nrow(row))
+  qa_step("at severity error", "error", row$severity)
+  qa_check("that names the field", grepl("dtatools_version", row$message, fixed = TRUE))
 })

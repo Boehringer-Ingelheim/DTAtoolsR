@@ -1561,6 +1561,19 @@ paragraph breaks; empty text is allowed while drafting. The app supports
 adding, editing, deleting and reordering sections. Empty `study` and `sections`
 are omitted from YAML, so legacy documents need no migration.
 
+`dtatools_version` records the DTAtools release that last saved the file, for
+example `dtatools_version: 0.29.0`. It is written by the app, not by you: every
+time the app saves a specification as YAML it replaces the value with its own
+release, so a file the app has not saved yet simply has none, and leaving it
+out of a file you write by hand is correct. A document with no other metadata
+gets no stamp. The value must be a bare version number, quoted if it has only
+two parts (`'1.0'`, not `1.0`, which YAML reads as a number), and a template
+can neither set nor carry it over. Writing a `DTAMetaData` out with
+`as.list()` and `yaml::write_yaml()` yourself does not stamp it. A file that
+carries the field is refused by a DTAtools release that predates it, which
+rejects `dtatools_version` as an unknown metadata key; delete the line to read
+such a file with that release.
+
 The extra transmission entries above are optional text, not executed services.
 They do not implement encryption, delivery, checksum verification, blinding
 or approval. Existing transmission extensions are retained when editing.

@@ -44,10 +44,10 @@ areas:
     min_tests: 32
   - area: META
     title: Transfer metadata
-    min_tests: 22
+    min_tests: 23
   - area: TMPL
     title: Templates, inheritance and controlled vocabulary
-    min_tests: 149
+    min_tests: 150
   - area: EXPORT
     title: Document and data export
     min_tests: 77
@@ -56,7 +56,7 @@ areas:
     min_tests: 18
   - area: APP
     title: The interactive application
-    min_tests: 71
+    min_tests: 72
   - area: ROBUST
     title: Error handling, integrity and isolation
     min_tests: 17

@@ -121,7 +121,7 @@
 # this automatically follows whatever that method decides to include/rename/
 # reshape, instead of drifting from it over time.
 #
-# dta_metadata_machine_fields() (import_issues, template) are stripped at the
+# dta_metadata_machine_fields() (import_issues, template, dtatools_version) are stripped at the
 # TOP level before any recursion: provenance is not user content, and must
 # never surface as a leaf a rebase could classify as changed/conflicting --
 # a document's OWN @template is rewritten by rebase_apply() itself (see

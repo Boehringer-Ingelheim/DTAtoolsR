@@ -44,6 +44,14 @@
 #'   Section order and text are preserved, without an executable Markdown or
 #'   HTML contract. Empty \code{study} and \code{sections} lists are omitted
 #'   from list and YAML serialization.
+#' @param dtatools_version The DTAtools release that last wrote this
+#'   specification as YAML, e.g. \code{"0.29.0"}. Machine-owned: the Shiny app
+#'   records it each time it saves the document, replacing any earlier value, and
+#'   a specification author never sets it. Optional: a file the app has not
+#'   saved has none. Must be a single version string of integers separated by
+#'   \code{.} or \code{-}. The package API alone (\code{as.list()} with
+#'   \code{yaml::write_yaml()}) writes whatever value the object holds and does
+#'   not stamp one.
 #' @return An object of class DTAMetaData.
 #'
 #' @details
@@ -99,7 +107,8 @@ DTAMetaData <- S7::new_class(
     authorized_for_corrections = NULL,
     template = list(),
     study = list(),
-    sections = list()
+    sections = list(),
+    dtatools_version = NULL
   ) {
     import_issues <- list()
 
@@ -133,6 +142,7 @@ DTAMetaData <- S7::new_class(
       template = template,
       study = study,
       sections = sections,
+      dtatools_version = dtatools_version,
       import_issues = import_issues
     )
   },
@@ -150,12 +160,14 @@ DTAMetaData <- S7::new_class(
     template = S7::new_property(S7::class_list, default = list()),
     study = S7::new_property(S7::class_list, default = list()),
     sections = S7::new_property(S7::class_list, default = list()),
+    dtatools_version = class_character_or_null,
     import_issues = S7::new_property(S7::class_list, default = list())
   ),
   validator = function(self) {
     errors <- c(
       .dta_metadata_validate_study(self@study),
       .dta_metadata_validate_sections(self@sections),
+      .dta_metadata_validate_tool_version(self@dtatools_version),
       .dta_metadata_validate_transmission_text(self@transmission)
     )
 
