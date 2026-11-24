@@ -101,6 +101,21 @@ test_that("an old-shaped object fails without help, and is stale", {
   expect_true(dta_is_stale(old@datasets$ae))
 })
 
+test_that("a document whose metadata lacks a newer property is stale and upgrades to its default", {
+  # Only the metadata is aged: the DTA and its datasets keep every property.
+  old <- roundtrip(age_object(current_dta(), drop = "dtatools_version"))
+  stored_props <- function(o) names(attr(S7::S7_class(o), "properties"))
+  stored <- stored_props(old@metadata)
+  expect_false("dtatools_version" %in% stored)
+  expect_true("containers" %in% stored_props(old))
+
+  expect_true(dta_is_stale(old))
+  up <- upgrade_dta(old)
+  expect_false(dta_is_stale(up))
+  expect_null(up@metadata@dtatools_version)
+  expect_type(as.list(up@metadata), "list")
+})
+
 test_that("entry points upgrade an old-shaped object by themselves", {
   old <- roundtrip(age_object(current_dta()))
   ae_csv <- cont_write("ae.csv", CONT_AE_CSV)

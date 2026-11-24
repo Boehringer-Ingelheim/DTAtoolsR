@@ -209,3 +209,39 @@ test_that("OQ-APP-030 | ordered agreement section editing is safe and renders pl
     )
   })
 })
+
+test_that("OQ-APP-075 | every saved specification records the release that wrote it, replacing an older one, and saving it again changes nothing | REQ-APP-062 | tags: white-box", {
+  qapp_skip_unless_app_installed()
+  save_text <- qapp_fn("dta_to_yaml_text")
+  read_text <- qapp_fn("dta_read_yaml_text")
+  recorded <- function(text) DTAtools::metadata(read_text(text)$value)@dtatools_version
+
+  # The expected release is the one the suite declares for the package it
+  # qualifies (IQ-ENV-001 ties that to the installed Version), never one read
+  # back from the code under test.
+  declared <- qual_read_index(qa_suite_root())$package_version
+
+  dta <- read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
+  first <- save_text(dta)
+  qa_check("the document saves", isTRUE(first$ok))
+  qa_step("the saved text names the release the suite declares", declared, recorded(first$value))
+
+  # A document last saved by another release names that release until it is
+  # saved again; saving replaces it.
+  older <- dta
+  older_md <- DTAtools::metadata(older)
+  S7::prop(older_md, "dtatools_version") <- "0.0.1"
+  older@metadata <- older_md
+  resaved <- save_text(older)
+  qa_step("an older recorded release is replaced on save", declared, recorded(resaved$value))
+
+  again <- save_text(read_text(first$value)$value)
+  qa_step("saving the saved document again gives identical text", first$value, again$value)
+
+  # A metadata block holding only the stamp would not load, because title and
+  # version are required whenever the block is present.
+  bare <- save_text(DTA(datasets = list()))
+  qa_check("a document with no metadata saves", isTRUE(bare$ok))
+  qa_check("without a metadata block", !grepl("metadata:", bare$value, fixed = TRUE))
+  qa_check("and so without the release", !grepl("dtatools_version", bare$value, fixed = TRUE))
+})

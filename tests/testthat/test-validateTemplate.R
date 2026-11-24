@@ -294,6 +294,27 @@ test_that("target_machine_owned fires for a target naming a machine-owned metada
   expect_code_row(result, "target_machine_owned", "error")
 })
 
+test_that("target_machine_owned fires for the dtatools_version stamp, as an option target and as an effect", {
+  for (body in list(
+    c("    type: text", "    target: metadata.dtatools_version"),
+    c(
+      "    type: boolean", "    default: false", "    effects:", "      \"yes\":",
+      "        - path: metadata.dtatools_version", "          value: \"0.0.1\""
+    )
+  )) {
+    dir <- withr::local_tempdir()
+    writeLines(
+      c(
+        "kind: dta_creation_template", "id: forged_stamp", "version: \"1.0\"",
+        "abstract: true", "base: {metadata: {}}", "datasets: []",
+        "options:", "  - id: opt1", body
+      ),
+      lib_file(dir, "forged_stamp.dta-template.yaml")
+    )
+    expect_code_row(validate_template(dir), "target_machine_owned", "error")
+  }
+})
+
 test_that("target_machine_owned also fires when the forged target is hidden in a non-default effects branch", {
   # This is the entire reason target_machine_owned is its own static check
   # rather than relying on the instantiate dry-run alone: a dry run using

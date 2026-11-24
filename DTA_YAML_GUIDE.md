@@ -52,8 +52,10 @@ The key set is **closed**: any key not listed here is a hard error.
 | `error_handling` | string | Procedure when delivered data fails validation (who is notified, deadlines, re-delivery). |
 | `authorized_for_corrections` | string or list of strings | Names/roles allowed to request corrections. |
 | `sections` | mapping | Ordered free-text agreement sections. See below. |
+| `dtatools_version` | string, machine-written | The DTAtools release that last saved the file, e.g. `"0.29.0"`. The app overwrites it on every save; leave it out when writing a file by hand. |
 
-Never write `template:` — it is machine-owned provenance.
+Never write `template:` — it is machine-owned provenance. `dtatools_version:` is
+machine-written too; if you do write it, it must be a bare version number.
 
 ### Parties (`receiver`, `supplier`)
 

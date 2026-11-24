@@ -3471,14 +3471,43 @@ dta_dataset_to_list <- function(ds, dta = NULL, apply_default = TRUE) {
   out
 }
 
+# The DTAtools release doing the serializing: what `dtatools_version` records.
+# The PACKAGE version, not the app bundle's (dta_bundle_version(), app.R): the
+# package is what reads the file back, and on a server the two can differ.
+# "" when it cannot be determined, so the caller keeps whatever the document
+# already carried instead of writing a guess.
+dta_tool_version <- function() {
+  tryCatch(as.character(utils::packageVersion("DTAtools")), error = function(e) "")
+}
+
 # Whole DTA -> plain list (metadata, containers, datasets array).
+#
+# Every serialization records the release that wrote it in
+# `metadata.dtatools_version`, replacing whatever the loaded file carried: the
+# field names the LAST writer, and an unsaved file keeps what it had. It is set
+# on the object, before as.list(), so the class validator vets the value and
+# the key lands where as.list() puts it rather than at the end.
+#
+# A document with no metadata of its own is NOT stamped. A `metadata:` block
+# holding only this key would not load again -- title and version are
+# required -- so the stamp appears together with the first real metadata field.
 dta_to_list <- function(dta) {
   out <- list()
   md <- tryCatch(DTAtools::metadata(dta), error = function(e) NULL)
   if (!is.null(md)) {
+    ver <- dta_tool_version()
+    if (nzchar(ver)) {
+      md <- tryCatch(
+        {
+          S7::prop(md, "dtatools_version") <- ver
+          md
+        },
+        error = function(e) md
+      )
+    }
     ml <- tryCatch(as.list(md), error = function(e) NULL)
     ml <- .dta_compact(.dta_stringify_dates(ml))
-    if (!is.null(ml) && length(ml) > 0) out$metadata <- ml
+    if (length(setdiff(names(ml), "dtatools_version")) > 0) out$metadata <- ml
   }
   # Explicit containers only (an implied one is just a file name in an entry).
   cs <- .ctr_list(dta)

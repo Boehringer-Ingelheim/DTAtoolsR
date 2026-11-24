@@ -329,6 +329,16 @@ test_that("OQ-TMPL-018 | an option targeting a machine-owned metadata field is a
   )
 })
 
+test_that("OQ-TMPL-154 | an option targeting the recorded DTAtools version is an error, because the application owns that field | REQ-TMPL-012", {
+  result <- validate_template(tmpl_fixture("c", "target_machine_owned_stamp"))
+  qa_step("exactly one row", 1L, nrow(result))
+  qa_step("severity is error", "error", tmpl_severity(result, "target_machine_owned"))
+  qa_check(
+    "naming the machine-owned field",
+    grepl("metadata.dtatools_version", tmpl_message(result, "target_machine_owned"), fixed = TRUE)
+  )
+})
+
 test_that("OQ-TMPL-019 | an option targeting no known metadata field is a warning | REQ-TMPL-012", {
   result <- validate_template(tmpl_fixture("c", "target_invalid"))
   qa_step("exactly one row", 1L, nrow(result))

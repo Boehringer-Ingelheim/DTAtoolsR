@@ -317,8 +317,8 @@ standalone `{STUDY_TABLE}`, `{AGREEMENT_SECTIONS}` and `{CONTAINERS_TABLE}` bloc
 of the document, and is omitted when it has none).
 The library does not alter user-supplied Word templates automatically.
 
-The machine-owned fields `template` and `import_issues` cannot be set by a template. The validator reports a template attempting to target either
-with `target_machine_owned` when the field is reached through an option target.
+The machine-owned fields `template`, `import_issues` and `dtatools_version` cannot be set by a template. The validator reports a template attempting to
+target any of them with `target_machine_owned` when the field is reached through an option target.
 
 The app resolves these expression tokens in template data:
 
@@ -1673,7 +1673,7 @@ It also passes on the `lint_dta()` codes of the columns and rules it builds (`?v
 | `template_misplaced` | error | A template file is outside the folder for its kind, for example at the repository root, or a party profile in `templates/`. | Move it into `templates/`, `parties/` or `vocabulary/` as its kind requires, and update related paths. |
 | `library_subfolder_given` | error | The path given to the validator is itself `templates/`, `parties/` or `vocabulary/`. | Validate its parent, the library root; if it is a flat library, move its files into the kind sub-folders instead. |
 | `target_invalid` | warning | An option target is unknown, malformed, or does not resolve in its dataset body. | Correct the target path and use a supported metadata or dataset field. |
-| `target_machine_owned` | error | An option targets `metadata.template` or `metadata.import_issues`. | Remove the option/effect; these fields are written by DTAtools. |
+| `target_machine_owned` | error | An option targets `metadata.template`, `metadata.import_issues` or `metadata.dtatools_version`. | Remove the option/effect; these fields are written by DTAtools. |
 | `prior_versions_invalid` | error | A `prior_versions:` entry lacks a version or changes text, has a bad date or unknown key, repeats a version, or is not older than the template's first version in the library. | Fix the entry; see "Versions from before the library: `prior_versions:`". |
 | `party_slot_invalid` | warning | A party slot is malformed or names a profile ID not found in the library. | Check target, slot fields, role, and profile IDs. |
 | `party_profile_invalid` | error | A party profile cannot be read the way the app reads it, for example because of an unknown `role`; the app skips it. The message is the reader's own. | Correct the field the message names. May appear next to `id_missing` or `version_missing`. |
