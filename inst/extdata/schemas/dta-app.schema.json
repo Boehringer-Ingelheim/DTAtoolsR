@@ -115,6 +115,18 @@
         "editing": { "$ref": "#/definitions/flag", "description": "false makes the app read-only." }
       }
     },
+    "data_types": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "description": "Which type system new columns start with. Both stay available, and a type in a template or DTA file is read the same either way.",
+      "properties": {
+        "default": {
+          "type": "string",
+          "pattern": "^\\s*([Ss][Aa][Ss]|[Rr])\\s*$",
+          "description": "SAS or R, in any letter case. Anything else is an error in the app, which keeps SAS."
+        }
+      }
+    },
     "exports": {
       "type": ["object", "null"],
       "additionalProperties": false,

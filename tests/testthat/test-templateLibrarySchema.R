@@ -285,6 +285,10 @@ test_that("the app schema accepts the documented forms", {
   expect_accepted(v, "exports:\n  document: word\n  validation_messages: csv\n")
   # A null link is hidden, like false; the URL scheme is case-insensitive.
   expect_accepted(v, "links:\n  about: ~\n  repository: HTTPS://example.org\n")
+  # data_types.default takes either type system in any letter case, with blanks.
+  expect_accepted(v, "data_types:\n  default: R\n")
+  expect_accepted(v, "data_types:\n  default: sas\n")
+  expect_accepted(v, "data_types:\n  default: ' r '\n")
 })
 
 # ---- What the engine rejects, the schema flags --------------------------------
@@ -360,7 +364,11 @@ test_that("the app schema flags what parse_dta_app_config() rejects", {
     list("unknown export format", "exports:\n  document: [pdf]\n", "/exports/document/0", "enum", NULL),
     list("word template that is not a docx", "exports:\n  word_templates:\n    - file: a.txt\n", "/exports/word_templates/0/file", "pattern", NULL),
     list("word template without a file", "exports:\n  word_templates:\n    - label: A\n", "/exports/word_templates/0", "required", "file"),
-    list("a feature flag that is not a boolean", "features:\n  editing: maybe\n", "/features/editing", "enum", NULL)
+    list("a feature flag that is not a boolean", "features:\n  editing: maybe\n", "/features/editing", "enum", NULL),
+    list("a type system that does not exist", "data_types:\n  default: Python\n", "/data_types/default", "pattern", NULL),
+    # An empty `default:` arrives as null, which the app reports as invalid.
+    list("an empty default type system", "data_types:\n  default:\n", "/data_types/default", "type", NULL),
+    list("misspelt key under data_types", "data_types:\n  defualt: R\n", "/data_types", "additionalProperties", "defualt")
   )
 
   for (case in cases) {
