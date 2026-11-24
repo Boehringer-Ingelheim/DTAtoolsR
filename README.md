@@ -1081,8 +1081,16 @@ my-templates/
     starter_terms.dta-vocabulary.yaml
   export-templates/
     README.md
+  schemas/
+    dta-template-library.schema.json
+    dta-app.schema.json
+  .vscode/settings.json
   .github/workflows/validate-templates.yml
 ```
+
+The two JSON Schemas and `.vscode/settings.json` make the Red Hat YAML
+extension in VS Code mark a wrong `kind`, an unquoted `version` or a misspelt
+key while a template is written; `validate_template()` stays the authority.
 
 `lint_template_repo(".")` at the repository root validates the
 four folders and reports a template file in the wrong place (for example a

@@ -877,3 +877,33 @@ test_that("a scaffold stays clean when a template added to it declares spaced co
   expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
   expect_no_error(validate_template(dir, strict = TRUE))
 })
+
+test_that(".Rbuildignore leaves everything the package ships out of inst/, R/ and man/ in the built package", {
+  # `R CMD build` drops every path that matches a line of .Rbuildignore (a
+  # case-insensitive Perl regular expression on the path from the package
+  # root). A test that loads the source tree cannot see that: an unanchored
+  # `.vscode` line once dropped the settings source of create_template_repo()
+  # from the built package, and only an installed copy failed. Source tree only:
+  # a built package has no .Rbuildignore, so under R CMD check this skips.
+  ignore_file <- testthat::test_path("..", "..", ".Rbuildignore")
+  skip_if_not(file.exists(ignore_file), "only the source tree has an .Rbuildignore")
+  root <- dirname(ignore_file)
+  rules <- trimws(readLines(ignore_file, warn = FALSE))
+  rules <- rules[nzchar(rules) & !startsWith(rules, "#")]
+
+  shipped <- unlist(lapply(c("inst", "R", "man"), function(d) {
+    files <- list.files(file.path(root, d), recursive = TRUE, all.files = TRUE, no.. = TRUE)
+    file.path(d, files)
+  }))
+  expect_gt(length(shipped), 100)
+
+  hit_by <- vapply(shipped, function(f) {
+    hit <- rules[vapply(rules, grepl, logical(1), x = f, perl = TRUE, ignore.case = TRUE)]
+    paste(hit, collapse = " ")
+  }, character(1))
+  dropped <- hit_by[nzchar(hit_by)]
+  expect_identical(
+    unname(dropped), character(0),
+    info = paste0("dropped by .Rbuildignore: ", paste(names(dropped), "<-", dropped, collapse = "; "))
+  )
+})

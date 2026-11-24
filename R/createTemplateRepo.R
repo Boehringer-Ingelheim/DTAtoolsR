@@ -88,10 +88,10 @@
 # schemas live beside the other bundled assets, not in template-repo-skeleton/,
 # so they are not an "example file"; and `.vscode/settings.json` is copied from
 # a non-dotted source folder for the reason the agent skill is.
-# Do NOT name a source file after VS Code: .Rbuildignore has an unanchored
-# `.vscode` line, whose `.` also matches a `/`, so `editor/vscode-settings.json`
-# was silently left out of the built package. Every test that loads the source
-# tree passes in that state; only an installed package fails.
+# Every file listed below has to survive `R CMD build`: an .Rbuildignore line
+# that matches one drops it silently, every test that loads the source tree
+# still passes, and only an installed package fails. test-createTemplateRepo.R
+# applies the file to everything under inst/ to catch that.
 # Named character vector: destination in the new repository = path beneath
 # inst/extdata/.
 .dta_create_repo_editor_assets <- c(

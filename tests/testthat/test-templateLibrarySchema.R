@@ -123,10 +123,12 @@ test_that("both schemas are valid draft-07 schemas and the engine really applies
   # Building a validator only proves a schema valid if the engine checks it
   # against the metaschema first. ajv does, which this pins: an invalid schema
   # must fail to build, so a schema that builds below is a valid one.
-  expect_error(
+  # Judged by the failure itself, not by ajv's wording of it.
+  built <- tryCatch(
     jsonvalidate::json_validator('{"type": "nonsense"}', engine = "ajv"),
-    "schema is invalid"
+    error = identity
   )
+  expect_s3_class(built, "error")
   for (name in c("dta-template-library.schema.json", "dta-app.schema.json")) {
     expect_no_error(jsonvalidate::json_validator(schema_file(name), engine = "ajv"))
   }
