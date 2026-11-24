@@ -56,7 +56,7 @@ areas:
     min_tests: 18
   - area: APP
     title: The interactive application
-    min_tests: 70
+    min_tests: 71
   - area: ROBUST
     title: Error handling, integrity and isolation
     min_tests: 17
