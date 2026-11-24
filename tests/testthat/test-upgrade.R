@@ -51,6 +51,30 @@ roundtrip <- function(x) {
   readRDS(f)
 }
 
+# `obj` with every DTAtools object inside it pointing at the current class
+# reference. A round-tripped object carries a deserialised copy of that
+# reference, so comparing it with an upgraded one makes waldo walk the whole
+# class chain down to S7's own base class - closures whose environments are
+# loaded lazily from the installed S7 package and are gone once the check
+# sandbox has removed its library. What a test compares is the content, so it
+# pins the class first; the class itself is tested on its own.
+pin_class <- function(obj) {
+  if (is.environment(obj) || is.data.frame(obj)) {
+    return(obj)
+  }
+  if (inherits(obj, "S7_object")) {
+    for (p in setdiff(names(attributes(obj)), c("class", "_S7_class", "S7_class", "_S7_version"))) {
+      attr(obj, p) <- pin_class(attr(obj, p))
+    }
+    attr(obj, "_S7_class") <- dta_class_storage(dta_current_class(obj))
+    return(obj)
+  }
+  if (is.list(obj)) {
+    for (i in seq_along(obj)) if (!is.null(obj[[i]])) obj[[i]] <- pin_class(obj[[i]])
+  }
+  obj
+}
+
 current_dta <- function() {
   dta_of(
     tab_ds("ae", list(DTAFileCSV("ae.csv"))),
@@ -116,12 +140,12 @@ test_that("a current object comes back with every property unchanged", {
   rt <- roundtrip(d)
   expect_false(dta_is_stale(rt))
   up <- upgrade_dta(rt)
-  expect_identical(up@datasets, rt@datasets)
-  expect_identical(up@metadata, rt@metadata)
-  expect_identical(up@containers, rt@containers)
+  expect_identical(pin_class(up@datasets), pin_class(rt@datasets))
+  expect_identical(pin_class(up@metadata), pin_class(rt@metadata))
+  expect_identical(pin_class(up@containers), pin_class(rt@containers))
   expect_identical(dta_provenance(datasets(up, "ae")), dta_provenance(datasets(rt, "ae")))
   expect_identical(up@datasets$ae@id, d@datasets$ae@id)
-  expect_identical(up@datasets$ae@files, d@datasets$ae@files)
+  expect_identical(pin_class(up@datasets$ae@files), pin_class(d@datasets$ae@files))
 })
 
 test_that("check() upgrades an aged dataset with a bound path by itself", {
