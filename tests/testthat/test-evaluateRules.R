@@ -2655,3 +2655,195 @@ test_that("the in-memory and the streamed check agree on an in-list of mixed mem
     expect_identical(failed_rows(list(num, "5", NULL), mode), 4L, info = mode)
   }
 })
+
+# ---- pattern: empty and missing values never match; numbers read as plain text ----
+#
+# REQ-RULE-007 (inst/qualification/requirements/REQ-RULE.yaml): the `pattern`
+# operator treats a missing value and an empty string as not matching. Every
+# expected value below is worked out by hand from that sentence and from the
+# regular expression, never from what the operator returned.
+
+test_that("a pattern never matches an empty string or a missing value, whatever the pattern", {
+  x <- c("", NA, "x", "AB1", "XY")
+  selected <- function(pattern) dta_condition_mask("V", "pattern", pattern, x)
+
+  # `^$` can only ever match the empty string, which a pattern must not select.
+  expect_identical(selected("^$"), c(FALSE, FALSE, FALSE, FALSE, FALSE))
+  # `.*` matches every string, the empty one included as far as PCRE goes;
+  # only the empty string and the missing value are held back.
+  expect_identical(selected(".*"), c(FALSE, FALSE, TRUE, TRUE, TRUE))
+  # Case-sensitive: "x" is lower case and "AB1" has a digit.
+  expect_identical(selected("^[A-Z]*$"), c(FALSE, FALSE, FALSE, FALSE, TRUE))
+  expect_identical(selected("^[A-Z]+[0-9]$"), c(FALSE, FALSE, FALSE, TRUE, FALSE))
+  # An optional group that PCRE satisfies with nothing at all.
+  expect_identical(selected("^(AB1)?$"), c(FALSE, FALSE, FALSE, TRUE, FALSE))
+})
+
+test_that("a pattern does not treat text made of spaces as empty", {
+  # Only a zero-length string is empty here. `empty` is the operator that also
+  # counts blanks (REQ-RULE-008); a pattern that asks for spaces gets them.
+  x <- c(" ", "  ", "", "a b")
+  expect_identical(
+    dta_condition_mask("V", "pattern", "^ +$", x),
+    c(TRUE, TRUE, FALSE, FALSE)
+  )
+})
+
+test_that("a pattern reads the empty string and a missing value the same in a factor", {
+  x <- factor(c("", "a", NA, "ab"))
+  expect_identical(dta_condition_mask("V", "pattern", ".*", x), c(FALSE, TRUE, FALSE, TRUE))
+  expect_identical(dta_condition_mask("V", "pattern", "^a$", x), c(FALSE, TRUE, FALSE, FALSE))
+})
+
+test_that("a pattern on a THEN clause counts an empty string against the row, as it does a missing value", {
+  # Three rows, all in scope. `.*` accepts any text: only "x" satisfies the THEN.
+  # The empty string and the missing value both violate, so two rows are reported.
+  df <- data.frame(
+    GRP = c("a", "a", "a"),
+    V = c("x", "", NA),
+    stringsAsFactors = FALSE
+  )
+  rule <- DTARuleColCondition(
+    id = "then_pattern",
+    condition = list(GRP = list(equals = "a")),
+    then = list(V = list(pattern = ".*"))
+  )
+  expect_identical(which(dta_condition_violated(rule, df)), 2:3)
+  expect_match(rule_check_col_condition(rule, df)$message, "violated: 2 rows", fixed = TRUE)
+})
+
+test_that("a pattern in an IF clause does not put an empty string or a missing value in scope", {
+  # THEN requires FLAG = "yes" and every FLAG is "no", so each row the IF
+  # selects is a violation, and the violations are exactly the selection.
+  df <- data.frame(
+    V = c("x", "", NA, "yy"),
+    FLAG = "no",
+    stringsAsFactors = FALSE
+  )
+  rule <- DTARuleColCondition(
+    id = "if_pattern",
+    condition = list(V = list(pattern = ".*")),
+    then = list(FLAG = list(equals = "yes"))
+  )
+  expect_identical(which(dta_condition_violated(rule, df)), c(1L, 4L))
+})
+
+test_that("a pattern reads a number as its plain decimal text, never in scientific notation", {
+  # Worked out by hand: 100000 is written 100000, 0.00001 is 0.00001, and 1e15
+  # is a one followed by fifteen zeros. R's as.character() would give "1e+05",
+  # "1e-05" and "1e+15", which no ordinary pattern for these numbers matches.
+  x <- c(100000, 100001, 99999.5, 1e15, 0.00001, 1234567.5, NA, NaN, -5)
+  hits <- function(pattern) dta_condition_mask("V", "pattern", pattern, x)
+
+  expect_identical(hits("^100000$"), c(TRUE, rep(FALSE, 8)))
+  expect_identical(hits("^0[.]00001$"), c(rep(FALSE, 4), TRUE, rep(FALSE, 4)))
+  expect_identical(hits("^1000000000000000$"), c(rep(FALSE, 3), TRUE, rep(FALSE, 5)))
+  expect_identical(hits("^-5$"), c(rep(FALSE, 8), TRUE))
+  expect_identical(hits("^[0-9]+[.][0-9]+$"), c(FALSE, FALSE, TRUE, FALSE, TRUE, TRUE, FALSE, FALSE, FALSE))
+  # The exponent form is not what the number is matched as.
+  expect_identical(hits("e[+-]"), rep(FALSE, 9))
+  # NA and NaN are the missing values of a numeric column and match nothing.
+  expect_identical(hits(".*"), c(rep(TRUE, 6), FALSE, FALSE, TRUE))
+})
+
+test_that("a pattern gives a whole number one verdict however it is stored", {
+  # The oracle is the number's own digits, written with sprintf("%d"), so the
+  # expected value comes from the construction and not from the operator. The
+  # same whole number is held as an integer, as a double and as digit text; a
+  # pattern built from its digits must select it in all three, and a pattern
+  # asking for one more digit must select it in none.
+  withr::local_seed(20261124)
+  round_numbers <- as.integer(rep(1:9, times = 9) * 10^rep(0:8, each = 9))
+  n <- c(round_numbers, sample.int(.Machine$integer.max, 120L), 0L, 1L, 99999L, 100000L, 100001L)
+  digits <- sprintf("%d", n)
+
+  for (i in seq_along(n)) {
+    exact <- paste0("^", digits[[i]], "$")
+    longer <- paste0("^", digits[[i]], "0$")
+    prefix <- paste0("^", substr(digits[[i]], 1L, 1L), "[0-9]*$")
+    storages <- list(integer = n[[i]], double = as.double(n[[i]]), text = digits[[i]])
+    for (storage in names(storages)) {
+      value <- storages[[storage]]
+      info <- paste(digits[[i]], "held as", storage)
+      expect_true(dta_condition_mask("V", "pattern", exact, value), info = info)
+      expect_true(dta_condition_mask("V", "pattern", prefix, value), info = info)
+      expect_false(dta_condition_mask("V", "pattern", longer, value), info = info)
+    }
+  }
+})
+
+test_that("a pattern reads an integer64 as the number it holds", {
+  skip_if_not_installed("bit64")
+  x <- bit64::as.integer64(c(100000, 123, NA))
+  expect_identical(dta_condition_mask("V", "pattern", "^100000$", x), c(TRUE, FALSE, FALSE))
+  expect_identical(dta_condition_mask("V", "pattern", ".*", x), c(TRUE, TRUE, FALSE))
+})
+
+test_that("a pattern on a number reaches the same verdict held in memory and read from a file", {
+  # Five whole numbers. By their digits, the three that start with 1 or 2 and
+  # have six digits are 100000, 100001 and 200000; 999999 starts with 9 and
+  # 1000000 has seven digits. The rule reports every row the pattern selects.
+  # The file is read as each of four declared types, so the number reaches the
+  # rule as an integer in two of them and as a double in the other two.
+  path <- file.path(withr::local_tempdir(), "numbers.csv")
+  writeLines(c("V,FLAG", "100000,no", "100001,no", "200000,no", "999999,no", "1000000,no"), path)
+  rule <- DTARuleColCondition(
+    id = "r", condition = list(V = list(pattern = "^[12][0-9]{5}$")),
+    then = list(FLAG = list(equals = "yes"))
+  )
+  reported <- function(type, mode, batch_rows = NULL) {
+    specs <- DTAColumnSpecCollection(
+      columns = list(
+        V = DTAColumnSpec(id = "V", type = type, nullable = TRUE),
+        FLAG = DTAColumnSpec(id = "FLAG", type = "R character", nullable = FALSE)
+      ),
+      rules = list(rule)
+    )
+    ds <- DTADataSetTabular(id = "d", specs = specs, files = list(DTAFileCSV(filename = "numbers.csv")))
+    ds <- load_file(ds, file = path, handler_index = 1, stream = mode)
+    ck <- suppressMessages(suppressWarnings(
+      if (is.null(batch_rows)) check(ds, quiet = TRUE, persist = FALSE) else check(ds, quiet = TRUE, persist = FALSE, batch_rows = batch_rows)
+    ))
+    errors <- as.data.frame(validation_errors(ck, names(tables(ck))[[1]]))
+    msg <- errors$message[errors$rule_id == "r"]
+    if (length(msg) == 0L) 0L else as.integer(sub("^.*violated: ([0-9]+) rows? failed.*$", "\\1", msg[[1]]))
+  }
+  for (type in c("SAS Int", "SAS Num", "R integer", "R numeric")) {
+    expect_identical(reported(type, "never"), 3L, info = paste(type, "in memory"))
+    for (rows in c(1L, 2L, 100L)) {
+      expect_identical(reported(type, "always", rows), 3L, info = paste(type, "in batches of", rows))
+    }
+  }
+})
+
+test_that("a pattern on a fractional number reaches the same verdict held in memory and read in batches", {
+  # By their digits: 100000 is "100000" and 0.00001 is "0.00001", the two the
+  # pattern names; 2.5 and 100000.5 are neither. A fraction in the file makes
+  # the column a double in every batch, the whole-number batch included.
+  path <- file.path(withr::local_tempdir(), "fractions.csv")
+  writeLines(c("V,FLAG", "100000,no", "0.00001,no", "2.5,no", "100000.5,no"), path)
+  rule <- DTARuleColCondition(
+    id = "r", condition = list(V = list(pattern = "^(100000|0[.]00001)$")),
+    then = list(FLAG = list(equals = "yes"))
+  )
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      V = DTAColumnSpec(id = "V", type = "SAS Num", nullable = TRUE),
+      FLAG = DTAColumnSpec(id = "FLAG", type = "SAS Char", length = 3, nullable = FALSE)
+    ),
+    rules = list(rule)
+  )
+  ds <- DTADataSetTabular(id = "d", specs = specs, files = list(DTAFileCSV(filename = "fractions.csv")))
+  reported <- function(mode, batch_rows = NULL) {
+    loaded <- load_file(ds, file = path, handler_index = 1, stream = mode)
+    ck <- suppressMessages(suppressWarnings(
+      if (is.null(batch_rows)) check(loaded, quiet = TRUE, persist = FALSE) else check(loaded, quiet = TRUE, persist = FALSE, batch_rows = batch_rows)
+    ))
+    errors <- as.data.frame(validation_errors(ck, names(tables(ck))[[1]]))
+    errors$message[errors$rule_id == "r"]
+  }
+  expect_match(reported("never"), "violated: 2 rows", fixed = TRUE)
+  for (rows in c(1L, 2L, 100L)) {
+    expect_match(reported("always", rows), "violated: 2 rows", fixed = TRUE, info = paste("batches of", rows))
+  }
+})

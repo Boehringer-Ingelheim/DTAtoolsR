@@ -967,6 +967,15 @@ The most versatile rule type. When `condition` is satisfied for a row, the
 | `min` / `max`   | number range      | `min: 10` + `max: 100`           |
 | `range`         | `[lo, hi]`, inclusive | `range: [10, 100]`           |
 
+A `pattern` never matches a missing value or an empty string, whatever the
+expression: not even `^$` or `.*` select them. In a `then` block they are
+therefore violations, and in a `condition` block their rows are out of scope. A
+value of spaces only is ordinary text for `pattern`; use `empty` to ask whether a
+value is missing or blank. A number is matched as its plain decimal text, never
+in scientific notation (`100000` is matched as `100000`, not `1e+05`; a fraction
+keeps at most 15 significant digits), so a whole number gets the same verdict
+whether it is stored as an integer or as a double.
+
 ```yaml
 rules:
   # IF consent was given, consent date must be filled in

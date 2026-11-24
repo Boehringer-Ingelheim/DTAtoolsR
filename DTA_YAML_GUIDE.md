@@ -663,10 +663,24 @@ Operators (several on one column are ANDed):
 | `greater`, `less`, `greater_equal`, `less_equal` | number | numeric comparison |
 | `min` + `max` | numbers | one inclusive band (either alone also works) |
 | `range` | `[lo, hi]` | inclusive band |
-| `pattern` | regex | value matches (anchor it) |
+| `pattern` | regex | value matches (anchor it); a missing value and an empty string never match |
 | `empty` | `true` / `false` | value is / is not missing or blank |
 
 Each column may appear only once per clause; merge its operators.
+
+**What `pattern` does with missing, empty and numeric values.** A missing value
+and an empty string match no pattern, not even `^$` or `.*`. In a `then` clause
+that makes them violations, exactly as a missing value is for every operator; in
+a `condition` clause it leaves their rows out of scope. Text of spaces only is
+ordinary text for `pattern` (it is `empty` that counts blanks), so use `empty`
+to ask whether a value is missing or empty. A number is matched as its plain
+decimal text, never in scientific notation: `100000` is matched as `100000`, not
+`1e+05`, and `0.00001` as `0.00001` (a fraction keeps at most 15 significant
+digits). A whole number is therefore matched the same way whether the column is
+declared as an integer or as a number. A column's own
+`pattern` (in `columns:`) is a different check, whether a value may stand in the
+column, and judges an empty string like any other text; a file never delivers
+one, because an empty field is read as missing.
 
 On an `R logical` column, `equals`, `equal`, `not_equals`, `not_equal`, `in` and
 `not_in` take `true` or `false`, or one of `TRUE`, `T`, `true`, `True`, `FALSE`,
