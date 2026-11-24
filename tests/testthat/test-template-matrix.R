@@ -286,3 +286,48 @@ test_that("validate_template() lints a matrix template's `columns:` key and non-
   expect_true(all(wanted %in% lint_dta(list(datasets = list(body)))$code))
   expect_true(all(wanted %in% res$code))
 })
+
+# ---- the R vocabulary ------------------------------------------------------------
+
+test_that("validate_template() accepts a matrix template typed in the R vocabulary", {
+  dir <- mxt_template_dir(
+    "    - {id: GENE_ID, type: R character, nullable: No}",
+    c(
+      "  matrix:", "    columns: { pattern: '^S[0-9]+$' }",
+      "    cells: { type: R numeric, range: { min: 0 }, infinite: No }"
+    )
+  )
+  expect_equal(nrow(validate_template(dir)), 0)
+})
+
+test_that("validate_template() reports an R cell type a matrix cannot hold, and a range on R character", {
+  dir <- mxt_template_dir(
+    "    - {id: GENE_ID, type: R character, nullable: No}",
+    c("  matrix:", "    cells: { type: R logical }")
+  )
+  expect_true("matrix_cells_type" %in% validate_template(dir)$code)
+  dir <- mxt_template_dir(
+    "    - {id: GENE_ID, type: R character, nullable: No}",
+    c("  matrix:", "    cells: { type: R character, range: { min: 0 } }")
+  )
+  expect_true("cell_range_type" %in% validate_template(dir)$code)
+})
+
+test_that("a built matrix template keeps its R row labels and R cells", {
+  body <- mxt_body(row_labels = list(
+    list(id = "GENE_ID", header = "gene_id", type = "R character", nullable = FALSE),
+    list(id = "BATCH", type = "R integer", nullable = TRUE)
+  ))
+  body$matrix$cells <- list(type = "R numeric", range = list(min = 0))
+  def <- list(kind = "dta_dataset_template", id = "mx", version = "1.0", dataset = body)
+  built <- app_fn("build_dataset_from_template")(def, patch = list(
+    modify_columns = list(list(id = "GENE_ID", pattern = "^ENSG"))
+  ))
+  expect_true(built$ok, info = built$error)
+  ds <- dta_dataset_from_list(built$value$dataset)
+  expect_s3_class(ds, "DTAtools::DTADataSetMatrix")
+  expect_identical(ds@specs@columns[["GENE_ID"]]@structure@backend, "R")
+  expect_identical(ds@specs@columns[["BATCH"]]@structure@type, "integer")
+  expect_identical(ds@matrix@cells@structure@type, "numeric")
+  expect_true(ds@matrix@cells@finite)
+})

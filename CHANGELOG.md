@@ -4,6 +4,157 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.0] - 2026-11-23
+
+### Added
+
+- `create_template_repo()` writes an agent skill to
+  `.claude/skills/dta-template-authoring/` (new argument `agent_skill`,
+  default `TRUE`). It gives coding agents the working method for a template
+  library: a layered layout (vocabularies, dataset templates, an abstract
+  standard, mixins, thin deviations), releasing a change by freezing the
+  released version beside the edited one, when a reference follows `@latest`
+  and when it pins, when to use `extends:` and when `mixins:`, and how to
+  triage and fix every validator finding. The package's tests rebuild its
+  worked example library from the text and validate it, and check that it
+  covers every validator code the README documents. Existing repositories
+  copy it from
+  `system.file("extdata", "agent-skills", package = "DTAtools")`.
+- **Date masks in patterns.** A pattern `filename`, a column `pattern:` or a
+  rule `pattern` condition may contain `<<yyyyMMddHHmm>>`-style masks
+  (`yyyy yy MMMM MMM MM dd d HH H mm ss`, other characters literal) that
+  accept only in-range dates and times, instead of a hand-written
+  `[0-9]{12}`. A malformed mask (`<<yyy>>`, `<<YYYY>>`, or `MM`/`mm` mixed up
+  as in `<<yyyyMMddHHMM>>`) is refused when the specification is built; the
+  specification keeps the mask as written.
+- **A second type system, `R`, next to `SAS`.** A column can be declared
+  `type: R character`, `R numeric` (`R double` is accepted), `R integer`,
+  `R logical`, `R Date`, `R POSIXct` or `R hms`; the new exported class
+  `DTAColumnSpecStructureR` holds it and `DTAColumnSpecStructureFactory()`
+  accepts the `R` prefix. The prefix is always required (a bare `Char` or
+  `character` is still refused) and is written `R`; the type after it is not
+  case-sensitive and is stored in the spelling above. A `format` is allowed
+  only on `R Date`, `R POSIXct` and `R hms`, a `length` only on
+  `R character`, and one dataset, or one matrix, may mix both type systems.
+  `SAS` columns, files and templates behave exactly as before.
+- **Date and time formats for the `R` types.** `format: R %d/%m/%Y` is built
+  from `%Y %m %d %H %M %S`, `%OS1` to `%OS6` (seconds with an optional
+  fraction), `%F` and `%T`, with a space, `- / . , : ; _` and the letters `T`
+  and `Z` as literals, so ISO 8601 is `%Y-%m-%dT%H:%M:%SZ`. Every field has a
+  fixed width and range, the day is checked against its month (leap years
+  included), a value from a text source (CSV, TSV) is matched exactly (not
+  trimmed, case-sensitive), and `R hms` is a time of day (`00:00:00` to
+  `23:59:59`; `SAS Time` accepts longer times). A `Date` format needs year,
+  month and day, a `POSIXct` format also hour and minute, an `hms` format hour
+  and minute and no date. Month names, AM/PM, two-digit years and time zones
+  are not supported and are refused when the specification is built, as is a
+  repeated directive or a format of the wrong kind for the type. Leap seconds
+  have no directive: a seconds field of `60` is a value that does not fit
+  `%S`, reported as a `format` finding. With no `format`, the default
+  (`%Y-%m-%d`, `%Y-%m-%d %H:%M:%S`, `%H:%M:%S`) is written into the
+  specification, so `R Date` becomes `R Date` with `R %Y-%m-%d`. The three
+  types are validated as text and stay text after import; a typed `Date`,
+  `POSIXct` or `hms` vector in memory is not class-checked and skips the format
+  check. A format with a colon followed by a space must be quoted in YAML.
+- **`R logical` columns.** The text `TRUE`, `T`, `true`, `True` and `FALSE`,
+  `F`, `false`, `False` is converted to logical at import, in memory and in
+  streamed batches alike; a blank is missing and anything else, including
+  `yes` and `1`, is an import error (`not_convertible`). The text `NA` is
+  already a missing marker in a CSV or TSV file, so it raises no finding there;
+  read from a `.sas7bdat` or `.xpt` file, or passed to `dta_coerce_column()`,
+  it is not convertible. `values` and `examples` must be quoted (`["TRUE", "FALSE"]`, since YAML reads
+  a bare `true` as a boolean; the error now names `R logical`), and `pattern`
+  is refused (`dta_spec_logical_pattern`). In a `col_unique` rule on such a
+  column `T`, `true` and `TRUE` are one key, also when the file is streamed.
+- **Rules on logical columns.** `equals`, `equal`, `not_equals`, `not_equal`,
+  `in` and `not_in` on an `R logical` column take `true` or `false`, or any of
+  the eight tokens, so `equals: T` matches `TRUE`; `lint_dta()` reports any
+  other operand as `rule_condition_value_unfit`. A rule condition with the
+  `pattern` operator on an `R logical` column is refused when the
+  specification is checked, since it could never match a logical value.
+- **Matrix cells in the `R` vocabulary.** A matrix `cells.type` may be
+  `R numeric`, `R integer` or `R character` (`R logical`, `R Date` and the
+  other date types are refused), with `range` and `infinite` behaving as for
+  `SAS Num` and `SAS Int`. Row labels may use either type system.
+- **`.sas7bdat` and `.xpt` columns declared with an `R` date/time type** arrive
+  as text in the stored R format (a datetime in UTC), when the declared type is
+  the kind SAS stored (`R Date` for a date, `R POSIXct` for a datetime, `R hms`
+  for a time). The typed value is rendered under the declared format, so
+  anything finer than it is cut (`14:30:45` under `R %H:%M` reads `14:30`,
+  `.1234` under `%OS3` reads `.123`) and then passes, as under `SAS TIME5.`.
+  Any other pairing arrives as ISO 8601 text, which then fails the format. `R character`, `R numeric`, `R integer` and
+  `R logical` keep the SAS number.
+- **`data_types.default` in `dta-app.yaml`** (`SAS`, the default, or `R`, in any
+  case) sets which type system the app starts new columns and new matrix cells
+  with. It never restricts a type written in YAML (which keeps its prefix) or
+  an existing column: the column editor offers both type systems and a column
+  keeps its own. A new matrix is offered the cell types of the default system.
+  Any other value is reported as `app_config_invalid` by `validate_template()`
+  and the app keeps `SAS`.
+
+### Changed
+
+- `get_arrow_type()` follows the backend of the column's type: `R character`,
+  `R numeric`, `R integer` and `R logical` give `"utf8"`, `"double"`, `"int32"`
+  and `"bool"`, and the date/time types of either backend give `NA_character_`.
+  SAS results are unchanged.
+- A rule's `equals`, `not_equals`, `in` and `not_in` with a text operand that is
+  a logical token (`T`, `true`, ...) now compare as logical against any column
+  that holds logical values, whatever its declared type. Before, `TRUE == "T"`
+  never matched. A column of text keeps comparing as text.
+- The validation report words an R format as "Must fit the R date/time format:
+  ..." (a SAS format still reads "Must fit the SAS format: ..."), and the
+  linter names an `R` type with its prefix in its findings (`R character`).
+- The matrix cell messages name both type systems. `cells.type` (class
+  `dta_matrix_cells_type`) now reads "must be a numeric or text type" and lists
+  `SAS Num`, `SAS Int`, `SAS Char`, `R numeric`, `R integer` and `R character`;
+  the range error (`dta_cell_range_type`) says "numeric cells only" and the
+  `infinite` error (`dta_cell_finite_type`) names `SAS Num` and `R numeric`;
+  the header error (`dta_matrix_header_invalid`) asks for a non-nullable text
+  column. The classes are unchanged.
+- The app's list of type systems (`dta_supported_backends()`) now includes `R`,
+  so the column editor offers both.
+- The app's sidebar Delivery zone (the drop area for the whole delivery) is
+  offered only to a document that names containers, in its containers section
+  or in the container reference of a file entry. A document without any shows
+  no drop area; in edit mode the sidebar still offers the Containers… link to
+  the container manager, and the drop area appears as soon as the first
+  container is added. A dataset's own drop zone is unchanged, and its hint
+  names the sidebar zone only when there is one.
+
+### Fixed
+
+- `validate_template()` reported a concrete template with a required party
+  slot (`required: true`) as `instantiate_failed`, though the app builds it:
+  the dry run selected no party profile. It now selects, for each required
+  slot, the first profile the app would offer; a slot no profile in the
+  directory being validated can fill is still reported.
+- `validate_template()` checked the party slots, vocabulary slots and option
+  targets a child template writes only in the plain-list form, and only as
+  complete entries. Written with collection verbs (`modify:`, `add:`), they
+  went unchecked, so a misspelt profile id passed, and the run printed
+  "Dropping 1 party slot with a missing or empty id."; a plain-list entry
+  that changed one field of an inherited slot was reported as having an
+  invalid target, a false error for a vocabulary slot. Slots are now checked
+  as merged with what they inherit, once, on the file that wrote them; when
+  a parent cannot be found, the entries complete as written still are.
+- **The app's page no longer loses its scrollbar after a dialog closes.**
+  A dialog opened again while it was already on screen left the page locked
+  once it closed: no scrollbar, and a mouse wheel that did nothing, so
+  everything below the window was out of reach until the page was reloaded.
+  It followed *Load example*, *Create new* and *Create new from template*
+  whenever the button's dialog was requested twice, and the "Could not
+  load" dialog when a corrected YAML still failed to load. It shows only
+  once a document is taller than the window. The page is now unlocked
+  whenever the last dialog has closed.
+- **A dialog asked for twice in quick succession no longer leaves a dead
+  copy on top.** If the second request reached the app while the first
+  dialog was still opening, a second copy appeared over it whose *Load* or
+  *Create* button did nothing. It most often followed a click the app took
+  several seconds to acknowledge, on a busy machine: the button is released
+  after five seconds, a second click goes through, and the two requests are
+  then answered together. The second dialog now simply replaces the first.
+
 ## [0.28.0] - 2026-11-18
 
 ### Added
@@ -5336,7 +5487,8 @@ All of the following belong to the manifest verification work above.
 
 - Initial internal release
 
-[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.25.0...v0.26.0

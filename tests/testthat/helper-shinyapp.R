@@ -198,6 +198,23 @@ app_source <- function(file) {
   )
 }
 
+# The value of one top-level `name <- <expr>` in app.R, evaluated: the JavaScript
+# snippets the page embeds are plain strings there. app.R is not part of
+# app_env() (which sources only inst/shiny/dta_app/R), so the string is lifted
+# out of the parsed source rather than fetched by name. Returns NA when the
+# binding is gone, so a renamed or deleted snippet fails loudly in the tests
+# that assert on it instead of passing vacuously.
+app_r_binding <- function(name) {
+  exprs <- parse(text = app_source("app.R"), keep.source = FALSE)
+  for (e in exprs) {
+    if (is.call(e) && identical(as.character(e[[1]]), "<-") &&
+      identical(as.character(e[[2]]), name)) {
+      return(eval(e[[3]]))
+    }
+  }
+  NA_character_
+}
+
 # ---- Helpers shared by the test-shinyapp-*.R files ---------------------------
 
 # Path of `filename` inside library root `root`, routed by its kind suffix:
@@ -312,6 +329,26 @@ render_html <- function(tag) {
 # assertion about the MESSAGE CONTENT rather than about where cli happened to
 # wrap it.
 flat_message <- function(x) gsub("\\s+", " ", x)
+
+# Run the rest of the calling test with a library holding `yaml_lines` as its
+# dta-app.yaml: the app config of every server started afterwards. Nothing here
+# evaluates `code`; the argument is kept so existing call sites read the same.
+with_app_library <- function(yaml_lines, code, .local_envir = parent.frame()) {
+  lib <- normalizePath(withr::local_tempdir(.local_envir = .local_envir), winslash = "/")
+  writeLines(yaml_lines, file.path(lib, "dta-app.yaml"))
+  withr::local_envvar(
+    c(
+      DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", lib),
+      DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = NA,
+      DTATOOLS_TEMPLATE_REFRESH_SECONDS = NA,
+      DTATOOLS_TEMPLATE_CACHE_DIR = NA
+    ),
+    .local_envir = .local_envir
+  )
+  withr::local_options(list(DTAtools.template_dir = NULL), .local_envir = .local_envir)
+  clean_session_file()
+  invisible(lib)
+}
 
 # Clear every DTATOOLS_TEMPLATE_* variable for the duration of each test.
 # WHY: a developer machine with DTATOOLS_TEMPLATE_SOURCES exported would flip

@@ -50,16 +50,23 @@ after the matrix reader's own condition for a \verb{matrix:} block it refuses
 (\code{matrix_field_unknown}, \code{matrix_header_invalid}, ...; \code{matrix_invalid} when
 it has none), \code{file_container_invalid},
 \code{file_field_unknown}, \code{file_container_misplaced}, \code{file_count_bound_invalid},
+\code{date_pattern_invalid} (a \code{filename}'s \verb{<<date-mask>>} is malformed),
 \code{container_invalid} (the \code{containers} section is malformed, an element lacks
 an \code{id} or \code{filename}, has an unknown field or a value a container cannot
 hold), \code{container_duplicate} (an id or file name used twice, or more than one
 \code{default: true}) and \code{file_container_unknown} (a file entry's \code{container}
 names an id the document's \code{containers} do not define).
 
+On an \verb{R logical} column a rule operand must be \code{true} or \code{false}, or one of
+the texts \code{TRUE}, \code{T}, \code{true}, \code{True}, \code{FALSE}, \code{F}, \code{false}, \code{False}; any
+other operand is a \code{rule_condition_value_unfit} error, and a \code{pattern}
+operator on such a column (its values are not text, so it never matches) is a
+\code{rule_condition_operator_invalid} error.
+
 Warnings: \code{rules_without_columns}, \code{rule_not_checkable},
-\code{rule_condition_numeric_on_text} when the column is not \verb{SAS Char} but is
-read as text (a date), \code{rule_condition_value_unfit} when a number is written
-where the column holds text,
+\code{rule_condition_numeric_on_text} when the column is not text (\verb{SAS Char},
+\verb{R character}) but is read as text (a date), \code{rule_condition_value_unfit}
+when a number is written where the column holds text,
 \code{format_narrower_than_length}, \code{column_id_shadows_field} (a column \verb{X.<field>}
 beside a column \code{X}, where \verb{<field>} is a column field such as \code{values}: a
 template path \verb{columns.X.<field>} is read as that field of \code{X}, so a seal or

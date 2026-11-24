@@ -1,5 +1,5 @@
 # File handler classes and the properties they apply at read time.
-# REQ-FILE-001 .. REQ-FILE-010.
+# REQ-FILE-001 .. REQ-FILE-010, REQ-FILE-046.
 #
 # Every case here calls a handler's read_file()/matches_filename() directly,
 # with no DTADataSetTabular and no specification in between -- the point is to
@@ -220,6 +220,57 @@ test_that("OQ-FILE-010 | matches_filename is an unanchored regular-expression se
   qa_step("...or in the middle", TRUE, isTRUE(matches_filename(h, "mydata2.csv")))
   qa_step("...or with no separator at all around it", TRUE, isTRUE(matches_filename(h, "xdatacsv")))
   qa_step("a name that does not contain the pattern at all does not match", FALSE, isTRUE(matches_filename(h, "nomatchhere.csv")))
+})
+
+# ---- date masks in a filename pattern ----------------------------------------------
+# Every expected value is read off the token ranges in REQ-FILE-046.
+
+test_that("OQ-FILE-070 | a date mask in a filename pattern matches only in-range dates and times in its layout | REQ-FILE-046", {
+  h <- DTAFileCSV(filename = "^s1_<<yyyyMMddHHmm>>\\.csv$", pattern = TRUE)
+  m <- function(name) isTRUE(matches_filename(h, name))
+
+  qa_step("the filename property keeps the mask as written", "^s1_<<yyyyMMddHHmm>>\\.csv$", h@filename)
+  qa_step("2024-01-31 14:59 matches", TRUE, m("s1_202401311459.csv"))
+  qa_step("the lowest stamp, 2000-01-01 00:00, matches", TRUE, m("s1_200001010000.csv"))
+  qa_step("the highest stamp, 2099-12-31 23:59, matches", TRUE, m("s1_209912312359.csv"))
+  qa_step("the day is not checked against the month: 30 February matches", TRUE, m("s1_202402301200.csv"))
+  qa_step("year 1999 is outside 2000-2099", FALSE, m("s1_199901311459.csv"))
+  qa_step("month 13 is refused", FALSE, m("s1_202413311459.csv"))
+  qa_step("month 00 is refused", FALSE, m("s1_202400311459.csv"))
+  qa_step("day 32 is refused", FALSE, m("s1_202401321459.csv"))
+  qa_step("day 00 is refused", FALSE, m("s1_202401001459.csv"))
+  qa_step("hour 24 is refused", FALSE, m("s1_202401312459.csv"))
+  qa_step("minute 60 is refused", FALSE, m("s1_202401311460.csv"))
+  qa_step("an 11-digit stamp is refused", FALSE, m("s1_20240131145.csv"))
+  qa_step("the mask text itself is not a matching name", FALSE, m("s1_<<yyyyMMddHHmm>>.csv"))
+
+  # Characters other than the token letters are literal, the ISO T included.
+  iso <- DTAFileCSV(filename = "^x_<<yyyy-MM-ddTHH:mm>>$", pattern = TRUE)
+  qa_step("a literal -, T and : inside the mask match themselves", TRUE, isTRUE(matches_filename(iso, "x_2024-01-31T14:59")))
+  qa_step("...and only themselves", FALSE, isTRUE(matches_filename(iso, "x_2024-01-31 14:59")))
+
+  named <- DTAFileCSV(filename = "^r_<<d-MMM-yy>>_<<MMMM>>\\.csv$", pattern = TRUE)
+  qa_step(
+    "d without a leading zero, MMM and MMMM as title-case English month names",
+    TRUE, isTRUE(matches_filename(named, "r_5-Mar-24_March.csv"))
+  )
+  qa_step("a month name in lower case is refused", FALSE, isTRUE(matches_filename(named, "r_5-mar-24_March.csv")))
+  qa_step("a full name where MMM asks for three letters is refused", FALSE, isTRUE(matches_filename(named, "r_5-March-24_March.csv")))
+})
+
+test_that("OQ-FILE-071 | a malformed date mask in a filename pattern is refused when the handler is built | REQ-FILE-046", {
+  refused <- function(filename) {
+    err <- tryCatch(DTAFileCSV(filename = filename, pattern = TRUE), error = function(e) e)
+    inherits(err, "dta_date_pattern_invalid")
+  }
+  qa_step("a run that is no token length (yyy) is refused", TRUE, refused("^a_<<yyy>>\\.csv$"))
+  qa_step("...as is mmm", TRUE, refused("^a_<<mmm>>\\.csv$"))
+  qa_step("upper-case YYYY and DD are refused", TRUE, refused("^a_<<YYYYMMDD>>\\.csv$"))
+  qa_step("lower-case hh is refused", TRUE, refused("^a_<<hhmm>>\\.csv$"))
+  qa_step("upper-case SS is refused", TRUE, refused("^a_<<HHmmSS>>\\.csv$"))
+  qa_step("a month token next to times only (HHMM) is refused", TRUE, refused("^a_<<yyyyMMddHHMM>>\\.csv$"))
+  qa_step("a minute token next to dates only (yyyymmdd) is refused", TRUE, refused("^a_<<yyyymmdd>>\\.csv$"))
+  qa_step("the well-formed mask beside them is accepted", FALSE, refused("^a_<<yyyyMMddHHmm>>\\.csv$"))
 })
 
 # ---- file counting ------------------------------------------------------------------

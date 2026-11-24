@@ -463,3 +463,56 @@ test_that("OQ-CONT-032 | a library member named like a Windows device is refused
   qa_check("a single-member file con.xpt is accepted", is.null(s$error), s$error)
   qa_step("and read with its two rows", c("a", "b"), cont_table(s$result, "con", "con")$X)
 })
+
+# ---- a date variable declared in the R vocabulary -----------------------------------
+#
+# REQ-CONT-033. The VS variable VSDT holds the SAS days 23968, 23968 and 23969,
+# which are 2025-08-15, 2025-08-15 and 2025-08-16 (see the table at the top).
+
+test_that("OQ-CONT-063 | a transport member's date variable declared R Date reads as the date text of the column's format, and R numeric as the SAS days | REQ-CONT-033", {
+  # The VS dataset described in the R vocabulary; `...` is what VSDT declares.
+  vs_r <- function(...) {
+    col <- function(id, type, ...) DTAtools::DTAColumnSpec(id = id, type = type, nullable = FALSE, ...)
+    DTAtools::DTAColumnSpecCollection(
+      columns = list(
+        USUBJID = col("USUBJID", "R character"),
+        VSTESTCD = col("VSTESTCD", "R character"),
+        VSSTRESN = col("VSSTRESN", "R numeric"),
+        VSDT = col("VSDT", ...)
+      ),
+      rules = list()
+    )
+  }
+  vsdt <- function(id, ...) {
+    dta <- cont_of(cont_tab("vs", list(DTAtools::DTAFileXPT("vs.xpt")), vs_r(...)))
+    r <- cont_run(dta, cont_fx("sdtm.xpt"), exdir = cont_exdir(id))
+    qa_check(paste("the library is accepted:", id), is.null(r$error), r$error)
+    list(table = cont_table(r$result, "vs", "vs"), result = r$result)
+  }
+
+  default <- vsdt("OQ-CONT-063-default", type = "R Date")
+  qa_step(
+    "R Date with no format is read as %Y-%m-%d text",
+    c("2025-08-15", "2025-08-15", "2025-08-16"), default$table$VSDT
+  )
+  qa_step("the other variables are the VS values", c(120, 80, 135), default$table$VSSTRESN, tolerance = 0)
+
+  named <- vsdt("OQ-CONT-063-named", type = "R Date", format = "R %d/%m/%Y")
+  qa_step(
+    "R Date under R %d/%m/%Y is read as that text",
+    c("15/08/2025", "15/08/2025", "16/08/2025"), named$table$VSDT
+  )
+
+  number <- vsdt("OQ-CONT-063-number", type = "R numeric")
+  qa_step(
+    "R numeric is read as the SAS days since 1960-01-01",
+    c(23968, 23968, 23969), number$table$VSDT,
+    tolerance = 0
+  )
+
+  checked <- check(default$result, persist = FALSE, quiet = TRUE)
+  qa_check(
+    "the date text satisfies the format it was written in",
+    isTRUE(validation_status(datasets(checked, "vs"))$ok)
+  )
+})

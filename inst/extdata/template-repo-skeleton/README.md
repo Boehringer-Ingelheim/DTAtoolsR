@@ -57,7 +57,12 @@ repository/
 │   └── workflows/
 │       └── validate-templates.yml
 ├── bitbucket-pipelines.yml
-└── Jenkinsfile
+├── Jenkinsfile
+└── .claude/
+    └── skills/
+        └── dta-template-authoring/     (instructions for coding agents; see "Working with a coding agent")
+            ├── SKILL.md
+            └── references/
 ```
 
 Each kind of file lives in its own folder, directly inside it:
@@ -354,9 +359,9 @@ dataset:
   id: lab_results
   type: tabular
   files:
-    filename: ^s${study.id}_[0-9]{12}\.csv$
+    filename: ^s${study.id}_<<yyyyMMddHHmm>>\.csv$
     pattern: true
-    pattern_description: s${study.id}_YYYYMMDDHHMM.csv
+    pattern_description: s${study.id}_yyyyMMddHHmm.csv
     type: csv
   columns:
     - id: STUDYID
@@ -384,6 +389,33 @@ dataset:
 
 These tokens are not general-purpose environment-variable substitution. `validate_template()` reports any other `${...}` token in a creation
 or dataset template, and a `${version}` inside a dataset, as `token_unknown` (a warning), because it would reach the document as literal text.
+
+#### Date masks in patterns: `<<yyyyMMdd>>`
+
+Inside a regular expression -- a `filename` whose entry says `pattern: true`, a column's `pattern:`, or a rule's `pattern` condition -- a
+date/time mask written between `<<` and `>>` stands for the matching digits or names, so `^ae_<<yyyyMMdd>>_<<HHmm>>\.csv$` accepts
+`ae_20240131_1459.csv` but not `ae_20241331_1459.csv`. The tokens are case-sensitive:
+
+| Token | Meaning | Accepts |
+| --- | --- | --- |
+| `yyyy` | 4-digit year | `2000`-`2099` |
+| `yy` | 2-digit year | `00`-`99` |
+| `MMMM` | full month name | `January`-`December` |
+| `MMM` | abbreviated month name | `Jan`-`Dec` |
+| `MM` | 2-digit month | `01`-`12` |
+| `dd` | 2-digit day | `01`-`31` |
+| `d` | day without a leading zero | `1`-`31` |
+| `HH` | 2-digit hour (24 h) | `00`-`23` |
+| `H` | hour without a leading zero | `0`-`23` |
+| `mm` | 2-digit minute | `00`-`59` |
+| `ss` | 2-digit second | `00`-`59` |
+
+- Any other character inside the mask is matched literally, so `<<yyyy-MM-dd>>` and `<<yyyy-MM-ddTHH:mm:ss>>` work as written.
+- The day is not checked against the month: `<<yyyy-MM-dd>>` accepts `2024-02-30`.
+- A mask that is not made of these tokens is refused when the specification is built: a wrong length (`<<yyy>>`), a wrong-case letter
+  (`YYYY`, `DD`, `SS`, `hh`) or a month where minutes were meant (`<<yyyyMMddHHMM>>`, and the reverse, `<<yyyymmdd>>`).
+- The specification keeps the mask as written; it is expanded only where the pattern is matched. Outside `<<...>>` the pattern is an
+  ordinary regular expression, and a `pattern_description` is plain text in which a mask is not expanded.
 
 ### `options:`
 
@@ -614,9 +646,9 @@ A column specification is passed into `DTAColumnSpec`. Supported fields are:
 | --- | --- |
 | `id` | Required column identifier: the exact text of the column's header. Spaces and punctuation are allowed between characters (`Subject ID`, `Wt. (kg)`); no space at the start or end, and no whitespace other than spaces between characters (tabs, line breaks and other whitespace such as an ideographic space are refused). A matrix row label is the exception, see below. |
 | `label` | Human-readable column label. |
-| `type` | Data type, including the supported SAS-prefixed types below. |
-| `format` | Format string, such as a SAS format. |
-| `length` | Maximum character length where applicable. |
+| `type` | Data type, always prefixed with its type system: the `SAS` or `R` types below. |
+| `format` | Format string, prefixed like the type: a SAS format (`SAS $10.`) or an R date/time format (`R %Y-%m-%d`). |
+| `length` | Maximum character length where applicable (of the `R` types, only `R character`). |
 | `nullable` | Whether an empty or missing value is permitted. |
 | `values` | Explicit permitted values. |
 | `values_from` | A controlled-vocabulary binding expanded to `values` when built. |
@@ -639,7 +671,7 @@ Use `examples` (plural), matching the column-specification field. Do not use `ex
 exclusive. When a column uses `values_from`, do not also set `pattern`; that is an error. A literal `values` list combined with `values_from` is
 a warning, and the vocabulary binding wins.
 
-The supported SAS type names are:
+The supported type names are, in the `SAS` type system:
 
 - `SAS Char`
 - `SAS Num`
@@ -648,8 +680,50 @@ The supported SAS type names are:
 - `SAS Time`
 - `SAS DateTime`
 
-Use the `SAS` prefix where the type is a SAS type. A SAS format may follow the same backend prefix convention, for example `format: SAS $10.` for
-a character column. The package's column-structure factory supports the SAS backend; do not assume an unlisted backend is available.
+and in the `R` type system (`R` in capitals, then the type, which is not case-sensitive):
+
+- `R character`
+- `R numeric` (`R double` is accepted)
+- `R integer`
+- `R logical`
+- `R Date`
+- `R POSIXct`
+- `R hms`
+
+Every `type` and every `format` starts with the name of its type system, and the two must match on one column (`type: SAS Char` with `format: R %Y-%m-%d`
+is refused). A bare `Char` or `character` is refused, and no other type system exists. One dataset may mix the two. A SAS format follows the same
+prefix convention, for example `format: SAS $10.` for a character column.
+
+The `R` types in short:
+
+| Type | Checks | `format` |
+| --- | --- | --- |
+| `R character` | Any text; `length` is the maximum number of characters. | no |
+| `R numeric` | A number, parsed strictly as `SAS Num` is. | no |
+| `R integer` | A whole number within the 32-bit range, as `SAS Int`. | no |
+| `R logical` | `TRUE`, `T`, `true`, `True` or `FALSE`, `F`, `false`, `False`; blank is missing; anything else is an import error. | no |
+| `R Date`, `R POSIXct`, `R hms` | Text that fits the format. Defaults: `%Y-%m-%d`, `%Y-%m-%d %H:%M:%S`, `%H:%M:%S`; the default is written into the specification. | optional |
+
+An R date/time format is built from `%Y` (four digits), `%m`, `%d`, `%H`, `%M`, `%S` (two digits, in range, the day checked against its month),
+`%OS1` to `%OS6` (seconds with an optional fraction of one to n digits), and the shorthands `%F` (`%Y-%m-%d`) and `%T` (`%H:%M:%S`), plus a space,
+`- / . , : ; _` and the letters `T` and `Z`, each standing for itself. Fields have a fixed width, a value from a text source (CSV, TSV) is matched exactly (neither trimmed nor
+case-folded; a `.sas7bdat` or `.xpt` value is rendered under the format first), a `Date` format needs year, month and day, a `POSIXct` format also hour and minute, and an `hms` format (a time of day,
+`00:00:00` to `23:59:59`) hour and minute and no date. Month names, AM/PM, two-digit years and time zones are not supported (a seconds field of `60` simply does not fit `%S`); use
+`SAS Date` with `SAS DATE9.` for `15AUG2025`. A format that contains a colon followed by a space must be quoted: `format: 'R %H: %M'`. On an `R logical` column
+`values` and `examples` must be quoted (`values: ["TRUE", "FALSE"]`, since YAML reads a bare `true` as a boolean), `pattern` is refused, and so is a rule condition with the `pattern` operator.
+
+```yaml
+- id: VISITDT
+  label: Visit date
+  type: R Date
+  format: R %d/%m/%Y
+  nullable: No
+  examples: [15/08/2025]
+```
+
+A matrix `cells.type` is `SAS Num`, `SAS Int`, `SAS Char`, `R numeric`, `R integer` or `R character`; its row labels may use either system.
+Which system the app starts new columns and matrix cells with is the `data_types.default` key of `dta-app.yaml` (see its key reference below); it does not
+restrict the types a template may use.
 
 Example of a column bound to a vocabulary:
 
@@ -1443,6 +1517,12 @@ Each link is an `http://`, `https://` or `mailto:` URL without spaces or quotes.
 | `dta_yaml_download` | Download of the whole DTA's YAML. |
 | `editing` | `false` makes the app read-only: no edit menu and no editing at all. |
 
+`data_types`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `default` | `SAS` | The type system the app preselects for **new** columns and new matrix cells: `SAS` or `R`, in any case. It is only the starting choice: the column editor still offers both type systems, an existing column or matrix keeps its own, and a type written in YAML keeps its mandatory prefix (`SAS Char`, `R character`), so existing templates and DTA files are read exactly as before. A **new** matrix gets the default system's cell types; a matrix of the other system can be written in YAML. Any other value is an error and keeps `SAS`. |
+
 `exports`
 
 | Key | Default | Meaning |
@@ -1504,7 +1584,7 @@ The app reads the configuration together with the template index: after "Refresh
 
 | Code | Severity | Meaning |
 | --- | --- | --- |
-| `app_config_invalid` | error | A value the app would reject: unreadable YAML, wrong `kind`, a bad colour, link or format, or a logo or `.docx` that is missing, too large, of the wrong type or outside the library. |
+| `app_config_invalid` | error | A value the app would reject: unreadable YAML, wrong `kind`, a bad colour, link or format, a `data_types.default` other than `SAS` or `R`, or a logo or `.docx` that is missing, too large, of the wrong type or outside the library. |
 | `app_config_unknown_key` | warning | A key the app does not know. |
 | `app_config_warning` | warning | A value the app accepts but adjusts, such as `create_blank: true` with `editing: false`. |
 | `app_config_duplicate` | error | Both `dta-app.yaml` and `dta-app.yml` in the library. Keep one. |
@@ -1654,6 +1734,28 @@ DTATOOLS_TEMPLATE_SOURCES=dev=dir:/path/to/your/clone
 
 On systems where the app process uses R environment configuration, set the variable before launching the app. Do not store deployment tokens in
 shell history or repository files.
+
+### Working with a coding agent
+
+`create_template_repo()` writes an agent skill to `.claude/skills/dta-template-authoring/`. Coding agents that support the Agent Skills format
+load it when a task touches this library. It is the working method that this README's reference sections leave to the author: how to lay out a
+family of templates (extends, mixins, sealing), how to release a change without altering a released version, when a reference should follow
+`@latest` and when it should pin a version, and how to run the validator and act on each of its findings. It points back to this README for field
+syntax.
+
+The skill is versioned with DTAtools. To add it to a repository created without it, or to refresh it after upgrading DTAtools, copy the installed
+one from the repository root:
+
+```r
+dir.create(".claude/skills", recursive = TRUE, showWarnings = FALSE)
+file.copy(
+  system.file("extdata", "agent-skills", "dta-template-authoring", package = "DTAtools"),
+  ".claude/skills", recursive = TRUE, overwrite = TRUE
+)
+```
+
+Keep team-specific rules in a skill or instruction file of your own rather than editing these files, so that a refresh does not overwrite them.
+Agents that read skills from a different folder use the same files.
 
 ### Pull-request review checklist
 

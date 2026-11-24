@@ -4,7 +4,8 @@
 # A template library is already the per-deployment unit (it is what
 # DTATOOLS_TEMPLATE_SOURCES points at), so it also carries that deployment's
 # look and feature set: owner, title, logo, a header tag, colours, links, which
-# start buttons / tabs / exports are offered, and its own Word templates. With no
+# start buttons / tabs / exports are offered, the type system new columns start
+# with, and its own Word templates. With no
 # file the defaults reproduce the stock app -- except that the organisation is
 # deliberately empty, so no organisation name appears unless a library sets one.
 #
@@ -34,6 +35,12 @@
 # -----------------------------------------------------------------------------
 
 dta_app_config_filenames <- function() c("dta-app.yaml", "dta-app.yml")
+
+# The type systems (backends) data_types.default may name. A literal on
+# purpose: this file also runs on its own inside validate_template(), so it
+# cannot ask the app's helpers. A test pins it to the package's own list
+# (`__DTAtools_supported_backends__`); keep the two in step.
+dta_app_config_backends <- function() c("SAS", "R")
 
 # Today's literal values, moved out of app.R / theme.R.
 dta_app_config_defaults <- function() {
@@ -100,6 +107,10 @@ dta_app_config_defaults <- function() {
       dta_yaml_download = TRUE,
       editing = TRUE
     ),
+    # The type system (backend) the app preselects for NEW columns and new
+    # matrix cells: "SAS" or "R". It never hides the other one, and types
+    # written in YAML keep their mandatory "SAS " / "R " prefix.
+    data_types = list(default = "SAS"),
     exports = list(
       document = c("markdown", "markdown_pdf", "word", "word_template"),
       default_document = "word",
@@ -140,6 +151,19 @@ dta_app_config_defaults <- function() {
   } else {
     .cfg_bad("must be true or false.")
   }
+}
+
+# One of dta_app_config_backends(), in any case and with surrounding whitespace;
+# stored in its canonical spelling. Anything else keeps the default.
+.cfg_backend <- function(v) {
+  allowed <- dta_app_config_backends()
+  if (.cfg_is_scalar_chr(v)) {
+    hit <- allowed[match(toupper(trimws(v)), toupper(allowed))]
+    if (!is.na(hit)) {
+      return(.cfg_ok(hit))
+    }
+  }
+  .cfg_bad(paste0("must be one of: ", paste(allowed, collapse = ", "), "."))
 }
 
 .cfg_color <- function(v) {
@@ -330,7 +354,10 @@ parse_dta_app_config <- function(path) {
     }
   }
 
-  top <- c("kind", "organisation", "document", "branding", "header_tag", "colors", "links", "features", "exports")
+  top <- c(
+    "kind", "organisation", "document", "branding", "header_tag", "colors", "links",
+    "features", "data_types", "exports"
+  )
   for (u in setdiff(names(raw), top)) {
     add("warning", u, "is not a known setting and is ignored.", type = "unknown_key")
   }
@@ -403,6 +430,11 @@ parse_dta_app_config <- function(path) {
   )
   flat <- c("raw_yaml_tab", "raw_yaml_editable", "dataset_yaml_download", "dta_yaml_download", "editing")
   fill("features", ft, stats::setNames(lapply(flat, function(k) .cfg_bool), flat))
+
+  # null_ok: an empty `default:` arrives as null and must be reported rather
+  # than silently kept as the default.
+  dt <- section(raw[["data_types"]], "data_types", "default")
+  fill("data_types", dt, list(default = .cfg_backend), null_ok = "default")
 
   ex <- section(
     raw[["exports"]], "exports",

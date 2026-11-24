@@ -1,10 +1,12 @@
 # The click guard -- click_guard_script() in R/ui_components.R, and the CSS it
 # drives in bi_css() (R/theme.R).
 #
-# These are SOURCE-LEVEL assertions, which this suite otherwise avoids, and the
-# reason is specific: the behaviour under test is JavaScript running against a
-# DOM, and there is no JS engine anywhere in the package's dependency set (no
-# V8, no chromote, no shinytest2), so the guard cannot be executed here at all.
+# These are SOURCE-LEVEL assertions, which this suite otherwise avoids: the
+# behaviour under test is JavaScript running against a DOM, and no test runs
+# the guard in a browser. (shinytest2 and chromote are in Suggests, and
+# test-shinyapp-modal-browser.R runs two other snippets in headless Chrome that
+# way. The guard is harder: it acts on trusted clicks only, which a script in
+# the page cannot produce, so it would take real input events.)
 #
 # What is pinned instead is the small set of structural properties the guard's
 # SAFETY rests on -- each one a thing that, if it silently regressed, would

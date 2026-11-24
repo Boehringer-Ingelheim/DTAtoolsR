@@ -147,9 +147,73 @@ dta_narrow_rows <- function(v) {
   v
 }
 
-`__DTAtools_supported_backends__` <- c("SAS")
+`__DTAtools_supported_backends__` <- c("SAS", "R")
 `__DTAtools_supported_dataset_types__` <- c("tabular", "file", "matrix")
 `__DTAtools_stream_modes__` <- c("auto", "always", "never")
+
+# The one table of declared types. Every code path that asks what KIND of column
+# a declared type is (text, number, integer, logical or temporal) goes through
+# it, so a backend's vocabulary lives here and in its class file, nowhere else.
+# The names are the canonical spellings, in the order a picker shows them.
+`__DTAtools_type_families__` <- list(
+  SAS = c(
+    Char = "text", Num = "number", Int = "integer",
+    Date = "temporal", Time = "temporal", DateTime = "temporal"
+  ),
+  R = c(
+    character = "text", numeric = "number", integer = "integer", logical = "logical",
+    Date = "temporal", POSIXct = "temporal", hms = "temporal"
+  )
+)
+
+#' @title Family of a Declared Type
+#' @description
+#' The kind of column a declared type is, whichever backend spelled it: `"text"`,
+#' `"number"`, `"integer"`, `"logical"` or `"temporal"`. `SAS Char` and
+#' `R character` are both `"text"`; `SAS Time` and `R hms` are both `"temporal"`.
+#' @param backend A backend name, `"SAS"` or `"R"`.
+#' @param type A canonical type name of that backend.
+#' @return A family, or `NA_character_` for an unknown backend or type, `NULL` or
+#'   anything that is not one string.
+#' @keywords internal
+dta_family_of <- function(backend, type) {
+  is_one_string <- function(x) is.character(x) && length(x) == 1L && !is.na(x)
+  if (!is_one_string(backend) || !is_one_string(type)) {
+    return(NA_character_)
+  }
+  families <- `__DTAtools_type_families__`[[backend]]
+  if (is.null(families) || !type %in% names(families)) {
+    return(NA_character_)
+  }
+  unname(families[[type]])
+}
+
+#' @title Family of a Column Structure
+#' @description
+#' [dta_family_of()] applied to a `DTAColumnSpecStructure`.
+#' @param structure A `DTAColumnSpecStructure`, or `NULL` (a column with no
+#'   declared type).
+#' @return A family, or `NA_character_` when there is no structure or no type.
+#' @keywords internal
+dta_type_family <- function(structure) {
+  if (is.null(structure)) {
+    return(NA_character_)
+  }
+  dta_family_of(structure@backend, structure@type)
+}
+
+#' @title Declared Types of a Backend
+#' @description
+#' The canonical type names of a backend, in the order a picker shows them.
+#' @param backend A backend name, `"SAS"` or `"R"`.
+#' @return A character vector, empty for an unknown backend.
+#' @keywords internal
+dta_backend_types <- function(backend) {
+  if (!is.character(backend) || length(backend) != 1L || is.na(backend)) {
+    return(character(0))
+  }
+  names(`__DTAtools_type_families__`[[backend]]) %||% character(0)
+}
 
 # The size above which `stream = "auto"` keeps a file lazy rather than reading
 # it into memory. 512 MB is chosen to sit well below the point where an R
@@ -490,8 +554,8 @@ if (!exists("check", mode = "function", inherits = FALSE)) {
 
 #' Create a DTAColumnSpecStructure Object
 #'
-#' Constructs a DTAColumnSpecStructure object for a specified backend (currently
-#' only SAS), based on the provided type, format, and length. The function
+#' Constructs a DTAColumnSpecStructure object for a specified backend (\code{SAS}
+#' or \code{R}), based on the provided type, format, and length. The function
 #' validates that the
 #' prefixes of type and format are supported and match, then dispatches to the appropriate
 #' backend-specific constructor.
@@ -500,7 +564,9 @@ if (!exists("check", mode = "function", inherits = FALSE)) {
 #' @param format Character. The format specification, potentially prefixed with a backend identifier.
 #' @param length Integer or NULL. The length specification for the column (optional).
 #'
-#' @return An object of class \code{DTAColumnSpecStructureSAS}.
+#' @return An object of class \code{DTAColumnSpecStructureSAS} for the
+#'   \code{SAS} backend, or \code{DTAColumnSpecStructureR} for the \code{R}
+#'   backend.
 #'
 #' @details
 #' The function checks that the prefixes of \code{type} and \code{format} are among the supported
@@ -510,7 +576,11 @@ if (!exists("check", mode = "function", inherits = FALSE)) {
 #' @examples
 #' DTAColumnSpecStructureFactory(type = "SAS Char", format = "SAS $10.", length = 10)
 #'
-#' @seealso \code{\link{DTAColumnSpecStructureSAS}}
+#' # The R backend: an R Date with no format gets the default one.
+#' DTAColumnSpecStructureFactory(type = "R Date")
+#'
+#' @seealso \code{\link{DTAColumnSpecStructureSAS}},
+#'   \code{\link{DTAColumnSpecStructureR}}
 #' @export
 DTAColumnSpecStructureFactory <- function(
   type = NULL,
@@ -567,6 +637,11 @@ DTAColumnSpecStructureFactory <- function(
 
   switch(backend,
     SAS = DTAtools::DTAColumnSpecStructureSAS(
+      type = type_info[["rest"]],
+      format = format_info[["rest"]],
+      length = length
+    ),
+    R = DTAtools::DTAColumnSpecStructureR(
       type = type_info[["rest"]],
       format = format_info[["rest"]],
       length = length
@@ -903,6 +978,7 @@ dta_str_detect <- function(string, pattern) {
     pattern <- rep_len(pattern, n)
     return(vapply(seq_len(n), function(i) dta_str_detect(string[i], pattern[i]), logical(1)))
   }
+  pattern <- dta_expand_date_pattern_tokens(pattern)
   rx <- stringr::regex(pattern, time_limit = dta_regex_time_limit, stack_limit = dta_regex_stack_limit)
   # ICU names its limit errors by code, which is not translated.
   is_limit <- function(e) grepl("U_REGEX_(TIME_OUT|STACK_OVERFLOW)", conditionMessage(e))

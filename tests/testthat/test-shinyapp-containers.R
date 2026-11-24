@@ -94,29 +94,98 @@ ct_set_input <- function(session, id, value) do.call(session$setInputs, stats::s
 
 # ---- the Delivery block's gate and static wiring ----------------------------------
 
-test_that("the Delivery block is offered for every document with a dataset, also one plain dataset", {
+test_that("the Delivery zone is offered only to a document that names containers", {
   clean_session_file()
   one <- app_fixture_path("clinical_dta.yaml")
   two <- ct_spec()
   one_container <- ct_yaml(c(
     ct_header, ct_default, "datasets:", ct_ds("ae", "{filename: ae.csv, type: csv}", ct_ae_cols)
   ))
+  implied <- ct_spec(ae = "{filename: ae.csv, type: csv, container: sdtm_csv.zip}")
 
   shiny::testServer(app_server_dir(), {
     expect_false(output$delivery_zone)
+    expect_false(output$delivery_block)
     session$setInputs(dta_file = ct_fi(one, "clinical_dta.yaml"))
     expect_length(rv$structure, 1)
     expect_length(rv$dta@containers, 0)
-    expect_true(output$delivery_zone)
+    expect_false(output$delivery_zone)
+    expect_false(output$delivery_block)
   })
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_file = ct_fi(two, "spec.yaml"))
-    expect_true(output$delivery_zone)
+    expect_length(rv$structure, 2)
+    expect_false(output$delivery_zone)
+    expect_false(output$delivery_block)
   })
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_file = ct_fi(one_container, "spec.yaml"))
     expect_length(rv$structure, 1)
     expect_true(output$delivery_zone)
+    expect_true(output$delivery_block)
+  })
+  # A container no record declares, named only by a file entry, is still one.
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = ct_fi(implied, "spec.yaml"))
+    expect_length(rv$dta@containers, 0)
+    expect_true(output$delivery_zone)
+    expect_true(output$delivery_block)
+  })
+})
+
+test_that("a dataset's hint points at the sidebar Delivery zone only when there is one", {
+  clean_session_file()
+  plain <- ct_spec()
+  named <- ct_spec(ct_default)
+  pointer <- "drop it on Delivery in the sidebar"
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = ct_fi(plain, "spec.yaml"))
+    hint <- ui_text(output$dataset_hint)
+    expect_match(hint, "Drop this dataset's files below.", fixed = TRUE)
+    expect_false(grepl(pointer, hint, fixed = TRUE))
+    # The Datasets tab carries the hint's placeholder.
+    expect_match(ui_text(output$dataset_detail), 'id="dataset_hint"', fixed = TRUE)
+  })
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = ct_fi(named, "spec.yaml"))
+    expect_match(ui_text(output$dataset_hint), pointer, fixed = TRUE)
+  })
+})
+
+# The hint reads the document; the slots must not, or every upload, check and
+# metadata save would rebuild their file inputs (the comment on dataset_hint).
+test_that("reading the document for the hint does not rebuild the slot file inputs", {
+  clean_session_file()
+  n <- 0L
+  testthat::local_mocked_bindings(
+    fileInput = function(...) {
+      n <<- n + 1L
+      shiny::textInput("stand_in", "stand in")
+    },
+    .package = "shiny"
+  )
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+    invisible(ui_text(output$dataset_detail))
+    invisible(ui_text(output$dataset_hint))
+    after_load <- n
+    expect_gt(after_load, 0L)
+
+    session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
+    session$setInputs(check_all = 1)
+    session$setInputs(edit_meta = 1)
+    session$setInputs(
+      meta_id = "clinical_data", meta_name = "Clinical data table",
+      meta_description = "Vitals collected at every visit", meta_template_source = "CDISC SDTM",
+      meta_template_version = "3.4", meta_template_date = "2026-01-15"
+    )
+    session$setInputs(meta_save = 1)
+    invisible(ui_text(output$dataset_detail))
+    invisible(ui_text(output$dataset_hint))
+    expect_identical(n, after_load)
   })
 })
 
@@ -131,6 +200,7 @@ test_that("the workspace carries the static drop zone, its flag and the tab id t
     expect_match(html, "Drop or choose the whole delivery", fixed = TRUE)
     expect_match(html, "delivery-drop", fixed = TRUE)
     expect_match(html, "output.delivery_zone", fixed = TRUE)
+    expect_match(html, "output.delivery_block", fixed = TRUE)
     expect_match(html, 'id="main_tabs"', fixed = TRUE)
     expect_match(html, 'id="delivery_panel"', fixed = TRUE)
     expect_false(grepl("delivery_hint", html, fixed = TRUE))
@@ -142,6 +212,37 @@ test_that("the workspace carries the static drop zone, its flag and the tab id t
   })
 })
 
+# testServer never evaluates a conditionalPanel, so what each client condition
+# wraps is read from the markup: the drop area only under the zone's condition,
+# and the panel with the manager link under the block's but NOT the zone's, or
+# a document without containers could never reach the manager.
+test_that("the drop area sits under the zone's condition and the manager link only under the block's", {
+  skip_if_not_installed("xml2")
+  clean_session_file()
+  spec <- ct_spec()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = ct_fi(spec, "spec.yaml"))
+    doc <- xml2::read_html(ui_text(output$main))
+    panel <- function(flag) {
+      xml2::xml_find_first(doc, sprintf("//div[@data-display-if='output.%s']", flag))
+    }
+    inside <- function(node, id) length(xml2::xml_find_all(node, sprintf(".//*[@id='%s']", id)))
+    block <- panel("delivery_block")
+    zone <- panel("delivery_zone")
+    expect_false(inherits(block, "xml_missing"))
+    expect_false(inherits(zone, "xml_missing"))
+
+    expect_identical(inside(zone, "delivery_files"), 1L)
+    expect_identical(inside(zone, "delivery_panel"), 0L)
+    expect_identical(inside(block, "delivery_files"), 1L)
+    expect_identical(inside(block, "delivery_panel"), 1L)
+    # The zone's condition is nested in the block's, never the other way round.
+    expect_identical(length(xml2::xml_find_all(block, ".//div[@data-display-if='output.delivery_zone']")), 1L)
+    expect_identical(length(xml2::xml_find_all(zone, ".//div[@data-display-if='output.delivery_block']")), 0L)
+  })
+})
+
 test_that("a one-dataset document without containers offers the container manager in edit mode", {
   clean_session_file()
   one <- app_fixture_path("clinical_dta.yaml")
@@ -149,12 +250,46 @@ test_that("a one-dataset document without containers offers the container manage
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_file = ct_fi(one, "clinical_dta.yaml"))
     expect_length(rv$dta@containers, 0)
+    # Viewing: nothing to deliver and nothing to manage, so no Delivery block.
+    expect_false(output$delivery_block)
+    expect_false(output$delivery_zone)
     expect_false(grepl('id="open_containers"', ui_text(output$delivery_panel), fixed = TRUE))
+    # Editing: the way to the first container, but still no drop area.
     unlock_editing(session)
-    expect_true(output$delivery_zone)
+    expect_true(output$delivery_block)
+    expect_false(output$delivery_zone)
     expect_match(ui_text(output$delivery_panel), 'id="open_containers"', fixed = TRUE)
     session$setInputs(open_containers = 1)
     expect_match(ui_text(output$ctr_modal_body), "No containers", fixed = TRUE)
+  })
+})
+
+test_that("the drop area appears when the first container is added and goes when the last is removed", {
+  clean_session_file()
+  spec <- ct_spec()
+  ct_notes()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = ct_fi(spec, "spec.yaml"))
+    unlock_editing(session)
+    expect_false(output$delivery_zone)
+    session$setInputs(open_containers = 1)
+    ui_text(output$ctr_modal_body)
+    session$setInputs(ctr_add = 1)
+    session$setInputs(ctr_filename = "STUDY_SDTM_*.zip", ctr_description = "SDTM data", ctr_default = FALSE)
+    session$setInputs(ctr_save = 1)
+    expect_length(rv$dta@containers, 1)
+    expect_true(output$delivery_zone)
+    expect_true(output$delivery_block)
+
+    session$setInputs(open_containers = 2)
+    ui_text(output$ctr_modal_body)
+    session$setInputs(ctr_remove = 1)
+    session$setInputs(ctr_remove_confirm = 1)
+    expect_length(rv$dta@containers, 0)
+    expect_false(output$delivery_zone)
+    # Still editing: the link to the manager stays.
+    expect_true(output$delivery_block)
   })
 })
 

@@ -292,3 +292,129 @@ test_that("empty ranges are absent; infinite bounds and empty column-label value
     class = "dta_matrix_columns_values_text"
   )
 })
+
+# ---- the R vocabulary ------------------------------------------------------------
+# A cell type is judged by its family (number, integer, text), so the R types
+# behave as their SAS counterparts do.
+
+test_that("an R numeric cell reads like SAS Num: range, and finite unless infinite: true", {
+  m <- mx("cells: {type: R numeric, nullable: No, range: {min: 0}, infinite: false}")
+  expect_identical(m@cells@structure@backend, "R")
+  expect_identical(m@cells@structure@type, "numeric")
+  expect_equal(m@cells@minimum, 0)
+  expect_true(m@cells@finite)
+  expect_false(m@cells@nullable)
+  # the default, written or not, is the same as for SAS Num
+  expect_true(mx("cells: {type: R numeric}")@cells@finite)
+  expect_false(mx("cells: {type: R numeric, infinite: true}")@cells@finite)
+  expect_identical(
+    mx("cells: {type: R numeric, range: {min: 1}}")@cells@finite,
+    mx("cells: {type: SAS Num, range: {min: 1}}")@cells@finite
+  )
+})
+
+test_that("R double is the same cell as R numeric", {
+  m <- mx("cells: {type: R double}")
+  expect_identical(m@cells@structure@type, "numeric")
+  expect_true(m@cells@finite)
+})
+
+test_that("an R integer cell takes a range and no finiteness, like SAS Int", {
+  m <- mx("cells: {type: R integer, nullable: No, range: {min: 0, max: 9}}")
+  expect_equal(m@cells@minimum, 0)
+  expect_equal(m@cells@maximum, 9)
+  expect_null(m@cells@finite)
+  expect_error(mx_cells("infinite: true", "R integer"), class = "dta_cell_finite_type")
+  expect_error(mx_cells("infinite: false", "R integer"), class = "dta_cell_finite_type")
+})
+
+test_that("an R character cell takes length, pattern and values, and no range or infinite", {
+  m <- mx("cells: {type: R character, length: 8, pattern: '^[A-Z]+$'}")
+  expect_identical(m@cells@structure@type, "character")
+  expect_equal(m@cells@structure@length, 8)
+  expect_null(m@cells@finite)
+  expect_error(mx_cells("range: {min: 0}", "R character"), class = "dta_cell_range_type")
+  expect_error(mx_cells("infinite: true", "R character"), class = "dta_cell_finite_type")
+  expect_error(mx_cells("infinite: false", "R character"), class = "dta_cell_finite_type")
+})
+
+test_that("a number or text cell is accepted, any other family refused with the class used today", {
+  for (type in c("R numeric", "R integer", "R character", "SAS Num", "SAS Int", "SAS Char")) {
+    expect_no_error(mx(sprintf("cells: {type: %s}", type)))
+  }
+  # Refused by the matrix validator, SAS and R alike.
+  for (type in c("R logical", "R Date", "R POSIXct", "R hms", "SAS Date", "SAS Time", "SAS DateTime")) {
+    expect_error(mx(sprintf("cells: {type: %s}", type)), class = "dta_matrix_cells_type", info = type)
+  }
+  base <- mx("cells: {type: R numeric}")
+  for (type in c("R logical", "R Date", "R POSIXct", "R hms")) {
+    expect_error(
+      S7::`prop<-`(base, "cells", value = DTAColumnSpecCell(type = type)),
+      class = "dta_matrix_cells_type", info = type
+    )
+  }
+})
+
+test_that("the refusal of a cell type names the types of both vocabularies", {
+  err <- expect_error(mx("cells: {type: R logical}"), class = "dta_matrix_cells_type")
+  text <- gsub("\\s+", " ", conditionMessage(err))
+  for (type in c("SAS Num", "SAS Int", "SAS Char", "R numeric", "R integer", "R character")) {
+    expect_match(text, type, fixed = TRUE)
+  }
+})
+
+test_that("a type the factory refuses is reported as it always was, not as a matrix cell type", {
+  # No backend prefix, or a backend that does not exist: the column spec says so.
+  expect_error(mx("cells: {type: Num}"), regexp = "supported\\s+backends")
+  expect_error(mx("cells: {type: Python float}"), regexp = "supported\\s+backends")
+  expect_error(mx("cells: {type: R complex}"), regexp = "must\\s+be\\s+one\\s+of")
+})
+
+test_that("the header stays the package-built SAS Char whatever the cells use", {
+  m <- mx("cells: {type: R numeric}")
+  expect_identical(m@header@structure@backend, "SAS")
+  expect_identical(m@header@structure@type, "Char")
+  expect_identical(m@header@nullable, FALSE)
+})
+
+test_that("the validator takes a text header of either backend and refuses any other", {
+  base <- mx("cells: {type: R numeric}")
+  r_header <- DTAColumnSpec(id = "matrix.columns", type = "R character", nullable = FALSE)
+  expect_no_error(S7::`prop<-`(base, "header", value = r_header))
+  for (type in c("R numeric", "R Date", "SAS Num", "SAS Date")) {
+    expect_error(
+      S7::`prop<-`(
+        base, "header",
+        value = DTAColumnSpec(id = "matrix.columns", type = type, nullable = FALSE)
+      ),
+      class = "dta_matrix_header_invalid", info = type
+    )
+  }
+  expect_error(
+    S7::`prop<-`(
+      base, "header",
+      value = DTAColumnSpec(id = "matrix.columns", type = "R character", nullable = TRUE)
+    ),
+    class = "dta_matrix_header_invalid"
+  )
+})
+
+test_that("as.list() round-trips an R matrix, through YAML text too", {
+  fixtures <- c(
+    "cells: {type: R numeric}",
+    "cells: {type: R numeric, nullable: No, range: {min: -1, max: 1}, infinite: true}",
+    "cells: {type: R integer, nullable: Yes, values: [0, 1, 2]}",
+    "cells: {type: R integer, range: {min: 0}}",
+    "columns: {count: 3}\ncells: {type: R character, length: 8, pattern: '^x'}"
+  )
+  for (text in fixtures) {
+    spec <- mx(text)
+    expect_identical(dta_matrix_spec_from_list(as.list(spec)), spec, info = text)
+    again <- dta_matrix_spec_from_list(yaml::yaml.load(yaml::as.yaml(as.list(spec))))
+    expect_identical(again, spec, info = text)
+  }
+  out <- as.list(mx("cells: {type: R numeric, infinite: true}"))
+  expect_identical(out$cells$type, "R numeric")
+  expect_true(out$cells$infinite)
+  expect_null(as.list(mx("cells: {type: R integer}"))$cells$infinite)
+})

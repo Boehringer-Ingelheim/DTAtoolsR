@@ -258,6 +258,73 @@ dta_numeric_operands <- function(x, value, converted = NULL) {
   list(x = values, value = bound)
 }
 
+#' @title Operand of an Equality or Set Operator Against a Logical Column
+#' @description
+#' Reads a rule's operand so it can be compared with a logical column. A text
+#' operand that is a logical token (`T`, `TRUE`, `true`, `True`, `F`, ... see
+#' [dta_as_logical_strict()]) becomes `TRUE`/`FALSE`, and an operand that is
+#' already logical (YAML `true`) is kept.
+#'
+#' Text that is not a token (`yes`, `1`, `" T"`, `tRuE`) can never equal a
+#' logical value, and must not abort the evaluation. When the operand holds any,
+#' the whole operand is returned as canonical text -- tokens as `"TRUE"` /
+#' `"FALSE"`, the rest as written -- which R compares with the logical column
+#' through `as.character()`: tokens still match, the rest never do, and
+#' `not_equals` still holds for every row it should. An operand holding anything
+#' else (a number) is returned unchanged, as it compared before.
+#'
+#' A missing member is handled as it is on every other column: a logical `NA`
+#' inside a list (what a YAML sequence parses to) is compared as the text
+#' `"NA"`, so it never matches a missing value, while a missing text entry
+#' (`.na.character`) and a missing entry of a plain vector stay missing and do.
+#' @param value The operand: a scalar, a vector, or the list a YAML sequence
+#'   parses to.
+#' @return A logical vector, a character vector, or `value` unchanged.
+#' @keywords internal
+dta_logical_bound <- function(value) {
+  in_list <- is.list(value)
+  members <- if (in_list) value else as.list(value)
+
+  if (!all(lengths(members) == 1L)) {
+    return(value)
+  }
+
+  # One canonical text per member: a token spells TRUE/FALSE and text that is not
+  # a token is left exactly as written. A logical NA inside a list is the text
+  # "NA" -- `as.character(list(NA))` -- every other missing member stays missing.
+  canonical <- character(length(members))
+  as_text <- logical(length(members))
+
+  for (i in seq_along(members)) {
+    member <- members[[i]]
+
+    if (!(is.logical(member) || is.character(member) || is.factor(member))) {
+      return(value)
+    }
+
+    text <- as.character(member)
+    if (is.na(text)) {
+      # Only a logical (or numeric) NA inside a list turns into the text; a
+      # missing TEXT entry (YAML .na.character) stays a missing value there.
+      as_na_text <- in_list && is.logical(member)
+      canonical[[i]] <- if (as_na_text) "NA" else NA_character_
+      as_text[[i]] <- as_na_text
+    } else if (is.logical(member)) {
+      canonical[[i]] <- text
+    } else if (is.na(dta_as_logical_token(text))) {
+      canonical[[i]] <- text
+      as_text[[i]] <- TRUE
+    } else {
+      canonical[[i]] <- as.character(dta_as_logical_token(text))
+    }
+  }
+
+  if (any(as_text)) {
+    return(canonical)
+  }
+  as.logical(canonical)
+}
+
 #' @title Bound of an Equality or Set Operator Against a Numeric Column
 #' @description
 #' `equals`/`not_equals`/`in`/`not_in` compare `value` against the raw
@@ -270,13 +337,24 @@ dta_numeric_operands <- function(x, value, converted = NULL) {
 #' numeric column, and only when every element of `value` parses; a bound
 #' that does not parse, or a non-numeric column, is returned unchanged so the
 #' comparison stays textual exactly as before.
+#'
+#' Against a **logical** column the text operands are read as logical tokens
+#' instead (see [dta_logical_bound()]): `equals: T` has to match a `TRUE`, which
+#' `TRUE == "T"` never does. The test is on the column's class at evaluation
+#' time -- what it holds, not what its spec declares -- so a text column of
+#' `"T"` that nothing has coerced keeps comparing as text.
 #' @param x The column vector taken from the table.
 #' @param value The bound supplied for `equals`, `not_equals`, `in`, or
 #'   `not_in`.
 #' @return `value` as numeric when `x` is numeric and every element of
-#'   `value` parses as a number; `value` unchanged otherwise.
+#'   `value` parses as a number; `value` as logical (or canonical text, see
+#'   [dta_logical_bound()]) when `x` is logical; `value` unchanged otherwise.
 #' @keywords internal
 dta_equality_bound <- function(x, value) {
+  if (is.logical(x)) {
+    return(dta_logical_bound(value))
+  }
+
   if (!is.numeric(x)) {
     return(value)
   }
@@ -694,6 +772,21 @@ dta_check_condition_arity <- function(conditions, arg = "condition") {
           class = "dta_condition_arity_error"
         )
       }
+
+      # A malformed `<<yyyyMMdd>>` date mask is refused when the rule is built,
+      # not first when check() evaluates it.
+      if (identical(operator, "pattern") && is.character(flat)) {
+        mask_problem <- dta_date_pattern_problem(flat)
+        if (!is.null(mask_problem)) {
+          cli::cli_abort(
+            c(
+              "{.arg {arg}}: operator {.field pattern} on column {.field {column_name}} has an invalid date mask.",
+              x = "{mask_problem}"
+            ),
+            class = "dta_date_pattern_invalid"
+          )
+        }
+      }
     }
   }
 
@@ -755,7 +848,7 @@ dta_condition_mask <- function(column_name, operator, value, x, converted = NULL
     greater_equal = x >= value,
     less_equal = x <= value,
     range = x >= value[1] & x <= value[2],
-    pattern = grepl(value, as.character(x), perl = TRUE),
+    pattern = grepl(dta_expand_date_pattern_tokens(value), as.character(x), perl = TRUE),
     empty = {
       empty_mask <- is.na(x)
 

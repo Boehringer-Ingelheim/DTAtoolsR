@@ -1385,3 +1385,172 @@ test_that("the Arrow numeric path declines a batch below the row threshold", {
     })
   }
 })
+
+
+# ---------------------------------------------------------------------------
+# A column declared `R logical`
+# ---------------------------------------------------------------------------
+
+logical_specs <- function() {
+  make_specs(
+    DTAColumnSpec(id = "SUBJID", type = "R character", nullable = FALSE),
+    DTAColumnSpec(id = "FLAG", type = "R logical", nullable = TRUE)
+  )
+}
+
+test_that("a declared R logical column reaches the coercion as the logical target", {
+  specs <- logical_specs()
+
+  expect_identical(as_r_type(DTAColumnSpecStructureR(type = "logical")), "logical")
+  expect_identical(dta_spec_r_type(specs, "FLAG"), "logical")
+  expect_identical(dta_spec_r_type(specs, "SUBJID"), "character")
+  # The compiled map is what every streamed batch looks the target up in.
+  expect_identical(
+    dta_compile_spec_types(specs),
+    c(SUBJID = "character", FLAG = "logical")
+  )
+  expect_identical(dta_spec_declared_type(specs, "FLAG"), "R logical")
+})
+
+test_that("dta_coerce_column reads the logical tokens and reports everything else", {
+  raw <- c("T", "yes", "", "False", NA, " TRUE", "NA", "true")
+  out <- dta_coerce_column(raw, "logical")
+
+  # The same list the numeric branches return, so callers need no new case.
+  expect_named(out, c("values", "offending", "reason", "source"))
+  expect_identical(out$values, c(TRUE, NA, NA, FALSE, NA, NA, NA, TRUE))
+  expect_identical(out$offending, c(2L, 6L, 7L))
+  expect_identical(out$reason, rep("not_convertible", 3L))
+  # The raw text of an offending row is read back off the untouched input.
+  expect_identical(out$source, raw)
+  expect_identical(dta_numeric_raw(out, out$offending), c("yes", " TRUE", "NA"))
+
+  # A factor is read through its labels, not its integer codes.
+  expect_identical(
+    dta_coerce_column(factor(c("F", "T")), "logical")$values,
+    c(FALSE, TRUE)
+  )
+
+  # A clean column has no offending rows and no reasons.
+  clean <- dta_coerce_column(c("TRUE", "F", ""), "logical")
+  expect_identical(clean$values, c(TRUE, FALSE, NA))
+  expect_identical(clean$offending, integer(0))
+  expect_identical(clean$reason, character(0))
+})
+
+test_that("dta_coerce_column leaves a logical target's non-text input alone", {
+  untouched <- list(
+    logical = c(TRUE, NA, FALSE),
+    all_missing_logical = c(NA, NA),
+    integer = 1:2,
+    double = c(0, 1),
+    Date = as.Date("2024-01-05") + 0:1,
+    POSIXct = as.POSIXct("2024-01-05 10:00:00", tz = "UTC") + 0:1,
+    empty = character(0),
+    all_missing_text = c(NA_character_, NA_character_)
+  )
+
+  for (label in names(untouched)) {
+    expect_null(dta_coerce_column(untouched[[label]], "logical"), info = label)
+  }
+
+  # Only the declared type decides: a text column the spec calls character is
+  # never read as logical, and the numeric targets are unchanged.
+  expect_null(dta_coerce_column(c("T", "F"), "character"))
+  expect_identical(dta_coerce_column(c("T", "1"), "double")$values, c(NA_real_, 1))
+  expect_identical(dta_coerce_column(c("T", "1"), "double")$offending, 1L)
+})
+
+test_that("a declared R logical column is typed and its unconvertible value becomes NA", {
+  df <- data.frame(
+    SUBJID = c("a", "b", "c", "d", "e"),
+    FLAG = c("T", "yes", "", "false", " TRUE"),
+    stringsAsFactors = FALSE
+  )
+
+  result <- dta_coerce_table_to_specs(df, logical_specs())
+
+  expect_identical(result$table$FLAG, c(TRUE, NA, NA, FALSE, NA))
+  expect_identical(result$table$SUBJID, df$SUBJID)
+
+  expect_equal(result$issues$row, c(2L, 5L))
+  expect_equal(result$issues$column, c("FLAG", "FLAG"))
+  # The source text is retained verbatim, whitespace included.
+  expect_equal(result$issues$raw, c("yes", " TRUE"))
+  expect_equal(result$issues$declared_type, c("R logical", "R logical"))
+  expect_equal(result$issues$reason, c("not_convertible", "not_convertible"))
+  expect_identical(dta_import_error_count(result$issues), 2L)
+
+  # The blank row (3) is missing, not an import error.
+  expect_false(3L %in% result$issues$row)
+
+  # An Arrow table is typed the same way and keeps the type through Arrow.
+  arrow_result <- dta_coerce_table_to_specs(arrow::as_arrow_table(df), logical_specs())
+  typed <- as.data.frame(arrow_result$table)
+  expect_identical(typed$FLAG, c(TRUE, NA, NA, FALSE, NA))
+  expect_equal(arrow_result$issues$row, c(2L, 5L))
+})
+
+test_that("an already logical or all-missing column raises no import issue", {
+  specs <- logical_specs()
+
+  already <- data.frame(SUBJID = c("a", "b"), FLAG = c(TRUE, NA), stringsAsFactors = FALSE)
+  result <- dta_coerce_table_to_specs(already, specs)
+  expect_identical(result$table, already)
+  expect_equal(nrow(result$issues), 0)
+
+  blank <- data.frame(
+    SUBJID = c("a", "b"), FLAG = c(NA_character_, ""), stringsAsFactors = FALSE
+  )
+  result <- dta_coerce_table_to_specs(blank, specs)
+  expect_equal(nrow(result$issues), 0)
+})
+
+test_that("load_file types a declared R logical column and records its import issues", {
+  dir <- file.path(tempdir(), "dta-typed-logical-import")
+  dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  csv <- file.path(dir, "typed_logical.csv")
+  writeLines(
+    c('"SUBJID","FLAG"', '"001","T"', '"002","maybe"', '"003",""', '"004","false"'),
+    csv
+  )
+
+  ds <- DTADataSetTabular(
+    id = "typed",
+    specs = logical_specs(),
+    files = list(DTAFileCSV(filename = "typed_logical.csv"))
+  )
+  ds <- DTAtools:::load_file(ds, file = csv, handler_index = 1)
+  typed <- as.data.frame(ds@tables[["typed_logical"]])
+
+  expect_identical(typed$FLAG, c(TRUE, NA, NA, FALSE))
+  expect_identical(typed$SUBJID, c("001", "002", "003", "004"))
+
+  issues <- ds@import_issues[["typed_logical"]]
+  expect_equal(nrow(issues), 1)
+  expect_equal(issues$row, 2L)
+  expect_equal(issues$raw, "maybe")
+  expect_equal(issues$declared_type, "R logical")
+  expect_equal(issues$reason, "not_convertible")
+})
+
+test_that("the Arrow numeric fast path ignores a declared logical column", {
+  specs <- make_specs(
+    DTAColumnSpec(id = "FLAG", type = "R logical", nullable = TRUE),
+    DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE)
+  )
+
+  # No numeric column, no state: a logical column is not what the fast path is for.
+  only_logical <- make_specs(DTAColumnSpec(id = "FLAG", type = "R logical", nullable = TRUE))
+  expect_null(dta_arrow_numeric_state(dta_compile_spec_types(only_logical)))
+
+  withr::local_options(DTAtools.stream_arrow_numeric_min_rows = 0)
+  state <- dta_arrow_numeric_state(dta_compile_spec_types(specs))
+  # "1" and "0" would parse as numbers, so a cast of FLAG would show here.
+  batch <- arrow::record_batch(FLAG = c("1", "0"), VAL = c("1.5", "2.5"))
+  out <- dta_arrow_parse_numeric_batch(batch, state)
+
+  expect_identical(class(out$column(0L)$type)[[1]], "Utf8")
+  expect_identical(class(out$column(1L)$type)[[1]], "Float64")
+})

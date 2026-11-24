@@ -17,31 +17,19 @@
 # no selection and reported it. Nothing on the server was wrong, which is
 # exactly why the whole existing testServer() suite passed throughout.
 #
-# These are SOURCE-LEVEL assertions, which this suite otherwise avoids, for the
-# same reason test-shinyapp-click-guard.R gives: the behaviour under test is
-# JavaScript against a DOM, and the package's dependency set carries no JS
-# engine (no V8, no chromote, no shinytest2), so the snippet cannot be executed
-# here at all. What is pinned instead is each structural property the fix rests
-# on -- a regression in any one of them puts the modals back to blank, silently
-# and with every other test still green.
+# These are SOURCE-LEVEL assertions, which this suite otherwise avoids: the
+# behaviour under test is JavaScript against a DOM, and no test runs THIS
+# snippet in a browser. (One could: shinytest2 and chromote are in Suggests,
+# and test-shinyapp-modal-browser.R runs the two scroll-lock snippets in
+# headless Chrome that way.) What is pinned instead is each structural property
+# the fix rests on -- a regression in any one of them puts the modals back to
+# blank, silently and with every other test still green.
 
 skip_if_not_installed("shiny")
 
-# app.R is not part of app_env() (which sources only inst/shiny/dta_app/R), so
-# the string is lifted out of the parsed source rather than fetched by name.
-# Returns NA when the binding is gone, which every test below asserts on: a
-# renamed or deleted snippet must fail loudly, not pass vacuously.
-app_r_binding <- function(name) {
-  exprs <- parse(text = app_source("app.R"), keep.source = FALSE)
-  for (e in exprs) {
-    if (is.call(e) && identical(as.character(e[[1]]), "<-") &&
-      identical(as.character(e[[2]]), name)) {
-      return(eval(e[[3]]))
-    }
-  }
-  NA_character_
-}
-
+# app_r_binding() (helper-shinyapp.R) lifts the snippet out of app.R and returns
+# NA when it is gone, which every test below asserts on: a renamed or deleted
+# snippet must fail loudly, not pass vacuously.
 modal_js <- function() app_r_binding("modal_unsuspend_js")
 
 # Every `uiOutput("id")` / `textOutput("id")` written directly into a

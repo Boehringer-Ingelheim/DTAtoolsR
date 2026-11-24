@@ -355,7 +355,7 @@ test_that("OQ-SPEC-054 | strict mode and the readers abort with every error and 
   qa_check("import_specs_from_yaml() aborts with class dta_lint_error", inherits(got_specs, "dta_lint_error"))
 })
 
-test_that("OQ-SPEC-055 | a numeric operator on a Date, Time or DateTime column is a warning, on a Char column an error, on a numeric column no finding | REQ-SPEC-030", {
+test_that("OQ-SPEC-055 | a numeric operator on a Date, Time or DateTime column (SAS or R) is a warning, on a Char or R character column an error, on a numeric column no finding | REQ-SPEC-030", {
   # One condition column X of the type under test and one numeric column Y for
   # the consequence, so the only thing that varies is the type of X.
   numeric_on <- function(type, op = "greater") {
@@ -389,6 +389,26 @@ test_that("OQ-SPEC-055 | a numeric operator on a Date, Time or DateTime column i
     qa_step(paste0("on a ", type, " column there is no such finding"), 0L, nrow(numeric_on(type)))
   }
 
+  # The same three outcomes for the R vocabulary: the kind of column decides.
+  for (type in c("R Date", "R POSIXct", "R hms")) {
+    qa_step(
+      paste0("a numeric operator on an ", type, " column is one warning on the rule"),
+      "r1:warning",
+      paste(numeric_on(type)$id, numeric_on(type)$severity, sep = ":")
+    )
+  }
+  qa_step(
+    "another numeric operator on an R Date column is a warning too",
+    "warning", numeric_on("R Date", "less_equal")$severity
+  )
+  qa_step(
+    "on an R character column the same finding is an error",
+    "error", numeric_on("R character")$severity
+  )
+  for (type in c("R numeric", "R integer")) {
+    qa_step(paste0("on an ", type, " column there is no such finding"), 0L, nrow(numeric_on(type)))
+  }
+
   # A warning does not refuse the specification: it still constructs.
   built <- tryCatch(
     DTAColumnSpecCollection(
@@ -404,6 +424,20 @@ test_that("OQ-SPEC-055 | a numeric operator on a Date, Time or DateTime column i
     error = function(e) e
   )
   qa_check("the specification with the warning still constructs", !inherits(built, "condition"))
+  built_r <- tryCatch(
+    DTAColumnSpecCollection(
+      columns = list(
+        DTAColumnSpec(id = "D", type = "R Date"),
+        DTAColumnSpec(id = "Y", type = "R numeric")
+      ),
+      rules = list(DTARuleColCondition(
+        id = "r1", condition = list(D = list(greater = 5)),
+        then = list(Y = list(greater_equal = 0))
+      ))
+    ),
+    error = function(e) e
+  )
+  qa_check("and so does the one written in R types", !inherits(built_r, "condition"))
 })
 
 # ---- matrix datasets ----------------------------------------------------------
@@ -490,5 +524,145 @@ test_that("OQ-SPEC-058 | lint_dta() reports each problem of a matrix dataset und
   )
   for (cs in cases) {
     qa_step(sprintf("%s is exactly one error, with its code", cs[[1]]), cs[[3]], sl_codes(cs[[2]]))
+  }
+})
+
+# ---- the operands of a rule on a logical column -----------------------------------
+
+test_that("OQ-SPEC-062 | an operand on an R logical column is true, false or one of eight spellings, any other is an error, and a range is refused | REQ-SPEC-036", {
+  # Column FLAG of the type under test and a text column ID the rule consequence
+  # sits on, so the type of FLAG is the only thing that varies.
+  on_flag <- function(op, value, type = "R logical") {
+    lint_dta(list(
+      columns = list(list(id = "FLAG", type = type), list(id = "ID", type = "R character", length = 5)),
+      rules = list(list(
+        id = "r1", type = "col_condition",
+        condition = list(FLAG = stats::setNames(list(value), op)),
+        then = list(ID = list(empty = FALSE))
+      ))
+    ))
+  }
+  codes <- function(out) paste(out$code, out$severity, sep = ":")
+
+  accepted <- list(TRUE, FALSE, "TRUE", "T", "true", "True", "FALSE", "F", "false", "False")
+  for (op in c("equals", "not_equals")) {
+    for (value in accepted) {
+      qa_step(sprintf("%s %s is accepted", op, format(value)), character(0), codes(on_flag(op, value)))
+    }
+  }
+  qa_step("in [T, false, True] is accepted", character(0), codes(on_flag("in", list("T", FALSE, "True"))))
+  qa_step("not_in [F] is accepted", character(0), codes(on_flag("not_in", list("F"))))
+
+  refused <- list("maybe", "yes", "1", " T", "T ", "tRuE", "NA", 1, 0, 2.5)
+  for (op in c("equals", "not_equals")) {
+    for (value in refused) {
+      qa_step(
+        sprintf("%s %s is one operand-type error", op, format(value)),
+        "rule_condition_value_unfit:error", codes(on_flag(op, value))
+      )
+    }
+  }
+  qa_step(
+    "a set holding one text that is no spelling is one error",
+    "rule_condition_value_unfit:error", codes(on_flag("in", list("T", "maybe")))
+  )
+  qa_step(
+    "so is a negated set",
+    "rule_condition_value_unfit:error", codes(on_flag("not_in", list("maybe")))
+  )
+
+  # LIM-032: a numeric operator on the column reads TRUE as 1 and is not reported.
+  qa_step("greater 0 is accepted", character(0), codes(on_flag("greater", 0)))
+
+  # A range rule needs a number.
+  qa_step(
+    "a range rule on an R logical column is refused",
+    "rule_range_non_numeric:error",
+    codes(lint_dta(list(
+      columns = list(list(id = "FLAG", type = "R logical")),
+      rules = list(list(id = "r1", type = "col_range", columns = "FLAG", min = 0, max = 1))
+    )))
+  )
+
+  # A YAML true or false is a logical value: right on a logical column, an error
+  # beside any other type, SAS or R.
+  for (type in c("R character", "R numeric", "SAS Char")) {
+    qa_step(
+      paste("an unquoted YAML true against", type, "is an error"),
+      "rule_condition_value_unfit:error", codes(on_flag("equals", TRUE, type))
+    )
+  }
+
+  # A specification with such an error is not built.
+  columns <- list(
+    DTAColumnSpec(id = "FLAG", type = "R logical"),
+    DTAColumnSpec(id = "ID", type = "R character", length = 5)
+  )
+  rule_with <- function(value) {
+    DTARuleColCondition(
+      id = "r1", condition = list(FLAG = list(equals = value)),
+      then = list(ID = list(empty = FALSE))
+    )
+  }
+  refusal <- sl_refusal(DTAColumnSpecCollection(columns = columns, rules = list(rule_with("maybe"))))
+  qa_check(
+    "a collection whose rule compares the column with maybe is refused, naming the code",
+    sl_has_code(refusal, "rule_condition_value_unfit")
+  )
+  qa_step(
+    "while the same rule with T builds",
+    NULL, sl_refusal(DTAColumnSpecCollection(columns = columns, rules = list(rule_with("T"))))
+  )
+})
+
+test_that("OQ-SPEC-063 | the pattern operator in a rule condition is an error on an R logical column and accepted on R character and SAS Char | REQ-SPEC-037", {
+  # Column FLAG of the type under test and a text column ID the rule consequence
+  # sits on, so the type of FLAG is the only thing that varies.
+  columns_for <- function(type) {
+    list(
+      DTAColumnSpec(id = "FLAG", type = type),
+      DTAColumnSpec(id = "ID", type = "R character", length = 5)
+    )
+  }
+  rule <- function() {
+    DTARuleColCondition(
+      id = "r1", condition = list(FLAG = list(pattern = "^T")),
+      then = list(ID = list(empty = FALSE))
+    )
+  }
+  body <- function(type) {
+    list(
+      columns = list(list(id = "FLAG", type = type), list(id = "ID", type = "R character", length = 5)),
+      rules = list(list(
+        id = "r1", type = "col_condition",
+        condition = list(FLAG = list(pattern = "^T")),
+        then = list(ID = list(empty = FALSE))
+      ))
+    )
+  }
+  codes <- function(out) paste(out$code, out$severity, sep = ":")
+
+  qa_step(
+    "pattern on an R logical column is one operand error",
+    "rule_condition_operator_invalid:error", codes(lint_dta(body("R logical")))
+  )
+  for (type in c("R character", "SAS Char")) {
+    qa_step(
+      paste("pattern on", type, "is accepted"),
+      character(0), codes(lint_dta(body(type)))
+    )
+  }
+
+  # A specification with the error is not built; the same rule on text builds.
+  refusal <- sl_refusal(DTAColumnSpecCollection(columns = columns_for("R logical"), rules = list(rule())))
+  qa_check(
+    "a collection whose rule applies pattern to the logical column is refused, naming the code",
+    sl_has_code(refusal, "rule_condition_operator_invalid")
+  )
+  for (type in c("R character", "SAS Char")) {
+    qa_step(
+      paste("while the same rule on", type, "builds"),
+      NULL, sl_refusal(DTAColumnSpecCollection(columns = columns_for(type), rules = list(rule())))
+    )
   }
 })

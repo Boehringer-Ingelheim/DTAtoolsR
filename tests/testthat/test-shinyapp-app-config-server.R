@@ -7,23 +7,8 @@
 # cache; pointing DTATOOLS_TEMPLATE_SOURCES at a temp library before the call is
 # enough, no invalidation needed.
 
-# Run `code` with a library holding `yaml_lines` as its dta-app.yaml.
-with_app_library <- function(yaml_lines, code, .local_envir = parent.frame()) {
-  lib <- normalizePath(withr::local_tempdir(.local_envir = .local_envir), winslash = "/")
-  writeLines(yaml_lines, file.path(lib, "dta-app.yaml"))
-  withr::local_envvar(
-    c(
-      DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", lib),
-      DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = NA,
-      DTATOOLS_TEMPLATE_REFRESH_SECONDS = NA,
-      DTATOOLS_TEMPLATE_CACHE_DIR = NA
-    ),
-    .local_envir = .local_envir
-  )
-  withr::local_options(list(DTAtools.template_dir = NULL), .local_envir = .local_envir)
-  clean_session_file()
-  invisible(lib)
-}
+# with_app_library() (a library holding `yaml_lines` as its dta-app.yaml) is in
+# helper-shinyapp.R, shared with test-shinyapp-backends.R.
 
 # ---- Brand bar and footer -----------------------------------------------------
 
@@ -147,6 +132,61 @@ test_that("app_footer_ui keeps the name and version, and shows the label and rep
   expect_match(custom, "Example Institute &lt;b&gt;", fixed = TRUE)
   expect_no_match(custom, "GitHub repository", fixed = TRUE)
   expect_no_match(custom, "foot-ver", fixed = TRUE)
+})
+
+# ---- data_types.default -------------------------------------------------------
+# It decides which backend a NEW column starts with and nothing else; the form
+# itself is asserted in test-shinyapp-backends.R.
+
+test_that("the server's config carries data_types.default, and an unusable value leaves SAS", {
+  for (case in list(
+    list(yaml = "data_types: {default: R}", expect = "R"),
+    list(yaml = "data_types: {default: r}", expect = "R"),
+    list(yaml = "data_types: {default: SAS}", expect = "SAS"),
+    list(yaml = "data_types: {default: Python}", expect = "SAS", warns = TRUE),
+    list(yaml = "# all defaults", expect = "SAS")
+  )) {
+    with_app_library(case$yaml)
+    run <- function() {
+      shiny::testServer(app_server_dir(), {
+        expect_identical(cfg$data_types$default, case$expect, info = case$yaml)
+        expect_identical(app_fn("dta_default_backend")(cfg), case$expect, info = case$yaml)
+      })
+    }
+    # The unusable value is reported once, as every bad setting is, and ignored.
+    if (isTRUE(case$warns)) expect_warning(run(), "data_types.default", fixed = TRUE) else run()
+  }
+})
+
+test_that("the default backend does not gate the Backend select: both are chosen from, and saved, in either library", {
+  for (default in c("SAS", "R")) {
+    with_app_library(paste0("data_types: {default: ", default, "}"))
+
+    shiny::testServer(app_server_dir(), {
+      session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+      unlock_editing(session)
+      session$setInputs(edit_cols = 1)
+      session$setInputs(col_add = 1)
+      html <- ui_text(output$col_modal_body)
+
+      options <- regmatches(html, regexpr('(?s)<select id="col_backend".*?</select>', html, perl = TRUE))
+      expect_match(options, 'value="SAS"', fixed = TRUE, info = default)
+      expect_match(options, 'value="R"', fixed = TRUE, info = default)
+      expect_match(options, sprintf('value="%s" selected', default), fixed = TRUE, info = default)
+
+      # The one that is not the default saves just the same.
+      other <- setdiff(c("SAS", "R"), default)
+      session$setInputs(
+        col_id = "OTHER", col_label = "", col_backend = other,
+        col_type = if (other == "R") "numeric" else "Num",
+        col_format = "", col_length = "", col_nullable = TRUE, col_values = "",
+        col_pattern = "", col_examples = "", col_desc = "", col_save = 1
+      )
+      expect_null(rv$col_msg)
+      st <- DTAtools::datasets(rv$dta, "clinical_data")@specs@columns[["OTHER"]]@structure
+      expect_identical(st@backend, other)
+    })
+  }
 })
 
 # ---- Server gates -------------------------------------------------------------

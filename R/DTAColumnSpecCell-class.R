@@ -6,11 +6,11 @@
 #' block of a specification.
 #' @param id Character. The id of the cell spec; \code{"cells"} by default. The
 #'   dataset renames a clone of it to each data column.
-#' @param minimum,maximum Numeric or NULL. Inclusive bounds; \code{Num} and
-#'   \code{Int} cells only.
+#' @param minimum,maximum Numeric or NULL. Inclusive bounds; numeric cells only
+#'   (\code{SAS Num}, \code{SAS Int}, \code{R numeric}, \code{R integer}).
 #' @param finite Logical or NULL. \code{TRUE} rejects infinite values
-#'   (YAML \code{infinite: false}); \code{Num} cells only. \code{NULL} performs
-#'   no finiteness check.
+#'   (YAML \code{infinite: false}); \code{SAS Num} and \code{R numeric} cells
+#'   only. \code{NULL} performs no finiteness check.
 #' @inheritParams DTAColumnSpec
 #' @return An object of class \code{DTAColumnSpecCell}.
 #' @keywords internal
@@ -74,16 +74,16 @@ DTAColumnSpecCell <- S7::new_class(
         class = "dta_cell_range_invalid"
       )
     }
-    type <- dta_cell_type(self)
-    if ((!is.null(self@minimum) || !is.null(self@maximum)) && !(type %in% c("Num", "Int"))) {
+    family <- dta_cell_family(self)
+    if ((!is.null(self@minimum) || !is.null(self@maximum)) && !(family %in% c("number", "integer"))) {
       cli_abort(
-        "{self@id}: a range applies to {.val SAS Num} and {.val SAS Int} cells only.",
+        "{self@id}: a range applies to numeric cells only ({.val SAS Num}, {.val SAS Int}, {.val R numeric} and {.val R integer}).",
         class = "dta_cell_range_type"
       )
     }
-    if (!is.null(self@finite) && !(type %in% "Num")) {
+    if (!is.null(self@finite) && !(family %in% "number")) {
       cli_abort(
-        "{self@id}: {.field infinite} applies to {.val SAS Num} cells only.",
+        "{self@id}: {.field infinite} applies to {.val SAS Num} and {.val R numeric} cells only.",
         class = "dta_cell_finite_type"
       )
     }
@@ -108,15 +108,22 @@ method(as.list, DTAColumnSpecCell) <- function(x, ...) {
   if (length(range) > 0) {
     out$range <- range
   }
-  if (identical(dta_cell_type(x), "Num")) {
+  if (identical(dta_cell_family(x), "number")) {
     out$infinite <- !isTRUE(x@finite)
   }
   out
 }
 
-# The bare type ("Num", "Int", "Char", ...) or NA when the spec declares none.
+# The bare type ("Num", "Int", "Char", "numeric", ...) or NA when the spec
+# declares none.
 dta_cell_type <- function(x) {
   if (is.null(x@structure) || is.null(x@structure@type)) NA_character_ else x@structure@type
+}
+
+# The family of the cell's type ("text", "number", "integer", ...), the same for
+# both backends: SAS Num and R numeric are both "number". NA when it declares none.
+dta_cell_family <- function(x) {
+  dta_type_family(x@structure)
 }
 
 method(print, DTAColumnSpecCell) <- function(x, ...) {

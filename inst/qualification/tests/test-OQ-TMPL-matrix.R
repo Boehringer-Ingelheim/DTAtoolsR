@@ -398,3 +398,63 @@ test_that("OQ-TMPL-123 | the template guide lists a matrix dataset's row labels 
     strsplit(tb$col4[[2]], "\n", fixed = TRUE)[[1]]
   )
 })
+
+# ---- templates typed in the R vocabulary ---------------------------------------------
+#
+# REQ-TMPL-063. A template carries its columns as plain lists and the validator
+# builds them like any specification, so R types are accepted where SAS types are.
+
+test_that("OQ-TMPL-147 | validate_template() and lint_template_repo() accept R-typed columns and a matrix of R row labels and cells, and report what an R matrix cannot hold | REQ-TMPL-063", {
+  tabular <- c(
+    "kind: dta_dataset_template", "id: rt", "version: \"1.0\"",
+    "dataset:", "  id: rt_data", "  type: tabular",
+    "  files: {filename: rt.tsv, type: tsv}",
+    "  columns:",
+    "    - {id: A, type: R character, length: 8, nullable: No}",
+    "    - {id: B, type: R numeric}",
+    "    - {id: C, type: R integer}",
+    "    - {id: D, type: R logical, values: [\"TRUE\", \"FALSE\"]}",
+    "    - {id: E, type: R Date, format: \"R %Y-%m-%d\"}",
+    "    - {id: F, type: R POSIXct, format: \"R %Y-%m-%dT%H:%M:%SZ\"}",
+    "    - {id: G, type: R hms}"
+  )
+  qa_step("a dataset template of all seven R types is not reported", 0L, nrow(tmx_validate(tabular)))
+
+  matrix <- tmx_dataset_template(
+    c(
+      "    - {id: GENE_ID, type: R character, nullable: No}",
+      "    - {id: GENE_NAME, type: R character, nullable: Yes}"
+    ),
+    c(
+      "  matrix:", "    columns: { pattern: '^S[0-9]+$' }",
+      "    cells: { type: R numeric, range: { min: 0 }, infinite: No }"
+    )
+  )
+  qa_step("a matrix dataset template of R row labels and R cells is not reported", 0L, nrow(tmx_validate(matrix)))
+
+  # lint_template_repo() builds on the same checks and aborts on an error.
+  root <- file.path(qa_tempdir(), "rlib")
+  tmx_put(root, "templates/rt.dta-dataset-template.yaml", tabular)
+  tmx_put(root, "templates/mx.dta-dataset-template.yaml", matrix)
+  linted <- suppressMessages(lint_template_repo(root, fail_on = "error"))
+  qa_step("lint_template_repo() reports nothing for both", 0L, nrow(linted))
+
+  logical_cells <- tmx_validate(tmx_dataset_template(
+    c("    - {id: GENE_ID, type: R character, nullable: No}"),
+    c("  matrix:", "    cells: { type: R logical }")
+  ))
+  qa_step(
+    "an R logical cell, which a matrix cannot hold, is matrix_cells_type at severity error",
+    "error", logical_cells$severity[logical_cells$code == "matrix_cells_type"]
+  )
+
+  not_a_type <- tmx_validate(c(
+    "kind: dta_dataset_template", "id: rt", "version: \"1.0\"",
+    "dataset:", "  id: rt_data", "  type: tabular",
+    "  files: {filename: rt.tsv, type: tsv}",
+    "  columns:", "    - {id: A, type: R Char}"
+  ))
+  hit <- not_a_type[not_a_type$code == "column_spec_invalid", , drop = FALSE]
+  qa_step("R Char, a type the R vocabulary does not have, is column_spec_invalid, once", 1L, nrow(hit))
+  qa_step("at severity error", "error", hit$severity)
+})

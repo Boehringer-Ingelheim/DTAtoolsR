@@ -404,6 +404,256 @@ test_that("the normaliser blanks empty text and strips every attribute but the s
   expect_null(attributes(out$N))
 })
 
+# ---- the same columns declared in the R vocabulary -------------------------------
+
+# delivery.sas7bdat with every column declared as an R type. The formats are
+# given with their `R ` prefix; NULL stores the type's default.
+delivery_r_specs <- function(date = "R Date", datetime = "R POSIXct", time = "R hms",
+                             date_format = NULL, datetime_format = NULL, time_format = NULL) {
+  DTAColumnSpecCollection(columns = list(
+    SUBJID = DTAColumnSpec(id = "SUBJID", type = "R character", nullable = TRUE),
+    AGE = DTAColumnSpec(id = "AGE", type = "R numeric", nullable = TRUE),
+    VISDT = DTAColumnSpec(id = "VISDT", type = date, format = date_format, nullable = TRUE),
+    VISDTM = DTAColumnSpec(id = "VISDTM", type = datetime, format = datetime_format, nullable = TRUE),
+    VISTM = DTAColumnSpec(id = "VISTM", type = time, format = time_format, nullable = TRUE)
+  ))
+}
+
+test_that("declared R Date, POSIXct and hms, the temporal columns are text in the stored default format", {
+  ds <- sas_dataset("delivery.sas7bdat", delivery_r_specs())
+  df <- as.data.frame(tables(ds)[["delivery"]])
+
+  # SAS days 0, 23968, missing, -1, 14669 and 3653 are 1960-01-01, 2025-08-15,
+  # missing, 1959-12-31, 2000-02-29 and 1970-01-01 (the ISO test above).
+  expect_identical(
+    df$VISDT,
+    c("1960-01-01", "2025-08-15", NA, "1959-12-31", "2000-02-29", "1970-01-01")
+  )
+  expect_identical(
+    df$VISDTM,
+    c(
+      "1960-01-01 00:00:00", "2025-08-15 14:30:00", NA,
+      "1959-12-31 23:59:59", "2000-02-29 12:00:00", "1970-01-01 00:00:00"
+    )
+  )
+  expect_identical(
+    df$VISTM,
+    c("00:00:00", "14:30:00", NA, "23:59:59", "12:00:00", "01:00:00")
+  )
+
+  # The text fits the format it was written under: nothing is reported.
+  expect_identical(unname(sas_counts(ds)), c(0L, 0L, 0L))
+})
+
+test_that("a custom R format is the text the temporal column is shown as", {
+  ds <- sas_dataset(
+    "delivery.sas7bdat",
+    delivery_r_specs(
+      date_format = "R %d/%m/%Y",
+      datetime_format = "R %Y-%m-%dT%H:%M:%SZ",
+      time_format = "R %H:%M"
+    )
+  )
+  df <- as.data.frame(tables(ds)[["delivery"]])
+
+  expect_identical(
+    df$VISDT,
+    c("01/01/1960", "15/08/2025", NA, "31/12/1959", "29/02/2000", "01/01/1970")
+  )
+  expect_identical(
+    df$VISDTM,
+    c(
+      "1960-01-01T00:00:00Z", "2025-08-15T14:30:00Z", NA,
+      "1959-12-31T23:59:59Z", "2000-02-29T12:00:00Z", "1970-01-01T00:00:00Z"
+    )
+  )
+  expect_identical(df$VISTM, c("00:00", "14:30", NA, "23:59", "12:00", "01:00"))
+  expect_identical(unname(sas_counts(ds)), c(0L, 0L, 0L))
+})
+
+test_that("declared R numeric or R integer, the temporal columns stay the SAS number", {
+  ds <- sas_dataset(
+    "delivery.sas7bdat",
+    delivery_r_specs(date = "R numeric", datetime = "R numeric", time = "R integer")
+  )
+  df <- as.data.frame(tables(ds)[["delivery"]])
+
+  # Days and seconds counted from 1960-01-01, as for SAS Num -- never a day
+  # count from 1970 and never text.
+  expect_identical(df$VISDT, c(0, 23968, NA, -1, 14669, 3653))
+  expect_identical(df$VISDTM, c(0, 2070887400, NA, -1, 1267444800, 315619200))
+  expect_identical(df$VISTM, c(0, 52200, NA, 86399, 43200, 3600))
+  expect_identical(unname(sas_counts(ds)), c(0L, 0L, 0L))
+})
+
+test_that("a SAS date declared R POSIXct or R hms is ISO text that fails the format", {
+  # The SAS column is a date, the declaration a datetime: the declaration is not
+  # the kind of column that was stored, so the value is shown as ISO text, and
+  # the five dates (the sixth row is missing) are format findings.
+  for (wrong in c("R POSIXct", "R hms")) {
+    ds <- sas_dataset("delivery.sas7bdat", delivery_r_specs(date = wrong))
+    df <- as.data.frame(tables(ds)[["delivery"]])
+    expect_identical(
+      df$VISDT,
+      c("1960-01-01", "2025-08-15", NA, "1959-12-31", "2000-02-29", "1970-01-01"),
+      info = wrong
+    )
+    counts <- sas_counts(ds)
+    expect_identical(unname(counts[["columnspec"]]), 5L, info = wrong)
+    expect_identical(unname(counts[["import"]]), 0L, info = wrong)
+  }
+})
+
+test_that("the normaliser renders R temporal types by their stored format, and keeps R numbers as numbers", {
+  frame <- function() {
+    data.frame(
+      D = as.Date("2025-08-15"),
+      DT = as.POSIXct("2025-08-15 14:30:00", tz = "UTC"),
+      TM = structure(52200, class = c("hms", "difftime"), units = "secs")
+    )
+  }
+  declared <- function(...) DTAColumnSpecCollection(columns = list(...))
+  spec <- function(id, type, format = NULL) DTAColumnSpec(id = id, type = type, format = format)
+
+  out <- dta_sas7bdat_normalise(
+    frame(),
+    declared(spec("D", "R Date"), spec("DT", "R POSIXct"), spec("TM", "R hms"))
+  )
+  expect_identical(out$D, "2025-08-15")
+  expect_identical(out$DT, "2025-08-15 14:30:00")
+  expect_identical(out$TM, "14:30:00")
+
+  out <- dta_sas7bdat_normalise(
+    frame(),
+    declared(
+      spec("D", "R Date", "R %d/%m/%Y"),
+      spec("DT", "R POSIXct", "R %Y-%m-%dT%H:%M:%SZ"),
+      spec("TM", "R hms", "R %H:%M")
+    )
+  )
+  expect_identical(out$D, "15/08/2025")
+  expect_identical(out$DT, "2025-08-15T14:30:00Z")
+  expect_identical(out$TM, "14:30")
+
+  # Every other R type keeps the SAS number, as Num, Int and Char do.
+  for (type in c("R numeric", "R integer", "R character", "R logical")) {
+    out <- dta_sas7bdat_normalise(
+      frame(),
+      declared(spec("D", type), spec("DT", type), spec("TM", type))
+    )
+    expect_identical(out$D, 23968, info = type)
+    expect_identical(out$DT, 2070887400, info = type)
+    expect_identical(out$TM, 52200, info = type)
+  }
+
+  # A type that is not the kind of column SAS stored is shown as ISO text.
+  iso <- function(...) as.list(dta_sas7bdat_normalise(frame(), declared(...)))
+  expect_identical(
+    iso(spec("D", "R POSIXct"), spec("DT", "R Date"), spec("TM", "R Date")),
+    list(D = "2025-08-15", DT = "2025-08-15T14:30:00", TM = "14:30:00")
+  )
+  expect_identical(
+    iso(spec("D", "R hms"), spec("DT", "R hms"), spec("TM", "R POSIXct")),
+    list(D = "2025-08-15", DT = "2025-08-15T14:30:00", TM = "14:30:00")
+  )
+
+  # No declared type of the R backend, or none for the column: ISO as before.
+  untyped <- DTAColumnSpec(id = "DT", nullable = TRUE)
+  untyped@structure <- DTAColumnSpecStructureR(length = 8)
+  expect_null(untyped@structure@type)
+  expect_identical(
+    as.list(dta_sas7bdat_normalise(frame(), declared(DT = untyped))),
+    list(D = "2025-08-15", DT = "2025-08-15T14:30:00", TM = "14:30:00")
+  )
+})
+
+test_that("a missing temporal value stays missing under every R declaration", {
+  frame <- data.frame(
+    D = as.Date(c("2025-08-15", NA)),
+    DT = as.POSIXct(c("2025-08-15 14:30:00", NA), tz = "UTC"),
+    TM = structure(c(52200, NA), class = c("hms", "difftime"), units = "secs")
+  )
+  declared <- function(type) {
+    DTAColumnSpecCollection(columns = list(
+      D = DTAColumnSpec(id = "D", type = type[[1]]),
+      DT = DTAColumnSpec(id = "DT", type = type[[2]]),
+      TM = DTAColumnSpec(id = "TM", type = type[[3]])
+    ))
+  }
+
+  out <- dta_sas7bdat_normalise(frame, declared(c("R Date", "R POSIXct", "R hms")))
+  expect_identical(out$D, c("2025-08-15", NA))
+  expect_identical(out$DT, c("2025-08-15 14:30:00", NA))
+  expect_identical(out$TM, c("14:30:00", NA))
+
+  out <- dta_sas7bdat_normalise(frame, declared(rep("R numeric", 3)))
+  expect_identical(out$D, c(23968, NA))
+  expect_identical(out$DT, c(2070887400, NA))
+  expect_identical(out$TM, c(52200, NA))
+})
+
+test_that("a fraction of a second is written exactly, truncated and never rounded up", {
+  base <- as.POSIXct("2025-08-15 14:30:00", tz = "UTC")
+  specs <- function(type, format) {
+    DTAColumnSpecCollection(columns = list(
+      X = DTAColumnSpec(id = "X", type = type, format = format)
+    ))
+  }
+
+  # format(x + 0.3, "%OS3") would print .299; the written text is .300.
+  out <- dta_sas7bdat_normalise(
+    data.frame(X = base + c(0.3, 0.5, 0.123456)),
+    specs("R POSIXct", "R %Y-%m-%d %H:%M:%OS3")
+  )
+  expect_identical(
+    out$X,
+    c("2025-08-15 14:30:00.300", "2025-08-15 14:30:00.500", "2025-08-15 14:30:00.123")
+  )
+
+  # One digit of 0.19 and of 0.96 is the tenth, not the rounded tenth.
+  out <- dta_sas7bdat_normalise(
+    data.frame(X = base + c(0.19, 0.96)),
+    specs("R POSIXct", "R %Y-%m-%d %H:%M:%OS1")
+  )
+  expect_identical(out$X, c("2025-08-15 14:30:00.1", "2025-08-15 14:30:00.9"))
+
+  out <- dta_sas7bdat_normalise(
+    data.frame(X = structure(c(52200.5, 52200.123), class = c("hms", "difftime"), units = "secs")),
+    specs("R hms", "R %H:%M:%OS3")
+  )
+  expect_identical(out$X, c("14:30:00.500", "14:30:00.123"))
+})
+
+test_that("a time held in minutes or hours is converted to seconds before an R format shows it", {
+  time_spec <- DTAColumnSpecCollection(columns = list(
+    TM = DTAColumnSpec(id = "TM", type = "R hms")
+  ))
+  held <- list(
+    mins = structure(870, class = c("hms", "difftime"), units = "mins"),
+    hours = structure(14.5, class = "difftime", units = "hours"),
+    secs = structure(52200, class = c("hms", "difftime"), units = "secs")
+  )
+  for (value in held) {
+    expect_identical(dta_sas7bdat_normalise(data.frame(TM = value), time_spec)$TM, "14:30:00")
+  }
+})
+
+test_that("a time of 24 hours or more, or a negative one, is shown as it is and fails the R format", {
+  time_spec <- DTAColumnSpecCollection(columns = list(
+    TM = DTAColumnSpec(id = "TM", type = "R hms")
+  ))
+  # 25 h = 90000 s; -1 h = -3600 s.
+  tm <- structure(c(90000, -3600, 86399), class = c("hms", "difftime"), units = "secs")
+  out <- dta_sas7bdat_normalise(data.frame(TM = tm), time_spec)
+  expect_identical(out$TM, c("25:00:00", "-01:00:00", "23:59:59"))
+
+  found <- dta_check_column_spec(
+    "TM", as_json_schema(time_spec@columns$TM), out$TM
+  )
+  expect_identical(found$row, c(1L, 2L))
+  expect_true(all(found$keyword == "format"))
+})
+
 # ---- an empty dataset --------------------------------------------------------
 
 test_that("a dataset with no observations reads as zero rows and keeps its variables", {

@@ -95,6 +95,16 @@ format, it is ISO 8601 text (\code{2025-08-15},
 \code{2025-08-15T14:30:00}, \code{14:30:00}). When the column is declared
 \code{Num}, \code{Int} or \code{Char} it stays the SAS number: days (dates)
 or seconds (datetimes, times) counted from 1960-01-01, not 1970-01-01.
+\item The same column declared with an \code{R} type is read as text under
+the R backend's rules: \code{R Date}, \code{R POSIXct} and \code{R hms}
+show the value as the declared (or default) date/time format, e.g.
+\code{2025-08-15} under \code{\%Y-\%m-\%d} (a datetime is shown in UTC),
+but only when the declaration matches the kind of column SAS stored (a
+date for \code{R Date}, a datetime for \code{R POSIXct}, a time for
+\code{R hms}); any other combination is ISO 8601 text, which then fails
+the format. \code{R character}, \code{R numeric}, \code{R integer} and
+\code{R logical} keep the SAS number, as \code{Char}, \code{Num} and
+\code{Int} do.
 \item A SAS date stored without a date format is just a number to the
 reader, and stays one; declaring it \code{SAS Date} then fails with a
 type error.

@@ -59,6 +59,39 @@ test_that("an unknown key is a warning and does not fail strict", {
   expect_match(rows$message, "branding.nonsense", fixed = TRUE)
 })
 
+test_that("a valid data_types.default produces no app_config rows, in any case", {
+  for (value in c("SAS", "R", "r", "sas", "'  R '")) {
+    dir <- app_config_library(c("kind: dta_app_config", "data_types:", paste0("  default: ", value)))
+    expect_equal(nrow(app_rows(validate_template(dir, strict = TRUE))), 0, info = value)
+  }
+})
+
+test_that("a bad data_types.default is an app_config_invalid error naming the key, and strict aborts", {
+  for (value in c("Python", "3", "''", "[]", "")) {
+    dir <- app_config_library(c("kind: dta_app_config", "data_types:", paste0("  default: ", value)))
+    rows <- app_rows(validate_template(dir))
+    expect_equal(rows$code, "app_config_invalid", info = value)
+    expect_equal(rows$severity, "error", info = value)
+    expect_equal(rows$kind, "dta_app_config", info = value)
+    expect_match(rows$message, "data_types.default", fixed = TRUE, info = value)
+    expect_match(rows$message, "SAS, R", fixed = TRUE, info = value)
+    expect_error(validate_template(dir, strict = TRUE), "app_config_invalid", fixed = TRUE, info = value)
+  }
+})
+
+test_that("an unknown key under data_types, or a misspelled section, is an app_config_unknown_key warning", {
+  dir <- app_config_library(c("kind: dta_app_config", "data_types:", "  defualt: R"))
+  rows <- app_rows(validate_template(dir, strict = TRUE))
+  expect_equal(rows$code, "app_config_unknown_key")
+  expect_equal(rows$severity, "warning")
+  expect_match(rows$message, "data_types.defualt", fixed = TRUE)
+
+  dir <- app_config_library(c("kind: dta_app_config", "data_type:", "  default: R"))
+  rows <- app_rows(validate_template(dir, strict = TRUE))
+  expect_equal(rows$code, "app_config_unknown_key")
+  expect_match(rows$message, "data_type", fixed = TRUE)
+})
+
 test_that("a logo or Word template that does not exist is an error", {
   dir <- app_config_library(c(
     "kind: dta_app_config",

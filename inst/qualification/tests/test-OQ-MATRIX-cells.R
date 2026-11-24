@@ -1,4 +1,4 @@
-# What a matrix cell may hold. REQ-MATRIX-026 .. REQ-MATRIX-041.
+# What a matrix cell may hold. REQ-MATRIX-026 .. REQ-MATRIX-041, and the R cell types, REQ-MATRIX-060 and REQ-MATRIX-061.
 #
 # One case per row of the cell contract in the requirements. Each case writes a
 # file with ONE data row and one data column per raw token, labelled C1, C2 ...,
@@ -397,4 +397,140 @@ test_that("OQ-MATRIX-039 | an inapplicable range or infinite setting, a reversed
     "while the same bound written as 1000 is accepted",
     NULL, mx_error(build(list(type = "SAS Num", range = list(max = 1000))))
   )
+})
+
+# ---- the R vocabulary ------------------------------------------------------------
+#
+# REQ-MATRIX-060 and REQ-MATRIX-061. The cell contract above is stated for the
+# SAS types. A cell of type R numeric, R integer or R character is read the same
+# way, token by token, with the table held in memory and scanned in batches.
+
+# A matrix dataset as the YAML reader would build it, with the row label and the
+# cells in whichever vocabulary the case names.
+mc_build <- function(cells, label_type = "R character") {
+  dta_dataset_from_list(list(
+    id = "m", type = "matrix", files = list(filename = "m.tsv", type = "tsv"),
+    row_labels = list(list(id = "ID", header = "", type = label_type, nullable = FALSE)),
+    matrix = list(cells = cells)
+  ))
+}
+
+# mc_char_kept() for a text cell of the named type.
+mc_text_kept <- function(raws, type) {
+  mc_expect(
+    paste("a", type, "cell keeps the text"), raws,
+    list(type = type, nullable = FALSE, values = as.list(raws)),
+    rep(list(character(0)), length(raws))
+  )
+  mc_expect(
+    paste("and a", type, "value list that omits the text rejects it"), raws,
+    list(type = type, nullable = FALSE, values = list("zzz", "yyy")),
+    rep(list("columnspec enum"), length(raws))
+  )
+}
+
+test_that("OQ-MATRIX-058 | a matrix takes R numeric, R integer and R character cells and row labels of either vocabulary, and refuses what SAS refuses by the same classes | REQ-MATRIX-060 | tags: white-box", {
+  qa_step(
+    "an R numeric cell with a range and infinite allowed is accepted",
+    NULL, mx_error(mc_build(list(type = "R numeric", range = list(min = 0, max = 9), infinite = TRUE)))
+  )
+  qa_step(
+    "an R integer cell with a range is accepted",
+    NULL, mx_error(mc_build(list(type = "R integer", range = list(min = 0, max = 9))))
+  )
+  qa_step(
+    "an R character cell with a length and a pattern is accepted",
+    NULL, mx_error(mc_build(list(type = "R character", length = 3, pattern = "^[A-Z]+$")))
+  )
+  qa_step(
+    "an R character cell with a list of values is accepted",
+    NULL, mx_error(mc_build(list(type = "R character", values = list("AB", "CD"))))
+  )
+
+  # The row labels do not have to use the vocabulary of the cells.
+  for (pair in list(
+    c("R character", "SAS Int"), c("SAS Char", "R integer"), c("R integer", "R numeric"), c("SAS Char", "R character")
+  )) {
+    qa_step(
+      sprintf("a %s row label beside %s cells is accepted", pair[[1]], pair[[2]]),
+      NULL, mx_error(mc_build(list(type = pair[[2]]), label_type = pair[[1]]))
+    )
+  }
+
+  qa_step(
+    "a range on an R character cell",
+    TRUE, mx_is(mx_error(mc_build(list(type = "R character", range = list(min = 1)))), "dta_cell_range_type")
+  )
+  qa_step(
+    "an infinite setting on an R integer cell",
+    TRUE, mx_is(mx_error(mc_build(list(type = "R integer", infinite = TRUE))), "dta_cell_finite_type")
+  )
+  qa_step(
+    "an infinite setting on an R character cell",
+    TRUE, mx_is(mx_error(mc_build(list(type = "R character", infinite = FALSE))), "dta_cell_finite_type")
+  )
+  for (type in c("R logical", "R Date", "R POSIXct", "R hms", "SAS Date", "SAS Time", "SAS DateTime")) {
+    qa_step(
+      paste("a cell of type", type, "is not a number or a text"),
+      TRUE, mx_is(mx_error(mc_build(list(type = type))), "dta_matrix_cells_type")
+    )
+  }
+
+  # LIM-031: the specification of the column labels is built by the package and
+  # is a SAS Char column whatever the cells use.
+  ds <- mc_build(list(type = "R numeric"))
+  qa_step(
+    "the column-label header of a matrix of R cells is a SAS Char column",
+    c(backend = "SAS", type = "Char"),
+    c(backend = ds@matrix@header@structure@backend, type = ds@matrix@header@structure@type)
+  )
+})
+
+test_that("OQ-MATRIX-059 | R numeric, R integer and R character cells are read as SAS Num, SAS Int and SAS Char cells are, held in memory and scanned in batches | REQ-MATRIX-061", {
+  # 007 is the value 7 in a number cell and the text 007 in a text cell; both
+  # are checked as the cell contract checks a SAS cell, by bounding the value.
+  mc_value("007", 7, "R numeric")
+  mc_value("007", 7, "R integer")
+  mc_text_kept("007", "R character")
+
+  raws <- c("12", " 12 ", "1.2e1")
+  mc_value(raws, 12, "R numeric")
+  mc_value(raws, 12, "R integer")
+  mc_text_kept(raws, "R character")
+
+  # 1.5 is a value in a numeric cell and not whole in an integer cell; abc is
+  # not convertible in either; the text cell keeps both.
+  mc_value("1.5", 1.5, "R numeric")
+  mc_expect(
+    "1.5 in an R integer cell", "1.5",
+    list(type = "R integer", nullable = TRUE), list("import not_whole")
+  )
+  mc_expect(
+    "abc in an R numeric cell", "abc",
+    list(type = "R numeric", nullable = TRUE), list("import not_convertible")
+  )
+  mc_expect(
+    "abc in an R integer cell", "abc",
+    list(type = "R integer", nullable = TRUE), list("import not_convertible")
+  )
+  mc_text_kept(c("1.5", "abc"), "R character")
+
+  # Inf is a finite finding in an R numeric cell unless infinite is written.
+  mc_expect(
+    "Inf in an R numeric cell", c("Inf", "-Inf"),
+    list(type = "R numeric", nullable = TRUE), rep(list("columnspec finite"), 2)
+  )
+  mc_expect(
+    "Inf in an R numeric cell that allows infinite", c("Inf", "-Inf"),
+    list(type = "R numeric", nullable = TRUE, infinite = TRUE), rep(list(character(0)), 2)
+  )
+
+  # A value below the minimum, above the maximum, and on either bound.
+  for (type in c("R numeric", "R integer")) {
+    mc_expect(
+      paste("range [0, 10] in an", type, "cell"), c("-1", "0", "10", "11"),
+      list(type = type, nullable = TRUE, range = list(min = 0, max = 10)),
+      list("columnspec minimum", character(0), character(0), "columnspec maximum")
+    )
+  }
 })

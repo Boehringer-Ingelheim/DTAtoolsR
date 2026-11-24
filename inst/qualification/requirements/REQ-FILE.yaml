@@ -475,12 +475,17 @@ requirements:
       read as follows. When the column declares the matching type (SAS Date,
       SAS DateTime, SAS Time) and a format, the value shall be the SAS display
       text of that format (DATEw., DATETIMEw., TIMEw.d); when the column
-      declares a non-temporal type (SAS Num, SAS Int, SAS Char), the value
-      shall be the SAS number itself, days since 1960-01-01 for a date and
-      seconds since 1960-01-01 00:00:00 or seconds since midnight for a
-      datetime and a time; otherwise the value shall be ISO 8601 text
-      (YYYY-MM-DD, YYYY-MM-DDTHH:MM:SS, HH:MM:SS). A missing value shall stay
-      missing in all three forms.
+      declares the matching R type (R Date, R POSIXct, R hms), the value shall
+      be the text of that date, datetime (in UTC) or time of day written in
+      the column's format, which is the default format of the type
+      (%Y-%m-%d, %Y-%m-%d %H:%M:%S, %H:%M:%S) when none was named; when the
+      column declares a non-temporal type (SAS Num, SAS Int, SAS Char, R
+      numeric, R integer, R character, R logical), the value shall be the SAS
+      number itself, days since 1960-01-01 for a date and seconds since
+      1960-01-01 00:00:00 or seconds since midnight for a datetime and a time;
+      otherwise the value shall be ISO 8601 text (YYYY-MM-DD,
+      YYYY-MM-DDTHH:MM:SS, HH:MM:SS). A missing value shall stay missing in
+      all of these forms.
     risk: high
     category: functional
     covers: [DTAFileSAS7BDAT, read_file, load_file, check]
@@ -647,3 +652,53 @@ requirements:
       CSV the name Length 5" is written "Length 5""" (a doubled quote stands
       for one), and "Subject ID" with its quotes in the name is written
       """Subject ID""".
+
+  - id: REQ-FILE-046
+    text: >
+      In a handler's filename with pattern TRUE, a date mask written between
+      << and >> shall match only a date and time in that layout: yyyy a year
+      2000-2099, yy any two digits, MM a month 01-12, MMM and MMMM an English
+      month name in title case, abbreviated to three letters (Jan) or in full
+      (January), dd a day 01-31 and d 1-31 (not
+      checked against the month), HH an hour 00-23 and H 0-23, mm a minute
+      00-59 and ss a second 00-59; any other character inside the mask
+      matches itself. The handler's filename property shall keep the mask as
+      written. A malformed mask -- a run of y, M, d, H, m or s that is not one
+      of these tokens, one of the letters Y, D, S or h, or a month token next
+      to times only or a minute token next to dates only -- shall be refused
+      when the handler is built, with a condition of class
+      dta_date_pattern_invalid.
+    risk: medium
+    category: functional
+    covers: [DTAFile, matches_filename]
+    source: R/datePatternTokens.R; R/DTAFile-class.R; template repository README, Date masks in patterns
+    notes: >
+      The same masks are accepted in a column's pattern and a rule's pattern
+      condition; this requirement is limited to the file name, which is what
+      its tests exercise. The year range and the day not being checked against
+      the month are part of the design, not limitations of it.
+
+  - id: REQ-FILE-047
+    text: >
+      A SAS date, datetime or time read under a matching R declaration shall be
+      written exactly as the column's format shows it: a datetime as the
+      time in UTC, whatever time zone the value is held with; each field
+      zero-padded to its fixed width; %OSn as the seconds followed by the first
+      n digits of the stored fraction of a second, cut and never rounded, so
+      0.3 seconds under %OS3 is .300 and 0.19 seconds under %OS1 is .1; and a
+      time of 24 hours or more with its real hour count (25:00:00), which the
+      R hms format then reports. An R declaration that is not the kind of
+      variable SAS stored (R POSIXct or R hms on a date, R Date on a time)
+      shall show the ISO 8601 text of the value, which the format then reports
+      for every value that is not missing.
+    risk: high
+    category: functional
+    covers: [DTAFileSAS7BDAT, read_file, load_file, check]
+    source: R/DTAFileSAS7BDAT-class.R (dta_sas7bdat_normalise); R/rTemporalFormat.R (dta_r_render_temporal)
+    notes: >
+      Expected values are written from the calendar and the format letters,
+      not from the renderer. The fraction rule matches the one the SAS display
+      text follows (REQ-FILE-037): R's own format(x + 0.3, "%OS3") prints .299,
+      so the text is never made by format(). The ISO fallback is the same text
+      an undeclared variable shows, so the mismatch is reported rather than
+      shown as a number.
