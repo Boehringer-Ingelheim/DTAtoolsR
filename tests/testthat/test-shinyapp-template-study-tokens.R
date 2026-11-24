@@ -253,6 +253,85 @@ test_that("an inline dataset of a creation template resolves the tokens, with or
   }
 })
 
+test_that("the _underscore tokens write the identifier with its hyphens as underscores, and only those", {
+  inline <- list(
+    id = "inline_ds", type = "tabular",
+    files = list(filename = "^s${study.id_underscore}_[0-9]{12}\\.csv$", pattern = TRUE, type = "csv"),
+    columns = list(
+      list(id = "STUDYID", type = "SAS Char", format = "SAS $20.", values = "${study.id}"),
+      list(id = "PROTID", type = "SAS Char", format = "SAS $20.", values = "${study.protocol_id_underscore}")
+    )
+  )
+  def <- list(
+    base = list(metadata = list(
+      title = "s${study.id_underscore} / ${study.protocol_id_underscore} / ${study.id}", version = "1.0",
+      study = list(id = "1001-0190", protocol_id = "BI 1001-0190")
+    )),
+    datasets = list(inline)
+  )
+  root <- withr::local_tempdir()
+  res <- app_fn("create_dta_from_template")(def, file.path(root, "t.yaml"))
+  expect_true(res$ok, info = res$error)
+  ds <- DTAtools::datasets(res$value)[["inline_ds"]]
+
+  # The file name carries the underscored id, so the hyphenated one no longer fits.
+  f <- ds@files[[1]]
+  expect_identical(f@filename, "^s1001_0190_[0-9]{12}\\.csv$")
+  expect_true(file_accepts(f, "s1001_0190_202611181200.csv"))
+  expect_false(file_accepts(f, "s1001-0190_202611181200.csv"))
+  # The plain token beside it is untouched, and only "-" is replaced (not the space).
+  expect_identical(unlist(ds@specs@columns[["STUDYID"]]@values), "1001-0190")
+  expect_identical(unlist(ds@specs@columns[["PROTID"]]@values), "BI 1001_0190")
+  expect_identical(DTAtools::metadata(res$value)@title, "s1001_0190 / BI 1001_0190 / 1001-0190")
+  # The identity itself is as entered.
+  expect_identical(DTAtools::metadata(res$value)@study$id, "1001-0190")
+})
+
+test_that("an _underscore token sitting in a pattern is escaped like the plain one", {
+  env <- app_fn("dta_template_dataset_env")(study_fallback = list(id = "1199.187-a", protocol_id = "P-1"))
+  # "." is a metacharacter; the "_" the hyphen became is not.
+  out <- app_fn("resolve_dataset_tokens")(
+    list(id = "x", files = list(filename = "^${study.id_underscore}\\.csv$", pattern = TRUE), note = "${study.id_underscore}"),
+    env, "x"
+  )
+  expect_identical(out$files$filename, "^1199\\.187_a\\.csv$")
+  expect_identical(out$note, "1199.187_a")
+})
+
+test_that("an _underscore token is as unanswered as its plain token, and a fallback answers both", {
+  expect_null(app_fn("dta_template_dataset_env")()[["${study.id_underscore}"]])
+  expect_null(app_fn("dta_template_dataset_env")(study_fallback = list(id = "A-1"))[["${study.protocol_id_underscore}"]])
+
+  def <- list(
+    base = list(metadata = list(title = "T", version = "1.0")),
+    datasets = list(list(
+      id = "inline_ds", type = "file",
+      files = list(filename = "${study.id_underscore}.csv", type = "csv")
+    ))
+  )
+  root <- withr::local_tempdir()
+  unanswered <- app_fn("create_dta_from_template")(def, file.path(root, "t.yaml"))
+  expect_false(unanswered$ok)
+  expect_match(unanswered$error, "inline_ds", fixed = TRUE)
+  expect_match(unanswered$error, "${study.id_underscore}", fixed = TRUE)
+
+  answered <- app_fn("create_dta_from_template")(
+    def, file.path(root, "t.yaml"),
+    study_fallback = list(id = "FB-1", protocol_id = "FB-P")
+  )
+  expect_true(answered$ok, info = answered$error)
+  expect_identical(DTAtools::datasets(answered$value)[["inline_ds"]]@files[[1]]@filename, "FB_1.csv")
+
+  # In the document metadata too: the error names the field.
+  titled <- def
+  titled$base$metadata$title <- "Transfer for ${study.id_underscore}"
+  titled$datasets <- list(list(id = "mini_ds", type = "file", files = list(filename = "mini.csv", type = "csv")))
+  late <- app_fn("create_dta_from_template")(titled, file.path(root, "t.yaml"))
+  expect_false(late$ok)
+  expect_match(late$error, "title", fixed = TRUE)
+  expect_match(late$error, "${study.id_underscore}", fixed = TRUE)
+})
+
 test_that("a template without study tokens builds unchanged with no study identity at all", {
   def <- list(
     base = list(metadata = list(title = "T", version = "1.0")),

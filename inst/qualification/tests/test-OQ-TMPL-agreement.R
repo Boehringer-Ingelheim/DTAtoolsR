@@ -143,3 +143,72 @@ test_that("OQ-TMPL-136 | study tokens in a dataset body take the document's stud
     unlist(fallback$value@datasets[["tok"]]@specs@columns[["STUDYID"]]@values)
   )
 })
+
+test_that("OQ-TMPL-151 | the _underscore study tokens give the study identity with every hyphen written as an underscore, escaped in a regular expression, and creation fails when none is known | REQ-TMPL-058 | tags: white-box", {
+  engine <- getFromNamespace(".dta_template_engine", "DTAtools")()
+  inline <- list(
+    id = "tok", type = "tabular",
+    files = list(filename = "^s${study.id_underscore}_[0-9]{12}\\.csv$", pattern = TRUE, type = "csv"),
+    columns = list(
+      list(id = "STUDYID", type = "SAS Char", values = "${study.id}"),
+      list(id = "PROTID", type = "SAS Char", values = "${study.protocol_id_underscore}")
+    )
+  )
+  def_with <- function(study = NULL) {
+    md <- list(title = "Transfer for ${study.id_underscore}", version = "1.0")
+    if (!is.null(study)) md$study <- study
+    list(base = list(metadata = md), datasets = list(inline))
+  }
+  path <- file.path(qa_tempdir(), "t.yaml")
+
+  # Expected values are derived from the requirement: the id 1199.187-a
+  # becomes 1199.187_a, the protocol id BI 1-2 becomes BI 1_2 (only the hyphen
+  # changes, not the blank), and in a pattern the "." is escaped.
+  built <- engine$create_dta_from_template(def_with(list(id = "1199.187-a", protocol_id = "BI 1-2")), path)
+  qa_check("creation with a study identity succeeds", isTRUE(built$ok))
+  ds <- built$value@datasets[["tok"]]
+  file <- ds@files[[1]]
+  qa_step(
+    "the underscored id is escaped in the file name pattern",
+    "^s1199\\.187_a_[0-9]{12}\\.csv$", file@filename
+  )
+  qa_step("the pattern accepts the underscored id", TRUE, any(matches_filename(file, "s1199.187_a_202611181200.csv")))
+  qa_step("the pattern refuses the hyphenated id", FALSE, any(matches_filename(file, "s1199.187-a_202611181200.csv")))
+  qa_step("the pattern refuses a lookalike", FALSE, any(matches_filename(file, "s1199x187_a_202611181200.csv")))
+  cols <- ds@specs@columns
+  qa_step("the plain token beside it keeps the id as entered", "1199.187-a", unlist(cols[["STUDYID"]]@values))
+  qa_step("the protocol id has its hyphen written as an underscore", "BI 1_2", unlist(cols[["PROTID"]]@values))
+  qa_step(
+    "the placeholder is filled in the document metadata too",
+    "Transfer for 1199.187_a", built$value@metadata@title
+  )
+  qa_step("and the study identity itself stays as entered", "1199.187-a", built$value@metadata@study$id)
+
+  unanswered <- engine$create_dta_from_template(def_with(NULL), path)
+  qa_step("creation without any study identity fails", FALSE, unanswered$ok)
+  qa_check(
+    "the error names the dataset and the placeholder",
+    grepl("tok", unanswered$error, fixed = TRUE) && grepl("${study.id_underscore}", unanswered$error, fixed = TRUE)
+  )
+  # The title holds the placeholder too; with the dataset body not using one, the
+  # error names the metadata field.
+  no_datasets <- def_with(NULL)
+  no_datasets$datasets <- list(list(id = "mini", type = "file", files = list(filename = "mini.csv", type = "csv")))
+  unanswered_title <- engine$create_dta_from_template(no_datasets, path)
+  qa_step("creation fails for a placeholder in the metadata alone", FALSE, unanswered_title$ok)
+  qa_check(
+    "and names the metadata field and the placeholder",
+    grepl("title", unanswered_title$error, fixed = TRUE) &&
+      grepl("${study.id_underscore}", unanswered_title$error, fixed = TRUE)
+  )
+
+  fallback <- engine$create_dta_from_template(
+    def_with(NULL), path,
+    study_fallback = list(id = "FB-1", protocol_id = "FB-P")
+  )
+  qa_check("a supplied fallback answers the placeholders", isTRUE(fallback$ok))
+  qa_step(
+    "the dataset carries the underscored fallback", "FB_P",
+    unlist(fallback$value@datasets[["tok"]]@specs@columns[["PROTID"]]@values)
+  )
+})

@@ -2811,6 +2811,97 @@ test_that("study_token_unanswered names a study placeholder no option or base va
   expect_no_code_row(validate_template(dir), "study_token_unanswered")
 })
 
+test_that("study_token_unanswered also covers the _underscore forms, and names the study field they come from", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: us_ct", "version: \"1.0\"",
+      "base:", "  metadata:", "    title: Underscore CT",
+      "datasets:",
+      "  - id: ds1",
+      "    type: tabular",
+      "    files: {filename: '^s${study.id_underscore}_[0-9]+\\.csv$', pattern: true, type: csv}",
+      "    columns:",
+      "      - {id: PROTID, type: SAS Char, values: \"${study.protocol_id_underscore}\"}",
+      "options:",
+      "  - {id: study_id, type: text, target: metadata.study.id}"
+    ),
+    lib_file(dir, "us_ct.dta-template.yaml")
+  )
+  result <- validate_template(dir)
+  expect_no_code_row(result, "token_unknown")
+  expect_no_code_row(result, "instantiate_failed")
+  # The study id is asked for; the protocol id is not.
+  gap <- expect_code_row(result, "study_token_unanswered", "warning")
+  expect_equal(nrow(gap), 1L)
+  expect_match(gap$message, "${study.protocol_id_underscore}", fixed = TRUE)
+  expect_match(gap$message, "target: metadata.study.protocol_id`", fixed = TRUE)
+
+  # The study id alone is answered by the option, the protocol id by a base value.
+  txt <- readLines(lib_file(dir, "us_ct.dta-template.yaml"))
+  writeLines(append(txt, "    study: {protocol_id: P-1}", after = 5L), lib_file(dir, "us_ct.dta-template.yaml"))
+  expect_no_code_row(validate_template(dir), "study_token_unanswered")
+})
+
+test_that("a dry run that fails on the _underscore stand-in names it", {
+  # A 4-character column cannot hold STUDY_ID, the stand-in as the token writes it.
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: nus_dt",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: nus",
+      "  type: tabular",
+      "  files: {filename: n.csv, type: csv}",
+      "  columns:",
+      "    - {id: STUDYID, type: SAS Char, format: SAS $4., values: \"${study.id_underscore}\"}"
+    ),
+    lib_file(dir, "nus.dta-dataset-template.yaml")
+  )
+  ct <- function(option) {
+    writeLines(
+      c(
+        "kind: dta_creation_template", "id: nus_ct", "version: \"1.0\"",
+        "base:", "  metadata:", "    title: Narrow",
+        "datasets:", "  - template: nus_dt@1.0",
+        "options:", option
+      ),
+      lib_file(dir, "nus_ct.dta-template.yaml")
+    )
+  }
+
+  ct("  - {id: study_id, type: text, target: metadata.study.id}")
+  failed <- expect_code_row(validate_template(dir), "instantiate_failed", "error")
+  expect_match(failed$message, "stood in 'STUDY_ID'", fixed = TRUE)
+
+  # A suggestion that fits, with a hyphen the token writes as an underscore.
+  ct("  - {id: study_id, type: text, target: metadata.study.id, choices: [\"1-23\"]}")
+  suggested <- validate_template(dir)
+  expect_equal(nrow(suggested), 0, info = paste(utils::capture.output(print(suggested)), collapse = "\n"))
+})
+
+test_that("the dry-run hint looks for each stand-in only in the form its token writes it", {
+  dry <- list(id = "STUDY-ID", protocol_id = "PROT-ID")
+  hint <- .dta_template_dry_study_hint
+  # A valid SAS column called STUDY_ID that failed for its own reasons is not the
+  # stand-in of a template that only uses the plain token.
+  expect_identical(hint("column 'STUDY_ID' is too long", dry, c(id = "${study.id}")), "")
+  expect_match(
+    hint("column 'STUDY_ID' is too long", dry, c(id = "${study.id_underscore}")),
+    "stood in 'STUDY_ID'",
+    fixed = TRUE
+  )
+  expect_match(hint("values 'STUDY-ID' is bad", dry, c(id = "${study.id}")), "stood in 'STUDY-ID'", fixed = TRUE)
+  expect_identical(hint("values 'STUDY-ID' is bad", dry, c(id = "${study.id_underscore}")), "")
+  # A field used in both forms is looked for in both.
+  both <- c(id = "${study.id}", id = "${study.id_underscore}")
+  expect_match(hint("'STUDY_ID' and 'STUDY-ID'", dry, both), "'STUDY-ID' / 'STUDY_ID'", fixed = TRUE)
+  # ...and is reported once as unanswered, under its plain token.
+  expect_identical(.dta_template_unanswered_study_tokens(list(), both), c(id = "${study.id}"))
+})
+
 test_that("text that merely looks like a stand-in is not taken for a study token", {
   # A column called STUDY-ID and a title naming PROT-ID, but no placeholder at all.
   dir <- withr::local_tempdir()
@@ -2848,7 +2939,7 @@ test_that("a study token in a column's description does not hide that column's o
   expect_match(bad$message, "AGE", fixed = TRUE)
 })
 
-test_that("token_unknown fires once per file for a mistyped placeholder, and never for the four known ones", {
+test_that("token_unknown fires once per file for a mistyped placeholder, and never for the six known ones", {
   dir <- withr::local_tempdir()
   writeLines(
     c(
@@ -2863,7 +2954,9 @@ test_that("token_unknown fires once per file for a mistyped placeholder, and nev
       "    - {id: A, type: SAS Char, values: \"${studyid}\"}",
       "    - {id: B, type: SAS Char, description: \"${studyid} again\"}",
       "    - {id: C, type: SAS Char, values: \"${study.id}\"}",
-      "    - {id: D, type: SAS Char, values: \"${study.protocol_id}\"}"
+      "    - {id: D, type: SAS Char, values: \"${study.protocol_id}\"}",
+      "    - {id: E, type: SAS Char, values: \"${study.id_underscore}\"}",
+      "    - {id: F, type: SAS Char, values: \"${study.protocol_id_underscore}\"}"
     ),
     lib_file(dir, "typo.dta-dataset-template.yaml")
   )
@@ -2885,7 +2978,7 @@ test_that("token_unknown fires once per file for a mistyped placeholder, and nev
     ),
     lib_file(dir, "typo_ct.dta-template.yaml")
   )
-  # Only the four known tokens: nothing to report.
+  # Only the six known tokens: nothing to report.
   writeLines(
     c(
       "kind: dta_creation_template",
@@ -2894,6 +2987,7 @@ test_that("token_unknown fires once per file for a mistyped placeholder, and nev
       "base:",
       "  metadata:",
       "    title: \"${today} ${version} ${study.id} ${study.protocol_id}\"",
+      "    header: \"${study.id_underscore} ${study.protocol_id_underscore}\"",
       "datasets:",
       "  - id: ds1",
       "    type: tabular",

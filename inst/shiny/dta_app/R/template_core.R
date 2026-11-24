@@ -824,6 +824,10 @@ resolve_template_expressions <- function(x, env) {
 #   files:   { filename: '^s${study.id}_<<yyyyMMddHHmm>>\.csv$', pattern: true }
 #   columns: [{ id: STUDYID, values: '${study.id}' }]
 #
+# ${study.id_underscore} and ${study.protocol_id_underscore} are the same
+# identities with every "-" written as "_", for file names, where a hyphenated
+# identifier ("1001-0190") would not do. Only the hyphen is replaced.
+#
 # They are resolved on the PLAIN dataset list, never on the built S7 objects: a
 # DTAColumnSpec compiles its `pattern` and checks its examples and values
 # against it on construction, so a token still sitting in the body would be
@@ -832,7 +836,10 @@ resolve_template_expressions <- function(x, env) {
 # Every ${...} token a template may use, wherever it is resolved. The validator
 # reports any other one as token_unknown.
 dta_template_known_tokens <- function() {
-  c("${today}", "${version}", "${study.id}", "${study.protocol_id}")
+  c(
+    "${today}", "${version}", "${study.id}", "${study.protocol_id}",
+    "${study.id_underscore}", "${study.protocol_id_underscore}"
+  )
 }
 
 # The study identity that builds which are not creating a real document (the
@@ -889,7 +896,8 @@ dta_template_regex_escape <- function(x) {
 # The tokens a dataset body is resolved with: ${today}, plus the study tokens
 # from `md`'s settled study identity, each falling back to `study_fallback`
 # (a list(id, protocol_id), or NULL). A study token with no value maps to NULL,
-# which resolve_dataset_tokens() turns into an error only if a body uses it.
+# which resolve_dataset_tokens() turns into an error only if a body uses it; so
+# does its `_underscore` form, which is derived from the same settled value.
 dta_template_dataset_env <- function(md = NULL, study_fallback = NULL) {
   study <- if (is.null(md)) list() else tryCatch(S7::prop(md, "study"), error = function(e) NULL) %||% list()
   pick <- function(key) {
@@ -900,9 +908,18 @@ dta_template_dataset_env <- function(md = NULL, study_fallback = NULL) {
     }
     NULL
   }
+  id <- pick("id")
+  protocol_id <- pick("protocol_id")
+  # NULL stays NULL: chartr() would turn it into an error of its own.
+  underscored <- function(v) if (is.null(v)) NULL else chartr("-", "_", v)
   c(
     dta_template_today_env(),
-    list("${study.id}" = pick("id"), "${study.protocol_id}" = pick("protocol_id"))
+    list(
+      "${study.id}" = id,
+      "${study.protocol_id}" = protocol_id,
+      "${study.id_underscore}" = underscored(id),
+      "${study.protocol_id_underscore}" = underscored(protocol_id)
+    )
   )
 }
 
@@ -963,9 +980,9 @@ resolve_dataset_tokens <- function(ds, env, dataset_name = NULL, what = "Dataset
   walk(ds, FALSE)
 }
 
-# Resolve ${version}, ${study.id} and ${study.protocol_id} across the metadata
-# of a freshly built DTA, so a title or an agreement clause can name the study
-# as a dataset body can.
+# Resolve ${version}, ${study.id}, ${study.protocol_id} and their `_underscore`
+# forms across the metadata of a freshly built DTA, so a title or an agreement
+# clause can name the study as a dataset body can.
 #
 # This runs as a post-pass because none of them is knowable while base
 # metadata is being written -- an option may still change any of them. ${today}
@@ -977,7 +994,8 @@ apply_template_expressions <- function(dta, study_fallback = NULL) {
   md <- DTAtools::metadata(dta)
   version <- tryCatch(S7::prop(md, "version"), error = function(e) NULL)
   env <- list("${version}" = as.character(version %||% ""))
-  study_env <- dta_template_dataset_env(md, study_fallback)[c("${study.id}", "${study.protocol_id}")]
+  study_env <- dta_template_dataset_env(md, study_fallback)
+  study_env <- study_env[startsWith(names(study_env), "${study.")]
 
   for (nm in setdiff(dta_template_metadata_fields(), "study")) {
     cur <- tryCatch(S7::prop(md, nm), error = function(e) NULL)
@@ -1034,7 +1052,8 @@ apply_template_expressions <- function(dta, study_fallback = NULL) {
 #                    NULL (default) selects nothing, so every slot keeps its
 #                    declared default (see resolve_vocabulary_slot_overrides()).
 #   study_fallback   list(id, protocol_id) the ${study.id} /
-#                    ${study.protocol_id} tokens in a dataset body resolve to
+#                    ${study.protocol_id} tokens (and their `_underscore`
+#                    forms) in a dataset body resolve to
 #                    when steps 2-5 settle no study identity. It is NEVER
 #                    written to the metadata. NULL (default) has no fallback,
 #                    so a body using a token the document has no value for is
@@ -1052,7 +1071,8 @@ apply_template_expressions <- function(dta, study_fallback = NULL) {
 #
 # Datasets keep the number 1 -- they come first in a template and in every
 # record of one -- but are BUILT after the metadata steps 2-5. A dataset body
-# may use ${study.id} / ${study.protocol_id}, which only 2-5 settle, and the
+# may use ${study.id} / ${study.protocol_id} (or their `_underscore` forms),
+# which only 2-5 settle, and the
 # tokens have to be substituted into the plain dataset list before its column
 # objects exist (see resolve_dataset_tokens()). None of 2-5 reads a dataset.
 #

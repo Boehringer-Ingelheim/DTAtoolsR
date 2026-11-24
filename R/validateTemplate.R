@@ -958,12 +958,13 @@
             prefix, build_res$error, .dta_template_dry_study_hint(build_res$error, dry_study, study_used)
           ))
         } else {
-          for (tok in .dta_template_unanswered_study_tokens(selected_def, study_used)) {
+          unanswered <- .dta_template_unanswered_study_tokens(selected_def, study_used)
+          for (key in names(unanswered)) {
             add(
               "warning", "study_token_unanswered",
               paste0(prefix, sprintf(
                 "The document uses %s, but no option and no base metadata of this template supplies it, so creating a new document fails; only a draft carrying the study identity over from an existing document gets one. Add an option with `target: %s`.",
-                tok, if (identical(tok, "${study.id}")) "metadata.study.id" else "metadata.study.protocol_id"
+                unanswered[[key]], paste0("metadata.study.", key)
               ))
             )
           }
@@ -998,14 +999,18 @@
   rows
 }
 
-# The study tokens (`${study.id}`, `${study.protocol_id}`) a creation template's
-# documents can contain: anywhere in its own resolved definition -- base
-# metadata, options, inline datasets, patches, mixins and parents already merged
-# in -- or in the body or options of a dataset template it imports. Read from
-# the definitions, not the built document, so a template that merely contains
-# the stand-in text (a column called STUDY-ID) is not taken for one using a
-# token. Every one of these is resolved at creation; a `path:`/`source:`
-# dataset file is not, and is not read.
+# The study tokens (`${study.id}`, `${study.protocol_id}` and their
+# `_underscore` forms) a creation template's documents can contain: anywhere in
+# its own resolved definition -- base metadata, options, inline datasets,
+# patches, mixins and parents already merged in -- or in the body or options of
+# a dataset template it imports. Read from the definitions, not the built
+# document, so a template that merely contains the stand-in text (a column
+# called STUDY-ID) is not taken for one using a token. Every one of these is
+# resolved at creation; a `path:`/`source:` dataset file is not, and is not
+# read.
+#
+# One element per token found, named by the study field it comes from (`id` or
+# `protocol_id`), so a field used in both forms appears twice.
 .dta_template_study_tokens_used <- function(def, index_df) {
   values <- unlist(def, use.names = FALSE)
   resolve_ref <- .dta_template_engine_get("resolve_template_ref")
@@ -1022,33 +1027,47 @@
     }
   }
   values <- as.character(values)
-  tokens <- c(id = "${study.id}", protocol_id = "${study.protocol_id}")
-  tokens[vapply(tokens, function(t) any(grepl(t, values, fixed = TRUE)), logical(1))]
+  tokens <- list(
+    id = c("${study.id}", "${study.id_underscore}"),
+    protocol_id = c("${study.protocol_id}", "${study.protocol_id_underscore}")
+  )
+  found <- lapply(tokens, function(ts) {
+    ts[vapply(ts, function(t) any(grepl(t, values, fixed = TRUE)), logical(1))]
+  })
+  stats::setNames(unlist(found, use.names = FALSE), rep(names(found), lengths(found)))
 }
 
 # When a dry build failed on the stand-in study identity itself (its text is in
 # the error: "values 'STUDY-ID' is not a valid Num"), say so and how to give the
 # dry run a value the dataset accepts. "" otherwise. Only the stand-ins of
-# tokens the template actually uses (`used`, named by study field) are looked
-# for, and only as a whole word, so a short suggestion such as "1" does not
-# match every error containing the digit.
+# tokens the template actually uses (`used`, one element per token, named by
+# study field) are looked for, each as that token writes it -- an `_underscore`
+# token with its hyphens written as underscores -- and only as a whole word, so
+# a short suggestion such as "1" does not match every error containing the
+# digit.
 .dta_template_dry_study_hint <- function(error, dry_study, used) {
   escape <- .dta_template_engine_get("dta_template_regex_escape")
-  keys <- intersect(names(used), names(dry_study))
-  hit <- vapply(keys, function(k) {
-    grepl(paste0("(^|[^[:alnum:]_])", escape(dry_study[[k]]), "([^[:alnum:]_]|$)"), error, perl = TRUE)
-  }, logical(1))
-  if (!any(hit)) {
+  seen <- character(0)
+  for (i in seq_along(used)) {
+    standin <- dry_study[[names(used)[[i]]]]
+    if (is.null(standin)) next
+    if (grepl("_underscore}", used[[i]], fixed = TRUE)) {
+      standin <- chartr("-", "_", standin)
+    }
+    if (grepl(paste0("(^|[^[:alnum:]_])", escape(standin), "([^[:alnum:]_]|$)"), error, perl = TRUE)) {
+      seen <- c(seen, standin)
+    }
+  }
+  if (length(seen) == 0L) {
     return("")
   }
-  dry_study <- dry_study[keys]
   sprintf(
     paste(
       " (The dry run stood in '%s' for a study identity nobody has entered yet. If a dataset",
       "constrains its shape -- a numeric or narrow column, a pattern -- give the option that asks",
       "for it a realistic first `choices:` suggestion; the dry run uses that instead.)"
     ),
-    paste(unlist(dry_study[hit]), collapse = "' / '")
+    paste(unique(seen), collapse = "' / '")
   )
 }
 
@@ -1061,12 +1080,14 @@
   targets <- unlist(lapply(def[["options"]] %||% list(), .dta_template_option_targets), use.names = FALSE)
   base_study <- def[["base"]][["metadata"]][["study"]]
   out <- character(0)
-  for (key in names(used)) {
+  for (key in unique(names(used))) {
     base_value <- base_study[[key]]
     answered <- any(targets %in% c(paste0("metadata.study.", key), "metadata.study")) ||
       (is.character(base_value) && length(base_value) == 1L && !is.na(base_value) && nzchar(trimws(base_value)))
     if (!answered) {
-      out <- c(out, used[[key]])
+      # Named by study field, so the caller can name the target that answers it
+      # whichever form of the token the template wrote.
+      out[[key]] <- used[[key]]
     }
   }
   out
@@ -1973,12 +1994,13 @@
 #' non-abstract creation template, that declares no files, so nothing can be
 #' loaded into it; a patch may still supply them, hence a warning),
 #' `token_unknown` (a `${...}` placeholder in a creation or dataset template
-#' other than `${today}`, `${version}`, `${study.id}` and
-#' `${study.protocol_id}`, or a `${version}` inside a dataset, either of which
-#' is left in the document as literal text), `study_token_unanswered` (a
-#' dataset or metadata value uses `${study.id}` / `${study.protocol_id}` but no
-#' option and no base metadata of the template supplies that study field, so a
-#' new document cannot be created),
+#' other than `${today}`, `${version}`, `${study.id}`, `${study.protocol_id}`
+#' and their file-name forms `${study.id_underscore}` and
+#' `${study.protocol_id_underscore}`, or a `${version}` inside a dataset, either
+#' of which is left in the document as literal text), `study_token_unanswered`
+#' (a dataset or metadata value uses one of the study tokens but no option and
+#' no base metadata of the template supplies that study field, so a new
+#' document cannot be created),
 #' `extends_unresolved`, `extends_cycle`, `mixin_unresolved` (a `mixins:`
 #' reference that does not resolve within the directory; a warning for the
 #' same reason as `extends_unresolved`), `sealed_violation`,

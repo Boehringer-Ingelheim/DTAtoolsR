@@ -616,6 +616,15 @@ dataset:
       values: ${study.id}
 ```
 
+For file names there are two more tokens, `${study.id_underscore}` and
+`${study.protocol_id_underscore}`: the same values with every hyphen (`-`)
+written as an underscore and nothing else changed, so `1001-0190` becomes
+`1001_0190`. With the study identifier `1001-0190`,
+`filename: ^s${study.id_underscore}_<<yyyyMMddHHmm>>\.csv$` accepts only files
+named like `s1001_0190_202611181200.csv`. They are resolved, escaped and
+checked exactly like the plain tokens, and the document's own study identity
+keeps its hyphens.
+
 Inside a regular expression (a `filename` with `pattern: true`, a column's
 `pattern:`, a rule's `pattern` condition) the identifier is escaped and so
 matched literally; everywhere else -- the metadata too, e.g.
@@ -631,7 +640,8 @@ one is refused when the specification is built. The tokens are listed in
 the scaffolded `README.md` section "Date masks in patterns".
 
 `validate_template()` builds the template with the study option's first
-`choices:` suggestion, else the stand-ins `STUDY-ID` and `PROT-ID`; give the option a
+`choices:` suggestion, else the stand-ins `STUDY-ID` and `PROT-ID` (`STUDY_ID` and
+`PROT_ID` for an `_underscore` token); give the option a
 realistic suggestion if a column constrains the identifier's shape. It warns
 with `study_token_unanswered` when no option or base value supplies a study
 field the template uses, and with `token_unknown` for any other `${...}`

@@ -1420,7 +1420,7 @@ test_that("OQ-TMPL-134 | a dataset template using study tokens builds in the dry
   qa_step("no row at all", 0L, nrow(result))
 })
 
-test_that("OQ-TMPL-135 | token_unknown is a warning once per file and distinct placeholder, and the four known placeholders give none | REQ-TMPL-059", {
+test_that("OQ-TMPL-135 | token_unknown is a warning once per file and distinct placeholder, and the six known placeholders give none | REQ-TMPL-059", {
   root <- qa_tempdir()
   tmpl_put(root, "templates/typo.dta-dataset-template.yaml", c(
     "kind: dta_dataset_template", "id: typo_dt", 'version: "1.0"',
@@ -1429,7 +1429,8 @@ test_that("OQ-TMPL-135 | token_unknown is a warning once per file and distinct p
     "  columns:",
     '    - {id: A, type: SAS Char, values: "${studyid}"}',
     '    - {id: B, type: SAS Char, description: "${studyid} again"}',
-    '    - {id: C, type: SAS Char, values: "${study.id}"}'
+    '    - {id: C, type: SAS Char, values: "${study.id}"}',
+    '    - {id: D, type: SAS Char, values: "${study.protocol_id_underscore}"}'
   ))
   # Both creation templates set the study identity in base metadata, so the
   # study placeholders in their titles have a value (see OQ-TMPL-137 for one
@@ -1448,6 +1449,7 @@ test_that("OQ-TMPL-135 | token_unknown is a warning once per file and distinct p
     "kind: dta_creation_template", "id: known_ct", 'version: "1.0"',
     "base:", "  metadata:",
     '    title: "${today} ${version} ${study.id} ${study.protocol_id}"',
+    '    header: "${study.id_underscore} ${study.protocol_id_underscore}"',
     "    study: {id: S-1, protocol_id: P-1}",
     "datasets:", "  - id: ds1", "    type: tabular",
     "    files: {filename: x.csv, type: csv}",
@@ -1526,6 +1528,57 @@ test_that("OQ-TMPL-137 | the dry run flags a study placeholder nothing can answe
     grepl("STUDY-ID", failed$message, fixed = TRUE) && grepl("choices:", failed$message, fixed = TRUE)
   )
   with <- narrow(', choices: ["1001"]')
+  qa_step("with a fitting first suggestion the dry run builds", 0L, sum(with$code == "instantiate_failed"))
+})
+
+test_that("OQ-TMPL-152 | the _underscore study placeholders are known, count as a use of their study field, and the dry run names the stand-in as they write it | REQ-TMPL-058 REQ-TMPL-059", {
+  # No option and no base metadata sets the protocol id.
+  unanswered <- qa_tempdir()
+  tmpl_put(unanswered, "templates/u.dta-template.yaml", c(
+    "kind: dta_creation_template", "id: u_ct", 'version: "1.0"',
+    "base:", "  metadata:", "    title: U",
+    "datasets:", "  - id: ds1", "    type: tabular",
+    "    files: {filename: 'u_${study.id_underscore}.csv', type: csv}",
+    "    columns:",
+    '      - {id: PROTID, type: SAS Char, values: "${study.protocol_id_underscore}"}',
+    "options:",
+    "  - {id: study_id, label: Study ID, type: text, target: metadata.study.id}"
+  ))
+  result <- validate_template(unanswered)
+  qa_step("neither underscore placeholder is reported as unknown", 0L, sum(result$code == "token_unknown"))
+  gap <- result[result$code == "study_token_unanswered", ]
+  qa_step("one study_token_unanswered row, for the protocol id only", 1L, nrow(gap))
+  qa_step("at severity warning", "warning", gap$severity)
+  qa_check(
+    "naming the placeholder as written and the target that would answer it",
+    grepl("${study.protocol_id_underscore}", gap$message, fixed = TRUE) &&
+      grepl("metadata.study.protocol_id", gap$message, fixed = TRUE)
+  )
+
+  # A column four characters wide cannot hold STUDY_ID, the stand-in as the
+  # underscore placeholder writes it.
+  narrow <- function(choices) {
+    root <- qa_tempdir()
+    tmpl_put(root, "templates/n.dta-template.yaml", c(
+      "kind: dta_creation_template", "id: n_ct", 'version: "1.0"',
+      "base:", "  metadata:", "    title: Narrow",
+      "datasets:", "  - id: ds1", "    type: tabular",
+      "    files: {filename: n.csv, type: csv}",
+      "    columns:",
+      '      - {id: STUDYID, type: SAS Char, format: SAS $4., values: "${study.id_underscore}"}',
+      "options:",
+      paste0("  - {id: study_id, label: Study ID, type: text, target: metadata.study.id", choices, "}")
+    ))
+    validate_template(root)
+  }
+  without <- narrow("")
+  failed <- without[without$code == "instantiate_failed", ]
+  qa_step("without a suggestion the dry run fails on the stand-in", 1L, nrow(failed))
+  qa_check(
+    "and says it stood in STUDY_ID and how to suggest a realistic id",
+    grepl("stood in 'STUDY_ID'", failed$message, fixed = TRUE) && grepl("choices:", failed$message, fixed = TRUE)
+  )
+  with <- narrow(', choices: ["1-23"]')
   qa_step("with a fitting first suggestion the dry run builds", 0L, sum(with$code == "instantiate_failed"))
 })
 

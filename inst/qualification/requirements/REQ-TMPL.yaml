@@ -1408,17 +1408,27 @@ requirements:
       the file name ^s${study.id}_[0-9]{12}\.csv$ gives
       ^s1199\.187\(a\)_[0-9]{12}\.csv$ and matches only that literal id.
       The same placeholders in the document metadata (a title, a clause) shall
-      be replaced with the value as entered. Creating the document shall fail,
+      be replaced with the value as entered. The placeholders
+      ${study.id_underscore} and ${study.protocol_id_underscore}, meant for
+      file names, shall be replaced in the same places (every text value of a
+      dataset body, and the text values of the document metadata such as a
+      title or a clause) with the study id or protocol id in which every
+      hyphen-minus character (-) is written as an underscore (_) and nothing
+      else is changed, so that the id 1199.187-a gives 1199.187_a; in a
+      regular expression that value shall be escaped as above. The study
+      identity stored in metadata.study shall keep the id as entered. Creating
+      the document shall fail,
       naming the dataset or metadata field and the placeholder, when a
       placeholder is used and neither the metadata nor the creation call has a
       non-blank value for it. validate_template() shall build such a template
       in its dry run with, for each study field, the first choices entry of
-      the option that asks for it, else the stand-in STUDY-ID or PROT-ID, and
+      the option that asks for it, else the stand-in STUDY-ID or PROT-ID
+      (written STUDY_ID or PROT_ID by an underscore placeholder), and
       shall judge a column's values and lengths on that value and not on the
       placeholder text, so that values: ${study.id} under format: SAS $9. is
       not reported; when the stand-in itself does not fit a column, the
-      instantiate_failed message shall name it and say that a choices entry
-      replaces it.
+      instantiate_failed message shall name it as the column held it and say
+      that a choices entry replaces it.
     risk: high
     category: functional
     covers: [validate_template, run_dta_app]
@@ -1435,18 +1445,22 @@ requirements:
     text: >
       validate_template() shall report, for a creation template or a dataset
       template, each placeholder of the form ${...} in a text value that is not
-      one of ${today}, ${version}, ${study.id} and ${study.protocol_id} as
+      one of ${today}, ${version}, ${study.id}, ${study.protocol_id},
+      ${study.id_underscore} and ${study.protocol_id_underscore} as
       token_unknown at severity "warning", once for each distinct placeholder
       in a file, the message containing the placeholder as written (a
       mistyped ${studyid} stays in the document as literal text and makes a
-      file name pattern match nothing). The four known placeholders shall
+      file name pattern match nothing). The six known placeholders shall
       give no row, except ${version} inside a dataset, where it is not filled
       in and shall be reported as token_unknown too. A creation template that
-      uses ${study.id} or ${study.protocol_id}, in its own definition or in a
+      uses ${study.id} or ${study.id_underscore} (study id), or
+      ${study.protocol_id} or ${study.protocol_id_underscore} (protocol id), in
+      its own definition or in a
       dataset template it imports, while no option writes that study field and
       its base metadata does not set it, shall be reported as
       study_token_unanswered at severity "warning", the message naming the
-      placeholder and the target that would answer it; text that merely equals
+      placeholder as written and the target that would answer it
+      (metadata.study.id or metadata.study.protocol_id); text that merely equals
       a stand-in value shall not count as a placeholder.
       Strict validation shall not abort on either warning.
     risk: medium
