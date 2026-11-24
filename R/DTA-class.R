@@ -199,7 +199,8 @@ dta_unresolved_container_message <- function(datasets, containers) {
     fl <- attr(d, "files", exact = TRUE)
     for (i in seq_along(fl)) {
       ref <- attr(fl[[i]], "container", exact = TRUE)
-      if (is.null(ref) || identical(ref, "none") || grepl(".", ref, fixed = TRUE) ||
+      # S7 1.0.0 stores a NULL property as a symbol, not as no attribute.
+      if (is.null(ref) || is.symbol(ref) || identical(ref, "none") || grepl(".", ref, fixed = TRUE) ||
         !is.null(containers[[ref]])) {
         next
       }
@@ -344,7 +345,7 @@ method(datasets, DTA) <- function(x, name = NULL) {
 #' dta <- create_example_DTA()
 #' dta[[1]]
 #' dta[["demographics"]]
-#' @usage x[[i]]
+#' @usage NULL
 #' @name double-bracket
 #' @aliases [[
 #' @export
@@ -369,7 +370,7 @@ method(`[[`, DTA) <- function(x, i) {
 #' dta <- create_example_DTA()
 #' dta[c(1, 2)]
 #' dta[c("demographics", "vitals")]
-#' @usage x[i]
+#' @usage NULL
 #' @name single-bracket
 #' @aliases [
 #' @export

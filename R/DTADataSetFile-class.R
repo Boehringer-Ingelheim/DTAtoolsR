@@ -86,7 +86,7 @@ DTADataSetFile <- S7::new_class(
     })
 
     new_object(
-      .parent = DTADataSet(
+      DTADataSet(
         id = id,
         type = "file",
         files = files,

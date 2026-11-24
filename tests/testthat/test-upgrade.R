@@ -28,7 +28,7 @@ age_object <- function(obj, drop = c("containers", "provenance", "file_handlers"
     return(obj)
   }
   if (inherits(obj, "S7_object")) {
-    cur <- attr(obj, "S7_class", exact = TRUE)
+    cur <- S7::S7_class(obj)
     if (!identical(cur@package, "DTAtools")) {
       return(obj)
     }
@@ -36,7 +36,7 @@ age_object <- function(obj, drop = c("containers", "provenance", "file_handlers"
       attr(obj, p) <- age_object(attr(obj, p), drop, validators)
     }
     for (p in intersect(drop, names(cur@properties))) attr(obj, p) <- NULL
-    attr(obj, "S7_class") <- old_shape_class(cur, drop, validators)
+    obj <- stamp_old_class(obj, old_shape_class(cur, drop, validators))
     return(obj)
   }
   if (is.list(obj)) {
@@ -68,7 +68,7 @@ test_that("an old-shaped object fails without help, and is stale", {
   old <- roundtrip(age_object(current_dta()))
   # The stored (old) classes lack the properties, so reading them fails; judged
   # by the class's property list, never by S7's (translatable) error text.
-  stored_props <- function(o) names(attr(attr(o, "S7_class"), "properties"))
+  stored_props <- function(o) names(attr(S7::S7_class(o), "properties"))
   expect_false("containers" %in% stored_props(old))
   expect_false("provenance" %in% stored_props(old@datasets$ae))
   expect_false("file_handlers" %in% stored_props(old@datasets$docs))
@@ -140,13 +140,37 @@ test_that("a re-stamp also rebuilds class(), so a changed hierarchy dispatches",
   OldXPT <- S7::new_class("DTAFileXPT", package = "DTAtools", parent = DTAFile, properties = list())
   fresh <- DTAFileXPT("ae.xpt")
   aged <- fresh
-  attr(aged, "S7_class") <- OldXPT
+  aged <- stamp_old_class(aged, OldXPT)
   class(aged) <- c("DTAtools::DTAFileXPT", "DTAtools::DTAFile", "S7_object")
   aged <- roundtrip(aged)
   expect_false(inherits(aged, "DTAtools::DTAFileSAS7BDAT"))
   up <- dta_upgrade(aged)
   expect_identical(class(up), class(fresh))
   expect_true(inherits(up, "DTAtools::DTAFileSAS7BDAT"))
+})
+
+test_that("the stored class is read under both S7 attribute names and re-stamped under the new one", {
+  # S7 < 1.0.0 stored `S7_class`; S7 1.0.0 stores `_S7_class`. An object built
+  # now carries the new name, so reading `S7_class` directly would see nothing.
+  fresh <- DTAFileCSV("ae.csv")
+  expect_null(attr(fresh, "S7_class", exact = TRUE))
+  expect_identical(dta_current_class(fresh)@name, "DTAFileCSV")
+
+  old <- roundtrip(age_object(current_dta()))
+  csv <- old@datasets$ae@files[[1]]
+  expect_null(attr(csv, "_S7_class", exact = TRUE))
+  expect_false(is.null(attr(csv, "S7_class", exact = TRUE)))
+  expect_true(dta_is_stale(old))
+  expect_identical(dta_current_class(csv)@name, "DTAFileCSV")
+
+  up <- upgrade_dta(old)
+  upcsv <- up@datasets$ae@files[[1]]
+  expect_null(attr(upcsv, "S7_class", exact = TRUE))
+  # the very reference S7 stores on an object it builds (same environment, not
+  # an equal copy: expect_identical() compares environments by content)
+  expect_true(identical(attr(upcsv, "_S7_class", exact = TRUE), attr(fresh, "_S7_class", exact = TRUE)))
+  expect_true(identical(attr(up, "_S7_class", exact = TRUE), attr(current_dta(), "_S7_class", exact = TRUE)))
+  expect_false(dta_is_stale(up))
 })
 
 test_that("upgrading restores defaults and keeps what was there", {
