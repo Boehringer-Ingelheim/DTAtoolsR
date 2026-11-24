@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- The app no longer shows a dataset as passed, and its validation summary no
+  longer reads "VALIDATION PASSED", while a table bound to it has not been
+  validated. One validated table was enough for the status map to call the
+  whole dataset passed: after a second file was uploaded, a file replaced or a
+  delivery added to a dataset that had already passed, the next check of any
+  other dataset turned it green again and offered the certifying summary,
+  although "Loaded files" still listed the new table as not validated yet. A
+  dataset now reads "pending" until every table bound to it has been
+  validated; a failing table still reads "fail".
 - **"None" in a vocabulary slot of the "Create from template" dialog now does
   what it says.** Emptying a slot (the **None** link, or clearing the chips)
   showed "0 of n selected", but the document still came out with every term of
