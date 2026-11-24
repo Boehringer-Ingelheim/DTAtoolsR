@@ -622,6 +622,19 @@ test_that("apply_metadata_carry_over() copies requested fields but silently drop
   expect_length(DTAtools::metadata(result)@template, 0)
 })
 
+test_that("apply_metadata_carry_over() never copies dtatools_version", {
+  fn <- app_fn("apply_metadata_carry_over")
+  source_meta <- DTAtools::DTAMetaData(
+    title = "Ancestor", version = "9.9", header = "Carried Header",
+    dtatools_version = "0.0.1"
+  )
+
+  result <- fn(app_fixture_dta(), source_meta, c("header", "dtatools_version"))
+
+  expect_equal(DTAtools::metadata(result)@header, "Carried Header")
+  expect_null(DTAtools::metadata(result)@dtatools_version)
+})
+
 test_that("apply_metadata_carry_over() aborts naming an unknown metadata field", {
   fn <- app_fn("apply_metadata_carry_over")
   dta <- app_fixture_dta()

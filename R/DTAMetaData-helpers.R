@@ -32,6 +32,21 @@
   errors
 }
 
+# `dtatools_version` is machine-written (by the app, on save), but a hand-edited
+# or foreign file can still carry anything, so it is checked like any other
+# field: a bare version number or nothing. \z, not $, so a trailing newline
+# does not pass.
+.dta_metadata_validate_tool_version <- function(version) {
+  if (is.null(version)) {
+    return(character())
+  }
+  if (.dta_metadata_is_text(version, blank = FALSE) &&
+    grepl("^[0-9]+([.-][0-9]+)*\\z", version, perl = TRUE)) {
+    return(character())
+  }
+  "dtatools_version must be a single version string of integers separated by '.' or '-', such as \"0.29.0\"."
+}
+
 .dta_metadata_validate_sections <- function(sections) {
   if (!.dta_metadata_is_mapping(sections)) {
     return("sections must be a named list with unique, non-empty identifiers.")
@@ -127,8 +142,12 @@ method(as.list, DTAMetaData) <- function(x, ...) {
     transmission = lapply(x@transmission, .date_to_iso),
     error_handling = x@error_handling,
     authorized_for_corrections = x@authorized_for_corrections,
-    # Machine-owned provenance. Unlike import_issues this MUST round-trip: it
-    # is what the rebase feature will trust.
+    # Machine-owned, like `template` below. Unlike import_issues these MUST
+    # round-trip. The app overwrites dtatools_version with its own release
+    # whenever it saves (dta_to_list(), utils_dta.R); this method writes
+    # whatever the object holds.
+    dtatools_version = x@dtatools_version,
+    # Machine-owned provenance: it is what the rebase feature will trust.
     template = x@template,
     study = x@study,
     sections = x@sections

@@ -360,11 +360,17 @@ dta_metadata_properties <- function() {
 # Metadata fields the engine owns and a specification author must never set.
 #
 # `import_issues` records how a file was read; `template` records which template
-# produced the document. Both are written by machinery, and a template that
-# could set either could forge its own provenance -- which is exactly what the
-# rebase feature would then trust.
+# produced the document; `dtatools_version` records which DTAtools release last
+# saved it (dta_to_list(), utils_dta.R). All three are written by machinery, and
+# a template that could set any of them could forge its own provenance -- which
+# is exactly what the rebase feature would then trust.
+#
+# Being listed here is also what keeps `dtatools_version` out of every
+# document-to-document comparison: dta_metadata_leaves() strips these fields, so
+# a change summary or a rebase never reports the stamp as something the author
+# changed, and a carry-over never copies it into a new document.
 dta_metadata_machine_fields <- function() {
-  c("import_issues", "template")
+  c("import_issues", "template", "dtatools_version")
 }
 
 # Allowed top-level fields of DTAMetaData for template metadata payloads.

@@ -189,7 +189,7 @@ as an error; none may stay.
 | `vocab_slot_invalid` | error | Target must be `datasets.<as>.columns.<column id>.values` of a dataset the template builds, or, for a matrix dataset, `datasets.<as>.row_labels.<row label id>.values` -- the id may contain spaces or dots and is read whole; `mode` `closed`/`open`; `include`/`exclude`/`default` codes must exist; `min` a whole number. |
 | `vocabulary_extends_failed` | error | Vocabulary inheritance failed: a cycle, or `remove_terms` naming a code the parent does not have. |
 | `target_invalid` | warning | An option `target` or effect `path` is not a real field. Use a supported metadata field (README "base: metadata") or a `dataset.` path that resolves. |
-| `target_machine_owned` | error | Never target `metadata.template` or `metadata.import_issues`. Remove it. |
+| `target_machine_owned` | error | Never target `metadata.template`, `metadata.import_issues` or `metadata.dtatools_version`. Remove it. |
 | `prior_versions_invalid` | error | Each entry needs `version` and `changes`, an optional `YYYY-MM-DD` `date`, no repeats, and must be older than the first library version. |
 
 ### The build

@@ -1495,10 +1495,11 @@ definition it was built from, the creation date, its `extends:` lineage (and the
 `selections` the user actually made, and — for any dataset built from a
 dataset template — that dataset's own template provenance.
 
-`metadata.template` is **machine-owned**: it is one of exactly two metadata
-fields (`import_issues` is the other) that a template author can never set
-from `base.metadata` or an option effect — the allowed-field list used to
-validate both is derived from the same set that excludes it. A template
+`metadata.template` is **machine-owned**: it is one of exactly three metadata
+fields (`import_issues` and `dtatools_version` are the others) that a template
+author can never set from `base.metadata` or an option effect — the
+allowed-field list used to validate both is derived from the same set that
+excludes it. A template
 author who could set this field could forge a document's own provenance,
 which the rebase feature below would then blindly trust.
 

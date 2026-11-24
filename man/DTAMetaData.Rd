@@ -17,7 +17,8 @@ DTAMetaData(
   authorized_for_corrections = NULL,
   template = list(),
   study = list(),
-  sections = list()
+  sections = list(),
+  dtatools_version = NULL
 )
 }
 \arguments{
@@ -72,6 +73,15 @@ as a YAML mapping. Names must be unique identifiers matching
 Section order and text are preserved, without an executable Markdown or
 HTML contract. Empty \code{study} and \code{sections} lists are omitted
 from list and YAML serialization.}
+
+\item{dtatools_version}{The DTAtools release that last wrote this
+specification as YAML, e.g. \code{"0.29.0"}. Machine-owned: the Shiny app
+records it each time it saves the document, replacing any earlier value, and
+a specification author never sets it. Optional: a file the app has not
+saved has none. Must be a single version string of integers separated by
+\code{.} or \code{-}. The package API alone (\code{as.list()} with
+\code{yaml::write_yaml()}) writes whatever value the object holds and does
+not stamp one.}
 }
 \value{
 An object of class DTAMetaData.

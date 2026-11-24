@@ -144,7 +144,7 @@ test_that("OQ-TMPL-136 | study tokens in a dataset body take the document's stud
   )
 })
 
-test_that("OQ-TMPL-154 | the _underscore study tokens give the study identity with every hyphen written as an underscore, escaped in a regular expression, and creation fails when none is known | REQ-TMPL-058 | tags: white-box", {
+test_that("OQ-TMPL-156 | the _underscore study tokens give the study identity with every hyphen written as an underscore, escaped in a regular expression, and creation fails when none is known | REQ-TMPL-058 | tags: white-box", {
   engine <- getFromNamespace(".dta_template_engine", "DTAtools")()
   inline <- list(
     id = "tok", type = "tabular",

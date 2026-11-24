@@ -207,7 +207,8 @@ requirements:
     text: >
       Every metadata key the specification accepts (title, version, date,
       header, version_history, receiver, supplier, transmission,
-      error_handling, authorized_for_corrections, template, study, sections) shall survive
+      error_handling, authorized_for_corrections, template, dtatools_version,
+      study, sections) shall survive
       being written to YAML and read back into an equivalent DTAMetaData
       object. A Date-valued field shall be written as an ISO date string, not
       as its underlying numeric day count. import_issues is derived, not
@@ -286,3 +287,24 @@ requirements:
     category: integrity
     covers: [DTAMetaData, read_dta_from_yaml]
     source: R/DTAMetaData-class.R; R/DTAMetaData-helpers.R
+
+  - id: REQ-META-023
+    text: >
+      DTAMetaData shall accept an optional dtatools_version, the DTAtools
+      release that last saved the document, as a single non-missing character
+      string made of integers separated by "." or "-" (for example "0.29.0").
+      An empty or blank string, NA, more than one string, a value of another
+      type, and a string with a leading "v", trailing text or whitespace shall
+      be rejected with an error naming dtatools_version. When set it shall be
+      written by as.list before template, and when unset it shall be omitted.
+      A value of two integers such as "1.0" shall be written as text, so
+      reading the file back gives the same string and not a number.
+    risk: medium
+    category: integrity
+    covers: [DTAMetaData, read_dta_from_yaml, lint_dta]
+    source: R/DTAMetaData-class.R; R/DTAMetaData-helpers.R .dta_metadata_validate_tool_version()
+    notes: >
+      The package has no YAML writer: the application writes the value on
+      every save (REQ-APP-062). A stamp that is not text, or is not a version
+      number, is reported by lint_dta() as metadata_invalid, because it is
+      rejected by this class on the way in.

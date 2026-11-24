@@ -20,9 +20,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   one as a use of the study field it comes from (`study_token_unanswered`),
   and names the stand-in as the token writes it (`STUDY_ID`) when a dry run
   fails on it; the template guide spells them out.
+- A specification's `metadata:` now records which DTAtools release wrote it, in
+  a new `dtatools_version` field (new last argument of `DTAMetaData()`). The
+  app sets it every time it saves the YAML, so it names the release that last
+  saved the file; a file the app has not saved has none, and nothing is
+  filled in retroactively. It is machine-owned like `template`: a template can
+  neither set nor carry it over, it never shows up as a change in a version
+  summary or a rebase, and the linters accept it only as a bare version
+  number. A document with no other metadata is not stamped. A DTAtools release
+  that predates the field rejects it as an unknown metadata key, so a file the
+  app has saved is not readable by one until the line is deleted.
 
 ### Fixed
 
+- `dta_is_stale()` now looks at a document's metadata as well as the document
+  and its datasets. A `DTA` saved with `saveRDS()` by an older release has
+  metadata without the properties added since, and no entry point noticed: the
+  metadata could not be read or written until `upgrade_dta()` was called by
+  hand. The app was not affected, because it upgrades a restored session
+  unconditionally.
 - **"None" in a vocabulary slot of the "Create from template" dialog now does
   what it says.** Emptying a slot (the **None** link, or clearing the chips)
   showed "0 of n selected", but the document still came out with every term of
