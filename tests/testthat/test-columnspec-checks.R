@@ -1137,3 +1137,21 @@ test_that("the report explains the range, finite and structure keywords", {
   expect_match(explain("minItems"), "fewer data rows", fixed = TRUE)
   expect_match(explain("maxProperties"), "more data columns", fixed = TRUE)
 })
+
+# A column's own `pattern` asks whether a value may stand in the column. An
+# empty string is a value there and is matched like any other text, which the
+# rule operator `pattern` deliberately does not do (REQ-RULE-007, LIM-036).
+# A missing value is not judged by the pattern at all: nullability decides it.
+test_that("a column pattern matches an empty string as text and leaves a missing value to nullability", {
+  schema <- list(type = c("string", "null"), pattern = "^[A-Z]*$")
+  x <- c("", NA, "AB", "ab")
+  errs <- dta_check_column_spec("CODE", schema, x)
+  # By hand: "" is zero capital letters, so it satisfies `^[A-Z]*$`; NA is not
+  # judged; "AB" matches; "ab" is lower case. Only row 4 is a violation.
+  expect_identical(errs$row, 4L)
+  expect_identical(errs$keyword, "pattern")
+
+  # A pattern that needs a letter rejects the empty string, by the expression.
+  strict <- dta_check_column_spec("CODE", list(type = "string", pattern = "^[A-Z]+$"), c("", "AB"))
+  expect_identical(strict$row, 1L)
+})

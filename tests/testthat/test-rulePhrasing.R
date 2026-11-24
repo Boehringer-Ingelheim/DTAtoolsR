@@ -1186,8 +1186,10 @@ test_that("the evaluator behaves as the reading guide and the unique rule say", 
   expect_identical(cv(list(K = list(`in` = c("100000", "3"))), num), c(TRUE, FALSE))
   # ... but not when one listed value does not.
   expect_identical(cv(list(K = list(`in` = c("1e5", "x"))), num), c(FALSE, FALSE))
-  # W4: a pattern sees the value as text.
-  expect_identical(cv(list(K = list(pattern = "^1e\\+05$")), num), c(TRUE, FALSE))
+  # W4: a pattern sees the value as text; a number is written in plain digits,
+  # never in exponent form (the pattern operator's rule, REQ-RULE-037).
+  expect_identical(cv(list(K = list(pattern = "^100000$")), num), c(TRUE, FALSE))
+  expect_identical(cv(list(K = list(pattern = "^1e\\+05$")), num), c(FALSE, FALSE))
   expect_identical(cv(list(K = list(pattern = "^TRUE$")), data.frame(K = c(TRUE, FALSE), V = NA)), c(TRUE, FALSE))
   # K3: case-sensitive unless the pattern says otherwise.
   ab <- data.frame(K = c("a", "A"), V = NA_character_, stringsAsFactors = FALSE)
@@ -1706,6 +1708,11 @@ test_that("the reading guide states the evaluation conventions once", {
   expect_true(grepl("0.0001 becomes 1e-04 and 100000 can become 1e+05", text, fixed = TRUE))
   expect_true(grepl("Equal to, not equal to, one of and not one of compare numbers as numbers", text, fixed = TRUE))
   expect_true(grepl("checked against the value as text", text, fixed = TRUE))
+  # What a pattern does with a number and with an empty or missing value is
+  # what dta_pattern_mask() does (REQ-RULE-007, REQ-RULE-037).
+  expect_true(grepl("a number is written in plain digits, without an exponent", text, fixed = TRUE))
+  expect_true(grepl("A missing value and an empty text never match a pattern", text, fixed = TRUE))
+  expect_false(grepl("a number may read as 1e+05", text, fixed = TRUE))
   expect_true(grepl("case-sensitive unless the pattern itself says otherwise", text, fixed = TRUE))
   expect_true(grepl("a bound written as a number counts the days since 1 January 1970", text, fixed = TRUE))
   expect_true(grepl("Numbers are compared exactly; 0 and minus 0 count as the same.", text, fixed = TRUE))

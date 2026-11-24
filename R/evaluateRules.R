@@ -810,8 +810,9 @@ dta_condition_mask <- function(column_name, operator, value, x, converted = NULL
   # a character vector coerces the bound to character and compares by locale
   # collation, so AGE = c("9", "700") passed `greater: 65` because "9" sorts
   # after "65". Equality and set operators go through the same treatment, but
-  # only conditionally (see below); `pattern` and `empty` are unaffected and
-  # deliberately stay on the raw column.
+  # only conditionally (see below). `pattern` and `empty` never convert the
+  # column to numbers: `pattern` matches the column's text (see
+  # `dta_pattern_mask()`) and `empty` looks at the raw column.
   if (operator %in% dta_numeric_condition_operators()) {
     operands <- dta_numeric_operands(x, value, converted)
     x <- operands$x
@@ -848,7 +849,7 @@ dta_condition_mask <- function(column_name, operator, value, x, converted = NULL
     greater_equal = x >= value,
     less_equal = x <= value,
     range = x >= value[1] & x <= value[2],
-    pattern = grepl(dta_expand_date_pattern_tokens(value), as.character(x), perl = TRUE),
+    pattern = dta_pattern_mask(x, value),
     empty = {
       empty_mask <- is.na(x)
 
@@ -868,6 +869,42 @@ dta_condition_mask <- function(column_name, operator, value, x, converted = NULL
   )
 }
 
+#' @title Rows a Pattern Selects
+#' @description
+#' The row mask of the `pattern` operator: which values of `x` the regular
+#' expression matches. It is the one definition of `pattern` for every rule
+#' path (a whole table in memory, a table scanned in batches, the row preview
+#' and the grouped conditions all reach it through [dta_condition_mask()]).
+#'
+#' - **A missing value never matches**, and neither does an empty string, whatever
+#'   the expression: `^$` and `.*` select neither. Text of spaces only is text and
+#'   is matched like any other; `empty` is the operator that treats blanks as
+#'   empty. A `NaN` is a missing value of a numeric column.
+#' - **A number is matched as its plain decimal text**, never in scientific
+#'   notation: `100000` is `"100000"` and `0.00001` is `"0.00001"`, not `"1e+05"`
+#'   and `"1e-05"`. A whole number is written out in full, a fraction to at most
+#'   15 significant digits, so a fraction that needs more can read as a whole
+#'   number. A whole number gets one verdict whether it is held as an integer or
+#'   as a double (a column read as `SAS Int` holds integers, the same numbers
+#'   read as `SAS Num` hold doubles). This is the text a column's `pattern` is
+#'   matched against too (see `dta_numeric_text()`).
+#' - Any other value (a factor, a logical, a date) is matched as `as.character()`
+#'   writes it, so a logical is `"TRUE"` or `"FALSE"`.
+#'
+#' A column's own `pattern` (`dta_check_column_spec()`) is a different question
+#' -- may this value stand in the column -- and keeps judging an empty string as
+#' any other text.
+#' @param x The column vector taken from the table.
+#' @param pattern The regular expression, a single string, in which a `<<...>>`
+#'   date mask is expanded first.
+#' @return A logical vector, one element per element of `x`, never `NA`.
+#' @keywords internal
+dta_pattern_mask <- function(x, pattern) {
+  text <- if (is.numeric(x)) dta_numeric_text(x) else as.character(x)
+  # is.na(x), not is.na(text): the text of a NaN is "NaN", which `.*` would match.
+  grepl(dta_expand_date_pattern_tokens(pattern), text, perl = TRUE) & !is.na(x) & nzchar(text)
+}
+
 #' @title Supported condition operators
 #' @description The operator keys accepted inside a conditional rule clause.
 #' @return A character vector of operator names.
@@ -885,8 +922,8 @@ dta_condition_operators <- function() {
 #' The subset of `dta_condition_operators()` that always go through
 #' `dta_numeric_operands()`. Equality and set operators (`equals`,
 #' `not_equals`, `in`, `not_in`) also compare numerically, but only
-#' conditionally -- see `dta_equality_bound()`; text (`pattern`) and
-#' emptiness (`empty`) operators always compare the raw column.
+#' conditionally -- see `dta_equality_bound()`; the text (`pattern`) and
+#' emptiness (`empty`) operators never convert the column to numbers.
 #' @return A character vector of operator names.
 #' @keywords internal
 dta_numeric_condition_operators <- function() {
@@ -1216,7 +1253,18 @@ evaluate_conditions <- function(conditions, df, numeric_cache = NULL) {
 #' - Set: `in`, `not_in`
 #' - Numeric comparisons: `greater`, `less`, `greater_equal`, `less_equal`,
 #'   `min`, `max`, `range`
-#' - Text: `pattern` (a regular expression; row passes when the value matches)
+#' - Text: `pattern` (a Perl-compatible regular expression; row passes when the
+#'   value matches). A missing value (`NA`, `NaN`) and an empty string never
+#'   match, whatever the expression: `^$` and `.*` select neither, so a `then`
+#'   `pattern` counts them as violations and an `if` `pattern` leaves their rows
+#'   out of scope. Text of spaces only is not empty here, and is matched like
+#'   any other text. Use `empty` to test for missing or empty values. A number
+#'   is matched as its plain decimal text, never in scientific notation (`100000`
+#'   is matched as `"100000"`, not `"1e+05"`; a fraction keeps at most 15
+#'   significant digits), so a whole number gets the same
+#'   verdict whether it is stored as an integer or as a double. Any other value
+#'   is matched as `as.character()` writes it, so a logical is `"TRUE"` or
+#'   `"FALSE"`.
 #' - Emptiness: `empty` (TRUE means empty: `NA`, `NaN`, `""`, or a text value
 #'   that is only whitespace; FALSE means not empty)
 #'
