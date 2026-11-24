@@ -319,6 +319,51 @@ test_that("OQ-APP-013 | a dataset with no delivery is never reported as passing 
   })
 })
 
+test_that("OQ-APP-074 | a dataset with a bound table nobody validated is pending, never passing, and a failing table still fails | REQ-APP-061 | tags: white-box", {
+  qapp_skip_unless_app_installed()
+  status_map <- qapp_fn("dta_status_map")
+  load_file_app <- qapp_fn("dta_load_file")
+  check_app <- qapp_fn("dta_check")
+
+  # One dataset behind a pattern handler that takes one or two files
+  # (clinical_data.*.csv$). The second file is a copy of the clean clinical one
+  # under another name, so it is valid exactly when the first is.
+  spec_path <- system.file("extdata", "clinical_dta_multiple_files.yaml", package = "DTAtools")
+  clean <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+  broken <- system.file("extdata", "clinical_data_error_all.csv", package = "DTAtools")
+  second <- file.path(qa_tempdir(), "clinical_data_b.csv")
+  file.copy(clean, second)
+  status_of <- function(dta) as_status(status_map(dta), "clinical_data")
+
+  first_bound <- load_file_app(read_dta_from_yaml(spec_path), "clinical_data", clean, handler_index = 1)
+  checked <- check_app(first_bound$value, dataset = "clinical_data")$value
+  qa_step("one clean table, validated, reads pass", "pass", status_of(checked))
+
+  # A second delivery arrives and nobody validates it.
+  both <- load_file_app(checked, "clinical_data", second, handler_index = 1)$value
+  qa_step(
+    "a second table bound and not yet validated makes the dataset read pending",
+    "pending", status_of(both)
+  )
+
+  # Replacing a validated table clears its validation (the application's
+  # overwrite flow), and that dataset reads pending again, not pass.
+  both_checked <- check_app(both, dataset = "clinical_data")$value
+  qa_step("both tables validated read pass", "pass", status_of(both_checked))
+  replaced <- load_file_app(both_checked, "clinical_data", second, handler_index = 1)$value
+  replaced <- qapp_fn("dta_clear_validation")(replaced, "clinical_data", tables = "clinical_data_b")$value
+  qa_step("a replaced table not yet validated makes the dataset read pending", "pending", status_of(replaced))
+
+  # A failing table is never hidden by a sibling that has not been validated.
+  failing <- check_app(
+    load_file_app(read_dta_from_yaml(spec_path), "clinical_data", broken, handler_index = 1)$value,
+    dataset = "clinical_data"
+  )$value
+  qa_step("a table breaking every axis reads fail", "fail", status_of(failing))
+  with_sibling <- load_file_app(failing, "clinical_data", second, handler_index = 1)$value
+  qa_step("and still reads fail beside a table not yet validated", "fail", status_of(with_sibling))
+})
+
 test_that("OQ-APP-014 | an unparseable value fails the dataset through the import axis | REQ-APP-011", {
   app <- qapp_skip_unless_app_installed()
   qapp_clean_session_files()

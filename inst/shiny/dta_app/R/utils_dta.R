@@ -1211,6 +1211,12 @@ dta_dataset_readiness <- function(dta, dataset) {
 # Compute a per-dataset status map: "nodata" | "pending" | "pass" | "fail".
 # A dataset with zero bound tables/files is ALWAYS "nodata" -- never "pass" --
 # regardless of any vacuous validation result the package may have produced.
+#
+# "pass" needs every bound table validated: one that was bound, replaced or
+# delivered after the last check (results() reports it as not validated) keeps
+# the dataset "pending", because "pass" over it would certify a table nobody
+# checked. A table that failed still makes the dataset "fail", whatever the rest
+# of its tables are doing.
 dta_status_map <- function(dta) {
   names_ds <- dta_dataset_names(dta)
   out <- stats::setNames(rep("pending", length(names_ds)), names_ds)
@@ -1247,6 +1253,7 @@ dta_status_map <- function(dta) {
     n_invalid <- if ("n_invalid" %in% names(res)) suppressWarnings(as.numeric(res$n_invalid)) else rep(NA_real_, nrow(res))
     n_valid <- if ("n_valid" %in% names(res)) suppressWarnings(as.numeric(res$n_valid)) else rep(NA_real_, nrow(res))
     n_validated <- if ("n_validated" %in% names(res)) suppressWarnings(as.numeric(res$n_validated)) else rep(NA_real_, nrow(res))
+    n_unvalidated <- if ("n_not_validated" %in% names(res)) suppressWarnings(as.numeric(res$n_not_validated)) else rep(NA_real_, nrow(res))
     ds_col <- if ("dataset" %in% names(res)) as.character(res$dataset) else names_ds
   }
 
@@ -1268,8 +1275,13 @@ dta_status_map <- function(dta) {
     inv <- sum(n_invalid[idx], na.rm = TRUE)
     val <- sum(n_valid[idx], na.rm = TRUE)
     done <- sum(n_validated[idx], na.rm = TRUE)
+    # results() repeats a dataset's counts on each of its rows, so only whether
+    # the sum is above zero is meaningful here, never its size.
+    unvalidated <- sum(n_unvalidated[idx], na.rm = TRUE)
     if (!is.na(inv) && inv > 0) {
       out[[nm]] <- "fail"
+    } else if (unvalidated > 0) {
+      out[[nm]] <- "pending"
     } else if (done > 0 || val > 0) {
       out[[nm]] <- "pass"
     } else {
