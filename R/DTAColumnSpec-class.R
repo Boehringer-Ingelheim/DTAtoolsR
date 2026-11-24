@@ -492,6 +492,7 @@ method(print, DTAColumnSpec) <- function(x, ...) {
 
 #' @title Convert a DTAtools Object to a List
 #' @name as.list
+#' @usage NULL
 #' @description
 #' Converts a DTAtools object to a plain named list, which is the form a
 #' specification is written out in: \code{\link{write_columns_to_yaml}()} and

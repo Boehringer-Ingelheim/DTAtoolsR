@@ -72,6 +72,7 @@ DTAColumnSpecStructure <- S7::new_class(
 
 #' @export
 #' @name as.list
+#' @usage NULL
 method(as.list, DTAColumnSpecStructure) <- function(x, ...) {
   out <- list()
   if (.structure_value_is_set(x@type)) {

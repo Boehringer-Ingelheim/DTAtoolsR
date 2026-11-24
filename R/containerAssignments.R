@@ -83,14 +83,30 @@ container_assignments <- function(x) {
 
 # ---- upgrading objects restored from an older version ---------------------------
 # An S7 object read back with readRDS() keeps the class it was SAVED with
-# (`attr(x, "S7_class")`): reading or writing a property that class lacks fails
-# ("Can't find property"), and assignments run the OLD validator. So objects
-# restored from an older version are re-stamped with the current class.
+# (attribute `_S7_class`, or `S7_class` before S7 1.0.0): reading or writing a
+# property that class lacks fails ("Can't find property"), and assignments run
+# the OLD validator. So objects restored from an older version are re-stamped
+# with the current class.
+
+# The class `obj` carries, as it was saved: NULL unless `obj` is an S7 object.
+# S7::S7_class() reads both attribute names; never `attr(obj, "S7_class")`,
+# which is NULL on every object S7 1.0.0 builds.
+dta_stored_class <- function(obj) {
+  if (inherits(obj, "S7_object")) S7::S7_class(obj) else NULL
+}
+
+# What S7 1.0.0 stores in `_S7_class` for an instance of `cls`: a small
+# reference to the class, which it keeps in the constructor's environment. The
+# class itself is accepted too (it is what S7 < 1.0.0 stored), so a missing
+# reference only costs file size.
+dta_class_storage <- function(cls) {
+  get0(".S7_class_ref", envir = environment(cls), inherits = FALSE, ifnotfound = cls)
+}
 
 # The class of this package's namespace that `obj` was saved as, or NULL when
-# `obj` is not one of ours. NOT S7::S7_class(obj), which returns the stored one.
+# `obj` is not one of ours. Not the stored class itself (see dta_stored_class()).
 dta_current_class <- function(obj) {
-  stored <- attr(obj, "S7_class", exact = TRUE)
+  stored <- dta_stored_class(obj)
   if (!inherits(stored, "S7_class") || !identical(stored@package, "DTAtools")) {
     return(NULL)
   }
@@ -123,7 +139,7 @@ dta_is_stale <- function(obj) {
   # and this runs at every entry point. (No identical() shortcut on classes:
   # comparing two class objects is slower than the property scan.)
   lacks <- function(o) {
-    stored <- attr(o, "S7_class", exact = TRUE)
+    stored <- dta_stored_class(o)
     if (!inherits(stored, "S7_class") || !identical(attr(stored, "package", exact = TRUE), "DTAtools")) {
       return(FALSE)
     }
@@ -177,7 +193,7 @@ dta_upgrade <- function(x) {
       if (is.null(cur)) {
         return(obj)
       }
-      stored <- attr(obj, "S7_class", exact = TRUE)
+      stored <- dta_stored_class(obj)
       for (p in names(cur@properties)) {
         v <- attr(obj, p, exact = TRUE)
         if (is.list(v) || inherits(v, "S7_object")) {
@@ -190,7 +206,8 @@ dta_upgrade <- function(x) {
           d <- cur@properties[[p]]$default
           if (!is.null(d)) attr(obj, p) <- d
         }
-        attr(obj, "S7_class") <- cur
+        attr(obj, "_S7_class") <- dta_class_storage(cur)
+        attr(obj, "S7_class") <- NULL # the name S7 < 1.0.0 stored it under
         # `class(obj)` is the dispatch chain of the class it was saved with:
         # rebuild it from the current parent chain as S7 does for a new object,
         # so a changed hierarchy (a new intermediate class) dispatches correctly.

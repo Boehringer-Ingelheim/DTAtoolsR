@@ -304,7 +304,7 @@ cf_age <- function(obj) {
     return(obj)
   }
   if (inherits(obj, "S7_object")) {
-    cur <- attr(obj, "S7_class", exact = TRUE)
+    cur <- S7::S7_class(obj)
     if (!identical(cur@package, "DTAtools")) {
       return(obj)
     }
@@ -312,7 +312,7 @@ cf_age <- function(obj) {
       attr(obj, p) <- cf_age(attr(obj, p))
     }
     for (p in intersect(c("containers", "provenance", "file_handlers"), names(cur@properties))) attr(obj, p) <- NULL
-    attr(obj, "S7_class") <- cf_age_class(cur)
+    obj <- stamp_old_class(obj, cf_age_class(cur))
     return(obj)
   }
   if (is.list(obj)) {

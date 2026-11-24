@@ -8,15 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
-- The app no longer shows a dataset as passed, and its validation summary no
-  longer reads "VALIDATION PASSED", while a table bound to it has not been
-  validated. One validated table was enough for the status map to call the
-  whole dataset passed: after a second file was uploaded, a file replaced or a
-  delivery added to a dataset that had already passed, the next check of any
-  other dataset turned it green again and offered the certifying summary,
-  although "Loaded files" still listed the new table as not validated yet. A
-  dataset now reads "pending" until every table bound to it has been
-  validated; a failing table still reads "fail".
 - **"None" in a vocabulary slot of the "Create from template" dialog now does
   what it says.** Emptying a slot (the **None** link, or clearing the chips)
   showed "0 of n selected", but the document still came out with every term of
@@ -43,6 +34,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   whole vocabulary and now removes that list check, as "None" does. Give the slot
   `min: 1` to keep the column constrained; the document is then not created
   until a term is chosen. No bundled template is affected.
+
+## [0.30.0] - 2026-11-23
+
+### Changed
+
+- **DTAtools now requires S7 1.0.0 or later, and R 4.2.0 or later.** S7 1.0.0
+  (CRAN, 2026-11-19) renamed the first argument of `new_object()` and the
+  attribute in which an object keeps its class, and itself needs R 4.2.0. The
+  lockfile and the Connect manifest record S7 1.0.0, and CI no longer pins S7
+  to 0.2.2. An object saved with `saveRDS()` by this version can no longer be
+  read under an S7 older than 1.0.0; objects saved by earlier versions are read
+  and upgraded as before.
+
+### Fixed
+
+- **Ten classes could not be built under S7 1.0.0.** They passed their
+  parent to `new_object()` by the name `.parent`, which S7 1.0.0 no longer
+  has: constructing a file handler, a dataset, a column structure or a rule
+  failed with `argument "_parent" is missing`. The parent is now passed by
+  position, which every S7 version accepts.
+- **`upgrade_dta()` and the upgrade the entry points run by themselves saw
+  nothing to do under S7 1.0.0.** The class an object was saved with is read
+  and re-stamped through S7 instead of through the attribute `S7_class`, which
+  S7 1.0.0 stores as `_S7_class`; an object restored from an older version is
+  detected as stale and upgraded as it was before.
+- **Removing a container, or clearing a file entry's container reference,
+  failed under S7 1.0.0** with `invalid type of argument[3]: 'symbol'`: S7
+  1.0.0 stores an unset (`NULL`) property as a symbol, which the document's
+  container check read as a container id.
+- **`names`, `print` and `labels` no longer leave placeholder objects in the
+  package namespace** (S7 1.0.0 creates them for every method registered on a
+  base generic; the package now removes them when it is built).
+- The app no longer shows a dataset as passed, and its validation summary no
+  longer reads "VALIDATION PASSED", while a table bound to it has not been
+  validated. One validated table was enough for the status map to call the
+  whole dataset passed: after a second file was uploaded, a file replaced or a
+  delivery added to a dataset that had already passed, the next check of any
+  other dataset turned it green again and offered the certifying summary,
+  although "Loaded files" still listed the new table as not validated yet. A
+  dataset now reads "pending" until every table bound to it has been
+  validated; a failing table still reads "fail".
 
 ## [0.29.0] - 2026-11-23
 
@@ -5527,7 +5559,8 @@ All of the following belong to the manifest verification work above.
 
 - Initial internal release
 
-[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.26.0...v0.27.0

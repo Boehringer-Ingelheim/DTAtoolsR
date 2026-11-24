@@ -120,7 +120,7 @@ DTAFileTabular <- S7::new_class(
     container = NULL
   ) {
     new_object(
-      .parent = DTAFile(
+      DTAFile(
         filename = filename,
         number_of_files = number_of_files,
         min_number_of_files = min_number_of_files,

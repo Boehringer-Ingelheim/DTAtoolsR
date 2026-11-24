@@ -61,7 +61,7 @@ DTARuleColRange <- S7::new_class(
 
     # Create the class object
     new_object(
-      .parent = DTAtools::DTARule(
+      DTAtools::DTARule(
         id = id,
         type = "col_range",
         description = description
@@ -163,6 +163,7 @@ method(check, DTARuleColRange) <- function(x, tab) {
 
 #' @export
 #' @name as.list
+#' @usage NULL
 method(as.list, DTARuleColRange) <- function(x, ...) {
   list(
     id = x@id,
