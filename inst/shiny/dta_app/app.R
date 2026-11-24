@@ -6398,91 +6398,20 @@ server <- function(input, output, session) {
       one_cond_row(prefix, i, cols, pf)
     })
   }
-  # named-list {COL:{op:val}} -> list of editable rows. "min"/"max" keys (single
-  # or combined) map to the UI "min_max" operator with a "min, max" value.
-  cond_to_rows <- function(cond) {
-    if (is.null(cond) || length(cond) == 0) {
-      return(list())
-    }
-    lapply(names(cond), function(col) {
-      spec <- cond[[col]]
-      if (is.list(spec) && length(spec) > 0) {
-        keys <- names(spec)
-        if ("min" %in% keys || "max" %in% keys) {
-          op <- "min_max"
-          mn <- if ("min" %in% keys) as.character(spec[["min"]]) else ""
-          mx <- if ("max" %in% keys) as.character(spec[["max"]]) else ""
-          val <- sub(",\\s*$", "", paste0(mn, ", ", mx))
-        } else {
-          op <- keys[1]
-          raw <- spec[[1]]
-          val <- if (identical(op, "empty")) {
-            if (isTRUE(raw)) "true" else "false"
-          } else {
-            paste(as.character(unlist(raw)), collapse = ", ")
-          }
-        }
-      } else {
-        op <- "equals"
-        val <- as.character(spec)
-      }
-      list(col = col, op = op, val = val)
-    })
-  }
-  parse_cond_value <- function(op, txt) {
-    txt <- txt %||% ""
-    if (identical(op, "empty")) {
-      v <- tolower(trimws(txt))
-      return(!(v %in% c("false", "no", "0", "f", "n"))) # default TRUE
-    }
-    if (identical(op, "pattern")) {
-      return(as.character(txt))
-    }
-    if (op %in% c("in", "not_in")) {
-      parts <- trimws(strsplit(txt, ",")[[1]])
-      parts <- parts[nzchar(parts)]
-      if (length(parts) == 0) {
-        return(character(0))
-      }
-      nums <- suppressWarnings(as.numeric(parts))
-      if (all(!is.na(nums))) {
-        return(nums)
-      }
-      return(parts)
-    }
-    if (!nzchar(trimws(txt))) {
-      return("")
-    }
-    num <- suppressWarnings(as.numeric(txt))
-    if (!is.na(num)) {
-      return(num)
-    }
-    txt
-  }
+  # The clause <-> form-row conversions are pure functions in
+  # R/rule_conditions.R; here only the rows are gathered from the inputs.
   collect_cond <- function(prefix, n) {
     removed <- isolate(rv[[paste0(prefix, "_removed")]])
-    out <- list()
+    rows <- list()
     for (i in seq_len(max(1L, n))) {
       if (i %in% removed) next
-      col <- trimws(input[[paste0(prefix, "_col_", i)]] %||% "")
-      if (!nzchar(col)) next
-      op <- input[[paste0(prefix, "_op_", i)]] %||% "equals"
-      txt <- input[[paste0(prefix, "_val_", i)]]
-      inner <- list()
-      if (identical(op, "min_max")) {
-        # Positional "min, max" parse (no nzchar filter so ", 9" means max-only).
-        parts <- trimws(strsplit(txt %||% "", ",", fixed = TRUE)[[1]])
-        mn <- if (length(parts) >= 1 && nzchar(parts[1])) suppressWarnings(as.numeric(parts[1])) else NA_real_
-        mx <- if (length(parts) >= 2 && nzchar(parts[2])) suppressWarnings(as.numeric(parts[2])) else NA_real_
-        if (!is.na(mn)) inner$min <- mn
-        if (!is.na(mx)) inner$max <- mx
-        if (length(inner) == 0) next
-      } else {
-        inner[[op]] <- parse_cond_value(op, txt)
-      }
-      out[[col]] <- inner
+      rows[[length(rows) + 1L]] <- list(
+        col = input[[paste0(prefix, "_col_", i)]],
+        op = input[[paste0(prefix, "_op_", i)]],
+        val = input[[paste0(prefix, "_val_", i)]]
+      )
     }
-    out
+    form_rows_to_condition(rows)
   }
   visible_cond_rows <- function(prefix) {
     removed <- isolate(rv[[paste0(prefix, "_removed")]])
@@ -6556,7 +6485,7 @@ server <- function(input, output, session) {
     rows <- list()
     for (nm in names(conditions)) {
       spec <- conditions[[nm]]
-      converted <- cond_to_rows(spec)
+      converted <- condition_to_form_rows(spec)
       if (length(converted) == 0) {
         rows[[length(rows) + 1L]] <- list(name = nm, col = "", op = "equals", val = "")
       } else {
@@ -6596,13 +6525,11 @@ server <- function(input, output, session) {
       }
 
       if (identical(op, "min_max")) {
-        parts <- trimws(strsplit(txt %||% "", ",", fixed = TRUE)[[1]])
-        mn <- if (length(parts) >= 1 && nzchar(parts[1])) suppressWarnings(as.numeric(parts[1])) else NA_real_
-        mx <- if (length(parts) >= 2 && nzchar(parts[2])) suppressWarnings(as.numeric(parts[2])) else NA_real_
-        if (!is.na(mn)) out[[nm]][[col]]$min <- mn
-        if (!is.na(mx)) out[[nm]][[col]]$max <- mx
+        bounds <- parse_min_max_text(txt)
+        if (!is.null(bounds$min)) out[[nm]][[col]]$min <- bounds$min
+        if (!is.null(bounds$max)) out[[nm]][[col]]$max <- bounds$max
       } else {
-        out[[nm]][[col]][[op]] <- parse_cond_value(op, txt)
+        out[[nm]][[col]][[op]] <- parse_form_value(op, txt)
       }
     }
     out
@@ -6941,7 +6868,7 @@ server <- function(input, output, session) {
           div(class = "cond-title", "IF (all of these hold):"),
           div(
             id = "cond_rows",
-            build_cond_rows("cond", isolate(rv$cond_n), cols, cond_to_rows(pf$condition))
+            build_cond_rows("cond", isolate(rv$cond_n), cols, condition_to_form_rows(pf$condition))
           ),
           actionButton("cond_add", HTML("&#x2795; Add condition"),
             class = "btn btn-sm btn-outline-secondary"
@@ -6952,7 +6879,7 @@ server <- function(input, output, session) {
           div(class = "cond-title", "THEN (all of these must hold):"),
           div(
             id = "then_rows",
-            build_cond_rows("then", isolate(rv$then_n), cols, cond_to_rows(pf$then))
+            build_cond_rows("then", isolate(rv$then_n), cols, condition_to_form_rows(pf$then))
           ),
           actionButton("then_add", HTML("&#x2795; Add THEN condition"),
             class = "btn btn-sm btn-outline-secondary"
@@ -7175,8 +7102,8 @@ server <- function(input, output, session) {
     rv$rule_edit_index <- idx
     rv$rule_prefill <- f
     rv$rule_msg <- NULL
-    rv$cond_n <- max(1L, length(cond_to_rows(f$condition)))
-    rv$then_n <- max(1L, length(cond_to_rows(f$then)))
+    rv$cond_n <- max(1L, length(condition_to_form_rows(f$condition)))
+    rv$then_n <- max(1L, length(condition_to_form_rows(f$then)))
     rv$gcond_n <- max(1L, length(flatten_group_conditions(f$conditions)))
     rv$gconstr_n <- max(1L, length(flatten_group_constraints(f$constraints)))
     rv$cond_removed <- integer(0)
