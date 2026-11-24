@@ -594,6 +594,13 @@ addressable there; such a target is reported as `vocab_slot_invalid`.
 still receives the selected values as its permitted-value list. `include` and `exclude` narrow the terms offered by the vocabulary, and
 `default` selects initial terms. `min` is a non-negative whole number that sets a minimum selection count; it is not a numeric-input lower bound.
 
+If the author selects no term at all (the **None** link, or the chips cleared), the column is built with no permitted values: neither `values:` nor
+a `values_from:` binding, whatever the slot's `default` or the dataset template bound the column to, so no value is checked against a list (the
+column's type, length and `nullable` still are). The dialog cannot tell a control that was cleared from one that never held a term, so a slot with
+no `default` that the author leaves alone builds its column the same way. A slot with `min` above 0 does not allow this: the document is not created
+until enough terms are selected. Give the slot `min: 1` when its column must stay constrained. In an `open` slot, a selection of only the author's
+own terms gives exactly those terms.
+
 `field` may be `code` or `label` and selects which vocabulary field populates the column values. The default is `code`. A vocabulary slot must
 name an existing vocabulary and a valid target. Invalid slot definitions produce `vocab_slot_invalid`; an unresolved vocabulary produces
 `vocab_slot_unresolved`.

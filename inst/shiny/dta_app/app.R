@@ -2015,8 +2015,12 @@ server <- function(input, output, session) {
   # omitted. The control opens holding the slot's `default:`, so whatever it
   # holds at "Create DTA" is the author's answer -- and the "None" link above
   # it would be a lie if clearing the chips silently put the default back.
-  # vocabulary_slot_values() reads character(0) as "no terms", and refuses it
-  # when `min:` says so, which is exactly what the emptied control shows.
+  # vocabulary_slot_values() reads character(0) as "None": the target column is
+  # built with no permitted values (no `values:`, no `values_from:` binding),
+  # and a slot whose `min:` says otherwise refuses it, which is exactly what the
+  # emptied control shows. A control that is empty is empty whether the author
+  # cleared it or never filled it, so a slot with no `default:` that is left
+  # alone also builds its column unconstrained.
   #
   # Only slots that actually rendered a control are read: the records
   # show_template_options_modal() resolved when the dialog opened. A slot whose

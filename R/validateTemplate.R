@@ -1177,6 +1177,13 @@
 # would be wrong: the template is fine, it simply has not been filled in. The
 # dry run stands in for a user who picked the minimum, not for one who
 # submitted an empty form.
+#
+# A slot with no `default:` and no `min:` gets NO entry, so the dry run builds
+# its column as the dataset template made it. The options dialog builds that
+# slot's column with no permitted values when the author leaves the control
+# empty (an empty control is None, whether it was cleared or never filled), so
+# for such a slot the dry run judges the bound column, not the one that
+# author's document would have.
 .dta_template_vocab_dry_selections <- function(def, index_df) {
   raw <- def[["vocabulary_slots"]] %||% list()
   if (!is.list(raw) || length(raw) == 0) {
