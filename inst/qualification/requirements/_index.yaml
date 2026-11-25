@@ -56,10 +56,10 @@ areas:
     min_tests: 18
   - area: APP
     title: The interactive application
-    min_tests: 72
+    min_tests: 79
   - area: ROBUST
     title: Error handling, integrity and isolation
-    min_tests: 17
+    min_tests: 18
   - area: PERF
     title: End-to-end workflows and behaviour at scale
     min_tests: 25

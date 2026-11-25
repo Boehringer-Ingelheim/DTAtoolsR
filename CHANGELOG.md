@@ -40,6 +40,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   number. A document with no other metadata is not stamped. A DTAtools release
   that predates the field rejects it as an unknown metadata key, so a file the
   app has saved is not readable by one until the line is deleted.
+- **Bytes that are not valid in a delimited file's encoding are refused with a
+  condition class of their own, `dta_encoding_invalid`.** For UTF-8, the
+  encoding such a file is read as unless its handler declares another, the
+  refusal was Arrow's: an `rlang_error` out of `load_file()` and a `simpleError`
+  out of the scan that `check()` and `validate_file_stream()` run over a lazy
+  table, the same kinds of condition a row of the wrong width or a truncated
+  archive arrive as, so a caller could tell them apart only by matching message
+  text. `load_file()` now raises `dta_encoding_invalid` for such bytes in a
+  column it reads, and `check()` and `validate_file_stream()` for those their
+  scan reaches further down (naming the file where there is one), with Arrow's
+  message, which locates the bytes, as the condition's `parent`. A header that
+  is not valid UTF-8, in a tabular or a matrix dataset, used to stop in a bare
+  base-R "invalid UTF-8" error that named neither the file nor the column; it is
+  now refused, naming the file, with the same class. A file declared in another
+  encoding is refused with it too, by the in-memory reader and by the lazy one.
+  A row of the wrong width and a truncated archive are refused as before and do
+  not carry it. A declared encoding that iconv does not know is now refused by
+  the in-memory reader as the lazy one already refused it, as
+  `dta_encoding_unsupported` naming the file and the encoding, instead of by a
+  base-R error. Two gaps remain: the scan reads only the columns the validation
+  uses, so bytes in a column nothing declares are not met by it, and `tables()`,
+  the exports and the report writer still meet Arrow's own error for such bytes
+  in a lazily held table. SAS transport and SAS7BDAT files keep their own
+  classes. Documented under `?load_file`, `?check` and `?validate_file_stream`;
+  qualified by `REQ-ROBUST-018` and `OQ-ROBUST-018`.
 
 ### Fixed
 
@@ -65,6 +90,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   nothing else produced every term of the vocabulary plus `UNSCHED`, even the
   terms the slot's own `include:` had left out of its menu. The column now gets
   exactly `UNSCHED`.
+- **A rule opened in the app's rule editor and saved without a change keeps its
+  meaning.** The editor modelled a clause as one row per column, with one
+  operator and the value as a number-or-text guess, and rewrote what it could
+  not show. `VISIT: {not_equal: SCREENING}` was saved as `equals`, the opposite
+  test; `LBORRES: {range: [0.5, 40]}` as the text `0.5, 40` (the spec check
+  then refused the save on a numeric column); a column with
+  `{greater_equal: 18, less: 65}` lost its second operator, and two rows for one
+  column overwrote each other; a Char column's `"001"` and `"007"` were saved as
+  the numbers 1 and 7, so `in: ["001", "002"]` could no longer select any row
+  and the rule could never fail; `"1.50"` became 1.5, and `"Smith, John"` was
+  split into two values. The editor now shows one row per column and operator,
+  keeps a row you did not touch exactly as it was (type and spelling), reads a
+  row you changed by the declared type of its column (a number for a numeric
+  column, text for any other), and takes a quoted list (`"Smith, John", Doe`; a
+  missing value is `~`). A rule it cannot show faithfully (an operator it does
+  not know, or two spellings of one operator on one column such as `range` with
+  `min`) is not opened and says why, instead of being rewritten, and the same
+  operator twice for one column is an error on Save, not an overwrite.
+- **A value the rule editor cannot read is refused, not dropped.** A range
+  rule's minimum of `0,5` (a decimal comma) was saved as no minimum, a between
+  row such as `18 - 65` vanished from the rule, `0,5, 10` became the bounds 0
+  and 5, and `empty` took any word to mean true; a row with a value and no
+  column, or a grouped row with a column and no condition name, was skipped, and
+  a blank Value box was saved as an empty text. Each is now an error on Save
+  that names the text, and the rule is left as it was. Decimals are written with
+  a point. A range rule's bounds are kept as they were (`max: 100000` is not
+  rewritten as `100000.0`).
 - **The qualification case `OQ-ROBUST-012` can now fail.** It is the only case
   for `REQ-ROBUST-012` (bytes that are not valid in the declared encoding "shall
   be reported rather than silently reinterpreted"), and its assertions accepted
@@ -114,9 +166,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   so a valid `integer64` value was reported as breaking `^100000$`. An
   `integer64` value is now written exactly, as the rule operator `pattern`
   writes it.
+- **Two qualification cases and one app test can now fail.** None of them
+  changes what the package or the app does.
+  - `OQ-ROBUST-003` (a delivery that is not readable as the declared format
+    "shall raise a condition rather than validate as an empty or partial
+    table") also passed when the delivery was read and given any verdict that was
+    not exactly `TRUE`, and when it produced no table. `OQ-ROBUST-013` (a
+    truncated compressed delivery) also passed when it produced no table, on an
+    archive of four lines cut after its header and the start of its first row, a
+    cut that left nothing a reader could validate. Both now accept one outcome,
+    an error condition from `load_file()` or `check()`, on the in-memory and the
+    streaming reader. `OQ-ROBUST-003` holds binary content and 3000 good rows
+    followed by a row of the wrong width, which is where a reader that stopped
+    would hold a partial table; `OQ-ROBUST-013` holds an archive of 20000 rows cut
+    in half, of which over a thousand complete rows can still be read by base
+    R, so that a refusal cannot be put down to an unreadable start. Each is
+    held against a twin that is read in full, so a refusal can be attributed to
+    the content.
+  - The app test of the sidebar's `suspendWhenHidden` contract read the setting
+    back with `outputOptions(output, id)`, which under `shiny::testServer()`
+    returns `NULL` for every output, so it passed whatever the app asked for. It
+    now records the `outputOptions()` calls the server makes and asserts the
+    exact set of outputs told `suspendWhenHidden = FALSE`: the sidebar's, the
+    two Delivery flags, and the outputs inside the modal dialogs. `edit_gate`,
+    which the app opts out with the sidebar, was not named by the old test at
+    all.
 
 ### Changed
 
+- **The rule editor writes the engine's normal form of an operator.** Saving a
+  rule written with `range: [lo, hi]` stores `min: lo` and `max: hi`, `equal`
+  becomes `equals` and `not_equal` becomes `not_equals`. The test is the same;
+  only the spelling in the saved YAML changes, on the first save of such a rule.
 - **A vocabulary slot with no `default:` that the author leaves empty now builds
   its column with no permitted values.** The options dialog reports a control
   holding nothing the same way whether the author cleared it or never filled
