@@ -1616,3 +1616,13 @@ Multibranch Pipeline scanning it) rather than an `on:` block in the file
 itself — Jenkinsfiles carry no triggers the way a GitHub Actions workflow
 does. `create_template_repo(ci = c("bitbucket", "jenkins"))` (or any
 combination including `"github"`) writes whichever of the three you ask for.
+
+None of the three blocks anything on its own. The app reads the branch named
+in its source (`#main` above), so a merge into that branch is a release, and
+a failed pipeline only stops it if the host refuses to merge without a green
+build. Make the check required on that branch and let changes reach it
+through pull requests only. On GitHub that is a branch protection rule or
+ruleset with "Require status checks to pass before merging" that selects
+`validate-templates`; Bitbucket and Jenkins setups have a merge check on
+successful builds. The run on `main` after a merge reports a failure too
+late, because the change is by then on the branch the app reads.

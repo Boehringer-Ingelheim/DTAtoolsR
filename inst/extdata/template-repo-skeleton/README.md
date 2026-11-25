@@ -1692,6 +1692,12 @@ working directory at the repository root so the linter sees the library folders.
 `create_template_repo()` can scaffold this CI for supported providers. If the repository uses more than one CI system, keep each
 configuration focused on the same command and avoid maintaining different rules per provider.
 
+The app reads the branch named in its source (`#main` in `DTATOOLS_TEMPLATE_SOURCES`), so a merge into that branch is a release. A pipeline
+only stops a bad merge when the host refuses to merge without it: make the check required on that branch and let changes reach it through
+pull requests only. On GitHub that is a branch protection rule or ruleset with "Require status checks to pass before merging" that selects
+`validate-templates`; Bitbucket and Jenkins setups have a merge check on successful builds. The run on `main` after a merge reports a
+failure too late, because the change is by then on the branch the app reads.
+
 ### Validator codes
 
 This table lists every template-specific code emitted by `validate_template()` in the current validator, including the library-layout codes.
