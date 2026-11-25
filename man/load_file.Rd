@@ -144,6 +144,25 @@ batch is typed in R, which is cheaper at that size. See
 }
 }
 
+\section{A file whose bytes are not valid in its encoding}{
+
+A delimited file whose bytes are not valid in its declared
+\code{encoding} (UTF-8 unless the handler says otherwise) is refused with a
+condition of class \code{dta_encoding_invalid}; match on the class, not on
+the message. Where Arrow made the refusal, its own message is the
+condition's \code{parent}; for UTF-8 text it also gives the position of the
+bytes: the column, counted from zero, and the line, the header included.
+
+Where it is raised depends on where the bytes are. \code{load_file()} raises
+it when it reads the file into memory, when it opens a lazy table on a first
+block that holds them, and when the header does (a matrix dataset's too).
+\code{\link{check}()} and \code{\link{validate_file_stream}()} raise it when
+their scan of a lazy table reaches them further down. That scan reads only
+the columns the validation uses, so bytes in a column nothing declares are
+not met by it, and reading such a table afterwards, with
+\code{\link{tables}()} for example, still meets Arrow's own error for them.
+}
+
 \examples{
 file_handler <- DTAFileCSV(filename = "clinical_data.csv")
 ds <- DTADataSetTabular(

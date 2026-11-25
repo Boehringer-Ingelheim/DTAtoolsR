@@ -1062,6 +1062,8 @@ test_that("a half-written copy does not survive the failure that produced it", {
 
   before <- list.files(tempdir(), pattern = "^file.*\\.csv$")
   expect_error(dta_transcode_to_utf8(path, "SHIFT-JIS"), "cannot be decoded as")
+  # The same class Arrow's refusal of invalid UTF-8 is given (test-encoding-invalid.R).
+  expect_error(dta_transcode_to_utf8(path, "SHIFT-JIS"), class = "dta_encoding_invalid")
   # The offset is named, because "somewhere in a 60 GB file" is not actionable.
   # A byte offset rather than a line number: the file is cut into blocks, not
   # lines, and the second line of this fixture starts at byte 8.
