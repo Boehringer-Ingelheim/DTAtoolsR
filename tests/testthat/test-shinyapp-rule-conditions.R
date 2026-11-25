@@ -472,8 +472,10 @@ test_that("a list is shown so that a value with a comma or a quote reads back as
 test_that("the range rule reads its two boxes strictly", {
   bounds <- app_fn("parse_form_bounds")
   expect_identical(bounds("0.5", "40"), list(min = 0.5, max = 40))
-  expect_identical(bounds("", "10"), list(max = 10))
-  expect_identical(bounds("-3", " "), list(min = -3))
+  # a blank box is an open side
+  expect_identical(bounds("", "10"), list(min = -Inf, max = 10))
+  expect_identical(bounds("-3", " "), list(min = -3, max = Inf))
+  expect_identical(bounds("2", "", orig = list(min = -Inf, max = Inf)), list(min = 2, max = Inf))
   # a box still showing the bound the rule was opened with keeps that bound
   # as it was (an integer stays an integer); an edited box is read again
   expect_identical(bounds("100000", "7", orig = list(min = 100000L, max = 7)), list(min = 100000L, max = 7))
@@ -491,4 +493,13 @@ test_that("the range rule's boxes show the bound the rule holds", {
   expect_identical(app_fn("form_number_text")(100000), "100000")
   expect_identical(app_fn("form_number_text")(0.30000000000000004), "0.30000000000000004")
   expect_identical(app_fn("form_number_text")(NULL), "")
+})
+
+test_that("an open range side shows as an empty box", {
+  text <- app_fn("form_bound_text")
+  for (open in list(-Inf, Inf, NA, NA_real_, NULL, numeric(0))) {
+    expect_identical(text(open), "")
+  }
+  expect_identical(text(5L), "5")
+  expect_identical(text(0.5), "0.5")
 })

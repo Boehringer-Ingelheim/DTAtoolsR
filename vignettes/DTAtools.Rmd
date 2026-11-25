@@ -1048,7 +1048,8 @@ opened; edit it in the YAML text.
 #### `col_range` — Numeric Range Check
 
 Enforces that all values in a numeric column fall within `[min, max]`. The bounds can also be
-given as `range: [18, 65]` in place of `min`/`max`.
+given as `range: [18, 65]` in place of `min`/`max`; give one form or the other, not both. The
+two bounds may be equal, and `-.inf` / `.inf` leave one side open.
 
 ```yaml
 rules:

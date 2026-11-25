@@ -6915,8 +6915,8 @@ server <- function(input, output, session) {
         ),
         layout_columns(
           col_widths = c(6, 6),
-          textInput("rule_min", "Minimum", value = form_number_text(pf$min), width = "100%"),
-          textInput("rule_max", "Maximum", value = form_number_text(pf$max), width = "100%")
+          textInput("rule_min", "Minimum", value = form_bound_text(pf$min), width = "100%"),
+          textInput("rule_max", "Maximum", value = form_bound_text(pf$max), width = "100%")
         ),
         div(
           class = "cond-hint",

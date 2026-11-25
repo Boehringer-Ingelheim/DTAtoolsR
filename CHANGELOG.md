@@ -43,6 +43,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **A range rule with only a minimum or only a maximum can be saved in the
+  app.** A blank Minimum or Maximum box is now an open side, saved as `-.inf`
+  or `.inf`, and the rule reopens with that box blank; before, the save failed
+  with a type error. A range rule whose minimum equals its maximum was refused
+  and is now accepted.
 - `dta_is_stale()` now looks at a document's metadata as well as the document
   and its datasets. A `DTA` saved with `saveRDS()` by an older release has
   metadata without the properties added since, and no entry point noticed: the
@@ -144,6 +149,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **A range rule given both `range` and `min`/`max` is refused** (condition
+  class `dta_rule_range_conflict`); `range` used to be silently ignored. A
+  lower bound greater than the upper bound now carries the class
+  `dta_rule_invalid_range`.
 - **The rule editor writes the engine's normal form of an operator.** Saving a
   rule written with `range: [lo, hi]` stores `min: lo` and `max: hi`, `equal`
   becomes `equals` and `not_equal` becomes `not_equals`. The test is the same;
