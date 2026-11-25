@@ -277,11 +277,11 @@ form_split_list <- function(txt, where) {
         i <- i + 1L
       }
       if (!closed) {
-        form_value_error(where, "the list has a double quote that is never closed.")
+        form_value_error(where, "the list {.val {txt}} has a double quote that is never closed.")
       }
       while (i <= n && blank(chars[i])) i <- i + 1L
       if (i <= n && !identical(chars[i], ",")) {
-        form_value_error(where, "in the list, a value in double quotes must be followed by a comma.")
+        form_value_error(where, "in the list {.val {txt}}, a value in double quotes must be followed by a comma.")
       }
       members <- c(members, paste(buffer, collapse = ""))
       quoted <- c(quoted, TRUE)
@@ -291,7 +291,7 @@ form_split_list <- function(txt, where) {
         if (identical(chars[i], "\"")) {
           form_value_error(
             where,
-            "in the list, a double quote must begin a value; put a value that holds one in double quotes and double the quote."
+            "in the list {.val {txt}}, a double quote must begin a value; put a value that holds one in double quotes and double the quote."
           )
         }
         i <- i + 1L

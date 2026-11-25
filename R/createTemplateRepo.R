@@ -283,8 +283,9 @@
 #'   `vocabulary/` beneath `path`, plus the commented-out `dta-app.yaml` and
 #'   `export-templates/README.md`. `README.md` stays at the repository root.
 #'   When `FALSE`, only `README.md`,
-#'   `.gitignore`, the JSON Schemas with their editor setting and (if `ci`
-#'   asks for any provider) its CI file(s) are
+#'   `.gitignore`, the two JSON Schemas and `.vscode/settings.json` (which are
+#'   written whatever `examples` says), the CI file(s) `ci` asks for and, while
+#'   `agent_skill = TRUE` (the default), the agent skill files are
 #'   written -- no template files, for a caller who wants the scaffolding
 #'   without the worked example. Such a repository has no templates yet, so
 #'   [validate_template()] reports the error `no_templates` and the generated

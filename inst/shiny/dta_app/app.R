@@ -6897,7 +6897,7 @@ server <- function(input, output, session) {
         div(class = "cond-hint", HTML(paste0(
           "A value is read by the type of its column: a number for a numeric column, ",
           "text for any other (<code>007</code> stays <code>007</code>); ",
-          "greater, less and between always take numbers. ",
+          "greater, less and between always take numbers (a date column keeps its text). ",
           "A rule opened and saved without a change keeps its values as they were. ",
           "Several rows may name the same column and all of them must hold ",
           "(<code>AGE</code> greater or equal 18 and <code>AGE</code> less 65), ",

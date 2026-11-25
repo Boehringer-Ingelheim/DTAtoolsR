@@ -205,7 +205,12 @@ my-templates/
     starter_terms.dta-vocabulary.yaml
   export-templates/
     README.md
+  schemas/
+    dta-template-library.schema.json
+    dta-app.schema.json
+  .vscode/settings.json
   .github/workflows/validate-templates.yml
+  .claude/skills/dta-template-authoring/
 ```
 
 - `README.md` — the comprehensive authoring guide: all template features,
@@ -224,12 +229,24 @@ my-templates/
   `values_from:`.
 - `export-templates/README.md` — says where Word templates (`.docx` files with `{PLACEHOLDER}` markers) for
   export go; drop `.docx` files into this folder.
+- `schemas/dta-template-library.schema.json` and `schemas/dta-app.schema.json`
+  — JSON Schemas for the four template file kinds and for `dta-app.yaml`.
+- `.vscode/settings.json` — points the Red Hat YAML extension in VS Code at the
+  two schemas. With the extension installed and the repository folder opened as
+  the workspace, they flag a wrong `kind`, an unquoted `version`, a misspelt key
+  or an invalid `role` while you type. They check the shape of one file only:
+  `validate_template()` stays the authority on everything else, and is stricter
+  or looser in a few places that the repository's `README.md` lists.
 - CI scaffolding, controlled by the `ci` argument (default `TRUE`, meaning
   `"github"` only): `"github"` writes `.github/workflows/validate-templates.yml`
   (GitHub Actions); `"bitbucket"` writes `bitbucket-pipelines.yml`; `"jenkins"`
   writes `Jenkinsfile`. Pass a character vector to write more than one, e.g.
   `ci = c("github", "jenkins")`. See "CI for a private template repository"
   below for what each file is for and which one applies to your Bitbucket.
+- `.claude/skills/dta-template-authoring/` — an agent skill (argument
+  `agent_skill`, default `TRUE`) that gives coding agents the working method for
+  a template library: the layered layout, releasing a change, when to use
+  `extends:` and when `mixins:`, and how to triage every validator finding.
 
 The four YAML files are a small, cross-referencing worked example, not stubs
 to fill in from nothing — the whole directory already passes
@@ -239,10 +256,13 @@ placeholder metadata, keeping the `id@version` references between the files
 (`starter_dataset@1.0`, `starter_terms@1.0`, `starter_supplier`) in step with
 whatever you rename.
 
-Pass `examples = FALSE` for a bare scaffold — `README.md`, `.gitignore` and
-whichever CI file(s) `ci` asks for, with none of the starter files and none of
-the folders. Until you add a template, such a repository (and its CI) fails
-validation with `no_templates`. Pass `ci = FALSE` to skip CI scaffolding
+Pass `examples = FALSE` for a bare scaffold — `README.md`, `.gitignore`, the two
+schemas and `.vscode/settings.json` (written whatever `examples` says),
+whichever CI file(s) `ci` asks for and, while `agent_skill = TRUE` (the
+default), the agent skill files under `.claude/skills/dta-template-authoring/`,
+with none of the starter files and none of the template folders
+(`templates/`, `parties/`, `vocabulary/`, `export-templates/`). Until you add a
+template, such a repository (and its CI) fails validation with `no_templates`. Pass `ci = FALSE` to skip CI scaffolding
 entirely. By default,
 `create_template_repo()` refuses to touch a directory where any file it would
 write already exists — it aborts, naming every conflict, and writes nothing at
@@ -1424,8 +1444,9 @@ multi-select: each term is listed as "CODE — Label" with its description
 underneath, and searching a word from the description finds the term too.
 Chosen terms are shown as removable chips inside the box. "All",
 "None" and "Default" links fill or clear the selection in one click, next to
-a live "n of m selected" count. `min:` is shown as "Choose at least n." and
-is enforced when the document is created. An emptied slot is not "back to
+a live "n of m selected" count. A `min:` of 1 or more marks the control with a
+"Required" badge, and only a `min:` above 1 adds the hint "Choose at least n.";
+the floor is enforced when the document is created. An emptied slot is not "back to
 the default": the control opens holding the default, and whatever it holds
 when the document is created is what is applied. A control holding nothing
 ("None", or the chips cleared) builds the column with no permitted values at
@@ -1623,6 +1644,8 @@ a failed pipeline only stops it if the host refuses to merge without a green
 build. Make the check required on that branch and let changes reach it
 through pull requests only. On GitHub that is a branch protection rule or
 ruleset with "Require status checks to pass before merging" that selects
-`validate-templates`; Bitbucket and Jenkins setups have a merge check on
-successful builds. The run on `main` after a merge reports a failure too
+`validate-templates`; on Bitbucket use its merge check on successful builds,
+which counts a Jenkins build only if Jenkins reports its build status back to
+Bitbucket (the generated `Jenkinsfile` does not do that by itself). The run on
+`main` after a merge reports a failure too
 late, because the change is by then on the branch the app reads.

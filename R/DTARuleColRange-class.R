@@ -17,9 +17,12 @@
 #'   an error of class `dta_rule_range_conflict`.
 #' @param description Character or NULL. Free-text description of the rule.
 #' @param min Numeric. Lower bound of the allowed range. Required unless
-#'   `range` is given, and must not be greater than `max`.
+#'   `range` is given, and must not be greater than `max` (the two may be
+#'   equal; a greater `min` is an error of class `dta_rule_invalid_range`).
+#'   `-Inf` leaves the lower side open.
 #' @param max Numeric. Upper bound of the allowed range. Required unless
-#'   `range` is given, and must not be less than `min`.
+#'   `range` is given, and must not be less than `min`. `Inf` leaves the upper
+#'   side open.
 #' @return An object of class `DTARuleColRange`.
 #'
 #' @examples

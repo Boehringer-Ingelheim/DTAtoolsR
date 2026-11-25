@@ -1099,11 +1099,16 @@ requirements:
       unchanged: a number that is not a number (a decimal comma included, in a
       comparison, a between row or a range rule's minimum or maximum), a
       between row with more than two bounds, a list with a double quote that
-      is never closed, a row with a column and no value. The same operator
-      given twice for one column shall be refused the same way, with a message
-      that names the column. A rule the form cannot show faithfully, because
-      two spellings of one operator stand on one column or the operator is
-      unknown to the editor, shall not be opened for editing. Nothing shall be
+      is never closed, a row with a column and no value (an empty row's blank
+      Value box excepted, which reads as true), a row with a value and no
+      column, an empty row whose Value box holds a word the editor cannot
+      read as true or false. The same operator given twice for one column
+      shall be refused the same way, with a message that names the column, and
+      so shall a row of a grouped condition that names a column and no
+      condition. A rule the form cannot show faithfully, because two spellings
+      of one operator stand on one column or the operator is unknown to the
+      editor, shall not be opened for editing, and the notification that says
+      so shall name the rule, the column and the operator. Nothing shall be
       dropped or reinterpreted to make a row savable.
     risk: high
     category: integrity
@@ -1112,7 +1117,21 @@ requirements:
     notes: >
       Before this requirement an unreadable bound was silently taken as absent
       (a minimum of "0,5" saved as no minimum), and the second of two rows for
-      one column overwrote the first.
+      one column overwrote the first. A row with a value and no column, or a
+      grouped row with a column and no condition name, was skipped, and an
+      empty row took any word to mean true. The refusal of a row with a value
+      and no column names that value, and the refusal of a grouped row names
+      its column, because no text was typed. The words the editor reads as
+      true or false for an empty row are not listed here; OQ-APP-084 pins
+      true, a blank box and a word that is neither. The engine refuses an
+      operator the editor does not know before a document is open: the linter
+      as an error on a file
+      (rule_condition_operator_invalid), the validator of the column
+      specifications on a rule built in R, both since 0.26.0; the source of
+      0.25.0 has neither check. The refusal to open such a rule therefore
+      guards a document that skipped validation, or an operator the engine
+      gains before the editor reads it; OQ-APP-082 sets the rule on the loaded
+      document by assigning the attributes of its objects directly.
 
   - id: REQ-APP-065
     text: >

@@ -26,16 +26,16 @@ areas:
     min_tests: 47
   - area: VAL
     title: Validation engine and result accessors
-    min_tests: 48
+    min_tests: 49
   - area: RULE
     title: Cross-column and grouped rules
-    min_tests: 49
+    min_tests: 52
   - area: FILE
     title: File handlers and readers
     min_tests: 61
   - area: CONT
     title: Container deliveries (zip archives, SAS transport libraries)
-    min_tests: 63
+    min_tests: 64
   - area: MATRIX
     title: Matrix datasets (type matrix)
     min_tests: 59
@@ -56,7 +56,7 @@ areas:
     min_tests: 18
   - area: APP
     title: The interactive application
-    min_tests: 79
+    min_tests: 81
   - area: ROBUST
     title: Error handling, integrity and isolation
     min_tests: 18

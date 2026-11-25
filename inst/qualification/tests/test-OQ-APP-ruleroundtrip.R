@@ -1,5 +1,5 @@
 # Opening a rule in the rule editor and saving it without a change.
-# REQ-APP-063 and REQ-APP-064.
+# REQ-APP-063, REQ-APP-064 and REQ-APP-065.
 #
 # The fixture is the worked laboratory example of DTA_YAML_GUIDE.md (section 5)
 # with the operator rows its operator table describes. Every expected clause is
@@ -136,13 +136,94 @@ qrr_open <- function(session, output, id) {
   invisible(inputs)
 }
 
-qrr_start <- function(session) {
+# The pencil really opened rule `id`: the editor shows its form and holds the
+# rule's position. A renamed input leaves the list showing and no rule held, so
+# a Save that follows would be pressed on nothing.
+qrr_opened <- function(rv, id) {
+  qa_step(paste0("the pencil of ", id, " opens the form"), "form", rv$rule_view)
+  qa_step(paste0("and the editor holds rule number ", qrr_index[[id]]), unname(qrr_index[[id]]), rv$rule_edit_index)
+}
+
+# Save really ran and was accepted: the editor is back on the rule list (a
+# refused Save keeps the form) and holds no message. A rule written in the
+# engine's normal form comes out of a Save that did nothing the same as out of
+# one that ran, so its content cannot tell the two apart.
+qrr_saved <- function(rv, id) {
+  qa_step(paste0("saving ", id, " returns the editor to the rule list"), "list", rv$rule_view)
+  qa_check(paste0("and reports no error"), is.null(rv$rule_msg))
+}
+
+# Message text on one line, without the formatting codes a terminal would show.
+qrr_flat <- function(x) gsub("\\s+", " ", cli::ansi_strip(paste(x, collapse = " ")))
+
+# A refused Save of `what`: the form is still open, the message names every
+# element of `named` (a text typed, or a column, as pieces that survive the way
+# the message formats a quote), and rule `id` is as it was before.
+qrr_refused <- function(rv, id, before, named, what) {
+  qa_check(paste0(what, " is refused"), isFALSE(rv$rule_msg$ok))
+  qa_step("and the form stays open", "form", rv$rule_view)
+  message <- qrr_flat(rv$rule_msg$error)
+  qa_check(
+    paste0("and the message names ", paste(named, collapse = " and ")),
+    all(vapply(named, grepl, logical(1), x = message, fixed = TRUE))
+  )
+  qa_step("and the rule is unchanged", before, qrr_rule(rv, id))
+}
+
+qrr_start <- function(session, lines = qrr_fixture) {
   path <- file.path(qa_tempdir(), "lb.yaml")
-  writeLines(qrr_fixture, path)
+  writeLines(lines, path)
   session$setInputs(dta_client_id = strrep("r", 32))
   session$setInputs(dta_file = qapp_upload_value(path, "lb.yaml"))
   qapp_enter_edit_mode(session)
   session$setInputs(edit_rules = 1)
+}
+
+# A document of its own for the rule the editor cannot open because of an
+# operator it does not know, so the fixture above, which every other case here
+# saves rules in, is left alone. The editor knows every operator the engine does
+# (R/evaluateRules.R, dta_condition_operators()), and the engine refuses the
+# others twice before a document is open in the application: the linter's error
+# rule_condition_operator_invalid refuses a file, and the validator of the
+# column specifications refuses a rule built in R. A rule with an operator the
+# editor does not know is therefore a document the validators were not asked
+# about, such as an object restored from a release that accepted it, or an
+# operator the engine gains that the editor does not yet read.
+# qrr_with_unknown_operator() puts such a rule into the loaded document by
+# setting the attributes of the objects directly, which S7 does not validate.
+# `between` is a spelling an author may well try for `range`.
+qrr_unknown_fixture <- c(
+  "metadata:",
+  "  title: A rule with an operator the editor does not know",
+  "  version: '1.0'",
+  "datasets:",
+  "  - id: lb",
+  "    type: tabular",
+  "    name: Laboratory results",
+  "    files: {filename: lb.csv, type: csv}",
+  "    columns:",
+  "      - {id: VISIT, type: SAS Char, length: 20, nullable: false}",
+  "      - {id: LBORRES, type: SAS Num, nullable: true}"
+)
+
+# `dta` with the rule result_between added to dataset lb: LBORRES between 0 and
+# 100 when VISIT is V03.
+qrr_with_unknown_operator <- function(dta) {
+  lb <- DTAtools::datasets(dta, "lb")
+  rule <- DTAtools::DTARuleColCondition(
+    id = "result_between",
+    description = "A result lies between two bounds, written with a spelling the editor does not read.",
+    condition = list(VISIT = list(equals = "V03")),
+    then = list(LBORRES = list(equals = 1))
+  )
+  attr(rule, "then") <- list(LBORRES = list(between = c(0L, 100L)))
+  specs <- lb@specs
+  attr(specs, "rules") <- list(rule)
+  attr(lb, "specs") <- specs
+  datasets <- dta@datasets
+  datasets[["lb"]] <- lb
+  attr(dta, "datasets") <- datasets
+  dta
 }
 
 test_that("OQ-APP-076 | a rule written with range opens in the rule editor and saves, unchanged, as the same band of min and max | REQ-APP-063", {
@@ -222,8 +303,9 @@ test_that("OQ-APP-078 | a text code and a list member holding a comma are saved 
 
     for (id in c("site_codes", "site_seven")) {
       qrr_open(session, output, id)
+      qrr_opened(rv, id)
       qrr_save(session)
-      qa_check(paste0("saving ", id, " reports no error"), is.null(rv$rule_msg))
+      qrr_saved(rv, id)
     }
 
     # SITEID is a Char column: its codes are text, leading zeros included.
@@ -319,16 +401,25 @@ test_that("OQ-APP-080 | a value the rule editor cannot read is refused with the 
     before_unit <- qrr_rule(rv, "glucose_unit")
     session$setInputs(then_val_2 = "0.5, 40, 50")
     qrr_save(session)
-    qa_check("a between row with three bounds is refused", isFALSE(rv$rule_msg$ok))
-    qa_step("and the rule is unchanged", before_unit, qrr_rule(rv, "glucose_unit"))
+    qrr_refused(rv, "glucose_unit", before_unit, "0.5, 40, 50", "a between row with three bounds")
 
     # --- a list with a double quote that is never closed ---------------------------
+    # Row 1 of THEN holds the list for LBNAM. The message may show the text with
+    # its quotes escaped, so what it must name are the words between them.
     qrr_open(session, output, "site_codes")
     before_codes <- qrr_rule(rv, "site_codes")
     session$setInputs(then_val_1 = "\"Smith, John, Doe")
     qrr_save(session)
-    qa_check("a list with an unclosed double quote is refused", isFALSE(rv$rule_msg$ok))
-    qa_step("and the rule is unchanged", before_codes, qrr_rule(rv, "site_codes"))
+    qrr_refused(rv, "site_codes", before_codes, "Smith, John, Doe", "a list with an unclosed double quote")
+
+    # The other two ways a list text is refused: a value in double quotes that is
+    # not followed by a comma, and a double quote in the middle of a value.
+    session$setInputs(then_val_1 = "\"Quincy\" Zephyr")
+    qrr_save(session)
+    qrr_refused(rv, "site_codes", before_codes, c("Quincy", "Zephyr"), "a quoted value not followed by a comma")
+    session$setInputs(then_val_1 = "Quincy \"Zephyr\"")
+    qrr_save(session)
+    qrr_refused(rv, "site_codes", before_codes, c("Quincy", "Zephyr"), "a double quote in the middle of a value")
 
     # --- a range rule: a bound with a decimal comma ------------------------------
     qrr_open(session, output, "result_limits")
@@ -348,8 +439,9 @@ test_that("OQ-APP-081 | a range rule opened in the rule editor and saved without
   shiny::testServer(app, {
     qrr_start(session)
     qrr_open(session, output, "result_limits")
+    qrr_opened(rv, "result_limits")
     qrr_save(session)
-    qa_check("saving the range rule reports no error", is.null(rv$rule_msg))
+    qrr_saved(rv, "result_limits")
 
     saved <- qrr_rule(rv, "result_limits")
     qa_step("the minimum is 0.5", 0.5, saved$min)
@@ -358,13 +450,22 @@ test_that("OQ-APP-081 | a range rule opened in the rule editor and saved without
   })
 })
 
-test_that("OQ-APP-082 | a rule the rule editor cannot show faithfully is not opened, so nothing is saved as something else | REQ-APP-064", {
+test_that("OQ-APP-082 | a rule the rule editor cannot show faithfully, two spellings of one operator on a column or an operator it does not know, is not opened and the notification says why, so nothing is saved as something else | REQ-APP-064 | tags: white-box", {
   app <- qapp_skip_unless_app_installed()
   qapp_clean_session_files()
+  notes <- character(0)
+  testthat::local_mocked_bindings(
+    showNotification = function(ui, ...) {
+      notes <<- c(notes, paste(as.character(ui), collapse = ""))
+      invisible("id")
+    },
+    .package = "shiny"
+  )
 
   shiny::testServer(app, {
     qrr_start(session)
     before <- rv$dta
+    seen <- length(notes) # the ones loading the document showed
 
     # `range: [0, 100]` and `min: 5` on one column are two keys of the one
     # between row; a form row per operator cannot hold both.
@@ -372,6 +473,52 @@ test_that("OQ-APP-082 | a rule the rule editor cannot show faithfully is not ope
     qa_step("the pencil opens no form", "list", rv$rule_view)
     qa_check("and no rule is being edited", is.null(rv$rule_edit_index))
     qa_step("and the document is untouched", before, rv$dta)
+    # The reason: which rule, which column, which two spellings.
+    shown <- notes[seq_along(notes) > seen]
+    qa_step("and one notification is shown", 1L, length(shown))
+    say <- qrr_flat(shown)
+    qa_step(
+      "it names the rule, the column and both spellings of the operator",
+      c(rule = TRUE, column = TRUE, range = TRUE, min = TRUE),
+      c(
+        rule = grepl("band_twice", say, fixed = TRUE), column = grepl("LBORRES", say, fixed = TRUE),
+        range = grepl("range", say, fixed = TRUE), min = grepl("min", say, fixed = TRUE)
+      )
+    )
+  })
+
+  # An operator the editor does not read: the form could show only a different
+  # one. (See qrr_unknown_fixture for how such a rule gets into a document.)
+  qapp_clean_session_files()
+  notes <- character(0)
+  shiny::testServer(app, {
+    qrr_start(session, qrr_unknown_fixture)
+    rv$dta <- qrr_with_unknown_operator(rv$dta)
+    before <- rv$dta
+    seen <- length(notes)
+    before_rule <- qrr_rule(rv, "result_between")
+    qa_step(
+      "the document holds the rule with its clause as written",
+      list(LBORRES = list(between = c(0L, 100L))),
+      before_rule$then
+    )
+
+    session$setInputs(rule_edit_click = 1L)
+    qa_step("the pencil opens no form", "list", rv$rule_view)
+    qa_check("and no rule is being edited", is.null(rv$rule_edit_index))
+    qa_step("and the document is untouched", before, rv$dta)
+    qa_step("and the rule's clause is as written", before_rule, qrr_rule(rv, "result_between"))
+    shown <- notes[seq_along(notes) > seen]
+    qa_step("and one notification is shown", 1L, length(shown))
+    say <- qrr_flat(shown)
+    qa_step(
+      "it names the rule, the column and the operator",
+      c(rule = TRUE, column = TRUE, operator = TRUE),
+      c(
+        rule = grepl("result_between", say, fixed = TRUE), column = grepl("LBORRES", say, fixed = TRUE),
+        operator = grepl("between", say, fixed = TRUE)
+      )
+    )
   })
 })
 
@@ -410,5 +557,83 @@ test_that("OQ-APP-083 | a range rule saved with its maximum or its minimum box l
     qrr_save(session)
     qa_check("a range with both boxes blank is refused", isFALSE(rv$rule_msg$ok))
     qa_step("the saved rule is unchanged", saved, qrr_rule(rv, "result_limits"))
+  })
+})
+
+test_that("OQ-APP-084 | a value whose column was cleared, a grouped condition row with a column and no condition name, and an empty row given a word that is not true or false are refused on Save and the rule is left as it was | REQ-APP-064", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+
+  shiny::testServer(app, {
+    qrr_start(session)
+
+    # --- a row with a value and no column -----------------------------------------
+    # Row 1 of the THEN clause is LBORRESU equals "mmol/L". Clearing its Column
+    # box leaves the value with nothing to apply to; it is not skipped.
+    qrr_open(session, output, "glucose_unit")
+    qrr_opened(rv, "glucose_unit")
+    before <- qrr_rule(rv, "glucose_unit")
+    session$setInputs(then_col_1 = "")
+    qrr_save(session)
+    qrr_refused(rv, "glucose_unit", before, "mmol/L", "a row with a value and no column")
+    session$setInputs(then_col_1 = "LBORRESU")
+
+    # --- an empty row given a word that is not true or false ------------------------
+    # Row 2 of the IF clause is LBORRES empty false. "maybe" is neither; it was
+    # once read as true.
+    session$setInputs(cond_val_2 = "maybe")
+    qrr_save(session)
+    qrr_refused(rv, "glucose_unit", before, "maybe", "an empty row given maybe")
+
+    # The same row given true saves, as true: the refusal is about the word.
+    session$setInputs(cond_val_2 = "true")
+    qrr_save(session)
+    qrr_saved(rv, "glucose_unit")
+    qa_step(
+      "an empty row given true is saved as empty: true, the rest of the rule as it was",
+      list(
+        condition = list(LBTESTCD = list(equals = "GLUC"), LBORRES = list(empty = TRUE)),
+        then = list(LBORRESU = list(equals = "mmol/L"), LBORRES = list(min = 0.5, max = 40L))
+      ),
+      qrr_rule(rv, "glucose_unit")[c("condition", "then")]
+    )
+
+    # --- a grouped condition row with a column and no condition name -----------------
+    # Row 1 is column LBTESTCD of condition c_glucose. With its name cleared the
+    # row belongs to no condition; it is not skipped. The message names the
+    # column (no text was typed).
+    qrr_open(session, output, "glucose_per_site")
+    qrr_opened(rv, "glucose_per_site")
+    before_group <- qrr_rule(rv, "glucose_per_site")
+    session$setInputs(gcond_name_1 = "")
+    qrr_save(session)
+    qrr_refused(rv, "glucose_per_site", before_group, "LBTESTCD", "a grouped row with a column and no condition name")
+
+    # The name typed again, the rule saves, with both conditions as they were.
+    session$setInputs(gcond_name_1 = "c_glucose")
+    qrr_save(session)
+    qrr_saved(rv, "glucose_per_site")
+    qa_step(
+      "with the name given again both conditions are saved, in the engine's normal form",
+      list(
+        c_glucose = list(LBTESTCD = list(equals = "GLUC"), LBORRES = list(min = 0.5, max = 40L)),
+        c_other = list(LBTESTCD = list(not_equals = "GLUC"))
+      ),
+      qrr_rule(rv, "glucose_per_site")$conditions
+    )
+
+    # --- an empty row left blank is not a row with no value ---------------------------
+    # Row 1 of the THEN clause is LBORRES empty false. A blank Value box of an
+    # empty row reads as true.
+    qrr_open(session, output, "result_after_screening")
+    qrr_opened(rv, "result_after_screening")
+    session$setInputs(then_val_1 = "")
+    qrr_save(session)
+    qrr_saved(rv, "result_after_screening")
+    qa_step(
+      "a blank Value box of an empty row is saved as empty: true",
+      list(LBORRES = list(empty = TRUE)),
+      qrr_rule(rv, "result_after_screening")$then
+    )
   })
 })

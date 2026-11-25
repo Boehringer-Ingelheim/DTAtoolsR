@@ -66,6 +66,8 @@ For now, it is only possible to install the development version from GitHub:
 remotes::install_github("Boehringer-Ingelheim/DTAtoolsR")
 ```
 
+DTAtools requires R 4.2.0 or later and S7 1.0.0 or later (DESCRIPTION: `R (>= 4.2.0)`, `S7 (>= 1.0.0)`).
+
 ## Quickstart
 
 ```r
@@ -1086,6 +1088,7 @@ my-templates/
     dta-app.schema.json
   .vscode/settings.json
   .github/workflows/validate-templates.yml
+  .claude/skills/dta-template-authoring/
 ```
 
 The two JSON Schemas and `.vscode/settings.json` make the Red Hat YAML
@@ -1325,8 +1328,8 @@ The most versatile rule type. When `condition` is satisfied for a row, the
 
 Supported operators in both `condition` and `then`:
 
-- `equals`: String / Number
-- `not_equals`: String / Number
+- `equals` (alias `equal`): String / Number
+- `not_equals` (alias `not_equal`): String / Number
 - `greater_equal`: Number
 - `greater`: Number
 - `less_equal`: Number
@@ -1340,6 +1343,11 @@ Supported operators in both `condition` and `then`:
   (not even `^$` or `.*`; use `empty` to test for them), and a number is matched
   as its plain decimal text, `100000` and not `1e+05` (a fraction keeps at most
   15 significant digits)
+
+The app's rule editor shows one row per column and operator, keeps the value of
+a row you did not touch, and refuses to open a rule it cannot show faithfully;
+the details are in the
+[YAML guide](DTA_YAML_GUIDE.md#col_condition--row-level-if--then).
 
 ```yaml
 rules:
@@ -1402,6 +1410,10 @@ rules:
     min: 18
     max: 65
 ```
+
+Unless `range` is used, both `min` and `max` must be written; put `-.inf` for `min` or `.inf` for `max` to leave that side open. The
+two bounds may be equal, whereas a `min` greater than `max` is refused. Giving `range` together with `min` or `max` is refused too. In the app,
+a blank Minimum or Maximum box is an open side and is saved as `-.inf` or `.inf`; both boxes blank is refused.
 
 #### `col_unique`
 
@@ -1573,10 +1585,11 @@ adding, editing, deleting and reordering sections. Empty `study` and `sections`
 are omitted from YAML, so legacy documents need no migration.
 
 `dtatools_version` records the DTAtools release that last saved the file, for
-example `dtatools_version: 0.29.0`. It is written by the app, not by you: every
-time the app saves a specification as YAML it replaces the value with its own
-release, so a file the app has not saved yet simply has none, and leaving it
-out of a file you write by hand is correct. A document with no other metadata
+example `dtatools_version: 0.30.0`. It is written by the app, not by you: every
+time the app writes a specification as YAML (the text in its YAML editor and an
+exported file as well as a save) it replaces the value with its own release, so
+a file the app has not written yet simply has none, and leaving it out of a
+file you write by hand is correct. A document with no other metadata
 gets no stamp. The value must be a bare version number, quoted if it has only
 two parts (`'1.0'`, not `1.0`, which YAML reads as a number), and a template
 can neither set nor carry it over. Writing a `DTAMetaData` out with

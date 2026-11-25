@@ -110,21 +110,28 @@ logo or Word template it names), \code{app_config_duplicate} (both
 \code{app_config_misplaced} (a \code{dta-app.yaml} anywhere but directly in the
 repository root), and the \code{\link[=lint_dta]{lint_dta()}} errors \code{rule_invalid},
 \code{rule_id_duplicate}, \code{rule_column_undeclared}, \code{rule_range_non_numeric},
-\code{rule_condition_operator_invalid}, \code{rule_condition_numeric_on_text},
-\code{rule_condition_value_unfit}, \code{rule_condition_value_outside_values} (only for \code{equals}/\verb{in}; the negated
+\code{rule_condition_operator_invalid}, \code{rule_condition_numeric_on_text} (also a
+warning, see below), \code{rule_condition_value_unfit} (also a warning, see
+below), \code{rule_condition_value_outside_values} (only for \code{equals}/\verb{in}; the negated
 operators raise no finding), \code{group_constraint_unknown_condition}, and
 \code{file_name_conflict} (file entries of two datasets could take the same file
 name; the linter's warning is an error here). Any other \code{\link[=lint_dta]{lint_dta()}} code
 (see its Codes section) is passed on with the linter's severity.
 The linter codes come from the columns and rules of a dataset template's
 body, and from every instantiated variant of a creation template.
-Warnings: the linter's \code{rules_without_columns}, \code{rule_not_checkable} and
-\code{format_narrower_than_length}, plus \code{kind_unknown}, \code{id_missing}, \code{version_missing},
+Warnings: the linter's \code{rules_without_columns}, \code{rule_not_checkable},
+\code{format_narrower_than_length}, \code{column_id_shadows_field} (a column \verb{X.<field>}
+beside a column \code{X}, where \verb{<field>} is a column field such as \code{values}) and,
+in the cases that are not errors, \code{rule_condition_numeric_on_text} (the column
+is a date, which a file read holds as text) and \code{rule_condition_value_unfit}
+(a number is written where the column holds text), plus \code{kind_unknown}, \code{id_missing}, \code{version_missing},
 \code{version_unparseable}, \code{target_invalid}, \code{party_slot_invalid},
 \code{vocab_slot_unresolved}, \code{dataset_template_unresolved}, \code{patch_incoherent},
 \code{dataset_no_files} (a dataset template body, or a dataset built by a
 non-abstract creation template, that declares no files, so nothing can be
-loaded into it; a patch may still supply them, hence a warning),
+loaded into it; a dataset template's body is judged before any patch, which
+may still supply the files, hence a warning, whereas a creation template is
+judged on the dataset it builds, after patching, so a patch there clears it),
 \code{token_unknown} (a \verb{$\{...\}} placeholder in a creation or dataset template
 other than \verb{$\{today\}}, \verb{$\{version\}}, \verb{$\{study.id\}}, \verb{$\{study.protocol_id\}}
 and their file-name forms \verb{$\{study.id_underscore\}} and
