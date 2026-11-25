@@ -150,6 +150,44 @@ qapp_upload_value <- function(path, name = basename(path)) {
   )
 }
 
+# The rendered HTML of a renderUI output, as one string ("" for nothing).
+qapp_ui_text <- function(out) {
+  if (is.null(out) || is.null(out$html)) "" else paste(as.character(out$html), collapse = "")
+}
+
+# What a browser reports for the controls of rendered HTML before the user
+# touches any of them, as a named list for session$setInputs(). testServer()
+# has no browser, so an input a test sets is whatever the test says; a test
+# that names an operator itself can never see the operator the browser would
+# have reported. A <select> reports the option marked `selected`, or its FIRST
+# option when none is marked (what it does for a `selected` value that is not
+# among its options); a multiple <select> reports its selected options; a text
+# <input> reports its `value` attribute, "" when it has none.
+qapp_browser_inputs <- function(html) {
+  qa_requires("xml2")
+  doc <- xml2::read_html(paste0("<body>", html, "</body>"))
+  out <- list()
+  for (sel in xml2::xml_find_all(doc, "//select")) {
+    id <- xml2::xml_attr(sel, "id")
+    if (is.na(id)) next
+    opts <- xml2::xml_find_all(sel, "./option")
+    chosen <- opts[!is.na(xml2::xml_attr(opts, "selected"))]
+    if (!is.na(xml2::xml_attr(sel, "multiple"))) {
+      out[[id]] <- as.character(xml2::xml_attr(chosen, "value"))
+      next
+    }
+    pick <- if (length(chosen) > 0) chosen[[1]] else opts[[1]]
+    out[[id]] <- xml2::xml_attr(pick, "value")
+  }
+  for (inp in xml2::xml_find_all(doc, "//input[@type='text']")) {
+    id <- xml2::xml_attr(inp, "id")
+    if (is.na(id)) next
+    value <- xml2::xml_attr(inp, "value")
+    out[[id]] <- if (is.na(value)) "" else value
+  }
+  out[lengths(out) > 0L]
+}
+
 # The app autosaves to a path in tempdir() keyed to a client-reported
 # browser id. A file left by an earlier test would put the next server under
 # test into "previous session available" state; clear before, not after, so
