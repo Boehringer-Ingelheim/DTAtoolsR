@@ -131,6 +131,9 @@ requirements:
     category: integrity
     covers: [load_file]
     source: R/DTAFileTabular-class.R
+    notes: >
+      How a refusal is reported -- the condition class a caller can match -- is
+      REQ-ROBUST-018's to say.
 
   - id: REQ-ROBUST-013
     text: >
@@ -220,3 +223,43 @@ requirements:
       same file-presence shape a file dataset uses for an undelivered target.
       Added after the section 4a mutation run: forcing this branch's import
       count to zero was not detected, and no case exercised the branch at all.
+
+  # ---- the refusal of bytes can be told from every other refusal ---------------
+
+  - id: REQ-ROBUST-018
+    text: >
+      A delimited delivery whose bytes are not valid UTF-8, the encoding a
+      delivery is read as unless its handler declares another, shall be refused
+      with a condition of class dta_encoding_invalid when the bytes are in its
+      header or in a column the specification declares, whichever of load_file()
+      and check() meets them. No failure other than bytes that are not valid in
+      a file's declared encoding shall carry that class: a row of the wrong
+      width and a truncated archive are refused without it.
+    risk: medium
+    category: interface
+    covers: [load_file, check]
+    source: >
+      R/DTAFileTabular-class.R (dta_with_encoding_refusal,
+      dta_refuse_invalid_header_bytes); R/streamingValidation.R (the scans of a
+      lazy table)
+    notes: >
+      REQ-ROBUST-012 requires that such bytes be reported rather than silently
+      reinterpreted; this requirement says what the report is. Before it, the
+      refusal was Arrow's own, with no class that said so: an rlang_error out of
+      the in-memory reader and the lazy opener, a simpleError out of a scan, in
+      the same kinds of condition a ragged row or a truncated archive arrive as. A
+      caller could tell it from them only by matching message text, which is
+      Arrow's and not ours to rely on. A header, which Arrow does not object to,
+      reached the caller as a bare base-R "invalid UTF-8" error naming neither
+      the file nor the column.
+
+      Not covered, on purpose. A file declared in another encoding carries the
+      same class from both readers, but only the developer suite pins that,
+      because which bytes a platform's iconv refuses differs from platform to
+      platform. The scan that check() runs over a lazily held table reads only the
+      columns the validation uses, so bytes in a column the specification does
+      not declare are not met by it (the column is reported as undeclared, so the
+      verdict is not clean, which REQ-ROBUST-012 asks). A SAS transport or
+      SAS7BDAT delivery has classes of its own (dta_xpt_read_error,
+      dta_sas7bdat_read_error). Other readers of a lazily held table (tables(),
+      the exports, the report writer) still meet Arrow's own error.

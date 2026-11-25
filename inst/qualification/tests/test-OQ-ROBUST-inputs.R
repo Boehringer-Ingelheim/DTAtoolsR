@@ -1,5 +1,5 @@
 # What the package does with input it did not expect.
-# REQ-ROBUST-001 .. REQ-ROBUST-003 and REQ-ROBUST-010 .. REQ-ROBUST-017.
+# REQ-ROBUST-001 .. REQ-ROBUST-003 and REQ-ROBUST-010 .. REQ-ROBUST-018.
 #
 # The concern throughout is not that bad input is rejected. It is that bad
 # input is never accepted quietly. A delivery that cannot be read, reported as
@@ -107,25 +107,145 @@ test_that("OQ-ROBUST-002 | a path that cannot be read is named in the condition 
   )
 })
 
+# What one delivery comes to when a caller does what the package is for: loads
+# it and then checks it. An error condition from either entry point is a
+# refusal, and the entry point and the condition's classes are all that is
+# recorded of it; otherwise the checked dataset is handed back, for the caller
+# to read the verdict and the table from. The one place the refusal is
+# recognised, so that every case that speaks of one means the same thing by it.
+ri_run <- function(path, stream) {
+  loaded <- tryCatch(ri_load(path, stream), error = function(e) e)
+  if (inherits(loaded, "error")) {
+    return(list(refused_at = "load_file()", classes = class(loaded), checked = NULL))
+  }
+  checked <- tryCatch(check(loaded, persist = FALSE, quiet = TRUE), error = function(e) e)
+  if (inherits(checked, "error")) {
+    return(list(refused_at = "check()", classes = class(checked), checked = NULL))
+  }
+  list(refused_at = NULL, classes = NULL, checked = checked)
+}
+
+# The rows the table of a run holds, or NA when the delivery was refused. A table
+# held lazily is read in full to count them, and a read that fails there is also
+# NA: the count is evidence for a step to compare, and the step is what fails.
+ri_run_rows <- function(run) {
+  if (is.null(run$checked)) {
+    return(NA_integer_)
+  }
+  tryCatch(
+    nrow(as.data.frame(tables(run$checked)[[1]])),
+    error = function(e) NA_integer_
+  )
+}
+
+# What a run looks like in the evidence: the branch it took and the observed
+# values behind it, so that a failing step shows what was seen and not only that
+# it failed.
+ri_run_detail <- function(run) {
+  if (!is.null(run$refused_at)) {
+    return(sprintf(
+      "refused by %s, condition class %s", run$refused_at,
+      paste(run$classes, collapse = "/")
+    ))
+  }
+  status <- validation_status(run$checked)
+  sprintf(
+    "read and checked: status = %s, ok = %s, %d row(s) in the table",
+    status$status, status$ok, ri_run_rows(run)
+  )
+}
+
+# A gzip-compressed CSV of `n_rows` data rows, whole and then cut in half: the
+# first half of its bytes, which is what a transfer that stopped part way leaves.
+ri_archive <- function(dir, n_rows) {
+  whole <- file.path(dir, "whole.csv.gz")
+  con <- gzfile(whole, "wb")
+  writeLines(
+    c("ID,AGE", sprintf("A%07d,%d", seq_len(n_rows), seq_len(n_rows) %% 100L)),
+    con
+  )
+  close(con)
+
+  truncated <- file.path(dir, "truncated.csv.gz")
+  bytes <- readBin(whole, "raw", n = file.size(whole))
+  writeBin(bytes[seq_len(floor(length(bytes) / 2))], truncated)
+  list(whole = whole, truncated = truncated)
+}
+
 test_that("OQ-ROBUST-003 | a delivery that cannot be parsed is refused, not read as empty | REQ-ROBUST-003", {
   dir <- qa_tempdir()
 
-  # Binary content offered as a CSV. Read as an empty table it would validate
-  # clean, which is the outcome this requirement exists to prevent.
+  # The contract is the requirement's own sentence: a delivery that is not
+  # readable as the declared format "shall raise a condition rather than
+  # validate as an empty or partial table". One outcome meets it -- an error
+  # condition, from load_file() or from check() -- and the case accepts no
+  # other. In particular it does not accept a delivery that was read and then
+  # given a poor verdict: a table made of whatever the bytes could be taken for
+  # is what the requirement is written against, however the verdict reads.
+  #
+  # Two deliveries that are not CSV, in the two ways a reader can fail:
+  #   binary  six bytes with no header line and no field in them. Nothing in it
+  #           is a table; a reader that did not refuse would hold an empty one,
+  #           which validates clean because no value breaks a constraint when
+  #           there are no values.
+  #   ragged  3000 good rows, then a row of three fields under a header that
+  #           declares two. A reader that stopped at it would hold the 3000
+  #           before it: a partial table, validated as if it were the delivery.
+  #           Read in 1 KiB blocks (set below) the streaming reader is far past
+  #           its first block by then, so for it the bad row meets the scan that
+  #           check() runs rather than the opening of the dataset.
+  # Each is held against a CSV that is read: the binary file against a CSV of
+  # one row, the ragged one against the same 3001 rows with no row of the wrong
+  # width. Were those refused too, a refusal of the deliveries would say nothing
+  # about their content, and a reader that read the deliveries would be seen to
+  # fail the case.
+  withr::local_options(DTAtools.stream_block_size = 1024L)
+
   binary <- file.path(dir, "binary.csv")
   writeBin(as.raw(c(0x00, 0xff, 0x00, 0xfe, 0x01, 0x02)), binary)
-  outcome <- tryCatch(
-    {
-      ds <- check(ri_load(binary), persist = FALSE, quiet = TRUE)
-      status <- validation_status(ds)
-      if (nrow(status) == 0) "no table" else as.character(status$ok)
-    },
-    error = function(e) "condition"
+  small <- file.path(dir, "small.csv")
+  writeLines(c("ID,AGE", "A0000001,30"), small)
+
+  valid_rows <- sprintf("A%07d,30", seq_len(3000L))
+  ragged <- file.path(dir, "ragged.csv")
+  writeLines(c("ID,AGE", valid_rows, "A9999999,30,EXTRA"), ragged)
+  long <- file.path(dir, "long.csv")
+  writeLines(c("ID,AGE", valid_rows, "A9999999,30"), long)
+
+  twins <- list(
+    list(what = "a CSV of one row", path = small, rows = 1L),
+    list(what = "3001 rows of two fields", path = long, rows = 3001L)
   )
-  qa_step(
-    "unreadable content does not become a clean verdict",
-    TRUE, outcome %in% c("condition", "no table", "FALSE", "NA")
+  deliveries <- list(
+    list(what = "binary content", path = binary),
+    list(what = "3000 rows and then a row of three fields", path = ragged)
   )
+
+  for (stream in c("never", "always")) {
+    route <- sprintf("stream = \"%s\"", stream)
+
+    for (twin in twins) {
+      run <- ri_run(twin$path, stream)
+      qa_check(
+        sprintf("%s, %s: read and validated clean", route, twin$what),
+        is.null(run$refused_at) && isTRUE(validation_status(run$checked)$ok),
+        detail = ri_run_detail(run)
+      )
+      qa_step(
+        sprintf("%s, %s: and every row is in the table", route, twin$what),
+        twin$rows, ri_run_rows(run)
+      )
+    }
+
+    for (delivery in deliveries) {
+      run <- ri_run(delivery$path, stream)
+      qa_check(
+        sprintf("%s, %s: refused with a condition, and given no verdict", route, delivery$what),
+        !is.null(run$refused_at),
+        detail = ri_run_detail(run)
+      )
+    }
+  }
 })
 
 test_that("OQ-ROBUST-010 | an empty delivery still reaches a definite verdict | REQ-ROBUST-010", {
@@ -181,28 +301,23 @@ test_that("OQ-ROBUST-011 | an awkwardly shaped delivery is validated on its cont
 
 # What load_file() and then check() made of one delivery, reduced to the facts
 # REQ-ROBUST-012 speaks about. `row` is the data row of the delivery whose ID
-# carries the bytes in question. An error condition from either entry point is a
-# refusal, and the entry point and the condition's classes are all that is
-# recorded; otherwise the verdict, whether any message names that row of column
-# ID, and the bytes of the ID that was read back.
+# carries the bytes in question. A refusal is what ri_run() recognises as one,
+# and the entry point and the condition's classes are all that is recorded of
+# it; otherwise the verdict, whether any message names that row of column ID,
+# and the bytes of the ID that was read back.
 #
-# A refusal is recognised as an error and not by its class: the reader's
-# rejection of bytes that are not valid UTF-8 is Arrow's own, and carries only
-# generic classes (`rlang_error` or `simpleError`, then `error` and `condition`)
-# and no package class, and its text is not ours to match. The classes are
-# recorded as evidence only, so the report shows it if a package class is ever
-# added. That a refusal is about the bytes and not about something else the
-# case did wrong is shown by ri_bytes_outcome() being run on a delivery with
-# valid bytes as well.
+# This case accepts a refusal of any class: REQ-ROBUST-012 asks only that the
+# bytes be reported, and the classes are recorded as evidence. That the refusal
+# is a condition of one particular package class is REQ-ROBUST-018's to say, and
+# OQ-ROBUST-018 asserts it. That a refusal is about the bytes and not about
+# something else the case did wrong is shown by ri_bytes_outcome() being run on
+# a delivery with valid bytes as well.
 ri_bytes_outcome <- function(path, stream, row = 1L) {
-  loaded <- tryCatch(ri_load(path, stream), error = function(e) e)
-  if (inherits(loaded, "error")) {
-    return(list(refused_at = "load_file()", classes = class(loaded)))
+  run <- ri_run(path, stream)
+  if (!is.null(run$refused_at)) {
+    return(list(refused_at = run$refused_at, classes = run$classes))
   }
-  checked <- tryCatch(check(loaded, persist = FALSE, quiet = TRUE), error = function(e) e)
-  if (inherits(checked, "error")) {
-    return(list(refused_at = "check()", classes = class(checked)))
-  }
+  checked <- run$checked
 
   messages_frame <- as.data.frame(messages(checked))
   rows <- as.data.frame(tables(checked)[[1]])
@@ -319,29 +434,64 @@ test_that("OQ-ROBUST-012 | bytes that are not valid in the declared encoding are
 
 test_that("OQ-ROBUST-013 | a truncated compressed delivery is refused | REQ-ROBUST-013", {
   dir <- qa_tempdir()
-  whole <- file.path(dir, "whole.csv.gz")
-  con <- gzfile(whole, "wb")
-  writeLines(c("ID,AGE", "A0000001,30", "A0000002,40", "A0000003,50"), con)
-  close(con)
 
-  # Half the bytes of a valid archive. Validating the part that decompresses
-  # would report a verdict on data the sender never sent.
-  truncated <- file.path(dir, "truncated.csv.gz")
-  bytes <- readBin(whole, "raw", n = file.size(whole))
-  writeBin(bytes[seq_len(floor(length(bytes) / 2))], truncated)
+  # The contract is the requirement's own sentence: a truncated compressed
+  # delivery "shall raise a condition rather than validate the part that could
+  # be read". One outcome meets it -- an error condition, from load_file() or
+  # from check() -- and the case accepts no other, so a delivery that is read
+  # up to the cut and given a verdict fails it, whatever the verdict says.
+  #
+  # The archive is 20000 rows long and cut in half, so that the part that could
+  # be read is most of ten thousand rows and not, as an archive of a few lines
+  # would leave, a header the reader cannot use anyway: a refusal of a cut that
+  # left no table would say nothing about a reader that tolerates the cut.
+  # Read in 1 KiB blocks (set below) the streaming reader opens the dataset on
+  # the first of them, which is readable, so for it the cut is met by the scan
+  # that check() runs.
+  withr::local_options(DTAtools.stream_block_size = 1024L)
 
-  outcome <- tryCatch(
-    {
-      ds <- check(ri_load(truncated), persist = FALSE, quiet = TRUE)
-      status <- validation_status(ds)
-      if (nrow(status) == 0) "no table" else "validated"
-    },
-    error = function(e) "condition"
+  n_rows <- 20000L
+  archive <- ri_archive(dir, n_rows)
+  whole <- archive$whole
+  truncated <- archive$truncated
+
+  # What the cut leaves, by a reader that is not this package's: base R's gzfile
+  # hands back every line it can decompress, the last of them cut short. The
+  # case needs this to be a real table's worth, or a refusal below could be put
+  # down to nothing being readable.
+  readable <- local({
+    con <- gzfile(truncated, "r")
+    on.exit(close(con))
+    suppressWarnings(readLines(con))
+  })
+  complete_rows <- length(readable) - 2L
+  qa_check(
+    "the cut archive still holds its header and over a thousand complete rows",
+    identical(readable[[1]], "ID,AGE") && complete_rows > 1000L,
+    detail = sprintf("%d complete data row(s) readable of %d", complete_rows, n_rows)
   )
-  qa_step(
-    "a truncated archive does not silently yield a partial verdict",
-    TRUE, outcome %in% c("condition", "no table")
-  )
+
+  for (stream in c("never", "always")) {
+    route <- sprintf("stream = \"%s\"", stream)
+
+    intact <- ri_run(whole, stream)
+    qa_check(
+      sprintf("%s: the uncut archive is read and validated clean", route),
+      is.null(intact$refused_at) && isTRUE(validation_status(intact$checked)$ok),
+      detail = ri_run_detail(intact)
+    )
+    qa_step(
+      sprintf("%s: and every row of it is in the table", route),
+      n_rows, ri_run_rows(intact)
+    )
+
+    cut <- ri_run(truncated, stream)
+    qa_check(
+      sprintf("%s: the cut archive is refused with a condition, and given no verdict", route),
+      !is.null(cut$refused_at),
+      detail = ri_run_detail(cut)
+    )
+  }
 })
 
 test_that("OQ-ROBUST-014 | two validations of one delivery agree, and so do two exports | REQ-ROBUST-014", {
@@ -514,4 +664,87 @@ test_that("OQ-ROBUST-017 | a lazily held table whose file has vanished fails alo
   msgs <- messages(checked, as_tibble = FALSE)
   qa_step("the finding is file_presence", "file_presence", msgs$rule_id)
   qa_check("and its message names the missing file", grepl("gone.csv", msgs$message, fixed = TRUE))
+})
+
+test_that("OQ-ROBUST-018 | the refusal of bytes that are not valid UTF-8 is a condition a caller can match | REQ-ROBUST-018", {
+  dir <- qa_tempdir()
+
+  # The contract is the requirement's own sentence: a delimited delivery whose
+  # bytes are not valid UTF-8 "shall be refused with a condition of class
+  # `dta_encoding_invalid`" when they are in its header or in a column the
+  # specification declares (ID is one), whichever of load_file() and check()
+  # meets them, and "no other failure shall carry that class". So the case holds
+  # three kinds of delivery to it:
+  #   - bytes FF FE, which occur in no UTF-8 text, in the only data row, in data
+  #     row 3001 after 3000 valid rows, and in the header: each must be refused
+  #     with the class. Read in 1 KiB blocks (set below), the streaming reader
+  #     is far past its first block by row 3001, so those bytes reach the scan
+  #     that check() runs and not the opening of the dataset; the in-memory
+  #     reader, the opening and the scan are three different routes to the same
+  #     refusal, and the two stream settings cover all three.
+  #   - the same three with valid bytes (U+00E9 for FF FE): each must be read.
+  #     Were they refused too, a refusal of the others would say nothing about
+  #     their bytes.
+  #   - a row of three fields where the header declares two, and an archive cut
+  #     in half: each is refused, because it cannot be read, and must NOT carry
+  #     the class. A class given to every read failure would pass every step
+  #     above, which is why these are here.
+  withr::local_options(DTAtools.stream_block_size = 1024L)
+
+  valid_rows <- paste(sprintf("A%07d,30\n", seq_len(3000L)), collapse = "")
+  bad_id <- c(charToRaw("A00000"), as.raw(c(0xff, 0xfe)))
+  valid_id <- c(charToRaw("A00000"), as.raw(c(0xc3, 0xa9)))
+  write_csv_bytes <- function(name, ...) {
+    path <- file.path(dir, name)
+    pieces <- lapply(list(...), function(piece) if (is.raw(piece)) piece else charToRaw(piece))
+    writeBin(do.call(c, pieces), path)
+    path
+  }
+
+  bad <- list(
+    list(what = "the only data row", path = write_csv_bytes("bad-only-row.csv", "ID,AGE\n", bad_id, ",30\n")),
+    list(what = "data row 3001", path = write_csv_bytes("bad-late-row.csv", "ID,AGE\n", valid_rows, bad_id, ",30\n")),
+    list(what = "the header", path = write_csv_bytes("bad-header.csv", "ID", as.raw(c(0xff, 0xfe)), ",AGE\nA0000001,30\n"))
+  )
+  twins <- list(
+    list(what = "the only data row", path = write_csv_bytes("ok-only-row.csv", "ID,AGE\n", valid_id, ",30\n")),
+    list(what = "data row 3001", path = write_csv_bytes("ok-late-row.csv", "ID,AGE\n", valid_rows, valid_id, ",30\n")),
+    list(what = "the header", path = write_csv_bytes("ok-header.csv", "ID", as.raw(c(0xc3, 0xa9)), ",AGE\nA0000001,30\n"))
+  )
+  ragged <- file.path(dir, "ragged.csv")
+  writeLines(c("ID,AGE", sprintf("A%07d,30", seq_len(3000L)), "A9999999,30,EXTRA"), ragged)
+  cut <- ri_archive(dir, 20000L)$truncated
+  unreadable <- list(
+    list(what = "a row of three fields under a header of two", path = ragged),
+    list(what = "a gzip archive cut in half", path = cut)
+  )
+
+  for (stream in c("never", "always")) {
+    route <- sprintf("stream = \"%s\"", stream)
+
+    for (twin in twins) {
+      run <- ri_run(twin$path, stream)
+      qa_check(
+        sprintf("%s, valid bytes in %s: read", route, twin$what),
+        is.null(run$refused_at),
+        detail = ri_run_detail(run)
+      )
+    }
+    for (delivery in bad) {
+      run <- ri_run(delivery$path, stream)
+      qa_check(
+        sprintf("%s, invalid bytes in %s: refused with a condition of class dta_encoding_invalid", route, delivery$what),
+        "dta_encoding_invalid" %in% run$classes,
+        detail = ri_run_detail(run)
+      )
+    }
+    for (delivery in unreadable) {
+      run <- ri_run(delivery$path, stream)
+      qa_check(
+        sprintf("%s, %s: refused, and not with that class", route, delivery$what),
+        !is.null(run$refused_at) && !("dta_encoding_invalid" %in% run$classes),
+        detail = ri_run_detail(run)
+      )
+    }
+  }
 })
