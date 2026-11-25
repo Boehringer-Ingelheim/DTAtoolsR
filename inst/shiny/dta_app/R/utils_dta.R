@@ -174,17 +174,24 @@ dta_rule_list_rename <- function(l, old, new) {
   l
 }
 
-# Ids of the columns a range rule may target: numeric ones only, whichever
-# backend declares them (SAS Num / Int, R numeric / integer). Decided by the
-# type's family, never by a bare type name.
-dta_numeric_column_ids <- function(dta, dataset) {
+# The declared type family (text, number, integer, logical, temporal) of every
+# column of a dataset, as a character vector named by column id; NA for a column
+# whose type is unknown. Decided by the package's own type tables, never by a
+# bare type name.
+dta_column_families <- function(dta, dataset) {
   ds <- dta_get_dataset(dta, dataset)
   cols <- tryCatch(ds@specs@columns, error = function(e) NULL) %||% list()
-  keep <- vapply(cols, function(c) {
-    fam <- tryCatch(dta_pkg_type_family(c@structure), error = function(e) NA_character_)
-    isTRUE(fam %in% c("number", "integer"))
-  }, logical(1))
-  names(cols)[keep]
+  fam <- vapply(cols, function(c) {
+    tryCatch(dta_pkg_type_family(c@structure), error = function(e) NA_character_)
+  }, character(1))
+  stats::setNames(fam, names(cols))
+}
+
+# Ids of the columns a range rule may target: numeric ones only, whichever
+# backend declares them (SAS Num / Int, R numeric / integer).
+dta_numeric_column_ids <- function(dta, dataset) {
+  fam <- dta_column_families(dta, dataset)
+  names(fam)[fam %in% c("number", "integer")]
 }
 
 # ---- Loading -------------------------------------------------------------

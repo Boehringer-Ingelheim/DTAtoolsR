@@ -65,9 +65,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   nothing else produced every term of the vocabulary plus `UNSCHED`, even the
   terms the slot's own `include:` had left out of its menu. The column now gets
   exactly `UNSCHED`.
+- **A rule opened in the app's rule editor and saved without a change keeps its
+  meaning.** The editor modelled a clause as one row per column, with one
+  operator and the value as a number-or-text guess, and rewrote what it could
+  not show. `VISIT: {not_equal: SCREENING}` was saved as `equals`, the opposite
+  test; `LBORRES: {range: [0.5, 40]}` as the text `0.5, 40` (the spec check
+  then refused the save on a numeric column); a column with
+  `{greater_equal: 18, less: 65}` lost its second operator, and two rows for one
+  column overwrote each other; a Char column's `"001"` and `"007"` were saved as
+  the numbers 1 and 7, so `in: ["001", "002"]` could no longer select any row
+  and the rule could never fail; `"1.50"` became 1.5, and `"Smith, John"` was
+  split into two values. The editor now shows one row per column and operator,
+  keeps a row you did not touch exactly as it was (type and spelling), reads a
+  row you changed by the declared type of its column (a number for a numeric
+  column, text for any other), and takes a quoted list (`"Smith, John", Doe`; a
+  missing value is `~`). A rule it cannot show faithfully (an operator it does
+  not know, or two spellings of one operator on one column such as `range` with
+  `min`) is not opened and says why, instead of being rewritten, and the same
+  operator twice for one column is an error on Save, not an overwrite.
+- **A value the rule editor cannot read is refused, not dropped.** A range
+  rule's minimum of `0,5` (a decimal comma) was saved as no minimum, a between
+  row such as `18 - 65` vanished from the rule, `0,5, 10` became the bounds 0
+  and 5, and `empty` took any word to mean true; a row with a value and no
+  column, or a grouped row with a column and no condition name, was skipped, and
+  a blank Value box was saved as an empty text. Each is now an error on Save
+  that names the text, and the rule is left as it was. Decimals are written with
+  a point. A range rule's bounds are kept as they were (`max: 100000` is not
+  rewritten as `100000.0`).
 
 ### Changed
 
+- **The rule editor writes the engine's normal form of an operator.** Saving a
+  rule written with `range: [lo, hi]` stores `min: lo` and `max: hi`, `equal`
+  becomes `equals` and `not_equal` becomes `not_equals`. The test is the same;
+  only the spelling in the saved YAML changes, on the first save of such a rule.
 - **A vocabulary slot with no `default:` that the author leaves empty now builds
   its column with no permitted values.** The options dialog reports a control
   holding nothing the same way whether the author cleared it or never filled

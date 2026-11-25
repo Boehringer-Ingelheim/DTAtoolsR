@@ -318,6 +318,44 @@ ui_text <- function(out) {
   if (is.null(out) || is.null(out$html)) "" else paste(as.character(out$html), collapse = "")
 }
 
+# What a browser reports for the controls in rendered HTML, before the user
+# touches any of them, as a named list ready for session$setInputs().
+#
+# testServer() has no browser, so an input a test sets is whatever the test says
+# it is, and a test that sets an operator itself can never see the operator the
+# browser would have reported. This reads the HTML the way the browser does: a
+# <select> reports the option marked `selected`, or its FIRST option when none
+# is marked (what a <select> does whose `selected` value is not among its
+# options), and a text <input> reports its `value` attribute, "" when absent.
+# A multiple <select> reports its selected options (none when none is). Only
+# controls whose id starts with one of `prefixes` are read.
+app_browser_inputs <- function(html, prefixes = "") {
+  skip_if_not_installed("xml2")
+  doc <- xml2::read_html(paste0("<body>", html, "</body>"))
+  wanted <- function(id) any(startsWith(id, prefixes))
+  out <- list()
+  for (sel in xml2::xml_find_all(doc, "//select")) {
+    id <- xml2::xml_attr(sel, "id")
+    if (is.na(id) || !wanted(id)) next
+    opts <- xml2::xml_find_all(sel, "./option")
+    chosen <- opts[!is.na(xml2::xml_attr(opts, "selected"))]
+    if (!is.na(xml2::xml_attr(sel, "multiple"))) {
+      # a multiple <select> reports every selected option, none when none is
+      out[[id]] <- as.character(xml2::xml_attr(chosen, "value"))
+      next
+    }
+    pick <- if (length(chosen) > 0) chosen[[1]] else opts[[1]]
+    out[[id]] <- xml2::xml_attr(pick, "value")
+  }
+  for (inp in xml2::xml_find_all(doc, "//input[@type='text']")) {
+    id <- xml2::xml_attr(inp, "id")
+    if (is.na(id) || !wanted(id)) next
+    value <- xml2::xml_attr(inp, "value")
+    out[[id]] <- if (is.na(value)) "" else value
+  }
+  out
+}
+
 # Flatten a static tag / renderUI() result to text, so it can be asserted on.
 render_html <- function(tag) {
   paste(as.character(tag), collapse = "\n")

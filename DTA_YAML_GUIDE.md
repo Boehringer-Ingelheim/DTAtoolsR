@@ -673,6 +673,24 @@ On an `R logical` column, `equals`, `equal`, `not_equals`, `not_equal`, `in` and
 `F`, `false`, `False` (`equals: T` matches `TRUE`); any other operand is an
 error.
 
+**The app's rule editor** (Edit rules) shows a clause as one row per column and
+operator. Several operators on one column are several rows, all of which must
+hold, with each operator at most once per column; `min` and `max` together, and
+`range`, are one *between* row. A rule opened and saved without a change keeps
+its meaning and its values, but the aliases are written in their normal form:
+`range: [lo, hi]` as `min: lo` with `max: hi`, `equal` as `equals`, `not_equal`
+as `not_equals`. A value you type is read by the declared type of its column: a
+number for a numeric column, text for any other, so `007` stays text on a
+`SAS Char` column; the comparison operators and *between* always take numbers
+(a date column keeps its text). Decimals are written with a point. In an `in` or
+`not_in` list a value that holds a comma goes in double quotes (`"Smith, John",
+Doe`, a quote inside it doubled), and a missing value is written `~`. A value
+the editor cannot read, or the same operator twice on one column, is refused on
+Save with a message, and the rule is left as it was. A rule it cannot show
+faithfully, because an operator is unknown to it or two spellings of one
+operator stand on one column (`range` with `min`), is not opened; edit it in the
+YAML text.
+
 ### `group_condition` — logic across the rows of a group
 
 Define named row conditions, then constrain how they co-occur inside each group.
