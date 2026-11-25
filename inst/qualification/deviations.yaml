@@ -472,6 +472,80 @@ deviations:
     opened: 2026-11-19
     closed: null
 
+  - id: DEV-019
+    title: The rule operator pattern matches an empty string
+    status: closed
+    severity: major
+    affects: [REQ-RULE-007]
+    observed: >
+      A rule's pattern matched an empty string like any other text: ^$ and .*
+      both selected "", and a THEN pattern such as ^[A-Z]*$ accepted it. A
+      missing value never matched, so the two were judged differently.
+    expected: >
+      REQ-RULE-007: a missing value and an empty string do not match a pattern,
+      whatever the expression.
+    impact: >
+      A THEN pattern accepted an empty string that it counted as a violation
+      when the value was missing, and an IF pattern put the row in scope.
+      Nothing was reported, so a delivery whose rule required text in a column
+      could pass with an empty string there. A file never delivers an empty
+      string (an empty field is read as missing, REQ-FILE-004), so the cost was
+      limited to tables built in R, as a data frame handed to check() or to
+      rule_check_col_condition(). The case that claimed to verify the
+      requirement ran ^$ on a column that held no empty string, and so could
+      not fail.
+    workaround: >
+      Test for an empty value with the empty operator instead of a pattern.
+    resolution: >
+      Closed by matching an empty string and a missing value as not matching in
+      dta_pattern_mask(), the one place the operator is evaluated for a table
+      held in memory, a table scanned in batches, the row preview and the
+      grouped conditions. OQ-RULE-011 now runs columns that hold an empty
+      string and a missing value, with expected counts worked out from the
+      requirement; OQ-RULE-057 reaches the same verdict through a file.
+    reference: >
+      R/evaluateRules.R (dta_pattern_mask);
+      inst/qualification/tests/test-OQ-RULE-operators.R (OQ-RULE-011);
+      tests/testthat/test-evaluateRules.R
+    opened: 2026-11-24
+    closed: 2026-11-24
+
+  - id: DEV-020
+    title: The rule operator pattern matches a number as R prints it, in scientific notation
+    status: closed
+    severity: major
+    affects: [REQ-RULE-037]
+    observed: >
+      A rule's pattern was matched against as.character() of a numeric column,
+      which writes the double 100000 as 1e+05 and 0.00001 as 1e-05 but the
+      integer 100000 as 100000. A pattern ^100000$ therefore selected the
+      integer and not the double, so a column read as SAS Int and the same
+      numbers read as SAS Num reached different verdicts. A column's own
+      pattern matched the plain decimal text of an integer or a double.
+    expected: >
+      REQ-RULE-037: a number is matched as its plain decimal text, 100000 as
+      100000 and 0.00001 as 0.00001, whatever its storage.
+    impact: >
+      A rule that selects, or requires, a round or a small number by its
+      digits (100000, 0.00001: the values R writes with an exponent) silently
+      missed it in a double column: an IF never applied to such a row, so the
+      rule passed without testing it, and a THEN failed it. Other numbers of
+      the same column, 100001 for one, were matched as intended. The rule engine and the column check gave two verdicts
+      on one value.
+    workaround: >
+      Declare the column an integer type when it holds whole numbers, or write
+      the pattern against the exponent form.
+    resolution: >
+      Closed by rendering a number with dta_numeric_text() in
+      dta_pattern_mask(), the text a column's own pattern is matched against.
+      OQ-RULE-056 and OQ-RULE-057 assert the corrected behaviour.
+    reference: >
+      R/evaluateRules.R (dta_pattern_mask);
+      inst/qualification/tests/test-OQ-RULE-operators.R (OQ-RULE-056);
+      tests/testthat/test-evaluateRules.R
+    opened: 2026-11-24
+    closed: 2026-11-24
+
 limitations:
   - id: LIM-001
     title: A row whose every field is empty is dropped by the CSV reader
@@ -977,3 +1051,23 @@ limitations:
       matched exactly, and a typed vector in a table built in R is not matched
       at all (LIM-027). A delivery in which the seconds or the fraction must
       be present declares the format with them.
+
+  - id: LIM-036
+    title: A column pattern matches an empty string, a rule pattern does not
+    affects: [REQ-RULE-007, REQ-VAL-009]
+    reference: >
+      R/columnSpecChecks.R (dta_check_column_spec); R/evaluateRules.R
+      (dta_pattern_mask); tests/test-OQ-VAL-columnspec.R (OQ-VAL-008);
+      tests/testthat/test-columnspec-checks.R
+    consequence: >
+      A column's pattern asks whether a value may stand in the column, and an
+      empty string is a value there: it is matched like any other text, so
+      ^[A-Z]*$ accepts it, and only a missing value is left to nullability.
+      The rule operator pattern asks which rows an expression selects and
+      never matches an empty string or a missing value (REQ-RULE-007). The same
+      expression can therefore accept an empty string as a column pattern and
+      refuse it as a THEN pattern. A file never delivers an empty string, since
+      an empty field is read as missing (REQ-FILE-004), so this shows only in a
+      table built in R. A delivery that must not hold an empty string
+      constrains the column with a pattern that needs a character, or with the
+      empty operator in a rule.

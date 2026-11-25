@@ -1,5 +1,6 @@
 # The four rule types and the rule set as a whole.
-# REQ-RULE-011 .. REQ-RULE-021 and REQ-RULE-029 .. REQ-RULE-032.
+# REQ-RULE-011 .. REQ-RULE-021 and REQ-RULE-029 .. REQ-RULE-032, REQ-RULE-036,
+# and REQ-RULE-007 and REQ-RULE-037 as a file reaches them.
 #
 # Each rule type is checked for what it reports, what it ignores, and what it
 # does when it cannot be evaluated at all. The last of those matters most: a
@@ -424,4 +425,75 @@ test_that("OQ-RULE-055 | T, TRUE, true and True are one key in an R logical colu
     "...and scanned in batches of two rows",
     0L, duplicates("R character", "always", 2L)
   )
+})
+
+# ---- a pattern on a file: missing values and numbers ---------------------------------------
+
+test_that("OQ-RULE-057 | a pattern reaches the same verdict on a file held in memory and scanned in batches, for an empty field and for a number in every numeric type | REQ-RULE-007 REQ-RULE-037", {
+  # Five rows. CODE is empty on row 2, which the reader reads as missing
+  # (REQ-FILE-004): an empty string never reaches a rule from a file, a missing
+  # value does, and a pattern matches neither (REQ-RULE-007). N holds whole
+  # numbers; by their decimal digits, 100000, 100001 and 200000 are six digits
+  # that start with 1 or 2, 999999 starts with 9 and 1000000 has seven digits.
+  # Row 3 is written 2e5, which is the number 200000: what a pattern sees is
+  # the number, never the characters the file held.
+  lines <- c(
+    "GRP,CODE,N",
+    "a,x,100000", "a,,100001", "a,y,2e5", "a,z,999999", "a,w,1000000"
+  )
+  path <- file.path(qa_tempdir(), "pattern_file.csv")
+  writeLines(lines, path)
+
+  # Row 2 is the only row whose CODE holds no text, so `.*` fails it alone.
+  code_rule <- DTARuleColCondition(
+    id = "code_text", condition = list(GRP = list(equals = "a")),
+    then = list(CODE = list(pattern = ".*"))
+  )
+  # The IF selects rows 1, 2 and 3 by the digits of N; none of them is "none",
+  # so each is a violation: the rows the pattern selected.
+  n_rule <- DTARuleColCondition(
+    id = "n_pattern", condition = list(N = list(pattern = "^[12][0-9]{5}$")),
+    then = list(CODE = list(equals = "none"))
+  )
+  reported <- function(n_type, stream, rule_id, batch_rows = NULL) {
+    specs <- DTAColumnSpecCollection(
+      columns = list(
+        GRP = DTAColumnSpec(id = "GRP", type = "R character", nullable = FALSE),
+        CODE = DTAColumnSpec(id = "CODE", type = "R character", nullable = TRUE),
+        N = DTAColumnSpec(id = "N", type = n_type, nullable = FALSE)
+      ),
+      rules = list(code_rule, n_rule)
+    )
+    ds <- DTADataSetTabular(id = "p", specs = specs, files = list(DTAFileCSV(filename = "pattern_file.csv")))
+    ds <- load_file(ds, file = path, handler_index = 1, stream = stream)
+    ds <- if (is.null(batch_rows)) {
+      check(ds, persist = FALSE, quiet = TRUE)
+    } else {
+      check(ds, persist = FALSE, quiet = TRUE, batch_rows = batch_rows)
+    }
+    msgs <- as.data.frame(messages(ds))
+    found <- msgs$message[msgs$source == "rule" & msgs$rule_id %in% rule_id]
+    if (length(found) == 0L) 0L else rt_violations(list(valid = FALSE, message = found[[1L]]))
+  }
+
+  for (n_type in c("SAS Int", "SAS Num", "R integer", "R numeric")) {
+    qa_step(
+      sprintf("N read as %s, held in memory: the empty CODE fails a THEN pattern", n_type),
+      1L, reported(n_type, "never", "code_text")
+    )
+    qa_step(
+      sprintf("N read as %s, held in memory: the pattern selects the three six-digit numbers", n_type),
+      3L, reported(n_type, "never", "n_pattern")
+    )
+    for (rows in c(1L, 2L, 100L)) {
+      qa_step(
+        sprintf("N read as %s, scanned in batches of %d rows: the empty CODE fails the same", n_type, rows),
+        1L, reported(n_type, "always", "code_text", rows)
+      )
+      qa_step(
+        sprintf("N read as %s, scanned in batches of %d rows: the same three numbers", n_type, rows),
+        3L, reported(n_type, "always", "n_pattern", rows)
+      )
+    }
+  }
 })

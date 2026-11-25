@@ -239,6 +239,12 @@ dta_check_column_spec <- function(column_name, col_spec, x) {
   # dta_numeric_text()); booleans are skipped. The generated schema's patterns
   # were previously evaluated as ECMAScript regex; PCRE is used here, which
   # agrees for the character-class and anchor constructs these specs use.
+  # A missing value is skipped (nullability decides it), but an empty string is
+  # a value like any other and is matched: this asks whether a value may stand
+  # in the column. The rule operator `pattern` asks which rows it selects, and
+  # there an empty string never matches (dta_pattern_mask()). No reader hands
+  # this check an empty string from a file: an empty field is read as missing,
+  # and a matrix header drops its empty labels before it gets here.
   pattern <- col_spec$pattern
   if (!is.null(pattern) && !is.na(pattern) &&
     base_type %in% c("string", "integer", "number")) {
@@ -411,7 +417,10 @@ dta_map_unique <- function(v, fun) {
 #' @return A character vector, `NA` where `x` is `NA`.
 #' @keywords internal
 dta_numeric_text <- function(x) {
-  if (is.integer(x)) {
+  # `integer64` answers TRUE to is.numeric() but stores the bits of a 64-bit
+  # integer in a double, which the arithmetic below would read as a tiny double
+  # ("0"). bit64's own as.character() writes it exactly, and never in an exponent.
+  if (is.integer(x) || inherits(x, "integer64")) {
     return(as.character(x))
   }
   txt <- rep(NA_character_, length(x))

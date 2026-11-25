@@ -29,7 +29,7 @@ areas:
     min_tests: 48
   - area: RULE
     title: Cross-column and grouped rules
-    min_tests: 47
+    min_tests: 49
   - area: FILE
     title: File handlers and readers
     min_tests: 61

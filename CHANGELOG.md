@@ -92,6 +92,55 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   that names the text, and the rule is left as it was. Decimals are written with
   a point. A range rule's bounds are kept as they were (`max: 100000` is not
   rewritten as `100000.0`).
+- **The qualification case `OQ-ROBUST-012` can now fail.** It is the only case
+  for `REQ-ROBUST-012` (bytes that are not valid in the declared encoding "shall
+  be reported rather than silently reinterpreted"), and its assertions accepted
+  every outcome the case could produce, including a reader that replaced the
+  bytes with U+FFFD and validated the delivery clean, so the requirement was
+  recorded as verified whatever `load_file()` and `check()` did with them. The
+  case now accepts an error condition, or a table whose verdict is not ok, with
+  a message naming the row and column `ID`, and whose stored ID is the delivered
+  bytes unchanged, and nothing else. It runs on the in-memory and the streaming
+  reader, with the bytes in the only row and in a row after the streaming
+  reader's first read block (where the refusal comes from `check()`), and reads
+  a delivery of valid multi-byte text through both as a control, so a refusal
+  can be attributed to the bytes. The package is unchanged: it refuses the bytes
+  today.
+- **A rule's `pattern` no longer matches an empty string.** The documented
+  behaviour (a missing value and an empty string do not match a pattern) held
+  for a missing value only: `""` matched `^$`, `.*` and every other expression
+  that accepts nothing, as an ordinary text. A pattern now matches neither an
+  empty string nor a missing value (`NA`, `NaN`), whatever the expression, in a
+  `condition` and in a `then`, in a table held in memory and in one scanned in
+  batches. **Specifications that relied on the old behaviour now fail:** a
+  `then` pattern such as `^[A-Z]*$` or `.*` used to accept an empty string and
+  now reports it, exactly as it already reported a missing value, and a
+  `condition` pattern no longer puts such a row in scope. Files are not
+  affected by the empty string itself, because an empty field is read as
+  missing; the change shows in a table whose columns hold a literal `""`, such
+  as a data frame handed to `check()` or `rule_check_col_condition()`. To test
+  for a missing or empty value, use `empty`. Text of spaces only stays text for
+  `pattern`. A column's own `pattern` is a different check and is unchanged.
+- **A rule's `pattern` now matches a number as its plain decimal text.** It
+  matched a number as R's `as.character()` writes it, in scientific notation
+  for round and small values: `100000` was `"1e+05"` and `0.00001` was
+  `"1e-05"`, so `^100000$` did not select a double 100000 but selected the
+  integer 100000, and a column read as `SAS Int` and the same column read as
+  `SAS Num` reached different verdicts. A number in a numeric column is now
+  matched as `100000` and `0.00001`: a whole number is written out in full,
+  whatever its size, and a fraction keeps at most 15 significant digits (so a
+  fraction that needs more can read as a whole number, as it does for a
+  column's own `pattern`, which already used this text). A pattern written
+  against the exponent form (`^1e[+]05$`) no longer matches. The rule reading
+  guide in the exported documents, `DTA_YAML_GUIDE.md`, the vignette and the
+  README now say what a pattern does with an empty, a missing and a numeric
+  value.
+- **A column's own `pattern` no longer misreads a `bit64::integer64` column.**
+  The plain decimal text it matches a number against wrote an `integer64`
+  value as `"0"` (the arithmetic read the 64-bit integer's bits as a double),
+  so a valid `integer64` value was reported as breaking `^100000$`. An
+  `integer64` value is now written exactly, as the rule operator `pattern`
+  writes it.
 
 ### Changed
 
