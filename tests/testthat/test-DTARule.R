@@ -251,3 +251,36 @@ test_that("a col_range rule naming several columns is rejected at construction",
     class = "dta_rule_range_columns"
   )
 })
+
+test_that("a col_range rule accepts equal bounds and refuses reversed ones", {
+  rule <- DTARuleColRange(id = "r", columns = "A", min = 5, max = 5)
+  expect_identical(rule@min, 5)
+  expect_identical(rule@max, 5)
+
+  result <- rule_check_range(rule, data.frame(A = c(4, 5, 6)))
+  expect_false(result$valid)
+  expect_match(result$message, "violated: 2 rows")
+
+  expect_error(
+    DTARuleColRange(id = "r", columns = "A", min = 6, max = 5),
+    class = "dta_rule_invalid_range"
+  )
+})
+
+test_that("a col_range rule given range together with min or max is refused", {
+  for (extra in list(list(min = 0), list(max = 9), list(min = 0, max = 9))) {
+    expect_error(
+      do.call(DTARuleColRange, c(list(id = "r", columns = "A", range = c(1, 2)), extra)),
+      class = "dta_rule_range_conflict"
+    )
+    expect_error(
+      do.call(
+        DTARuleFactory,
+        c(list(id = "r", type = "col_range", columns = "A", range = c(1, 2)), extra)
+      ),
+      class = "dta_rule_range_conflict"
+    )
+  }
+  # range alone still works
+  expect_identical(DTARuleColRange(id = "r", columns = "A", range = c(1, 2))@max, 2)
+})

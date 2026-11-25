@@ -374,3 +374,41 @@ test_that("OQ-APP-082 | a rule the rule editor cannot show faithfully is not ope
     qa_step("and the document is untouched", before, rv$dta)
   })
 })
+
+test_that("OQ-APP-083 | a range rule saved with its maximum or its minimum box left blank has no bound on that side and reopens with that box blank | REQ-APP-065", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+
+  shiny::testServer(app, {
+    qrr_start(session)
+    qrr_open(session, output, "result_limits")
+    session$setInputs(rule_min = "5", rule_max = "")
+    qrr_save(session)
+    qa_check("saving the rule reports no error", is.null(rv$rule_msg))
+
+    saved <- qrr_rule(rv, "result_limits")
+    qa_step("the minimum is the 5 that was typed", 5, saved$min)
+    qa_step("there is no upper bound", Inf, saved$max)
+
+    # Opened again, the Maximum box is blank and the Minimum shows its number.
+    session$setInputs(rule_edit_click = unname(qrr_index[["result_limits"]]))
+    shown <- qapp_browser_inputs(qapp_ui_text(output$rule_modal_body))
+    qa_step("the Maximum box is blank", "", shown$rule_max)
+    qa_step("the Minimum box shows 5", "5", shown$rule_min)
+
+    # The other side: a blank Minimum box leaves no lower bound.
+    session$setInputs(rule_min = "", rule_max = "7")
+    qrr_save(session)
+    qa_check("saving with the Minimum box blank reports no error", is.null(rv$rule_msg))
+    saved <- qrr_rule(rv, "result_limits")
+    qa_step("there is no lower bound", -Inf, saved$min)
+    qa_step("the maximum is the 7 that was typed", 7, saved$max)
+
+    # Both boxes blank is refused and leaves the rule as it was.
+    session$setInputs(rule_edit_click = unname(qrr_index[["result_limits"]]))
+    session$setInputs(rule_min = "", rule_max = "")
+    qrr_save(session)
+    qa_check("a range with both boxes blank is refused", isFALSE(rv$rule_msg$ok))
+    qa_step("the saved rule is unchanged", saved, qrr_rule(rv, "result_limits"))
+  })
+})

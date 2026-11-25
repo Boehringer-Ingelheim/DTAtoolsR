@@ -1392,7 +1392,7 @@ rules:
 #### `col_range`
 
 Ensures that all values in a numeric column fall within `[min, max]`. The bounds can also be
-given as `range: [18, 65]` in place of `min`/`max`.
+given as `range: [18, 65]` in place of `min`/`max`; give one form or the other, not both.
 
 ```yaml
 rules:

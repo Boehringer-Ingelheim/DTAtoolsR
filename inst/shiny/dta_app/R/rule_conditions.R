@@ -79,6 +79,14 @@ form_read_number <- function(txt, where) {
   value
 }
 
+# The text of a range bound's box: empty for an open side (absent, NA, +-Inf).
+form_bound_text <- function(x) {
+  if (is.null(x) || length(x) == 0 || is.na(x[1]) || !is.finite(x[1])) {
+    return("")
+  }
+  form_number_text(x)
+}
+
 # The shortest text that reads back as exactly this number. `as.character()`
 # would show 100000 as "1e+05" and 0.1 + 0.2 as "0.3", which is another number.
 form_number_text <- function(x) {
@@ -343,28 +351,29 @@ parse_form_between <- function(txt, family = NA_character_, where = "") {
   out
 }
 
-# The two boxes of a range rule: list(min =, max =), a blank box absent. A box
+# The two boxes of a range rule: list(min =, max =). A blank box is an open
+# side: -Inf for the minimum, Inf for the maximum; both blank is an error. A box
 # still showing the bound the rule was opened with (`orig`, list(min =, max =))
 # keeps that bound as it was, so an integer stays an integer. The message text of
 # "needs one" is the editor's old one.
 parse_form_bounds <- function(min_txt, max_txt, orig = list()) {
-  read <- function(txt, label, kept) {
+  read <- function(txt, label, kept, open) {
     txt <- txt %||% ""
     if (!nzchar(trimws(txt))) {
-      return(NULL)
+      return(open)
     }
     if (!is.null(kept) && identical(txt, form_number_text(kept))) {
       return(kept)
     }
     form_read_number(txt, paste0(label, ": "))
   }
-  out <- list()
-  out$min <- read(min_txt, "Minimum", orig[["min"]])
-  out$max <- read(max_txt, "Maximum", orig[["max"]])
-  if (length(out) == 0) {
+  if (!nzchar(trimws(min_txt %||% "")) && !nzchar(trimws(max_txt %||% ""))) {
     form_value_error("", "A range rule needs a minimum and/or maximum.")
   }
-  out
+  list(
+    min = read(min_txt, "Minimum", orig[["min"]], -Inf),
+    max = read(max_txt, "Maximum", orig[["max"]], Inf)
+  )
 }
 
 # The text of one Value box as the R value its operator takes, read by the

@@ -1113,3 +1113,18 @@ requirements:
       Before this requirement an unreadable bound was silently taken as absent
       (a minimum of "0,5" saved as no minimum), and the second of two rows for
       one column overwrote the first.
+
+  - id: REQ-APP-065
+    text: >
+      A range rule saved in the rule editor with its minimum box left blank
+      shall be saved with no lower bound, and one saved with its maximum box
+      left blank shall be saved with no upper bound, so that every value on
+      that side is within the range; the rule shall be opened again with that
+      box blank. A range rule with both boxes blank shall be refused.
+    risk: high
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/R/rule_conditions.R
+    notes: >
+      The editor's hint promises "a minimum and/or maximum". An open side is
+      stored as minus or plus infinity, written -.inf or .inf in YAML.

@@ -629,11 +629,11 @@ words. Rules must only reference declared columns.
   type: col_range
   description: Only adults up to 85 were enrolled.
   columns: AGE        # exactly one column
-  min: 18             # min < max, both required
+  min: 18             # min <= max, both required (use -.inf / .inf for an open side)
   max: 85
 ```
 
-(`range: [18, 85]` is equivalent to `min`/`max`.)
+(`range: [18, 85]` is equivalent to `min`/`max`; give one or the other, not both.)
 
 ### `col_condition` — row-level IF → THEN
 

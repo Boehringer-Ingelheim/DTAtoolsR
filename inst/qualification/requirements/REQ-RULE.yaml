@@ -160,7 +160,10 @@ requirements:
     text: >
       A range rule shall report every value outside its inclusive bounds, and
       shall accept its bounds either as a range of two values or as separate
-      min and max values.
+      min and max values. The two bounds may be equal; a lower bound greater
+      than the upper bound shall be refused with a condition of class
+      dta_rule_invalid_range. Giving a range together with min or max shall
+      be refused with a condition of class dta_rule_range_conflict.
     risk: high
     category: functional
     covers: [DTARuleColRange, rule_check_range]

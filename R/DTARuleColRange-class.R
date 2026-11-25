@@ -12,14 +12,14 @@
 #'   property is a character vector for consistency with the other rule
 #'   classes, but a range rule must name exactly one column; more than one is
 #'   an error (class `dta_rule_range_columns`) when the rule is constructed.
-#' @param range Numeric vector or list of length 2 (lower, upper). Legacy
-#'   argument for range checks; it is used only when both \code{min} and
-#'   \code{max} are \code{NULL}, and is ignored otherwise.
+#' @param range Numeric vector or list of length 2, `c(lower, upper)`. An
+#'   alternative to `min` and `max`; giving it together with `min` or `max` is
+#'   an error of class `dta_rule_range_conflict`.
 #' @param description Character or NULL. Free-text description of the rule.
 #' @param min Numeric. Lower bound of the allowed range. Required unless
-#'   \code{range} is given, and must be less than \code{max}.
+#'   `range` is given, and must not be greater than `max`.
 #' @param max Numeric. Upper bound of the allowed range. Required unless
-#'   \code{range} is given, and must be greater than \code{min}.
+#'   `range` is given, and must not be less than `min`.
 #' @return An object of class `DTARuleColRange`.
 #'
 #' @examples
@@ -50,7 +50,13 @@ DTARuleColRange <- S7::new_class(
       columns <- unlist(columns)
     }
 
-    if (!is.null(range) && is.null(min) && is.null(max)) {
+    if (!is.null(range) && (!is.null(min) || !is.null(max))) {
+      cli_abort(
+        "Give the bounds of rule {.val {id}} either as {.arg range} or as {.arg min} and {.arg max}, not both.",
+        class = "dta_rule_range_conflict"
+      )
+    }
+    if (!is.null(range)) {
       range_vec <- unlist(range)
       if (!is.numeric(range_vec) || length(range_vec) != 2) {
         cli_abort("'range' must be a numeric vector of length 2.")
@@ -109,8 +115,11 @@ DTARuleColRange <- S7::new_class(
       )
     }
 
-    if (self@min >= self@max) {
-      cli_abort("Min range must be less than max.")
+    if (self@min > self@max) {
+      cli_abort(
+        "{.arg min} ({self@min}) must not be greater than {.arg max} ({self@max}).",
+        class = "dta_rule_invalid_range"
+      )
     }
   }
 )

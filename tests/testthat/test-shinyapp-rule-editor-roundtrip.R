@@ -359,3 +359,39 @@ test_that("a grouped condition row with a column and no name is refused on Save,
     expect_identical(rr_rule(rv, "adult_group"), before)
   })
 })
+
+test_that("a range rule saved with only a Maximum has an open lower side and reopens with a blank Minimum", {
+  clean_session_file()
+  shiny::testServer(app_server_dir(), {
+    rr_start(session)
+    rr_open(session, rv, output, "age_band")
+    session$setInputs(rule_min = "", rule_max = "10")
+    rr_save(session)
+    expect_null(rv$rule_msg, info = rv$rule_msg$error)
+
+    rules <- DTAtools::datasets(rv$dta, "lab")@specs@rules
+    rule <- Filter(function(r) identical(r@id, "age_band"), rules)[[1]]
+    expect_identical(rule@min, -Inf)
+    expect_identical(rule@max, 10)
+    # No value above the maximum passes; a very negative value does
+    result <- rule_check_range(rule, data.frame(AGE = c(-1e9, 10, 11)))
+    expect_false(result$valid)
+    expect_match(result$message, "violated: 1 rows")
+    expect_true(rule_check_range(rule, data.frame(AGE = c(-1e9, 0, 10)))$valid)
+
+    # Reopened: the Minimum box is blank, the Maximum shows its number
+    session$setInputs(rule_edit_click = unname(rr_index[["age_band"]]))
+    html <- ui_text(output$rule_modal_body)
+    inputs <- app_browser_inputs(html)
+    expect_identical(inputs$rule_min, "")
+    expect_identical(inputs$rule_max, "10")
+
+    # ... and saved unchanged keeps the open side
+    rr_open(session, rv, output, "age_band")
+    rr_save(session)
+    expect_null(rv$rule_msg, info = rv$rule_msg$error)
+    saved <- rr_rule(rv, "age_band")
+    expect_identical(saved$min, -Inf)
+    expect_identical(saved$max, 10)
+  })
+})

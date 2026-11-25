@@ -497,3 +497,35 @@ test_that("OQ-RULE-057 | a pattern reaches the same verdict on a file held in me
     }
   }
 })
+
+test_that("OQ-RULE-058 | a range rule accepts equal bounds and reports every other value | REQ-RULE-014", {
+  rule <- DTARuleColRange(id = "exact", columns = "AGE", min = 5, max = 5)
+  result <- rule_check_range(rule, rt_frame(AGE = c(4, 5, 6)))
+  qa_step("the values 4 and 6 are reported, the value 5 passes", 2L, rt_violations(result))
+})
+
+test_that("OQ-RULE-059 | a range rule whose lower bound exceeds its upper bound is refused with a classed condition | REQ-RULE-014", {
+  qa_check(
+    "min 6 with max 5 raises dta_rule_invalid_range",
+    inherits(
+      tryCatch(
+        DTARuleColRange(id = "r", columns = "AGE", min = 6, max = 5),
+        error = function(e) e
+      ),
+      "dta_rule_invalid_range"
+    )
+  )
+})
+
+test_that("OQ-RULE-060 | a range rule given both a range and min or max is refused with a classed condition | REQ-RULE-014", {
+  refused <- function(...) {
+    inherits(
+      tryCatch(DTARuleColRange(id = "r", columns = "AGE", ...), error = function(e) e),
+      "dta_rule_range_conflict"
+    )
+  }
+  qa_check("range with min is refused", refused(range = c(1, 2), min = 0))
+  qa_check("range with max is refused", refused(range = c(1, 2), max = 9))
+  qa_check("range with min and max is refused", refused(range = c(1, 2), min = 0, max = 9))
+  qa_check("range alone is accepted", !refused(range = c(1, 2)))
+})
