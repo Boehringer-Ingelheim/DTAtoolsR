@@ -2477,16 +2477,24 @@ dta_validate_any_table <- function(specs,
     }
   }
 
-  dta_validate_table_stream(
-    specs,
-    reader,
-    verbose = verbose,
-    max_errors = max_errors,
-    coerce = TRUE,
-    fail_fast = fail_fast,
-    precomputed = precomputed,
-    known_columns = column_names,
-    structure = structure
+  # The scan is where a lazy table's bytes are first read in full, so it is
+  # where bytes that are not valid UTF-8 past the first block are met. The file
+  # is named when the table has exactly one: a scan of several would not say
+  # which.
+  source_files <- if (inherits(table, "Dataset")) dta_dataset_source_files(table) else character(0)
+  dta_with_encoding_refusal(
+    dta_validate_table_stream(
+      specs,
+      reader,
+      verbose = verbose,
+      max_errors = max_errors,
+      coerce = TRUE,
+      fail_fast = fail_fast,
+      precomputed = precomputed,
+      known_columns = column_names,
+      structure = structure
+    ),
+    path = if (length(source_files) == 1L) source_files
   )
 }
 
@@ -2938,6 +2946,12 @@ cache_as_parquet <- function(specs,
 #'   abort the scan mid-file; each batch is then typed by the specs, in Arrow
 #'   where Arrow's parser provably agrees with R's and in R otherwise.
 #'   Parquet is not read as text; its stored types are used.
+#'
+#' @section Bytes that are not valid UTF-8:
+#' A delimited file is read as UTF-8 text. Bytes that are not valid UTF-8, in a
+#' column the scan reads or in the header, stop the call with a condition of
+#' class `dta_encoding_invalid`, the class [load_file()] documents; match on
+#' the class, not on the message.
 #' @return A validation details list. It always carries an `n_rows_scanned`
 #'   attribute (rows actually read; `0` for a structural early return). When
 #'   `benchmark = TRUE` it additionally carries a `"benchmark"` attribute; see
@@ -3078,15 +3092,18 @@ validate_file_stream <- function(specs,
     )$ToRecordBatchReader()
   }
 
-  details <- dta_validate_table_stream(
-    specs,
-    reader,
-    verbose = verbose,
-    max_errors = max_errors,
-    coerce = TRUE,
-    fail_fast = fail_fast,
-    precomputed = precomputed,
-    known_columns = names(dataset$schema)
+  details <- dta_with_encoding_refusal(
+    dta_validate_table_stream(
+      specs,
+      reader,
+      verbose = verbose,
+      max_errors = max_errors,
+      coerce = TRUE,
+      fail_fast = fail_fast,
+      precomputed = precomputed,
+      known_columns = names(dataset$schema)
+    ),
+    path = path
   )
 
   # Arrow buffers batches ahead of R in a C++ pool that gc() cannot see, so

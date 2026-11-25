@@ -280,24 +280,109 @@ test_that("removing the only dataset leaves a valid DTA with zero datasets", {
 
 sidebar_upload <- function(path, name = basename(path)) app_upload_value(path, name)
 
-test_that("the sidebar outputs opt out of suspendWhenHidden", {
+# What outputOptions() was told, in order, while one server session started.
+#
+# It cannot be read back: under shiny::testServer() the session's
+# outputOptions() is a no-op that returns NULL for every output, so
+# `outputOptions(output, id)$suspendWhenHidden` is NULL whatever the app set,
+# and any expectation built on it passes whether or not the app opted out. The
+# calls are recorded as they are made instead. The recorder replaces shiny's
+# function for the test (the app calls it unqualified through the attached
+# package), and a call that changes nothing the server could observe is still
+# a call: what the contract needs is what the app ASKS for.
+#
+# Returns the final value asked for per output id -- shiny keeps the last --
+# as a named list, and the number of calls seen, so that a recorder the app
+# never reached is told apart from an app that asked for nothing.
+record_output_options <- function() {
+  calls <- list()
+  recorder <- function(x, name, ...) {
+    calls[[length(calls) + 1L]] <<- list(id = name, options = list(...))
+    invisible(NULL)
+  }
+  testthat::local_mocked_bindings(
+    outputOptions = recorder, .package = "shiny", .env = parent.frame()
+  )
+  function() {
+    asked <- list()
+    for (call in calls) {
+      if ("suspendWhenHidden" %in% names(call$options)) {
+        asked[[call$id]] <- call$options$suspendWhenHidden
+      }
+    }
+    list(asked = asked, n_calls = length(calls))
+  }
+}
+
+test_that("the outputs that must keep rendering while hidden opt out of suspendWhenHidden", {
   skip_if_not_installed("shiny")
   skip_if_not_installed("bslib")
   skip_if_not_installed("DT")
   skip_if_not_installed("shinyjs")
 
-  shiny::testServer(.shiny_app_dir(), {
-    for (id in c(
-      "workspace_header", "summary_metrics", "dataset_nav_ui",
-      "add_dataset_ui", "validation_report_ui",
-      "delivery_panel", "delivery_zone", "delivery_block"
-    )) {
-      expect_false(
-        isTRUE(outputOptions(output, id)$suspendWhenHidden),
-        info = paste0("output$", id, " must not suspend when hidden")
-      )
-    }
-  })
+  recorded <- record_output_options()
+  shiny::testServer(.shiny_app_dir(), NULL)
+  seen <- recorded()
+
+  # The expected ids are written out by hand, one group per reason, and not
+  # read back from the app. The reason for the sidebar and Delivery groups is
+  # the one this file's header gives; the one for the modal group is documented
+  # nowhere but in the app's own comments beside each opt-out, and is taken
+  # from there.
+  #
+  # The sidebar. Its outputs are replaced as placeholders whenever the
+  # workspace is re-rendered, and a visibility snapshot taken during that swap
+  # can wrongly report them hidden; a suspended output then never sends its
+  # HTML and nothing re-checks it (see the header above). edit_gate sits in
+  # the brandbar, outside the swap, but re-renders at the very moment a
+  # document loads, which is when a fresh page's first snapshot is unreliable;
+  # the app opts it out with the sidebar outputs for that reason, and so does
+  # this list.
+  sidebar <- c(
+    "workspace_header", "summary_metrics", "dataset_nav_ui", "add_dataset_ui",
+    "validation_report_ui", "edit_gate", "delivery_panel"
+  )
+  # The two flags the Delivery conditionalPanels read. The panel is hidden
+  # while its flag is FALSE, and a suspended output never tells the client the
+  # flag became TRUE, so the drop zone would never appear.
+  delivery <- c("delivery_zone", "delivery_block")
+  # Outputs inside modal dialogs. A modal's output keeps the client's last
+  # HTML, so the render that empties it once the dialog is closed has to run
+  # even though the dialog is no longer on screen; otherwise a stale copy, and
+  # its stale inputs, greets the next dialog.
+  modal <- c(
+    "template_picker_ui", "template_picker_list", "template_picker_detail",
+    "amb_error", "ctr_modal_body", "ctr_modal_footer", "ctr_msg", "ctr_match",
+    "ctr_default_warning", "mx_modal_body"
+  )
+
+  # A recorder the app never reached would make every expectation below fail
+  # for the wrong reason, so say so first.
+  expect_gt(seen$n_calls, 0L)
+
+  # Each one individually, so a failure names the output and the value asked
+  # for, and so that a value of TRUE (or no value) is told apart from FALSE.
+  for (id in c(sidebar, delivery, modal)) {
+    expect_identical(
+      seen$asked[[id]], FALSE,
+      info = paste0("output$", id, " must be told suspendWhenHidden = FALSE")
+    )
+  }
+  # And no other output: the list above is the whole contract, so an output
+  # opted out without being listed has to be added here on purpose.
+  expect_setequal(names(seen$asked), c(sidebar, delivery, modal))
+
+  # The recorder takes any name, where shiny's own outputOptions() stops on one
+  # that is not an output. An opt-out left behind by a renamed output would
+  # break the real app and still match the list above, so each listed id is
+  # also required to be defined as an output in the app's source: `output$id
+  # <-`, or through the helper that defines the two Delivery flags.
+  source_text <- app_source("app.R")
+  for (id in c(sidebar, delivery, modal)) {
+    defined <- grepl(sprintf("output\\$%s\\s*<-", id), source_text) ||
+      grepl(sprintf("delivery_flag\\(\"%s\"", id), source_text)
+    expect_true(defined, info = paste0("output$", id, " is not defined in app.R"))
+  }
 })
 
 test_that("removing one of two datasets keeps the sidebar rendered", {

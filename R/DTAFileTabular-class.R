@@ -440,6 +440,126 @@ dta_refuse_wide_encoding <- function(encoding, path) {
   invisible(TRUE)
 }
 
+#' @title Is This Arrow's Refusal of Bytes That Are Not Valid in an Encoding?
+#' @description
+#' Arrow refuses a field whose bytes are not valid in the encoding it reads, and
+#' says so in one of two sets of words: `CSV conversion error to string: invalid
+#' UTF8 data` for UTF-8 text (the in-memory reader, the dataset opener and a
+#' scan, wherever the columns are read as text, as they are for every delimited
+#' read made with a specification), and `Encountered invalid input bytes (input
+#' encoding was 'SHIFT-JIS')` where the in-memory reader re-encodes a declared
+#' non-UTF-8 encoding. For UTF-8 text Arrow adds where it met the bytes: the
+#' column by its position, counted from zero, and the row by its line in the
+#' file, the header included. The re-encoder gives no position.
+#'
+#' Nothing in the condition says so otherwise. It is an `rlang_error` out of the
+#' in-memory reader and the dataset opener and a `simpleError` out of a scan, and
+#' a row of the wrong width or a truncated archive reaches the caller as the same
+#' kinds of condition. The words are all there is to tell this refusal from
+#' those.
+#'
+#' They are Arrow's, written in C++, and are not translated with the system
+#' language the way an R message is -- the same footing as the causes
+#' [dta_delim_header_names()] names from Arrow's wording. If Arrow ever changes
+#' them this stops matching and the refusal reaches the caller unclassed; the
+#' qualification case that asserts `dta_encoding_invalid` is what notices.
+#'
+#' Only the condition's own message is read, not those of the errors it was
+#' raised from, so an error that merely wraps one of these is not taken for it.
+#' @param e A condition.
+#' @return `TRUE` when `e` is that refusal, otherwise `FALSE`.
+#' @keywords internal
+dta_is_arrow_encoding_refusal <- function(e) {
+  isTRUE(any(grepl(
+    paste0(
+      "CSV conversion error to [A-Za-z0-9_]+: invalid UTF8 data",
+      "|Encountered invalid input bytes \\(input encoding was"
+    ),
+    rlang::cnd_message(e, inherit = FALSE),
+    # The message can quote the delivery's own bytes, which are not valid text;
+    # the pattern is ASCII, so matching them as bytes is exact and warns of
+    # nothing.
+    useBytes = TRUE
+  )))
+}
+
+#' @title Run a Read, Giving a Refusal of Bad Bytes the Package's Own Class
+#' @description
+#' Evaluates `expr`, and when it fails because Arrow met bytes that are not
+#' valid in the encoding it reads (see [dta_is_arrow_encoding_refusal()]),
+#' re-raises that as a condition of class `dta_encoding_invalid` -- the class
+#' the package's refusals of bytes that are not valid in a delimited file's
+#' encoding carry -- with Arrow's message as its `parent`, so the position Arrow
+#' named, where it named one, stays in front of the reader. Any other error is left as it is: the handler is a
+#' calling handler, so nothing is caught, re-thrown or reordered on the way, and
+#' only the error it replaces is replaced.
+#'
+#' It wraps the four places a delimited file's bytes are first read: the
+#' in-memory reader, the opening of a lazy dataset, and the two scans that
+#' validate one (`check()`'s, and `validate_file_stream()`'s). Each is a route to
+#' the same refusal, and each used to deliver Arrow's own error.
+#' @param expr The read to run.
+#' @param path The file, for the message, or `NULL` where the caller does not
+#'   have a single one.
+#' @param encoding The encoding the bytes were read as, for the message.
+#' @return The value of `expr`.
+#' @keywords internal
+dta_with_encoding_refusal <- function(expr, path = NULL, encoding = "UTF-8") {
+  withCallingHandlers(
+    expr,
+    error = function(e) {
+      if (inherits(e, "dta_encoding_invalid") || !dta_is_arrow_encoding_refusal(e)) {
+        return(invisible(NULL))
+      }
+      headline <- if (is.null(path)) {
+        "A delivery holds bytes that are not valid {.val {encoding}}."
+      } else {
+        "{.path {path}} holds bytes that are not valid {.val {encoding}}."
+      }
+      cli::cli_abort(
+        c(
+          headline,
+          "i" = "Declare the encoding the file was written in, or deliver it as UTF-8."
+        ),
+        class = "dta_encoding_invalid",
+        parent = e,
+        call = NULL
+      )
+    }
+  )
+}
+
+#' @title Refuse a Header That Is Not Valid Text
+#' @description
+#' Arrow reads a header's names as bytes and does not object to any of them, and
+#' the first thing in the package that touches a name that is not valid text is
+#' [dta_clean_column_names()], whose refusal is a bare base-R "invalid UTF-8"
+#' error, in the system language, that names neither the file nor the column. So
+#' the names are checked where they are first in hand, once they are in the
+#' encoding the rest of the package reads: UTF-8, after any conversion from a
+#' declared one.
+#' @param header_names Character vector of the header's names.
+#' @param path The file, for the message.
+#' @param encoding The declared encoding, for the message.
+#' @return `header_names`, invisibly; aborts with class `dta_encoding_invalid`
+#'   when a name holds bytes that are not valid.
+#' @keywords internal
+dta_refuse_invalid_header_bytes <- function(header_names, path, encoding) {
+  not_text <- !validUTF8(header_names)
+  if (any(not_text)) {
+    first <- which(not_text)[[1]]
+    cli::cli_abort(
+      c(
+        "The header of {.path {path}} holds bytes that are not valid {.val {encoding}}.",
+        "x" = "Column {first} of the header is the first.",
+        "i" = "Declare the encoding the file was written in, or deliver it as UTF-8."
+      ),
+      class = "dta_encoding_invalid"
+    )
+  }
+  invisible(header_names)
+}
+
 # ---- reading a file that is not UTF-8 ---------------------------------------
 
 #' @title A UTF-8 Copy of a File Declared in Another Encoding
@@ -854,12 +974,15 @@ dta_transcode_write_block <- function(bytes, output, encoding, path, offset) {
   # neither is a thing to do silently to someone's data.
   if (anyNA(converted)) {
     at <- dta_format_count(dta_first_undecodable_byte(bytes, encoding, offset))
-    cli::cli_abort(c(
-      "{.path {path}} cannot be decoded as {.val {encoding}}.",
-      "x" = "The bytes at offset {at} are not valid {.val {encoding}}.",
-      "i" = "A byte offset, not a line number: the file is converted in blocks rather than a line at a time.",
-      "i" = "Declare the encoding the file was actually written in."
-    ))
+    cli::cli_abort(
+      c(
+        "{.path {path}} cannot be decoded as {.val {encoding}}.",
+        "x" = "The bytes at offset {at} are not valid {.val {encoding}}.",
+        "i" = "A byte offset, not a line number: the file is converted in blocks rather than a line at a time.",
+        "i" = "Declare the encoding the file was actually written in."
+      ),
+      class = "dta_encoding_invalid"
+    )
   }
 
   # Written piece by piece rather than pasted back into one string: the
@@ -1440,6 +1563,7 @@ dta_matrix_read_head <- function(handler, path) {
     converted <- iconv(fields, from = settings$encoding, to = "UTF-8")
     fields <- ifelse(is.na(converted), fields, converted)
   }
+  dta_refuse_invalid_header_bytes(fields, path, settings$encoding)
   fields <- dta_clean_column_names(unname(fields))
 
   # A second record cut at a quoted line break (or given up as too long) has
@@ -1529,14 +1653,14 @@ dta_delim_header_names <- function(path, parse_options, has_header, encoding = "
   # `encoding = "UTF-8"` and the path of an already-transcoded copy, so its
   # header is converted exactly once, here or there, never twice.
   if (!dta_encoding_is_utf8(encoding)) {
-    converted <- tryCatch(
-      iconv(raw_names, from = encoding, to = "UTF-8"),
-      error = function(e) NULL
-    )
-    if (!is.null(converted)) {
-      raw_names <- ifelse(is.na(converted), raw_names, converted)
-    }
+    # iconv() has no way to fail here: every route to this function has already
+    # refused an encoding name it does not know (dta_check_encoding_supported()),
+    # so what it cannot convert comes back as NA and is judged below.
+    converted <- iconv(raw_names, from = encoding, to = "UTF-8")
+    raw_names <- ifelse(is.na(converted), raw_names, converted)
   }
+
+  dta_refuse_invalid_header_bytes(raw_names, path, encoding)
 
   raw_names
 }
@@ -1823,7 +1947,12 @@ dta_open_normalized_dataset <- function(
     open_args$na <- plan$na
   }
 
-  dataset <- do.call(arrow::open_delim_dataset, open_args)
+  # Arrow reads the first block here to infer the schema, so bytes that are not
+  # valid UTF-8 in it are met now and not by the scan.
+  dataset <- dta_with_encoding_refusal(
+    do.call(arrow::open_delim_dataset, open_args),
+    path = source_path
+  )
 
   if (!transcoded) {
     # Nothing was substituted, so the dataset's own `$files` already names the
@@ -1891,7 +2020,13 @@ dta_read_delim_normalized <- function(
   handler = NULL,
   column_names = NULL
 ) {
-  dta_refuse_wide_encoding(dta_reader_parse_settings(handler)$encoding, path)
+  declared_encoding <- dta_reader_parse_settings(handler)$encoding
+  dta_refuse_wide_encoding(declared_encoding, path)
+  # The lazy reader refuses a name iconv() does not know when it converts the
+  # file, and the matrix header reader does so first thing; this reader used to
+  # leave it to a base-R error, in the system language, that named neither the
+  # file nor the encoding.
+  dta_check_encoding_supported(declared_encoding, path)
 
   plan <- dta_delim_reader_plan(
     path,
@@ -1929,7 +2064,11 @@ dta_read_delim_normalized <- function(
     read_args$na <- plan$na
   }
 
-  do.call(arrow::read_delim_arrow, read_args)
+  dta_with_encoding_refusal(
+    do.call(arrow::read_delim_arrow, read_args),
+    path = path,
+    encoding = plan$encoding
+  )
 }
 
 #' @title Missing-Value Markers for a Tabular Handler
