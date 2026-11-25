@@ -1067,3 +1067,49 @@ requirements:
       The value is the installed package version, which is what reads the file
       back; a hosted bundle's own version can differ from it. A template
       cannot target the value (REQ-TMPL-012).
+
+  - id: REQ-APP-063
+    text: >
+      A conditional or grouped-condition rule opened with the rule editor's
+      pencil and saved without a change shall keep its meaning. Every operator
+      of every column shall be saved as the same test: range as min and max
+      with the same bounds, equal as equals and not_equal as not_equals; and
+      every value shall be saved with the type and spelling it had, so that an
+      integer stays an integer, a text code such as "001", "007" or "1.50"
+      stays text and a list member that holds a comma stays one member. A
+      range rule's bounds shall be kept the same way.
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: >
+      DTA_YAML_GUIDE.md (section 5, operators table; `range` is equivalent to
+      `min`/`max`); inst/shiny/dta_app/R/rule_conditions.R
+    notes: >
+      Before this requirement the editor rewrote a rule as it was opened:
+      not_equal came back as equals, the opposite test; range as the text
+      "lo, hi" under equals; a second operator on a column was dropped; a Char
+      column's "001" became the number 1; and "Smith, John" became two
+      values. The spellings are rewritten on the first save, by decision: the
+      test is the same, the engine's normal form is what is written.
+
+  - id: REQ-APP-064
+    text: >
+      A value typed into the rule editor that it cannot read shall be refused
+      on Save, with a message that names the text, and the rule shall be left
+      unchanged: a number that is not a number (a decimal comma included, in a
+      comparison, a between row or a range rule's minimum or maximum), a
+      between row with more than two bounds, a list with a double quote that
+      is never closed, a row with a column and no value. The same operator
+      given twice for one column shall be refused the same way, with a message
+      that names the column. A rule the form cannot show faithfully, because
+      two spellings of one operator stand on one column or the operator is
+      unknown to the editor, shall not be opened for editing. Nothing shall be
+      dropped or reinterpreted to make a row savable.
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/R/rule_conditions.R
+    notes: >
+      Before this requirement an unreadable bound was silently taken as absent
+      (a minimum of "0,5" saved as no minimum), and the second of two rows for
+      one column overwrote the first.
