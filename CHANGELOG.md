@@ -124,6 +124,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   whole vocabulary and now removes that list check, as "None" does. Give the slot
   `min: 1` to keep the column constrained; the document is then not created
   until a term is chosen. No bundled template is affected.
+- **The template-repository guide and the `private-templates` vignette now say
+  that the CI file only gates a merge when the check is required.** The app
+  reads the deploy branch (`#main` in `DTATOOLS_TEMPLATE_SOURCES`), so a merge
+  is a release, and the generated pipelines run on pull requests but cannot
+  stop one by themselves. Both documents tell a library owner to make
+  `validate-templates` a required check on that branch. The generated CI files
+  are unchanged.
 
 ## [0.30.0] - 2026-11-23
 
