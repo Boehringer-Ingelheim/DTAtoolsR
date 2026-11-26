@@ -170,31 +170,6 @@ test_that("dta_table_status_map reports a real import-only failure as fail", {
 })
 
 
-test_that("dta_table_status_map reports a pre-import-axis artifact as unknown", {
-  ds <- DTAtools::check(
-    app_test_dataset(c("1.5", "2.5")),
-    force = TRUE, persist = FALSE, quiet = TRUE
-  )
-
-  # Exactly what a validation index written before the import axis existed looks
-  # like: the two-axis verdict is kept, the import count is simply not there.
-  entry <- ds@validation_index[["t1"]]
-  expect_true("n_import_errors" %in% names(entry))
-  entry$n_import_errors <- NULL
-  ds@validation_index[["t1"]] <- entry
-
-  vs <- as.data.frame(DTAtools::validation_status(ds))
-  expect_true(vs$ok)
-  expect_true(is.na(vs$n_import_errors))
-
-  dta <- DTAtools::DTA(datasets = ds)
-  expect_identical(
-    app_fn("dta_table_status_map")(dta, "ds1"),
-    c(t1 = "unknown")
-  )
-})
-
-
 test_that("dta_table_status_map passes a table that is clean on all axes", {
   dta <- app_test_dta(c("1.5", "2.5"))
   expect_identical(

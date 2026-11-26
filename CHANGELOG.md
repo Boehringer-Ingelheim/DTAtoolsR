@@ -6,6 +6,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Removed
+
+- **Breaking: the layer that read objects saved by an older version.**
+  Before 1.0.0 DTAtools promises nothing about a `DTA` or dataset that
+  `saveRDS()` wrote under another release, so `upgrade_dta()` is gone, with no
+  replacement, and so is the check that `load_file()`, `check()`,
+  `load_delivery()`, `container_assignments()`, `container_findings()`,
+  `file_name_conflicts()`, `lint_dta()` and the document exports ran on every
+  call to re-stamp such an object with the current classes. An old object is no
+  longer repaired: an old `DTA` stops with S7's `Property not found.` at the
+  first property its saved class lacks (`containers` is the first), and an old
+  dataset is used as it is. Build the document again from its YAML
+  (`read_dta_from_yaml()`). The accessors that read a missing property as
+  "none" (`container` on a handler, `containers` on a document, `provenance`
+  on a dataset, the parse settings of a handler) now read it directly, so a
+  genuinely broken object fails where it is broken instead of reading as an
+  unconstrained one. A matrix dataset saved while its header texts were
+  declared under `matrix.header.corner` is no longer recognised as such
+  (`dta_matrix_format_outdated` is gone); the retired YAML keys stay refused as
+  unknown fields. Qualification: REQ-CONT-029 and REQ-MATRIX-059 are retired
+  with their cases OQ-CONT-047, OQ-CONT-064 and OQ-MATRIX-057.
+- In the app, the flag `dataset_only` (always false since a dataset file is
+  wrapped into a document, and only a restored old snapshot could set it) and
+  the two unused template lookups `list_dta_creation_templates()` and
+  `get_dta_creation_template_path()`; a document that still carries
+  `selections` in its template record is no longer replayed from them when it
+  is rebased.
+
+### Changed
+
+- A validation result recorded before the import axis existed (no
+  `result_version`), read from a persisted artifact or held in memory, is
+  refused by `validation_errors()` (and so by `messages(source = "artifact")`
+  of a tabular dataset) with a condition of class
+  `dta_validation_details_outdated` instead of being migrated to "unknown";
+  run `check(force = TRUE)` again.
+- The app's Restore previous session reads back only a snapshot written by the
+  version that is running (the snapshot carries `dtatools_version`); any other
+  is refused with a message saying so. It no longer upgrades an old document or
+  rebuilds it from its YAML text.
+
 ## [0.30.0] - 2026-11-25
 
 ### Added

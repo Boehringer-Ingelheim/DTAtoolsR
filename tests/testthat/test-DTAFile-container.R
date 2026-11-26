@@ -186,13 +186,6 @@ test_that("load_file refuses a container, naming the delivery route", {
   expect_gt(nrow(as.data.frame(tables(load_file(ds2, file = fx))[["adverse"]])), 0L)
 })
 
-test_that("a handler restored without the property reads as NULL", {
-  # An autosave written before `container` existed restores handlers of a class
-  # that lacks the property.
-  Old <- S7::new_class("Old", properties = list(filename = S7::class_character))
-  expect_null(dta_handler_container(Old(filename = "a.csv")))
-})
-
 test_that("read_file ignores a declared container", {
   p <- cont_write("ae.csv", CONT_AE_CSV)
   expect_equal(nrow(read_file(DTAFileCSV("ae.csv", container = "sdtm.zip"), p)), 2)

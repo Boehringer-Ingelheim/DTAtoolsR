@@ -434,9 +434,8 @@ dta_container_value_problem <- function(value) {
   NULL
 }
 
-# The only reader of the property. A handler restored from an autosave written
-# before `container` existed has no such slot, and reads as "no container".
-dta_handler_container <- function(h) tryCatch(h@container, error = function(e) NULL)
+# The only reader of the property.
+dta_handler_container <- function(h) h@container
 
 # ---- container references ------------------------------------------------------
 # A file entry's `container` is a REFERENCE, and the three kinds are disjoint by
@@ -471,13 +470,12 @@ dta_container_ref_problem <- function(value) {
   NULL
 }
 
-# The containers a DTA (or an already-extracted list) holds; an object restored
-# from before the property existed holds none.
+# The containers a DTA (or an already-extracted list) holds.
 dta_containers <- function(x) {
   if (!inherits(x, "S7_object")) {
     return(if (is.null(x)) list() else x)
   }
-  tryCatch(x@containers, error = function(e) list())
+  x@containers
 }
 
 # "Container info", the one representation every consumer uses:

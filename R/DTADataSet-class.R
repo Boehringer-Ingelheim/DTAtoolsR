@@ -105,20 +105,11 @@ DTADataSet <- S7::new_class(
   }
 )
 
-# The records of a dataset (`list()` for an object restored from before the
-# property existed) and the write-safe way to add or drop one. `key` is the
-# table name (tabular) or the bound path (file dataset); `rec = NULL` drops it.
-# An object that has no such slot is returned unchanged: it still loads, its
-# items then read as "unrecorded".
-dta_provenance <- function(ds) {
-  tryCatch(ds@provenance, error = function(e) list())
-}
+# The records of a dataset and the write-safe way to add or drop one. `key` is
+# the table name (tabular) or the bound path (file dataset); `rec = NULL` drops
+# it.
+dta_provenance <- function(ds) ds@provenance
 dta_set_provenance <- function(ds, key, rec) {
-  # An object restored from an older version has no slot: unchanged. Any other
-  # error is a real one and propagates.
-  if (!"provenance" %in% S7::prop_names(ds)) {
-    return(ds)
-  }
   prov <- ds@provenance
   prov[[key]] <- rec
   if (length(prov) == 0L) prov <- list()
@@ -648,14 +639,9 @@ dta_validation_result_to_row <- function(table_name, status, index_entry, target
     # rollup silently drops, under-reporting the affected axis as 0.
     n_columnspec_errors = dta_narrow_count(index_entry$n_columnspec_errors),
     n_rule_errors = dta_narrow_count(index_entry$n_rule_errors),
-    # An index entry recorded before the import axis existed knows nothing
-    # about it. NA ("unknown") is the honest value; 0 would claim a clean
-    # import axis that was never checked.
-    n_import_errors = if (is.null(index_entry$n_import_errors)) {
-      NA_integer_
-    } else {
-      dta_narrow_count(index_entry$n_import_errors)
-    },
+    # NA ("unknown") is a value the entry holds, not an absent field: 0 would
+    # claim a clean import axis that was never checked.
+    n_import_errors = dta_narrow_count(index_entry$n_import_errors),
     stringsAsFactors = FALSE
   )
 }

@@ -551,46 +551,33 @@ dta_collect_import_errors <- function(rule_results, specs = NULL) {
 }
 
 
-#' @title Migrate Validation Details to the Current Schema Version
-#' @description
-#' Brings a `validate_table_detailed()` result recorded by an older version of
-#' the package up to the current shape.
-#'
-#' Details written before the import axis existed carry no information about
-#' whether values were representable in their declared type. Defaulting them to
-#' `import_valid = TRUE` / `n_import_errors = 0` would be permissive by
-#' construction: the artifact would assert a clean import axis it never checked.
-#' They are therefore migrated to `NA` ("unknown"), and the recorded `ok` is
-#' left exactly as it was rather than recomputed from incomplete data.
-#' @param details A list as returned by `validate_table_detailed()`.
-#' @return The same list, with the import fields and `result_version` present.
-#' @keywords internal
-dta_migrate_validation_details <- function(details) {
-  if (!is.list(details)) {
-    return(details)
+# A validation result is read back only in the shape this version writes. One
+# recorded before the import axis existed has no `result_version`, and carries
+# nothing about whether values were representable in their declared type; it is
+# refused rather than read as a clean import axis it never checked. `what` names
+# the result for the message.
+dta_assert_current_details <- function(details, what) {
+  if (is.list(details) && !"result_version" %in% names(details)) {
+    cli::cli_abort(
+      c(
+        "{what} was recorded by an older version of DTAtools and cannot be read.",
+        "i" = "Run {.fn check} again with {.code force = TRUE} to record a current one."
+      ),
+      class = "dta_validation_details_outdated"
+    )
   }
-
-  if ("result_version" %in% names(details)) {
-    return(details)
-  }
-
-  details$import_valid <- NA
-  details$n_import_errors <- NA_integer_
-  details["import_errors"] <- list(NULL)
-  details$result_version <- 1L
   details
 }
 
-# NOTE on `columnspec_checks`, which is NOT migrated above. It was added under
-# the existing `result_version = 2L`, so an artifact written by an earlier build
-# carries that version and takes the early return without gaining the field. No
-# placeholder is invented for it, deliberately: the per-check breakdown needs the
-# schemas to say which constraints a spec declared at all, and those are not in
-# the artifact. A reconstruction from `full_error` alone could distinguish
-# "failed" from "no violations recorded", but not "passed" from "never checked"
-# -- which is the one distinction the field exists to make. Consumers therefore
-# treat an absent `columnspec_checks` as unknown, and `check(force = TRUE)`
-# produces it.
+# NOTE on `columnspec_checks`. It was added under the existing
+# `result_version = 2L`, so an artifact written by an earlier build carries that
+# version and is read without the field. No placeholder is invented for it,
+# deliberately: the per-check breakdown needs the schemas to say which
+# constraints a spec declared at all, and those are not in the artifact. A
+# reconstruction from `full_error` alone could distinguish "failed" from "no
+# violations recorded", but not "passed" from "never checked" -- which is the one
+# distinction the field exists to make. Consumers therefore treat an absent
+# `columnspec_checks` as unknown, and `check(force = TRUE)` produces it.
 
 
 #' @title Tag Validation Details for Coercion

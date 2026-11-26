@@ -87,9 +87,7 @@
 #' \code{dta_matrix_header_empty}),
 #' \code{dta_matrix_preamble} or \code{dta_matrix_delimiter}. A row label whose
 #' \code{header} is not one text or \code{FALSE} aborts with
-#' \code{dta_row_label_header_invalid}, and a matrix dataset saved in the
-#' earlier format (see \code{\link{upgrade_dta}()}) with
-#' \code{dta_matrix_format_outdated}.
+#' \code{dta_row_label_header_invalid}.
 #'
 #' @param id Character. Identifier of the dataset.
 #' @param specs A \code{DTAColumnSpecCollection} of the row-label columns (at
@@ -755,10 +753,8 @@ method(load_file, DTADataSetMatrix) <- function(
   name = dta_default_table_name(file),
   stream = getOption("DTAtools.stream", "auto")
 ) {
-  # The guards of the tabular method: nothing is read, and no property of a
-  # stale object is touched, before they have passed. Unlike there, the
-  # directory check runs first, before the header is read.
-  if (dta_is_stale(x)) x <- dta_upgrade(x)
+  # The guards of the tabular method: nothing is read before they have passed.
+  # Unlike there, the directory check runs first, before the header is read.
   handler_index <- dta_resolve_file_handler_index(handler_index, x@files)
   handler <- files(x, handler_index)
   file <- dta_assert_single_file_path(file, "load_file")

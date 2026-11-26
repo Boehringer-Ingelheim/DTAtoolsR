@@ -900,40 +900,7 @@ test_that("the autosave keeps the last delivery and the provenance, and Start ov
   })
 })
 
-test_that("a restore whose document cannot be upgraded is rebuilt from its YAML text", {
-  clean_session_file()
-  ct_clean_autosave()
-  spec <- ct_spec(ct_default)
-  zip1 <- cont_zip(list(ae.csv = CONT_AE_CSV, dm.csv = CONT_DM_CSV), name = "delivery.zip")
-  id <- strrep("8", 32)
-  ct_notes()
-  ct_select_tab()
-
-  shiny::testServer(app_server_dir(), {
-    session$setInputs(dta_client_id = id)
-    session$setInputs(dta_file = ct_fi(spec, "spec.yaml"))
-    session$setInputs(delivery_files = ct_fi(zip1, "delivery.zip"))
-    session$close()
-  })
-
-  testthat::local_mocked_bindings(
-    upgrade_dta = function(x, ...) stop("cannot be upgraded"),
-    .package = "DTAtools"
-  )
-  shiny::testServer(app_server_dir(), {
-    session$setInputs(dta_client_id = id)
-    session$setInputs(restore_session = 1)
-    # The document is the YAML's, with the data bound in the saved one.
-    expect_identical(names(rv$dta@containers), "dlv")
-    expect_setequal(names(DTAtools::tables(DTAtools::datasets(rv$dta, "ae"))), "ae")
-    expect_identical(as.data.frame(DTAtools::tables(DTAtools::datasets(rv$dta, "ae"))[["ae"]])$AETERM, c("HEADACHE", "NAUSEA"))
-    expect_identical(DTAtools::datasets(rv$dta, "ae")@provenance[["ae"]]$container, "delivery.zip")
-    expect_identical(names(rv$structure), c("ae", "dm"))
-    expect_true(any(grepl("restored from its YAML text", shown, fixed = TRUE)))
-  })
-})
-
-test_that("a restore with neither an upgradable document nor usable YAML refuses", {
+test_that("a restore refuses a snapshot saved by another version of the package", {
   clean_session_file()
   ct_clean_autosave()
   spec <- ct_spec()
@@ -947,92 +914,22 @@ test_that("a restore with neither an upgradable document nor usable YAML refuses
     session$close()
   })
   f <- list.files(tempdir(), "^dtatools_app_session.*[.]rds$", full.names = TRUE)
+  expect_length(f, 1)
   saved <- readRDS(f)
-  saved$yaml_text <- NULL
-  saveRDS(saved, f)
+  expect_identical(saved$dtatools_version, as.character(utils::packageVersion("DTAtools")))
 
-  testthat::local_mocked_bindings(
-    upgrade_dta = function(x, ...) stop("cannot be upgraded"),
-    .package = "DTAtools"
-  )
-  shiny::testServer(app_server_dir(), {
-    session$setInputs(dta_client_id = id)
-    session$setInputs(restore_session = 1)
-    expect_null(rv$dta)
-    expect_true(any(grepl("Could not restore the previous session.", shown, fixed = TRUE)))
-  })
-})
-
-# An old-shaped DTA: its classes without the properties a later version added.
-ct_old_shape_class <- function(cls, drop) {
-  parent <- cls@parent
-  parent_old <- if (inherits(parent, "S7_class") && !identical(parent@name, "S7_object")) {
-    ct_old_shape_class(parent, drop)
-  } else {
-    S7::S7_object
+  # One written before the stamp existed, and one stamped by another version.
+  for (stamp in list(NULL, "0.0.1")) {
+    shown <- character(0)
+    saved$dtatools_version <- stamp
+    saveRDS(saved, f)
+    shiny::testServer(app_server_dir(), {
+      session$setInputs(dta_client_id = id)
+      session$setInputs(restore_session = 1)
+      expect_null(rv$dta)
+      expect_true(any(grepl("saved by a different version", shown, fixed = TRUE)))
+    })
   }
-  own <- setdiff(names(cls@properties), names(parent@properties))
-  S7::new_class(
-    cls@name,
-    package = "DTAtools", parent = parent_old,
-    properties = cls@properties[setdiff(own, drop)], validator = function(self) NULL
-  )
-}
-ct_age <- function(obj, drop = c("containers", "provenance", "file_handlers")) {
-  if (is.environment(obj) || is.data.frame(obj)) {
-    return(obj)
-  }
-  if (inherits(obj, "S7_object")) {
-    cur <- S7::S7_class(obj)
-    if (!identical(cur@package, "DTAtools")) {
-      return(obj)
-    }
-    for (p in setdiff(names(attributes(obj)), c("class", "S7_class"))) {
-      attr(obj, p) <- ct_age(attr(obj, p), drop)
-    }
-    for (p in intersect(drop, names(cur@properties))) attr(obj, p) <- NULL
-    obj <- stamp_old_class(obj, ct_old_shape_class(cur, drop))
-    return(obj)
-  }
-  if (is.list(obj)) {
-    for (i in seq_along(obj)) if (!is.null(obj[[i]])) obj[[i]] <- ct_age(obj[[i]], drop)
-  }
-  obj
-}
-
-test_that("restore_session() upgrades a document saved by an older version", {
-  clean_session_file()
-  ct_clean_autosave()
-  spec <- ct_spec()
-  id <- strrep("5", 32)
-  ct_notes()
-
-  shiny::testServer(app_server_dir(), {
-    session$setInputs(dta_client_id = id)
-    session$setInputs(dta_file = ct_fi(spec, "spec.yaml"))
-    session$setInputs(up_1_1 = ct_fi(cont_write("ae.csv", CONT_AE_CSV), "ae.csv"))
-    session$close()
-  })
-  f <- list.files(tempdir(), "^dtatools_app_session.*[.]rds$", full.names = TRUE)
-  saved <- readRDS(f)
-  saved$dump$dta <- ct_age(saved$dump$dta)
-  saveRDS(saved, f)
-  old <- readRDS(f)$dump$dta
-  expect_true(dta_is_stale(old))
-
-  shiny::testServer(app_server_dir(), {
-    session$setInputs(dta_client_id = id)
-    session$setInputs(restore_session = 1)
-    expect_false(dta_is_stale(rv$dta))
-    expect_length(rv$dta@containers, 0)
-    expect_length(rv$dta@datasets$ae@provenance, 0)
-    expect_identical(names(DTAtools::tables(DTAtools::datasets(rv$dta, "ae"))), "ae")
-    # It works as a current document does: a container can be named on an entry.
-    h <- rv$dta@datasets$ae@files[[1]]
-    h@container <- "sdtm.zip"
-    expect_identical(h@container, "sdtm.zip")
-    expect_false(any(grepl("YAML text", shown, fixed = TRUE)))
-  })
 })
 
 # =====================================================================================

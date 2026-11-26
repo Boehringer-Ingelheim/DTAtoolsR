@@ -17,11 +17,10 @@
 # is implied (the `container` column of container_assignments()).
 # -----------------------------------------------------------------------------
 
-# The document's explicit containers (named list by id); an object restored from
-# an older version has no such property.
+# The document's explicit containers (named list by id); none before a document
+# is loaded.
 .ctr_list <- function(dta) {
-  cs <- tryCatch(dta@containers, error = function(e) NULL)
-  if (is.null(cs)) list() else cs
+  if (inherits(dta, "DTAtools::DTA")) dta@containers %||% list() else list()
 }
 
 # "3 files" / "1 file".
@@ -210,7 +209,7 @@ dv_files_overview <- function(dta, ds) {
     hs <- dta_handlers(ds)
     changed <- FALSE
     for (i in seq_along(hs)) {
-      old <- tryCatch(hs[[i]]@container, error = function(e) NULL)
+      old <- hs[[i]]@container
       new <- fn(old, id, i)
       if (!identical(old, new)) {
         h <- hs[[i]]

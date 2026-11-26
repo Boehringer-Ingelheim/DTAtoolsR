@@ -346,13 +346,7 @@ dta_diff <- function(a, b) {
 # and the author's answer survives the rebase. An option whose answer cannot be
 # told falls back to its default. The variant comes from the recorded
 # `variant` block.
-#
-# `prov$selections`, when present, still wins: documents written before the
-# field was dropped keep replaying exactly what they recorded.
 rebase_derive_selections <- function(current, prov, defs) {
-  if (!is.null(prov$selections)) {
-    return(prov$selections)
-  }
   md <- as.list(DTAtools::metadata(current))
   variant <- prov$variant
   variant_sel <- list()

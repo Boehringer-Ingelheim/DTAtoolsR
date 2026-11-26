@@ -506,9 +506,6 @@ edit that introduces one. For `^lb.*[.]csv$` and `^lb_supp.*[.]csv$` use distinc
 prefixes (`^lb_main.*`, `^lb_supp.*`) or exclude the other
 (`^lb([^_].*)?[.]csv$`).
 
-Objects saved by an older version are upgraded when they are used;
-`upgrade_dta()` does it explicitly.
-
 An archive is inspected before anything is extracted, and refused as a whole
 when an entry name would escape its folder (absolute, `..`, a drive letter),
 is a symbolic link or is encrypted, or when two entries collide. An entry whose

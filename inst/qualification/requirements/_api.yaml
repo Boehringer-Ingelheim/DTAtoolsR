@@ -114,7 +114,6 @@ exports:
   - specs
   - specs_from_list
   - tables
-  - upgrade_dta
   - validate_file_stream
   - validate_rules
   - validate_table

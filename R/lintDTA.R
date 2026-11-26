@@ -1388,7 +1388,6 @@ dta_lint_specs_lists <- function(columns, rules, dataset, key = "columns") {
 
 dta_lint_object <- function(x) {
   if (inherits(x, "DTAtools::DTA")) {
-    if (dta_is_stale(x)) x <- dta_upgrade(x)
     out <- dta_lint_empty()
     if (!is.null(x@metadata)) {
       out <- rbind(out, dta_lint_metadata_object(x@metadata))
@@ -1420,7 +1419,6 @@ dta_lint_object <- function(x) {
     out <- rbind(out, dta_lint_containers_core(containers, refs)$rows)
     return(rbind(out, dta_lint_file_name_conflicts(dta_conflict_slots(x))))
   }
-  if (inherits(x, "DTAtools::DTADataSet") && dta_is_stale(x)) x <- dta_upgrade(x)
   if (inherits(x, "DTAtools::DTADataSetTabular")) {
     return(dta_lint_with_dataset(
       dta_specs_findings(x@specs@columns, x@specs@rules), x@id

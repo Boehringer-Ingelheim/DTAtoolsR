@@ -534,7 +534,6 @@ method(load_file, DTA) <- function(
   stream = getOption("DTAtools.stream", "auto"),
   ...
 ) {
-  if (dta_is_stale(x)) x <- dta_upgrade(x)
   dataset_object <- datasets(x, dataset)
 
   args <- list(
@@ -1047,9 +1046,6 @@ method(check, DTA) <- function(
   # Matched once, here, so a typo is reported before any dataset is touched
   # rather than after the first one has been scanned.
   on_missing_column <- match.arg(on_missing_column, c("scan", "stop"))
-
-  # An object restored from an older version lacks properties its class now has.
-  if (dta_is_stale(x)) x <- dta_upgrade(x)
 
   if (is.null(x@datasets) || length(x@datasets) == 0) {
     cli_abort("DTA object has no datasets to check.")

@@ -65,7 +65,6 @@ test_that("the server starts with an empty workspace", {
     expect_null(rv$yaml_text)
     expect_length(rv$uploads, 0)
     expect_length(rv$status, 0)
-    expect_false(rv$dataset_only)
     expect_false(rv$is_example)
     expect_equal(rv$col_view, "list")
     expect_equal(rv$rule_view, "list")
@@ -208,9 +207,6 @@ test_that("a standalone dataset YAML is wrapped into a full DTA workspace", {
     # empty DTA so the user lands in the normal workspace.
     expect_s3_class(rv$dta, "DTAtools::DTA")
     expect_equal(names(DTAtools::datasets(rv$dta)), "gf_data_specs_pattern")
-    # dataset_only is a legacy flag that must never be set again; the raw view
-    # would switch to a restricted mode if it were.
-    expect_false(rv$dataset_only)
     # The raw YAML view shows the wrapped DTA, not the original dataset file.
     expect_match(rv$yaml_text, "gf_data_specs_pattern", fixed = TRUE)
   })

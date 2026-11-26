@@ -730,12 +730,6 @@ test_that("template_dir roots are kept as given, with no templates/ autodetectio
   expect_identical(dirs[1:2], c(root, lib))
   expect_true(root %in% dirs)
   expect_true(lib %in% dirs)
-  # Only <root>/templates is searched for a creation template, so listing the
-  # root finds the file and listing the (wrongly given) templates/ dir does not.
-  withr::local_options(list(DTAtools.template_dir = root))
-  expect_true("x.dta-template.yaml" %in% app_fn("list_dta_creation_templates")())
-  withr::local_options(list(DTAtools.template_dir = lib))
-  expect_false("x.dta-template.yaml" %in% app_fn("list_dta_creation_templates")())
 })
 
 test_that("parse_template_sources() rejects a git locator or ref that git would read as an option", {

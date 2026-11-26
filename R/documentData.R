@@ -54,7 +54,6 @@
   if (!inherits(dta, "DTAtools::DTA")) {
     return(NULL)
   }
-  if (dta_is_stale(dta)) dta <- dta_upgrade(dta)
   list(
     rows = container_assignments(dta),
     containers = dta_containers(dta),

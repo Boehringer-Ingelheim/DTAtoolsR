@@ -122,25 +122,22 @@ test_that("a missing required column still renders as missing, once per row", {
   expect_false(anyNA(i$columnspec_keyword))
 })
 
-test_that("a fail_fast partial scan says the import axis was not settled, not that it predates", {
+test_that("a fail_fast partial scan says the import axis was not settled", {
   tab <- fr_write(c("ID,X", "r1,2", "r2,3"), "t.csv")
   mat <- fr_write(c("\tS1", "r1\t1", "r2\t2"), "m.tsv")
   details <- list(import_valid = NA, result_version = 2L)
   attr(details, "partial_scan") <- TRUE
   msg <- dta_import_messages_to_df("d", "t", details)$message
   expect_match(msg, "scan stopped early", fixed = TRUE)
-  expect_no_match(msg, "predates", fixed = TRUE)
-  # A genuinely old artifact keeps its text.
-  old <- dta_import_messages_to_df("d", "t", list(import_valid = NULL))$message
-  expect_match(old, "predates import checking", fixed = TRUE)
 })
 
-test_that("a fail_fast scan of a real dataset reports the unsettled import axis in its own words", {
+test_that("a fail_fast scan of a real dataset still reports the import error it found", {
   tab <- fr_write(c("ID,X", "r1,NaN", "r2,3", "r3,4"), "t.csv")
   d <- load_file(fr_tabular(FALSE), file = tab, stream = "always")
   d <- check(d, quiet = TRUE, persist = FALSE, fail_fast = TRUE)
   m <- as.data.frame(messages(d))
-  expect_false(any(grepl("predates import checking", m$message, fixed = TRUE)))
+  expect_true("import" %in% m$source)
+  expect_true(any(grepl("'NaN' in column 'X'", m$message[m$source == "import"], fixed = TRUE)))
 })
 
 test_that("a matrix prints under its own class name; a tabular dataset is unchanged", {

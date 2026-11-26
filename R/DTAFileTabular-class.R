@@ -381,11 +381,8 @@ dta_reader_parse_settings <- function(handler = NULL) {
     return(defaults)
   }
 
-  # tryCatch, not `%||%`: a handler predating these properties -- one restored
-  # from a serialised object, say -- has no such property at all, and reaching
-  # for it is an error rather than a NULL.
   pick <- function(name, default) {
-    value <- tryCatch(S7::prop(handler, name), error = function(e) NULL)
+    value <- S7::prop(handler, name)
     if (length(value) != 1 || is.na(value)) default else value
   }
 

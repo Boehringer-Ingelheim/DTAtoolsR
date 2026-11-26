@@ -19,26 +19,6 @@ mrf_file <- function(text, env = parent.frame()) {
 # cli wraps a condition message, so a phrase is looked for in one line of it.
 mrf_msg <- function(cnd) gsub("\\s+", " ", conditionMessage(cnd))
 
-test_that("a matrix saved in the earlier format is refused, not read with other header texts", {
-  ds <- mrf_ds()
-  expect_false(dta_is_stale(ds))
-
-  # What such an object looks like: its settings still carry `corner_mode`.
-  settings <- ds@matrix
-  attr(settings, "corner_mode") <- "blank"
-  old <- ds
-  attr(old, "matrix") <- settings
-
-  expect_true(dta_is_stale(old))
-  expect_error(dta_upgrade(old), class = "dta_matrix_format_outdated")
-  expect_error(upgrade_dta(old), class = "dta_matrix_format_outdated")
-  # load_file() upgrades a stale object first, so it refuses before reading.
-  expect_error(
-    load_file(old, file = mrf_file("G\tS1\ng1\t1\n"), stream = "never"),
-    class = "dta_matrix_format_outdated"
-  )
-})
-
 test_that("a header that is not one text or FALSE is refused with its class, whatever its type", {
   spec <- DTAColumnSpec(id = "G", type = "SAS Char", nullable = FALSE)
   for (bad in list(1, TRUE, c("a", "b"), NA_character_, list("a"))) {
@@ -154,27 +134,6 @@ test_that("a header text of spaces only is an empty field wherever it is put in 
   expect_identical(nrow(messages(ds)), 0L)
 })
 
-test_that("a document holding a matrix of the earlier format is refused by everything that reads it", {
-  dta <- suppressMessages(read_dta_from_yaml(system.file("extdata", "matrix_dta.yaml", package = "DTAtools")))
-  expect_false(dta_is_stale(dta))
-
-  # One of its two datasets is aged; the other stays current.
-  settings <- dta@datasets[["gene_counts"]]@matrix
-  attr(settings, "corner_mode") <- "named"
-  old <- dta@datasets[["gene_counts"]]
-  attr(old, "matrix") <- settings
-  sets <- dta@datasets
-  sets[["gene_counts"]] <- old
-  attr(dta, "datasets") <- sets
-
-  expect_true(dta_is_stale(dta))
-  expect_error(upgrade_dta(dta), class = "dta_matrix_format_outdated")
-  expect_error(check(dta, quiet = TRUE), class = "dta_matrix_format_outdated")
-  expect_error(lint_dta(dta), class = "dta_matrix_format_outdated")
-  # ... and so is the dataset on its own.
-  expect_error(lint_dta(old), class = "dta_matrix_format_outdated")
-})
-
 test_that("a wrong header text is explained with what to change, and an empty field is called one", {
   explained <- function(header_line) {
     ds <- mrf_ds(list(mrf_label(header = "gene_id")))
@@ -213,7 +172,6 @@ test_that("a matrix typed in the R vocabulary is current and keeps its types thr
     row_labels = list(list(id = "G", type = "R character", nullable = FALSE)),
     matrix = list(cells = list(type = "R numeric", nullable = FALSE, range = list(min = 0), infinite = TRUE))
   )
-  expect_false(dta_is_stale(ds))
   expect_identical(ds@specs@columns[["G"]]@structure@backend, "R")
   label <- as.list(ds@specs@columns[["G"]])
   settings <- as.list(ds@matrix)

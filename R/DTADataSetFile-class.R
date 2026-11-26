@@ -63,25 +63,26 @@ DTADataSetFile <- S7::new_class(
     # target arrived, is non-empty and can be opened -- so a reader handler
     # (DTAFileCSV, DTAFileTSV, a bare DTAFile, ...) is meaningless here and
     # would let the rest of the package treat this dataset as readable when it
-    # is not. The fix is COERCION, not rejection: an existing document that
-    # named a reader type before this constraint existed must keep loading, so
-    # every non-DTAFileAny handler is rebuilt as a DTAFileAny carrying every
-    # property the source handler has. Properties are read defensively because
-    # a bare DTAFile lacks some of what a reader subclass would carry.
+    # is not. The rule is COERCION, not rejection: an entry that names a reader
+    # type is accepted as the file entry it is, so every non-DTAFileAny handler
+    # is rebuilt as a DTAFileAny carrying every property the source handler has.
     files <- lapply(files, function(h) {
       if (inherits(h, "DTAtools::DTAFileAny")) {
         return(h)
       }
+      if (!inherits(h, "DTAtools::DTAFile")) {
+        cli_abort("All elements in 'files' must be of class 'DTAFile'")
+      }
 
       DTAFileAny(
-        filename = tryCatch(h@filename, error = function(e) NULL),
-        pattern = tryCatch(h@pattern, error = function(e) NULL),
-        pattern_description = tryCatch(h@pattern_description, error = function(e) NULL),
+        filename = h@filename,
+        pattern = h@pattern,
+        pattern_description = h@pattern_description,
         number_of_files = NULL,
-        min_number_of_files = tryCatch(h@min_number_of_files, error = function(e) NULL),
-        max_number_of_files = tryCatch(h@max_number_of_files, error = function(e) NULL),
-        info = tryCatch(h@info, error = function(e) NULL),
-        container = dta_handler_container(h)
+        min_number_of_files = h@min_number_of_files,
+        max_number_of_files = h@max_number_of_files,
+        info = h@info,
+        container = h@container
       )
     })
 
@@ -609,9 +610,6 @@ method(load_file, DTADataSetFile) <- function(
   stream = getOption("DTAtools.stream", "auto"),
   ...
 ) {
-  # An object restored from an older version lacks properties its class now has.
-  if (dta_is_stale(x)) x <- dta_upgrade(x)
-
   handler_index <- dta_resolve_file_handler_index(handler_index, x@files)
 
   file <- dta_assert_single_file_path(file, "load_file")
@@ -652,8 +650,8 @@ method(load_file, DTADataSetFile) <- function(
     slot <- match(name, dta_file_target_keys(x@file_paths))
   }
 
-  # Which entry took each path (see the property). A restored legacy object
-  # may hand back NULL or a vector of another length: start over, unknown.
+  # Which entry took each path (see the property). When it is out of step with
+  # the paths (they were set directly), start over, unknown.
   if (length(x@file_handlers) != length(x@file_paths)) {
     x@file_handlers <- rep(NA_integer_, length(x@file_paths))
   }
@@ -784,8 +782,6 @@ S7::method(check, DTADataSetFile) <- function(
   # reference is named.
   .container_globs = NULL
 ) {
-  if (dta_is_stale(x)) x <- dta_upgrade(x)
-
   if (is.null(validation_run)) {
     validation_run <- dta_new_validation_run_id()
   }
@@ -1004,7 +1000,9 @@ S7::method(validation_errors, DTADataSetFile) <- function(
   if (source %in% c("auto", "memory")) {
     in_memory <- x@validation_store[[table_name]]
     if (!is.null(in_memory)) {
-      return(dta_as_validation_details(dta_migrate_validation_details(in_memory)))
+      return(dta_as_validation_details(dta_assert_current_details(
+        in_memory, sprintf("The validation result held for target '%s'", table_name)
+      )))
     }
   }
 
@@ -1021,12 +1019,12 @@ S7::method(validation_errors, DTADataSetFile) <- function(
     )
   }
 
-  # Migrated on read like the tabular artifacts: an artifact written before the
-  # import axis existed reports import_valid = NA ("unknown"), never a clean
-  # axis it never checked.
-  dta_as_validation_details(
-    dta_migrate_validation_details(readRDS(entry$artifact_path))
-  )
+  # Read like the tabular artifacts: one recorded before the import axis
+  # existed is refused, never read as a clean axis it never checked.
+  dta_as_validation_details(dta_assert_current_details(
+    readRDS(entry$artifact_path),
+    sprintf("The validation artifact for target '%s'", table_name)
+  ))
 }
 
 #' @export

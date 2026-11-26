@@ -381,9 +381,6 @@ test_that("rebase_derive_selections() reads options a variant choice contributes
   sel <- derive(dta, prov, list(def))
   expect_identical(sel$hdr, "Variant header")
   expect_identical(sel$platform, "a")
-
-  # A document still carrying recorded selections replays exactly those.
-  expect_identical(derive(dta, c(prov, list(selections = list(hdr = "old"))), list(def)), list(hdr = "old"))
 })
 
 test_that("rebase_plan() re-derives option answers from the document, so they survive a rebase", {

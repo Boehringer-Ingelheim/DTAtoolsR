@@ -1763,55 +1763,6 @@ test_that("an archive is never a misfit of a type: any entry (default container 
   expect_setequal(rows_of(plan, "loaded")$dataset, c("ae", "adsl"))
 })
 
-# An old-shaped object: every DTAtools class without the newer properties.
-ld_old_class <- function(cls, drop) {
-  parent <- cls@parent
-  parent_old <- if (inherits(parent, "S7_class") && !identical(parent@name, "S7_object")) {
-    ld_old_class(parent, drop)
-  } else {
-    S7::S7_object
-  }
-  own <- setdiff(names(cls@properties), names(parent@properties))
-  S7::new_class(cls@name,
-    package = "DTAtools", parent = parent_old,
-    properties = cls@properties[setdiff(own, drop)], validator = function(self) NULL
-  )
-}
-ld_age <- function(obj, drop = c("containers", "provenance", "file_handlers")) {
-  if (is.environment(obj) || is.data.frame(obj)) {
-    return(obj)
-  }
-  if (inherits(obj, "S7_object")) {
-    cur <- S7::S7_class(obj)
-    if (!identical(cur@package, "DTAtools")) {
-      return(obj)
-    }
-    for (p in setdiff(names(attributes(obj)), c("class", "S7_class"))) {
-      attr(obj, p) <- ld_age(attr(obj, p), drop)
-    }
-    for (p in intersect(drop, names(cur@properties))) attr(obj, p) <- NULL
-    obj <- stamp_old_class(obj, ld_old_class(cur, drop))
-    return(obj)
-  }
-  if (is.list(obj)) {
-    for (i in seq_along(obj)) if (!is.null(obj[[i]])) obj[[i]] <- ld_age(obj[[i]], drop)
-  }
-  obj
-}
-ld_roundtrip <- function(x) {
-  f <- withr::local_tempfile(fileext = ".rds", .local_envir = parent.frame())
-  saveRDS(x, f)
-  readRDS(f)
-}
-
-test_that("a stale (old-shaped) DTA is upgraded by load_delivery()", {
-  old <- ld_roundtrip(ld_age(cont_dta("csv")))
-  expect_true(dta_is_stale(old))
-  d <- ld(old, cont_fx("sdtm_csv.zip"))
-  expect_setequal(rows_of(plan_of(d), "loaded")$dataset, c("ae", "dm"))
-  expect_identical(dta_provenance(datasets(d, "ae"))$ae$container, "sdtm_csv.zip")
-})
-
 # --- Tiers ---------------------------------------------------------------------
 
 test_that("tier 1 (literal, free) beats tier 2 (pattern, fits) in another dataset", {

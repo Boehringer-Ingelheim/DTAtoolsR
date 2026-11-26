@@ -944,21 +944,14 @@ test_that("printing a tabular dataset is unchanged by the shared print body", {
   )
 })
 
-# ---- an object saved before `heads` existed (T31) --------------------------------
+# ---- a table whose header was not recorded (T31) ---------------------------------
 
-test_that("an older-shaped matrix is upgraded, fails its check legibly and loads again", {
+test_that("a matrix table without a recorded header fails its check legibly and loads again", {
   path <- mxd_file("\tS1\tS2\nr1\t1\t2\n")
   d <- load_file(mxd_ds(), file = path, stream = "never")
+  # load_file() records the header it read; forget it.
   old <- d
-  cls <- S7::S7_class(old)
-  props <- attr(cls, "properties")
-  props$heads <- NULL
-  attr(cls, "properties") <- props
-  old <- stamp_old_class(old, cls)
-  attr(old, "heads") <- NULL
-
-  expect_true(dta_is_stale(old))
-  expect_identical(attr(dta_upgrade(old), "heads"), list())
+  old@heads <- list()
 
   res <- check(old, quiet = TRUE, persist = FALSE)
   expect_false(validation_status(res)$ok)
@@ -1168,9 +1161,8 @@ test_that("a repeated row key is the generated rule's error for an R matrix as f
   })
 })
 
-test_that("an R matrix prints, round-trips through as.list() and is not stale", {
+test_that("an R matrix prints and round-trips through as.list()", {
   ds <- mxd_r(list(type = "R numeric", nullable = FALSE, range = list(min = 0)))
-  expect_false(dta_is_stale(ds))
   spec <- as.list(ds@matrix)
   expect_identical(spec$cells$type, "R numeric")
   expect_identical(dta_matrix_spec_from_list(spec), ds@matrix)
