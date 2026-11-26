@@ -466,8 +466,10 @@ test_that("every spelling of a number the editor accepts reads as the number it 
     "5" = 5, "+5" = 5, "-5" = -5, "5." = 5, ".5" = 0.5, "-.5" = -0.5,
     "007" = 7, "000" = 0, "0.50" = 0.5, "1e5" = 1e5, "1E5" = 1e5,
     "1e+05" = 1e5, "1e-05" = 1e-5, "2.5e3" = 2500, "-0" = 0,
-    " 12 " = 12, "0.1" = 0.1, "100000" = 1e5, "1e308" = 1e308
+    " 12 " = 12, "0.1" = 0.1, "100000" = 1e5, "1e22" = 1e22
   )
+  # 1e22 is the largest power of ten a double holds exactly, so even R's own
+  # literal is right on every platform; 1e308 is not (arm64 reads it a ulp off)
   for (txt in names(spelled)) {
     expect_identical(read(txt, "A"), spelled[[txt]], info = txt)
   }
