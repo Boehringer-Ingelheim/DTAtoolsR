@@ -790,6 +790,7 @@ method(as_json_schema, DTAColumnSpecCollection) <- function(x) {
 
 #' @export
 #' @name as.list
+#' @usage NULL
 method(as.list, DTAColumnSpecCollection) <- function(x, ...) {
   columns <- lapply(x@columns, function(column) {
     as.list(column)

@@ -13,7 +13,7 @@ A character vector of operator names.
 The subset of \code{dta_condition_operators()} that always go through
 \code{dta_numeric_operands()}. Equality and set operators (\code{equals},
 \code{not_equals}, \verb{in}, \code{not_in}) also compare numerically, but only
-conditionally -- see \code{dta_equality_bound()}; text (\code{pattern}) and
-emptiness (\code{empty}) operators always compare the raw column.
+conditionally -- see \code{dta_equality_bound()}; the text (\code{pattern}) and
+emptiness (\code{empty}) operators never convert the column to numbers.
 }
 \keyword{internal}

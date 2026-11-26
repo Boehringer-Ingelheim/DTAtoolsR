@@ -1041,10 +1041,11 @@ test_that("edit mode from a template-created document survives a reload", {
 
 # ---- Vocabulary slots: the live "n of m selected" counter -------------------
 
-# A vocabulary plus a template with one slot bound to it. The slot's `target`
-# only has to PARSE here (vocabulary_slot_target_parts(), vocabulary.R) -- this
-# test stops at the options step and never builds a document.
-write_vocab_slot_fixture <- function(root) {
+# A vocabulary plus a template with one slot bound to it. The dataset holds one
+# VISIT column bound to the same vocabulary, so a document can really be built
+# from it: the slot's `target` has to name a column the dataset has. `default`
+# is the slot's `default:` line, or NULL for a slot without one.
+write_vocab_slot_fixture <- function(root, default = "    default: [TERM_A, TERM_B]") {
   writeLines(
     c(
       "kind: dta_vocabulary",
@@ -1075,18 +1076,22 @@ write_vocab_slot_fixture <- function(root) {
       "    label: Visits",
       "    target: datasets.mini_ds.columns.VISIT.values",
       "    vocabulary: visit@1.0",
-      "    default: [TERM_A, TERM_B]",
+      default,
       "datasets:",
       "  - id: mini_ds",
-      "    type: file",
+      "    type: tabular",
       "    files: { filename: mini.csv, type: csv }",
+      "    columns:",
+      "      - id: VISIT",
+      "        type: SAS Char",
+      "        values_from: visit@1.0",
       "options: []"
     ),
     lib_path(root, "vocab_tpl.dta-template.yaml")
   )
 }
 
-test_that("the vocabulary counter follows the control, and an emptied control means no terms", {
+test_that("the vocabulary counter follows the control, and an emptied control is collected as an empty selection", {
   # The counter is a server-side renderText registered per slot on every open
   # of the options modal, which is the only reason a test can see it at all --
   # the All/None/Default links that drive it are client-side.
@@ -1116,10 +1121,68 @@ test_that("the vocabulary counter follows the control, and an emptied control me
 
     # THE POINT OF "None": an emptied control is "0 of 2", and is collected
     # as an explicit empty selection -- which vocabulary_slot_values() reads
-    # as "no terms" -- not omitted, which would have put the default back
+    # as "no constraint" -- not omitted, which would have put the default back
     # behind the author's back.
     session$setInputs(tmpl_vocab_visit_choice = character(0))
     expect_equal(output$tmpl_vocab_visit_choice_count, "0 of 2 selected")
     expect_identical(collect_vocab_selections(), list(visit_choice = character(0)))
   })
+})
+
+# Confirms the options dialog of `vocab_tpl` with the vocabulary control holding
+# `chosen` (NULL: the browser reported nothing for it, as for a control that
+# never held a term), and returns the VISIT column's permitted values in the
+# document the app then holds (NULL for a column with none).
+confirm_vocab_dialog <- function(chosen, default = "    default: [TERM_A, TERM_B]") {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+  write_vocab_slot_fixture(root, default)
+
+  out <- NULL
+  shiny::testServer(app_server_dir(), {
+    pick_template_step1(session, output, "vocab_tpl", "1.0")
+    if (!is.null(chosen)) {
+      session$setInputs(tmpl_vocab_visit_choice = chosen)
+    }
+    session$setInputs(tmpl_carry_source = "none")
+    session$setInputs(template_create_confirm = 1)
+    stopifnot(!is.null(rv$dta))
+    spec <- rv$dta@datasets[["mini_ds"]]@specs@columns[["VISIT"]]
+    out <<- list(values = spec@values, id = spec@id)
+  })
+  out
+}
+
+test_that("confirming the options dialog with the control emptied builds the column unconstrained", {
+  # The whole path an author takes: clear the chips (or press None), press
+  # Create. The counter said "0 of 2 selected" and collect_vocab_selections()
+  # reported an empty selection, but nothing downstream acted on it, so the
+  # document came back with every term the vocabulary has.
+  cleared <- confirm_vocab_dialog(character(0))
+  expect_identical(cleared$id, "VISIT")
+  expect_null(cleared$values)
+
+  # The control holding something is still applied as before, so the empty case
+  # above is not simply "the column never gets values".
+  one <- confirm_vocab_dialog("TERM_B")
+  expect_identical(one$values, "TERM_B")
+  both <- confirm_vocab_dialog(c("TERM_A", "TERM_B"))
+  expect_identical(both$values, c("TERM_A", "TERM_B"))
+})
+
+test_that("a slot with no default that the author leaves empty builds the column unconstrained", {
+  # The dialog cannot tell a control the author cleared from one that never held
+  # a term: both report nothing, and the control is the author's answer. So a
+  # slot without a `default:` that is left alone is None as well, and the column
+  # loses the dataset template's vocabulary binding rather than keeping it. A
+  # template that needs the column constrained gives the slot a `min:`.
+  left_alone <- confirm_vocab_dialog(NULL, default = NULL)
+  expect_identical(left_alone$id, "VISIT")
+  expect_null(left_alone$values)
+
+  # The same slot with a term chosen is applied as for any other slot.
+  chosen <- confirm_vocab_dialog("TERM_B", default = NULL)
+  expect_identical(chosen$values, "TERM_B")
 })

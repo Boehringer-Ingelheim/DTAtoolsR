@@ -286,6 +286,23 @@ test_that("dta_numeric_text writes whole numbers and exponent forms in full", {
   expect_equal(dta_numeric_text(c(Inf, -Inf)), c("Inf", "-Inf"))
 })
 
+test_that("dta_numeric_text writes an integer64 value exactly", {
+  skip_if_not_installed("bit64")
+  # is.numeric(integer64) is TRUE, but the value's bits are stored in a double,
+  # which the whole-number arithmetic read as a tiny double and wrote as "0".
+  # 9007199254740993 is 2^53 + 1, which no double holds.
+  x <- bit64::as.integer64(c("100000", "9007199254740993", "-5", NA))
+  expect_identical(dta_numeric_text(x), c("100000", "9007199254740993", "-5", NA))
+})
+
+test_that("a column pattern judges an integer64 column by the digits it holds", {
+  skip_if_not_installed("bit64")
+  x <- bit64::as.integer64(c("100000", "5", "7"))
+  errs <- dta_check_column_spec("N", list(type = "integer", pattern = "^(100000|5)$"), x)
+  # By hand: 100000 and 5 fit the pattern; 7 does not. Row 3 is the only finding.
+  expect_identical(errs$row, 3L)
+})
+
 test_that("DATE11. display text with hyphens fits, and the day is 01-31", {
   specs <- cf_col(type = "SAS Date", format = "SAS DATE11.", nullable = FALSE)
   cf_expect(

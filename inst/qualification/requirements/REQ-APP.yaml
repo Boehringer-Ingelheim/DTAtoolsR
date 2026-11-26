@@ -1032,3 +1032,118 @@ requirements:
       The application cannot make an R Date, POSIXct or hms column without a
       format: the one the author did not write is stored and then written
       (LIM-034).
+
+  - id: REQ-APP-061
+    text: >
+      A dataset shall be reported pass only while every table bound to it has
+      been validated and none of them failed. While a table bound to it has not
+      been validated -- because it was bound, replaced or delivered after the
+      last check -- and none has failed, the dataset shall be reported
+      pending, however many checks of other datasets follow. A table that
+      failed shall still make the dataset fail.
+    risk: high
+    category: integrity
+    covers: [run_dta_app, validation_status]
+    source: inst/shiny/dta_app/R/utils_dta.R dta_status_map()
+    notes: >
+      A green status is what the application's validation summary certifies,
+      so "pass" over a table nobody validated would certify unchecked data.
+      REQ-APP-010 gives the four status values; this fixes when a dataset may
+      read pass.
+
+  - id: REQ-APP-062
+    text: >
+      Every specification text the application saves shall record the DTAtools
+      release that wrote it as metadata.dtatools_version, replacing any release
+      the document already named, so that the value names the last writer.
+      Reading the saved text back shall give that release, and saving the
+      document again shall give identical text. A document with no metadata of
+      its own shall be saved without a metadata block and so without the value.
+    risk: medium
+    category: integrity
+    covers: [run_dta_app, read_dta_from_yaml]
+    source: inst/shiny/dta_app/R/utils_dta.R (dta_to_list, dta_tool_version)
+    notes: >
+      The value is the installed package version, which is what reads the file
+      back; a hosted bundle's own version can differ from it. A template
+      cannot target the value (REQ-TMPL-012).
+
+  - id: REQ-APP-063
+    text: >
+      A conditional or grouped-condition rule opened with the rule editor's
+      pencil and saved without a change shall keep its meaning. Every operator
+      of every column shall be saved as the same test: range as min and max
+      with the same bounds, equal as equals and not_equal as not_equals; and
+      every value shall be saved with the type and spelling it had, so that an
+      integer stays an integer, a text code such as "001", "007" or "1.50"
+      stays text and a list member that holds a comma stays one member. A
+      range rule's bounds shall be kept the same way.
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: >
+      DTA_YAML_GUIDE.md (section 5, operators table; `range` is equivalent to
+      `min`/`max`); inst/shiny/dta_app/R/rule_conditions.R
+    notes: >
+      Before this requirement the editor rewrote a rule as it was opened:
+      not_equal came back as equals, the opposite test; range as the text
+      "lo, hi" under equals; a second operator on a column was dropped; a Char
+      column's "001" became the number 1; and "Smith, John" became two
+      values. The spellings are rewritten on the first save, by decision: the
+      test is the same, the engine's normal form is what is written.
+
+  - id: REQ-APP-064
+    text: >
+      A value typed into the rule editor that it cannot read shall be refused
+      on Save, with a message that names the text, and the rule shall be left
+      unchanged: a number that is not a number (a decimal comma included, in a
+      comparison, a between row or a range rule's minimum or maximum), a
+      between row with more than two bounds, a list with a double quote that
+      is never closed, a row with a column and no value (an empty row's blank
+      Value box excepted, which reads as true), a row with a value and no
+      column, an empty row whose Value box holds a word the editor cannot
+      read as true or false. The same operator given twice for one column
+      shall be refused the same way, with a message that names the column, and
+      so shall a row of a grouped condition that names a column and no
+      condition. A rule the form cannot show faithfully, because two spellings
+      of one operator stand on one column or the operator is unknown to the
+      editor, shall not be opened for editing, and the notification that says
+      so shall name the rule, the column and the operator. Nothing shall be
+      dropped or reinterpreted to make a row savable.
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/R/rule_conditions.R
+    notes: >
+      Before this requirement an unreadable bound was silently taken as absent
+      (a minimum of "0,5" saved as no minimum), and the second of two rows for
+      one column overwrote the first. A row with a value and no column, or a
+      grouped row with a column and no condition name, was skipped, and an
+      empty row took any word to mean true. The refusal of a row with a value
+      and no column names that value, and the refusal of a grouped row names
+      its column, because no text was typed. The words the editor reads as
+      true or false for an empty row are not listed here; OQ-APP-084 pins
+      true, a blank box and a word that is neither. The engine refuses an
+      operator the editor does not know before a document is open: the linter
+      as an error on a file
+      (rule_condition_operator_invalid), the validator of the column
+      specifications on a rule built in R, both since 0.26.0; the source of
+      0.25.0 has neither check. The refusal to open such a rule therefore
+      guards a document that skipped validation, or an operator the engine
+      gains before the editor reads it; OQ-APP-082 sets the rule on the loaded
+      document by assigning the attributes of its objects directly.
+
+  - id: REQ-APP-065
+    text: >
+      A range rule saved in the rule editor with its minimum box left blank
+      shall be saved with no lower bound, and one saved with its maximum box
+      left blank shall be saved with no upper bound, so that every value on
+      that side is within the range; the rule shall be opened again with that
+      box blank. A range rule with both boxes blank shall be refused.
+    risk: high
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/R/rule_conditions.R
+    notes: >
+      The editor's hint promises "a minimum and/or maximum". An open side is
+      stored as minus or plus infinity, written -.inf or .inf in YAML.

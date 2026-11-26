@@ -228,6 +228,26 @@ test_that("OQ-VAL-008 | a value not matching the declared pattern is reported | 
     vs_expect("columnspec", 2L, "CODE", "pattern"),
     vs_found(ds)
   )
+
+  # LIM-036: a column's pattern asks whether a value may stand in the column, so
+  # an empty string is matched like any other text and `^[A-Z]*$` accepts it. The
+  # rule operator pattern answers another question and never matches an empty
+  # string (REQ-RULE-007). A file cannot deliver an empty string (an empty field
+  # is read as missing, REQ-FILE-004), so this one case hands a table built in R
+  # to the engine instead of writing a file. Zero capital letters satisfy
+  # `^[A-Z]*$`, so the expected number of findings is zero.
+  held <- DTADataSetTabular(
+    id = "qual",
+    specs = vs_specs(list(
+      DTAColumnSpec(id = "CODE", type = "SAS Char", length = 6, nullable = FALSE, pattern = "^[A-Z]*$")
+    )),
+    tables = list(t = data.frame(CODE = c("", "AB"), stringsAsFactors = FALSE))
+  )
+  held <- check(held, persist = FALSE, quiet = TRUE)
+  qa_step(
+    "LIM-036: an empty string in a table built in R fits a column pattern that allows no characters",
+    0L, nrow(vs_found(held))
+  )
 })
 
 test_that("OQ-VAL-009 | a missing value in a nullable column is not an error | REQ-VAL-010", {
@@ -576,6 +596,59 @@ test_that("OQ-VAL-040 | a pattern declared on a numeric column is applied to the
       expected, vs_found(ds)
     )
   }
+})
+
+test_that("OQ-VAL-054 | a pattern declared on an integer64 column is applied to the integer as written, so a valid value is not reported as breaking it | REQ-VAL-009", {
+  qa_requires("bit64")
+
+  # No reader produces an integer64 column from a file; one built in R is the
+  # only way such a value reaches the check, so the table is handed over as it is
+  # (as OQ-TYPE-022 does).
+  #
+  # The rows hold the integers 100000, 7 and 123456, matched as "100000", "7"
+  # and "123456". A pattern naming the first two accepts exactly those, and one
+  # asking for six digits accepts the first and the last, so each row is
+  # accepted by one pattern and refused by the other, or by neither. A value
+  # written as "0" (the stored bits of an integer64 read as a double) satisfies
+  # neither, and so would be reported on every row.
+  specs <- vs_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+    DTAColumnSpec(id = "NAMED", type = "SAS Int", nullable = FALSE, pattern = "^(100000|7)$"),
+    DTAColumnSpec(id = "SIX", type = "SAS Int", nullable = FALSE, pattern = "^[0-9]{6}$")
+  ))
+  frame <- data.frame(ID = c("A001", "A002", "A003"), stringsAsFactors = FALSE)
+  frame$NAMED <- bit64::as.integer64(c(100000, 7, 123456))
+  frame$SIX <- bit64::as.integer64(c(100000, 7, 123456))
+
+  # Two steps. The call to validate_table_detailed() at the end is the one that
+  # pins the fixed defect: it hands the engine the integer64 column itself. The
+  # dataset path first was not seen to fail under the defect (an emulation of it,
+  # run while this case was written, left that step passing), so it covers that
+  # path and its row-by-row report, and no more.
+  held <- DTADataSetTabular(id = "qual", specs = specs, tables = list(t = frame))
+  held <- check(held, persist = FALSE, quiet = TRUE)
+
+  qa_step(
+    "on a dataset, only 123456 is reported against ^(100000|7)$ and only 7 against six digits",
+    rbind(
+      vs_expect("columnspec", 2, "SIX", "pattern"),
+      vs_expect("columnspec", 3, "NAMED", "pattern")
+    ),
+    vs_found(held)
+  )
+
+  # The integer64 columns themselves, handed to the engine's table check:
+  # 123456 against ^(100000|7)$ and 7 against six digits, one error each.
+  detailed <- validate_table_detailed(specs, frame, verbose = FALSE)
+  qa_step(
+    "validate_table_detailed() counts those two column-specification errors and no other",
+    c(columnspec = 2L, rule = 0L, import = 0L),
+    c(
+      columnspec = as.integer(detailed$n_columnspec_errors),
+      rule = as.integer(detailed$n_rule_errors),
+      import = as.integer(detailed$n_import_errors)
+    )
+  )
 })
 
 test_that("OQ-VAL-041 | a value too long for a declared $w. format is reported as a format violation | REQ-VAL-031", {

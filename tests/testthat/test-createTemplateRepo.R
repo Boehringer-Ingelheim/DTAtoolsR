@@ -83,6 +83,14 @@ agent_skill_files <- file.path(
   )
 )
 
+# The JSON Schemas and the VS Code setting that points at them. Written for
+# every scaffold, whatever `examples`, `ci` and `agent_skill` say.
+editor_asset_files <- c(
+  "schemas/dta-template-library.schema.json",
+  "schemas/dta-app.schema.json",
+  ".vscode/settings.json"
+)
+
 # ---- The round trip -- the anchor test --------------------------------------
 
 test_that("create_template_repo() scaffolds a directory that validate_template() accepts outright", {
@@ -336,7 +344,7 @@ test_that("examples = FALSE writes no template files, and validate_template() re
 
   expect_setequal(
     list_all_files(dir),
-    c(".gitignore", "README.md", ".github/workflows/validate-templates.yml", agent_skill_files)
+    c(".gitignore", "README.md", ".github/workflows/validate-templates.yml", editor_asset_files, agent_skill_files)
   )
 
   result <- validate_template(dir)
@@ -435,7 +443,7 @@ test_that("the bundled template-repo-skeleton directory is itself clean", {
 test_that("the scaffold puts README.md and dta-app.yaml at the root and one kind per folder", {
   dir <- withr::local_tempdir()
   create_template_repo(dir, ci = FALSE)
-  expect_setequal(list_all_files(dir), c(scaffold_example_files, agent_skill_files))
+  expect_setequal(list_all_files(dir), c(scaffold_example_files, editor_asset_files, agent_skill_files))
   # No template file sits in the root, and no folder holds another kind's file.
   expect_length(list.files(dir, pattern = "[.]dta-.*[.]ya?ml$"), 0)
   expect_setequal(
@@ -456,29 +464,38 @@ test_that("examples = TRUE and each ci provider write exactly the documented fil
   for (provider in names(ci_files)) {
     dir <- withr::local_tempdir()
     create_template_repo(dir, ci = provider)
-    expect_setequal(list_all_files(dir), c(scaffold_example_files, agent_skill_files, ci_files[[provider]]))
+    expect_setequal(
+      list_all_files(dir),
+      c(scaffold_example_files, editor_asset_files, agent_skill_files, ci_files[[provider]])
+    )
   }
 
   none <- withr::local_tempdir()
   create_template_repo(none, ci = FALSE)
-  expect_setequal(list_all_files(none), c(scaffold_example_files, agent_skill_files))
+  expect_setequal(list_all_files(none), c(scaffold_example_files, editor_asset_files, agent_skill_files))
 
   all3 <- withr::local_tempdir()
   create_template_repo(all3, ci = names(ci_files))
-  expect_setequal(list_all_files(all3), c(scaffold_example_files, agent_skill_files, unlist(ci_files)))
+  expect_setequal(
+    list_all_files(all3),
+    c(scaffold_example_files, editor_asset_files, agent_skill_files, unlist(ci_files))
+  )
 })
 
-test_that("examples = FALSE writes only README.md, .gitignore, the agent skill and the CI file(s), no kind folders", {
+test_that("examples = FALSE writes only README.md, .gitignore, the editor schemas, the agent skill and the CI file(s), no kind folders", {
   bare <- withr::local_tempdir()
   create_template_repo(bare, ci = FALSE, examples = FALSE)
-  expect_setequal(list_all_files(bare), c("README.md", ".gitignore", agent_skill_files))
+  expect_setequal(list_all_files(bare), c("README.md", ".gitignore", editor_asset_files, agent_skill_files))
   expect_false(any(dir.exists(file.path(bare, c("templates", "parties", "vocabulary", "export-templates")))))
 
   with_ci <- withr::local_tempdir()
   create_template_repo(with_ci, ci = c("github", "jenkins"), examples = FALSE)
   expect_setequal(
     list_all_files(with_ci),
-    c("README.md", ".gitignore", ".github/workflows/validate-templates.yml", "Jenkinsfile", agent_skill_files)
+    c(
+      "README.md", ".gitignore", ".github/workflows/validate-templates.yml", "Jenkinsfile",
+      editor_asset_files, agent_skill_files
+    )
   )
 })
 
@@ -509,7 +526,10 @@ test_that("agent_skill = TRUE copies the bundled skill byte-identically; FALSE w
   off <- withr::local_tempdir()
   create_template_repo(off, agent_skill = FALSE)
   expect_false(dir.exists(file.path(off, ".claude")))
-  expect_setequal(list_all_files(off), c(scaffold_example_files, ".github/workflows/validate-templates.yml"))
+  expect_setequal(
+    list_all_files(off),
+    c(scaffold_example_files, editor_asset_files, ".github/workflows/validate-templates.yml")
+  )
 })
 
 test_that("agent_skill must be a single TRUE/FALSE", {
@@ -529,6 +549,95 @@ test_that("a pre-existing SKILL.md is a conflict like any other file", {
   expect_error(create_template_repo(dir), "SKILL.md", class = "rlang_error")
   expect_identical(readLines(skill_md), "team edit")
   expect_setequal(list_all_files(dir), agent_skill_files[[1]])
+})
+
+# ---- Editor assets: JSON Schemas and the VS Code setting ----------------------
+# What the schemas accept is covered by test-templateLibrarySchema.R, which needs
+# jsonvalidate. These tests need nothing beyond jsonlite, so they never skip.
+
+test_that("the schemas and the VS Code setting are written byte-identically, whatever examples, ci and agent_skill say", {
+  sources <- c(
+    "schemas/dta-template-library.schema.json" = "schemas/dta-template-library.schema.json",
+    "schemas/dta-app.schema.json" = "schemas/dta-app.schema.json",
+    ".vscode/settings.json" = "editor/yaml-schema-mapping.json"
+  )
+  for (args in list(list(), list(examples = FALSE, ci = FALSE, agent_skill = FALSE))) {
+    dir <- withr::local_tempdir()
+    do.call(create_template_repo, c(list(dir), args))
+    for (dest in names(sources)) {
+      src <- system.file("extdata", sources[[dest]], package = "DTAtools")
+      expect_true(nzchar(src), info = dest)
+      expect_identical(
+        unname(tools::md5sum(file.path(dir, dest))), unname(tools::md5sum(src)),
+        info = dest
+      )
+    }
+  }
+})
+
+test_that(".vscode/settings.json maps each YAML file the scaffold writes to the one schema for its kind", {
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, ci = FALSE, agent_skill = FALSE)
+  schemas <- jsonlite::fromJSON(
+    file.path(dir, ".vscode", "settings.json"),
+    simplifyVector = FALSE
+  )[["yaml.schemas"]]
+  library_schema <- "./schemas/dta-template-library.schema.json"
+  app_schema <- "./schemas/dta-app.schema.json"
+  expect_setequal(names(schemas), c(library_schema, app_schema))
+  # Relative paths resolve against the workspace root, which is the repository.
+  for (schema in names(schemas)) {
+    expect_true(file.exists(file.path(dir, schema)), info = schema)
+  }
+
+  # An EMULATION of the glob dialect of VS Code's YAML extension (`**/` is any
+  # directory prefix, `*` anything within one path segment), written from its
+  # documentation. It checks that the shipped patterns hang together, not what
+  # an editor really does with them; that has to be seen in an editor.
+  glob_to_regex <- function(glob) {
+    x <- gsub(".", "\\.", glob, fixed = TRUE)
+    x <- gsub("**/", "\001", x, fixed = TRUE)
+    x <- gsub("*", "[^/]*", x, fixed = TRUE)
+    paste0("^", gsub("\001", "(.*/)?", x, fixed = TRUE), "$")
+  }
+  schemas_for <- function(file) {
+    hit <- vapply(
+      schemas,
+      function(globs) any(vapply(unlist(globs), function(g) grepl(glob_to_regex(g), file), logical(1))),
+      logical(1)
+    )
+    names(schemas)[hit]
+  }
+
+  files <- list.files(dir, pattern = "[.]ya?ml$", recursive = TRUE)
+  # All four template kinds and the app config, so no glob is left untried.
+  expect_length(files, 5)
+  for (file in files) {
+    expect_identical(
+      schemas_for(file),
+      if (file == "dta-app.yaml") app_schema else library_schema,
+      info = file
+    )
+  }
+  # A yml spelling and a nested folder are covered too. (Whether an editor also
+  # applies the app schema to a `dta-app.yaml` in a subfolder is not asserted:
+  # the emulation above cannot know.)
+  expect_identical(schemas_for("templates/sub/x.dta-party.yml"), library_schema)
+  expect_identical(schemas_for("dta-app.yml"), app_schema)
+})
+
+test_that("a pre-existing .vscode/settings.json is a conflict like any other file", {
+  dir <- withr::local_tempdir()
+  dir.create(file.path(dir, ".vscode"))
+  settings <- file.path(dir, ".vscode", "settings.json")
+  writeLines('{"editor.tabSize": 2}', settings)
+  before <- md5_snapshot(dir)
+
+  expect_error(create_template_repo(dir), "settings.json", class = "rlang_error")
+  expect_identical(md5_snapshot(dir), before)
+
+  create_template_repo(dir, overwrite = TRUE)
+  expect_match(paste(readLines(settings, warn = FALSE), collapse = "\n"), "yaml.schemas", fixed = TRUE)
 })
 
 # The skill is only worth shipping if what it shows works. Its worked family
@@ -677,7 +786,12 @@ test_that("every folder the scaffold writes is one the engine reads", {
   create_template_repo(dir, ci = FALSE, agent_skill = FALSE)
   engine <- function(f) DTAtools:::.dta_template_engine_get(f)
   folders <- list.dirs(dir, recursive = FALSE, full.names = FALSE)
-  expect_setequal(folders, c(engine("dta_template_kind_subdirs")(), engine("dta_export_templates_subdir")()))
+  # `schemas/` and `.vscode/` hold editor assets, not library files, so the
+  # validator's folder list rightly does not know them.
+  expect_setequal(
+    folders,
+    c(engine("dta_template_kind_subdirs")(), engine("dta_export_templates_subdir")(), "schemas", ".vscode")
+  )
   for (kind in engine("dta_template_all_kinds")()) {
     expect_true(dir.exists(engine("dta_template_kind_dir")(dir, kind)), info = kind)
   }
@@ -711,7 +825,7 @@ test_that("overwrite = FALSE conflict message shows braces in a path literally",
 
 test_that("the Bitbucket and Jenkins assets install from a current repository, not a dated snapshot", {
   # rocker/r-ver:4.4's default repos is frozen at 2025-04-10, before zip 3.0.0
-  # and S7 0.2.2 existed; the written CI files must override it.
+  # and S7 1.0.0 existed; the written CI files must override it.
   dir <- withr::local_tempdir()
   create_template_repo(dir, examples = FALSE, ci = c("bitbucket", "jenkins"))
   repos <- "options(repos = c(CRAN = \"https://p3m.dev/cran/__linux__/noble/latest\"))"
@@ -762,4 +876,34 @@ test_that("a scaffold stays clean when a template added to it declares spaced co
   result <- validate_template(dir)
   expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
   expect_no_error(validate_template(dir, strict = TRUE))
+})
+
+test_that(".Rbuildignore leaves everything the package ships out of inst/, R/ and man/ in the built package", {
+  # `R CMD build` drops every path that matches a line of .Rbuildignore (a
+  # case-insensitive Perl regular expression on the path from the package
+  # root). A test that loads the source tree cannot see that: an unanchored
+  # `.vscode` line once dropped the settings source of create_template_repo()
+  # from the built package, and only an installed copy failed. Source tree only:
+  # a built package has no .Rbuildignore, so under R CMD check this skips.
+  ignore_file <- testthat::test_path("..", "..", ".Rbuildignore")
+  skip_if_not(file.exists(ignore_file), "only the source tree has an .Rbuildignore")
+  root <- dirname(ignore_file)
+  rules <- trimws(readLines(ignore_file, warn = FALSE))
+  rules <- rules[nzchar(rules) & !startsWith(rules, "#")]
+
+  shipped <- unlist(lapply(c("inst", "R", "man"), function(d) {
+    files <- list.files(file.path(root, d), recursive = TRUE, all.files = TRUE, no.. = TRUE)
+    file.path(d, files)
+  }))
+  expect_gt(length(shipped), 100)
+
+  hit_by <- vapply(shipped, function(f) {
+    hit <- rules[vapply(rules, grepl, logical(1), x = f, perl = TRUE, ignore.case = TRUE)]
+    paste(hit, collapse = " ")
+  }, character(1))
+  dropped <- hit_by[nzchar(hit_by)]
+  expect_identical(
+    unname(dropped), character(0),
+    info = paste0("dropped by .Rbuildignore: ", paste(names(dropped), "<-", dropped, collapse = "; "))
+  )
 })

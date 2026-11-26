@@ -84,7 +84,7 @@ DTAColumnSpecStructureR <- S7::new_class(
     }
 
     new_object(
-      .parent = DTAColumnSpecStructure(
+      DTAColumnSpecStructure(
         type = type,
         format = format,
         length = length,
@@ -152,6 +152,7 @@ DTAColumnSpecStructureR <- S7::new_class(
 
 #' @export
 #' @name as.list
+#' @usage NULL
 method(as.list, DTAColumnSpecStructureR) <- function(x, ...) {
   out <- list()
   if (.structure_value_is_set(x@type)) {

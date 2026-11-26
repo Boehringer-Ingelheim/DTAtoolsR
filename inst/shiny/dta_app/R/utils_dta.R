@@ -174,17 +174,24 @@ dta_rule_list_rename <- function(l, old, new) {
   l
 }
 
-# Ids of the columns a range rule may target: numeric ones only, whichever
-# backend declares them (SAS Num / Int, R numeric / integer). Decided by the
-# type's family, never by a bare type name.
-dta_numeric_column_ids <- function(dta, dataset) {
+# The declared type family (text, number, integer, logical, temporal) of every
+# column of a dataset, as a character vector named by column id; NA for a column
+# whose type is unknown. Decided by the package's own type tables, never by a
+# bare type name.
+dta_column_families <- function(dta, dataset) {
   ds <- dta_get_dataset(dta, dataset)
   cols <- tryCatch(ds@specs@columns, error = function(e) NULL) %||% list()
-  keep <- vapply(cols, function(c) {
-    fam <- tryCatch(dta_pkg_type_family(c@structure), error = function(e) NA_character_)
-    isTRUE(fam %in% c("number", "integer"))
-  }, logical(1))
-  names(cols)[keep]
+  fam <- vapply(cols, function(c) {
+    tryCatch(dta_pkg_type_family(c@structure), error = function(e) NA_character_)
+  }, character(1))
+  stats::setNames(fam, names(cols))
+}
+
+# Ids of the columns a range rule may target: numeric ones only, whichever
+# backend declares them (SAS Num / Int, R numeric / integer).
+dta_numeric_column_ids <- function(dta, dataset) {
+  fam <- dta_column_families(dta, dataset)
+  names(fam)[fam %in% c("number", "integer")]
 }
 
 # ---- Loading -------------------------------------------------------------
@@ -1211,6 +1218,12 @@ dta_dataset_readiness <- function(dta, dataset) {
 # Compute a per-dataset status map: "nodata" | "pending" | "pass" | "fail".
 # A dataset with zero bound tables/files is ALWAYS "nodata" -- never "pass" --
 # regardless of any vacuous validation result the package may have produced.
+#
+# "pass" needs every bound table validated: one that was bound, replaced or
+# delivered after the last check (results() reports it as not validated) keeps
+# the dataset "pending", because "pass" over it would certify a table nobody
+# checked. A table that failed still makes the dataset "fail", whatever the rest
+# of its tables are doing.
 dta_status_map <- function(dta) {
   names_ds <- dta_dataset_names(dta)
   out <- stats::setNames(rep("pending", length(names_ds)), names_ds)
@@ -1247,6 +1260,7 @@ dta_status_map <- function(dta) {
     n_invalid <- if ("n_invalid" %in% names(res)) suppressWarnings(as.numeric(res$n_invalid)) else rep(NA_real_, nrow(res))
     n_valid <- if ("n_valid" %in% names(res)) suppressWarnings(as.numeric(res$n_valid)) else rep(NA_real_, nrow(res))
     n_validated <- if ("n_validated" %in% names(res)) suppressWarnings(as.numeric(res$n_validated)) else rep(NA_real_, nrow(res))
+    n_unvalidated <- if ("n_not_validated" %in% names(res)) suppressWarnings(as.numeric(res$n_not_validated)) else rep(NA_real_, nrow(res))
     ds_col <- if ("dataset" %in% names(res)) as.character(res$dataset) else names_ds
   }
 
@@ -1268,8 +1282,13 @@ dta_status_map <- function(dta) {
     inv <- sum(n_invalid[idx], na.rm = TRUE)
     val <- sum(n_valid[idx], na.rm = TRUE)
     done <- sum(n_validated[idx], na.rm = TRUE)
+    # results() repeats a dataset's counts on each of its rows, so only whether
+    # the sum is above zero is meaningful here, never its size.
+    unvalidated <- sum(n_unvalidated[idx], na.rm = TRUE)
     if (!is.na(inv) && inv > 0) {
       out[[nm]] <- "fail"
+    } else if (unvalidated > 0) {
+      out[[nm]] <- "pending"
     } else if (done > 0 || val > 0) {
       out[[nm]] <- "pass"
     } else {
@@ -3459,14 +3478,43 @@ dta_dataset_to_list <- function(ds, dta = NULL, apply_default = TRUE) {
   out
 }
 
+# The DTAtools release doing the serializing: what `dtatools_version` records.
+# The PACKAGE version, not the app bundle's (dta_bundle_version(), app.R): the
+# package is what reads the file back, and on a server the two can differ.
+# "" when it cannot be determined, so the caller keeps whatever the document
+# already carried instead of writing a guess.
+dta_tool_version <- function() {
+  tryCatch(as.character(utils::packageVersion("DTAtools")), error = function(e) "")
+}
+
 # Whole DTA -> plain list (metadata, containers, datasets array).
+#
+# Every serialization records the release that wrote it in
+# `metadata.dtatools_version`, replacing whatever the loaded file carried: the
+# field names the LAST writer, and an unsaved file keeps what it had. It is set
+# on the object, before as.list(), so the class validator vets the value and
+# the key lands where as.list() puts it rather than at the end.
+#
+# A document with no metadata of its own is NOT stamped. A `metadata:` block
+# holding only this key would not load again -- title and version are
+# required -- so the stamp appears together with the first real metadata field.
 dta_to_list <- function(dta) {
   out <- list()
   md <- tryCatch(DTAtools::metadata(dta), error = function(e) NULL)
   if (!is.null(md)) {
+    ver <- dta_tool_version()
+    if (nzchar(ver)) {
+      md <- tryCatch(
+        {
+          S7::prop(md, "dtatools_version") <- ver
+          md
+        },
+        error = function(e) md
+      )
+    }
     ml <- tryCatch(as.list(md), error = function(e) NULL)
     ml <- .dta_compact(.dta_stringify_dates(ml))
-    if (!is.null(ml) && length(ml) > 0) out$metadata <- ml
+    if (length(setdiff(names(ml), "dtatools_version")) > 0) out$metadata <- ml
   }
   # Explicit containers only (an implied one is just a file name in an entry).
   cs <- .ctr_list(dta)

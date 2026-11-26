@@ -42,7 +42,7 @@ requirements:
     risk: high
     category: installation
     covers: [run_qualification]
-    source: "DESCRIPTION Depends: R (>= 4.1.0)"
+    source: "DESCRIPTION Depends: R (>= 4.2.0)"
 
   - id: REQ-ENV-004
     text: >

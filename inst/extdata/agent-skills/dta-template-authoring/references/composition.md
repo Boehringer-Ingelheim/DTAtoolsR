@@ -196,6 +196,12 @@ then the dataset's own `id`).
   organisation with a child vocabulary: `extends:` + `remove_terms`/
   `add_terms` (a non-empty `terms:` in the child replaces the inherited list
   entirely).
+- A slot whose author selects no term ("None") builds the column with no
+  `values:` and no `values_from:`, so no value is checked against a list,
+  whatever the slot's `default:`. A slot with no `default:` that the author
+  leaves alone does the same, because the dialog cannot tell a cleared
+  control from one never filled. Give the slot `min: 1` when the column must
+  stay constrained; the document is then not created while the slot is empty.
 - `values_from` and `pattern` are mutually exclusive; a literal `values` next
   to `values_from` is ignored (and warned about). Never keep both.
 - `columns:` is a suggestion hint only and is not inherited through

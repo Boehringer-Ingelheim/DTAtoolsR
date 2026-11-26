@@ -925,10 +925,12 @@ test_that("YAML round-trip: to_yaml_text -> read_yaml_text preserves dataset/col
   # transmission dates, ...), so this is not a vacuous comparison of two empty
   # lists: it is the gap that would let a new DTAMetaData property silently
   # fail to round-trip through as.list()/to_yaml_text()/read_yaml_text().
-  expect_equal(
-    as.list(DTAtools::metadata(dta2)),
-    as.list(DTAtools::metadata(dta))
-  )
+  # The fixture predates dtatools_version; saving is what stamps it, so the
+  # round-tripped copy carries the running release and nothing else differs.
+  after <- as.list(DTAtools::metadata(dta2))
+  expect_identical(after$dtatools_version, as.character(utils::packageVersion("DTAtools")))
+  after$dtatools_version <- NULL
+  expect_equal(after, as.list(DTAtools::metadata(dta)))
 })
 
 # ---- column editor read-only helpers ----------------------------------------

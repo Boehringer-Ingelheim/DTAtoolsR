@@ -49,7 +49,7 @@ DTARuleColUnique <- S7::new_class(
 
     # Create the class object
     new_object(
-      .parent = DTAtools::DTARule(
+      DTAtools::DTARule(
         id = id,
         type = "col_unique",
         description = description
@@ -134,6 +134,7 @@ method(check, DTARuleColUnique) <- function(x, tab) {
 
 #' @export
 #' @name as.list
+#' @usage NULL
 method(as.list, DTARuleColUnique) <- function(x, ...) {
   list(
     id = x@id,

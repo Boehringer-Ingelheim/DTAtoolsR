@@ -52,8 +52,10 @@ The key set is **closed**: any key not listed here is a hard error.
 | `error_handling` | string | Procedure when delivered data fails validation (who is notified, deadlines, re-delivery). |
 | `authorized_for_corrections` | string or list of strings | Names/roles allowed to request corrections. |
 | `sections` | mapping | Ordered free-text agreement sections. See below. |
+| `dtatools_version` | string, machine-written | The DTAtools release that last saved the file, e.g. `"0.30.0"`. The app overwrites it every time it writes the specification as YAML (the text shown in its YAML editor and an exported file included, not only a save); leave it out when writing a file by hand. A DTAtools release older than 0.30.0 does not know the key and rejects a file that carries it, as an unknown metadata key, until the line is deleted. |
 
-Never write `template:` — it is machine-owned provenance.
+Never write `template:` — it is machine-owned provenance. `dtatools_version:` is
+machine-written too; if you do write it, it must be a bare version number.
 
 ### Parties (`receiver`, `supplier`)
 
@@ -627,16 +629,17 @@ words. Rules must only reference declared columns.
   type: col_range
   description: Only adults up to 85 were enrolled.
   columns: AGE        # exactly one column
-  min: 18             # min < max, both required
+  min: 18             # min <= max, both required (use -.inf / .inf for an open side)
   max: 85
 ```
 
-(`range: [18, 85]` is equivalent to `min`/`max`.)
+(`range: [18, 85]` is equivalent to `min`/`max`; give one or the other, not both.)
 
 ### `col_condition` — row-level IF → THEN
 
 For each row where **all** `condition` clauses hold, **all** `then` clauses must
-hold. Missing values in THEN count as a violation.
+hold. A missing value in THEN counts as a violation, except under `empty: true`
+and `not_in`, which a missing value satisfies.
 
 ```yaml
 - id: not_done_requires_reason
@@ -656,20 +659,53 @@ Operators (several on one column are ANDed):
 
 | Operator | Value | Meaning |
 | --- | --- | --- |
-| `equals` / `not_equals` | scalar | equality (numeric compare if both sides are numbers) |
+| `equals` (alias `equal`) / `not_equals` (alias `not_equal`) | scalar | equality (numeric compare if both sides are numbers) |
 | `in` / `not_in` | list | set membership |
 | `greater`, `less`, `greater_equal`, `less_equal` | number | numeric comparison |
 | `min` + `max` | numbers | one inclusive band (either alone also works) |
 | `range` | `[lo, hi]` | inclusive band |
-| `pattern` | regex | value matches (anchor it) |
+| `pattern` | regex | value matches (anchor it); a missing value and an empty string never match |
 | `empty` | `true` / `false` | value is / is not missing or blank |
 
 Each column may appear only once per clause; merge its operators.
+
+**What `pattern` does with missing, empty and numeric values.** A missing value
+and an empty string match no pattern, not even `^$` or `.*`. In a `then` clause
+that makes them violations, as a missing value is under most operators
+(`empty: true` and `not_in` are the two that a missing value satisfies); in a
+`condition` clause it leaves their rows out of scope. Text of spaces only is
+ordinary text for `pattern` (it is `empty` that counts blanks), so use `empty`
+to ask whether a value is missing or empty. A number is matched as its plain
+decimal text, never in scientific notation: `100000` is matched as `100000`, not
+`1e+05`, and `0.00001` as `0.00001` (a fraction keeps at most 15 significant
+digits). A whole number is therefore matched the same way whether the column is
+declared as an integer or as a number. A column's own
+`pattern` (in `columns:`) is a different check, whether a value may stand in the
+column, and judges an empty string like any other text; a file never delivers
+one, because an empty field is read as missing.
 
 On an `R logical` column, `equals`, `equal`, `not_equals`, `not_equal`, `in` and
 `not_in` take `true` or `false`, or one of `TRUE`, `T`, `true`, `True`, `FALSE`,
 `F`, `false`, `False` (`equals: T` matches `TRUE`); any other operand is an
 error.
+
+**The app's rule editor** (Edit rules) shows a clause as one row per column and
+operator. Several operators on one column are several rows, all of which must
+hold, with each operator at most once per column; `min` and `max` together, and
+`range`, are one *between* row. A rule opened and saved without a change keeps
+its meaning and its values, but the aliases are written in their normal form:
+`range: [lo, hi]` as `min: lo` with `max: hi`, `equal` as `equals`, `not_equal`
+as `not_equals`. A value you type is read by the declared type of its column: a
+number for a numeric column, text for any other, so `007` stays text on a
+`SAS Char` column; the comparison operators and *between* always take numbers
+(a date column keeps its text). Decimals are written with a point. In an `in` or
+`not_in` list a value that holds a comma goes in double quotes (`"Smith, John",
+Doe`, a quote inside it doubled), and a missing value is written `~`. A value
+the editor cannot read, or the same operator twice on one column, is refused on
+Save with a message, and the rule is left as it was. A rule it cannot show
+faithfully, because an operator is unknown to it or two spellings of one
+operator stand on one column (`range` with `min`), is not opened; edit it in the
+YAML text.
 
 ### `group_condition` — logic across the rows of a group
 

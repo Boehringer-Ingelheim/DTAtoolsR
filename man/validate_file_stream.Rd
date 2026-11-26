@@ -135,6 +135,14 @@ Parquet is not read as text; its stored types are used.
 }
 }
 
+\section{Bytes that are not valid UTF-8}{
+
+A delimited file is read as UTF-8 text. Bytes that are not valid UTF-8, in a
+column the scan reads or in the header, stop the call with a condition of
+class \code{dta_encoding_invalid}, the class \code{\link[=load_file]{load_file()}} documents; match on
+the class, not on the message.
+}
+
 \examples{
 specs <- DTAtools::DTAColumnSpecCollection(
   columns = list(

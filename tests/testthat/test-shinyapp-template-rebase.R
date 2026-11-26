@@ -153,6 +153,23 @@ test_that("dta_metadata_leaves() excludes template and import_issues", {
   expect_equal(leaves[["title"]], "T")
 })
 
+test_that("dtatools_version is never a change: not a leaf, not a diff row", {
+  # The app overwrites the stamp on every save, so a document loaded from an
+  # older release and the same document saved now always differ in it. Reported,
+  # it would head every version summary and put a conflict into every rebase.
+  older <- DTAtools::DTAMetaData(title = "T", version = "1.0", dtatools_version = "0.0.1")
+  newer <- DTAtools::DTAMetaData(title = "T", version = "1.0", dtatools_version = "9.9.9")
+
+  expect_false(any(grepl("dtatools_version", names(app_fn("dta_metadata_leaves")(older)))))
+  expect_identical(app_fn("dta_metadata_leaves")(older), app_fn("dta_metadata_leaves")(newer))
+
+  diff <- app_fn("dta_diff")(
+    DTAtools::DTA(datasets = list(), metadata = older),
+    DTAtools::DTA(datasets = list(), metadata = newer)
+  )
+  expect_identical(nrow(diff$metadata), 0L)
+})
+
 # ---- dta_dataset_leaves() -----------------------------------------------------
 
 test_that("dta_dataset_leaves() keys columns by id and is stable across a column insertion", {

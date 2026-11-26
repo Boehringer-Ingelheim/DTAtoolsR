@@ -186,6 +186,8 @@
   x <- gsub("${version}", "(the version you enter)", x, fixed = TRUE)
   x <- gsub("${study.id}", "(the study ID you enter)", x, fixed = TRUE)
   x <- gsub("${study.protocol_id}", "(the protocol ID you enter)", x, fixed = TRUE)
+  x <- gsub("${study.id_underscore}", "(the study ID you enter, hyphens written as underscores)", x, fixed = TRUE)
+  x <- gsub("${study.protocol_id_underscore}", "(the protocol ID you enter, hyphens written as underscores)", x, fixed = TRUE)
   x[!nzchar(x)] <- "(empty)"
   paste(x, collapse = ", ")
 }

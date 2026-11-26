@@ -474,7 +474,7 @@ test_that("OQ-CONT-047 | upgrade_dta() gives an object saved by an older version
 
   # An object as 0.27.0 saved it: its DTA class has no `containers`. The class
   # object is what saveRDS() keeps, so the round trip restores the old shape.
-  cur <- attr(d, "S7_class")
+  cur <- S7::S7_class(d)
   old_class <- S7::new_class(
     "DTA",
     package = "DTAtools", parent = cur@parent,
@@ -484,6 +484,9 @@ test_that("OQ-CONT-047 | upgrade_dta() gives an object saved by an older version
   # (An Arrow table does not survive saveRDS(), so the old object holds none.)
   old <- cont_doc(cont_csv_ds("ae"), cont_csv_ds("dm"))
   attr(old, "containers") <- NULL
+  # S7 before 1.0.0 stored the class as `S7_class`; 1.0.0 stores `_S7_class`.
+  attr(old, "_S7_class") <- NULL
+  attr(old, "_S7_version") <- NULL
   attr(old, "S7_class") <- old_class
   f <- file.path(qa_tempdir(), "old.rds")
   saveRDS(old, f)
@@ -504,6 +507,109 @@ test_that("OQ-CONT-047 | upgrade_dta() gives an object saved by an older version
     )
   )
   qa_step("anything that is not a DTA or a dataset is refused", TRUE, inherits(cont_catch(DTAtools::upgrade_dta("x")), "error"))
+})
+
+test_that("OQ-CONT-064 | a document saved by an older version whose metadata lacks a property added since is upgraded by load_file(), so its metadata can be read and written and every value set before is unchanged | REQ-CONT-029 | tags: white-box", {
+  # The metadata of a document saved before `dtatools_version` existed. A
+  # release of that time could not hold the property, so none is given here;
+  # the values below are the ones the document carried.
+  literals <- list(
+    title = "Ageing study", version = "2.1", header = "Sponsor Inc",
+    error_handling = "Report within five days.",
+    study = list(id = "ST-001", protocol_id = "P-77")
+  )
+  meta <- do.call(DTAtools::DTAMetaData, literals)
+  doc <- function(m) DTAtools::DTA(datasets = list(cont_csv_ds("ae")), metadata = m)
+
+  # Only the metadata is aged: the DTA and its dataset keep every property they
+  # have, so this is the object no property of the DTA or a dataset gives away.
+  # The class object is what saveRDS() keeps, so the round trip restores the old
+  # shape (S7 before 1.0.0 stored the class as `S7_class`; 1.0.0 as `_S7_class`).
+  cur <- S7::S7_class(meta)
+  old_class <- S7::new_class(
+    "DTAMetaData",
+    package = "DTAtools", parent = cur@parent,
+    properties = cur@properties[setdiff(names(cur@properties), "dtatools_version")],
+    validator = function(self) NULL
+  )
+  old_meta <- meta
+  attr(old_meta, "dtatools_version") <- NULL
+  attr(old_meta, "_S7_class") <- NULL
+  attr(old_meta, "_S7_version") <- NULL
+  attr(old_meta, "S7_class") <- old_class
+  old <- doc(meta)
+  attr(old, "metadata") <- old_meta
+  f <- file.path(qa_tempdir(), "old-metadata.rds")
+  saveRDS(old, f)
+  old <- readRDS(f)
+
+  # What a reader of the metadata does: read the property, list the metadata (the
+  # list is what is written to YAML), and give the property a value.
+  unreadable <- "unreadable"
+  read_version <- function(x) tryCatch(x@metadata@dtatools_version, error = function(e) unreadable)
+  as_list <- function(x) tryCatch(as.list(x@metadata), error = function(e) unreadable)
+  # The document with the property written, or NULL when the write fails.
+  stamp <- function(x, value) {
+    tryCatch(
+      {
+        x@metadata@dtatools_version <- value
+        x
+      },
+      error = function(e) NULL
+    )
+  }
+  kept <- function(x) {
+    m <- x@metadata
+    list(title = m@title, version = m@version, header = m@header, error_handling = m@error_handling, study = m@study)
+  }
+
+  qa_step(
+    "the aged metadata can neither read the property of the current class, nor be listed, nor be given a value for it",
+    list(read = unreadable, as_list = unreadable, write_refused = TRUE),
+    list(read = read_version(old), as_list = as_list(old), write_refused = is.null(stamp(old, "0.30.0")))
+  )
+
+  # An entry point that takes the document: it upgrades the stale part by itself.
+  csv <- cont_write("ae.csv", CONT_AE_CSV)
+  res <- suppressMessages(load_file(old, dataset = "ae", file = csv))
+  qa_step("load_file() gives the property its default, NULL", NULL, read_version(res))
+  qa_step("every value set before is unchanged", literals, kept(res))
+  listed <- as_list(res)
+  qa_check("the metadata lists, which is what the YAML writer reads", is.list(listed))
+  qa_step(
+    "and the list holds the values set before",
+    literals,
+    if (is.list(listed)) listed[names(literals)] else listed
+  )
+  stamped <- stamp(res, "0.30.0")
+  qa_check("the property can be written", !is.null(stamped))
+  qa_step(
+    "it reads back what was set, and writing it changes no other value",
+    list(version = "0.30.0", kept = literals),
+    if (is.null(stamped)) unreadable else list(version = read_version(stamped), kept = kept(stamped))
+  )
+
+  # upgrade_dta() does the same by hand.
+  fixed <- DTAtools::upgrade_dta(old)
+  qa_step(
+    "upgrade_dta() gives the same: the default and every value kept",
+    list(version = NULL, kept = literals),
+    list(version = read_version(fixed), kept = kept(fixed))
+  )
+
+  # A document that is current is left as it is.
+  current <- doc(DTAtools::DTAMetaData(title = "Current study", version = "3.0", dtatools_version = "0.29.0"))
+  res_cur <- suppressMessages(load_file(current, dataset = "ae", file = csv))
+  qa_step(
+    "a current document keeps its metadata through load_file(), the property included",
+    list(same = TRUE, version = "0.29.0", title = "Current study"),
+    list(same = identical(res_cur@metadata, current@metadata), version = read_version(res_cur), title = res_cur@metadata@title)
+  )
+  qa_step(
+    "and through upgrade_dta()",
+    TRUE,
+    identical(DTAtools::upgrade_dta(current)@metadata, current@metadata)
+  )
 })
 
 # ---- file-name conflicts ------------------------------------------------------------------

@@ -537,7 +537,7 @@
     DTAtools
   </a>
   <div class="header-spacer"></div>
-  <span class="version-badge">v0.29.0</span>
+  <span class="version-badge">v0.30.0</span>
   <button class="theme-toggle" id="themeToggle">
     <span id="themeIcon">🌙</span>
     <span id="themeLabel">Dark</span>
@@ -651,6 +651,8 @@
       <pre><code class="language-r">remotes::install_github("Boehringer-Ingelheim/DTAtoolsR")
 library(DTAtools)</code></pre>
     </div>
+
+    <p>DTAtools requires R 4.2.0 or later and S7 1.0.0 or later (DESCRIPTION: <code>R (&gt;= 4.2.0)</code>, <code>S7 (&gt;= 1.0.0)</code>).</p>
 
     <div class="callout callout-tip">
       <div class="callout-icon">💡</div>
@@ -1186,6 +1188,9 @@ messages(dta)</code></pre>
       </table>
     </div>
 
+    <p>A missing value and an empty string never match <code>pattern</code>. <code>equal</code> and <code>not_equal</code>
+    are accepted spellings of <code>equals</code> and <code>not_equals</code>.</p>
+
     <!-- ===== COL_RANGE ===== -->
     <h3 id="section-3-3">📏 col_range — Numeric Range Check</h3>
     <p>Validates that all values in a numeric column fall within a specified range.</p>
@@ -1206,6 +1211,13 @@ messages(dta)</code></pre>
         18 or exactly 65 will pass this rule.</p>
       </div>
     </div>
+
+    <p>Unless <code>range</code> is used, both <code>min</code> and <code>max</code> must be written; put
+    <code>-.inf</code> for <code>min</code> or <code>.inf</code> for <code>max</code> to leave that side
+    open. The two bounds may be equal, whereas a <code>min</code> greater than <code>max</code> is refused, and so
+    is <code>range</code> given together with <code>min</code> or <code>max</code>. In the app, a blank Minimum
+    or Maximum box is an open side and is saved as <code>-.inf</code> or <code>.inf</code>; both boxes blank is
+    refused.</p>
 
     <!-- ===== COL_UNIQUE ===== -->
     <h3 id="section-3-4">🔑 col_unique — Uniqueness Constraint</h3>
@@ -1919,7 +1931,7 @@ datasets:
 <!-- FOOTER -->
 <footer class="site-footer">
   <p>
-    DTAtools v0.29.0 — R package for Data Transfer Agreement validation &nbsp;·&nbsp;
+    DTAtools v0.30.0 — R package for Data Transfer Agreement validation &nbsp;·&nbsp;
     <a href="https://github.com/Boehringer-Ingelheim/DTAtoolsR" target="_blank">GitHub Repository</a>
     &nbsp;·&nbsp;
     <a href="https://github.com/Boehringer-Ingelheim/DTAtoolsR/issues" target="_blank">Report an Issue</a>

@@ -778,7 +778,7 @@ dta_template_placeholders <- function(dta = NULL) {
 # cannot be listed or holds any entry whose name would land outside `exdir`
 # (absolute, drive-lettered, or with a '.' / '..' segment). The names are
 # checked here, before extraction, because utils::unzip() only neutralises '..'
-# members from R 4.5.1 on and the package supports R >= 4.1.0. The same rule
+# members from R 4.5.1 on and the package supports R >= 4.2.0. The same rule
 # guards uploaded containers (dta_zip_entry_escape()). A mirror of this check
 # lives in the app's template_has_placeholders(), which cannot reach internals.
 .dta_unzip_docx_checked <- function(path, exdir) {

@@ -4,6 +4,312 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.30.0] - 2026-11-25
+
+### Added
+
+- `create_template_repo()` writes two JSON Schemas to `schemas/`
+  (`dta-template-library.schema.json` for the four template file kinds,
+  `dta-app.schema.json` for `dta-app.yaml`) and a `.vscode/settings.json` that
+  points the Red Hat YAML extension at them, whatever `examples` says. The
+  editor then marks a wrong `kind`, an unquoted `version`, a misspelt key, an
+  invalid `role` and the wrong shape of options, slots and vocabulary columns
+  while a template is written. The schemas check the shape of one file only;
+  `validate_template()` stays the authority. The generated `README.md`
+  documents where the two differ. `jsonvalidate` is a new suggested package,
+  used only by the tests.
+- **File-name forms of the study tokens.** `${study.id_underscore}` and
+  `${study.protocol_id_underscore}` are the study ID and protocol ID with every
+  hyphen written as an underscore and nothing else changed, so `1001-0190`
+  becomes `1001_0190`. They work wherever `${study.id}` and
+  `${study.protocol_id}` do -- in a dataset body, including a `filename:` and
+  its pattern, and in the document metadata -- are escaped inside a regular
+  expression in the same way, and fail in the same way when the document has
+  no value for the identifier. The study identity stored in the document keeps
+  its hyphens. `validate_template()` treats them as known placeholders, counts
+  one as a use of the study field it comes from (`study_token_unanswered`),
+  and names the stand-in as the token writes it (`STUDY_ID`) when a dry run
+  fails on it; the template guide spells them out.
+- A specification's `metadata:` now records which DTAtools release wrote it, in
+  a new `dtatools_version` field (new last argument of `DTAMetaData()`). The
+  app sets it every time it writes the specification as YAML, which is a save
+  and also the text shown in its YAML editor and an exported file, so it names
+  the release that last wrote the document; a file the app has not written has
+  none, and nothing is filled in retroactively. It is machine-owned like
+  `template`: a template can neither set nor carry it over, it never shows up
+  as a change in a version summary or a rebase, and the linters accept it only
+  as a bare version number. A document with no other metadata is not stamped.
+  A DTAtools release older than 0.30.0 rejects the field as an unknown metadata
+  key, so a file the app has saved is not readable by one until the line is
+  deleted.
+- **Bytes that are not valid in a delimited file's encoding are refused with a
+  condition class of their own, `dta_encoding_invalid`.** For UTF-8, the
+  encoding such a file is read as unless its handler declares another, the
+  refusal was Arrow's: an `rlang_error` out of `load_file()` and a `simpleError`
+  out of the scan that `check()` and `validate_file_stream()` run over a lazy
+  table, the same kinds of condition a row of the wrong width or a truncated
+  archive arrive as, so a caller could tell them apart only by matching message
+  text. `load_file()` now raises `dta_encoding_invalid` for such bytes in a
+  column it reads, and `check()` and `validate_file_stream()` for those their
+  scan reaches further down (naming the file where there is one), with Arrow's
+  message, which locates the bytes, as the condition's `parent`. A header that
+  is not valid UTF-8, in a tabular or a matrix dataset, used to stop in a bare
+  base-R "invalid UTF-8" error that named neither the file nor the column; it is
+  now refused, naming the file, with the same class. A file declared in another
+  encoding is refused with it too, by the in-memory reader and by the lazy one.
+  A row of the wrong width and a truncated archive are refused as before and do
+  not carry it. A declared encoding that iconv does not know is now refused by
+  the in-memory reader as the lazy one already refused it, as
+  `dta_encoding_unsupported` naming the file and the encoding, instead of by a
+  base-R error. Two gaps remain: the scan reads only the columns the validation
+  uses, so bytes in a column nothing declares are not met by it, and `tables()`,
+  the exports and the report writer still meet Arrow's own error for such bytes
+  in a lazily held table. SAS transport and SAS7BDAT files keep their own
+  classes. Documented under `?load_file`, `?check` and `?validate_file_stream`;
+  qualified by `REQ-ROBUST-018` and `OQ-ROBUST-018`.
+
+### Changed
+
+- **DTAtools now requires S7 1.0.0 or later, and R 4.2.0 or later.** S7 1.0.0
+  (CRAN, 2026-11-19) renamed the first argument of `new_object()` and the
+  attribute in which an object keeps its class, and itself needs R 4.2.0. The
+  lockfile and the Connect manifest record S7 1.0.0, and CI no longer pins S7
+  to 0.2.2. An object saved with `saveRDS()` by this version can no longer be
+  read under an S7 older than 1.0.0; objects saved by earlier versions are read
+  and upgraded as before.
+- **A range rule given both `range` and `min`/`max` is refused** (condition
+  class `dta_rule_range_conflict`); `range` used to be ignored without a word
+  when `min` and `max` were both given. A
+  lower bound greater than the upper bound now carries the class
+  `dta_rule_invalid_range`.
+- **The rule editor writes the engine's normal form of an operator.** Saving a
+  rule written with `range: [lo, hi]` stores `min: lo` and `max: hi`, `equal`
+  becomes `equals` and `not_equal` becomes `not_equals`. The test is the same;
+  only the spelling in the saved YAML changes, on the first save of such a rule.
+- **A vocabulary slot with no `default:` that the author leaves empty now builds
+  its column with no permitted values.** The options dialog reports a control
+  holding nothing the same way whether the author cleared it or never filled
+  it, so such a slot used to leave the column bound to the dataset template's
+  whole vocabulary and now removes that list check, as "None" does. Give the slot
+  `min: 1` to keep the column constrained; the document is then not created
+  until a term is chosen. No bundled template is affected.
+- **The template-repository guide and the `private-templates` vignette now say
+  that the CI file only gates a merge when the check is required.** The app
+  reads the deploy branch (`#main` in `DTATOOLS_TEMPLATE_SOURCES`), so a merge
+  is a release, and the generated GitHub and Bitbucket pipelines run on pull
+  requests (a Jenkins job runs when its own trigger says so) but cannot stop one
+  by themselves. Both documents tell a library owner to make
+  `validate-templates` a required check on that branch, and say that a Jenkins
+  build only counts for Bitbucket's merge check when Jenkins reports its build
+  status back. The generated CI files are unchanged.
+
+### Fixed
+
+- **The rule editor changed a long decimal by one unit in the last place on
+  Apple-silicon Macs.** R's own `as.numeric()` is not correctly rounded there,
+  so a number such as `123456789.12345679` came back from the Value box as the
+  next double up when only the operator had been changed. The box is now read
+  by the same correctly rounded parser the rule phrasing already uses
+  (`jsonlite`), after the text has been rewritten in JSON's number grammar so
+  that every spelling the editor accepted before (`+5`, `5.`, `.5`, `007`,
+  `1E5`) is accepted still.
+- **Ten classes could not be built under S7 1.0.0.** They passed their
+  parent to `new_object()` by the name `.parent`, which S7 1.0.0 no longer
+  has: constructing a file handler, a dataset, a column structure or a rule
+  failed with `argument "_parent" is missing`. The parent is now passed by
+  position, which every S7 version accepts.
+- **`upgrade_dta()` and the upgrade the entry points run by themselves saw
+  nothing to do under S7 1.0.0.** The class an object was saved with is read
+  and re-stamped through S7 instead of through the attribute `S7_class`, which
+  S7 1.0.0 stores as `_S7_class`; an object restored from an older version is
+  detected as stale and upgraded as it was before.
+- **Removing a container, or clearing a file entry's container reference,
+  failed under S7 1.0.0** with `invalid type of argument[3]: 'symbol'`: S7
+  1.0.0 stores an unset (`NULL`) property as a symbol, which the document's
+  container check read as a container id.
+- **`names`, `print` and `labels` no longer leave placeholder objects in the
+  package namespace** (S7 1.0.0 creates them for every method registered on a
+  base generic; the package now removes them when it is built).
+- The app no longer shows a dataset as passed, and its validation summary no
+  longer reads "VALIDATION PASSED", while a table bound to it has not been
+  validated. One validated table was enough for the status map to call the
+  whole dataset passed: after a second file was uploaded, a file replaced or a
+  delivery added to a dataset that had already passed, the next check of any
+  other dataset turned it green again and offered the certifying summary,
+  although "Loaded files" still listed the new table as not validated yet. A
+  dataset now reads "pending" until every table bound to it has been
+  validated; a failing table still reads "fail".
+- **A range rule with only a minimum or only a maximum can be saved in the
+  app.** A blank Minimum or Maximum box is now an open side, saved as `-.inf`
+  or `.inf`, and the rule reopens with that box blank; before, the save failed
+  with a type error. A range rule whose minimum equals its maximum was refused
+  and is now accepted.
+- **The metadata of a `DTA` saved by an older release is upgraded by the entry
+  points.** Such a `DTA` (saved with `saveRDS()`) has metadata without the
+  properties added since, and the check that decides whether a document needs
+  upgrading looked only at the document and its datasets, so no entry point
+  noticed: the metadata could not be read or written until `upgrade_dta()` was
+  called by hand. The check now looks at the metadata too. The app was not
+  affected, because it upgrades a restored session unconditionally.
+- **"None" in a vocabulary slot of the "Create from template" dialog now does
+  what it says.** Emptying a slot (the **None** link, or clearing the chips)
+  showed "0 of n selected", but the document still came out with every term of
+  the vocabulary the template had bound the column to, which is more terms than
+  the default the author had just cleared. An emptied slot and a slot nobody
+  had touched were reported as the same "nothing to do", so the column kept its
+  `values_from:` binding. The column is now built with no permitted values at
+  all (no `values:`, no `values_from:`, nothing else about it changed), so no
+  value is checked against a list; this holds for an imported dataset template,
+  an inline dataset and a matrix row label. A slot with `min:` above 0 still
+  refuses to create the document while it is empty, and the dialog stays open.
+- **An `open` vocabulary slot given only the author's own terms no longer adds
+  the whole vocabulary.** Typing `UNSCHED` into an open slot and selecting
+  nothing else produced every term of the vocabulary plus `UNSCHED`, even the
+  terms the slot's own `include:` had left out of its menu. The column now gets
+  exactly `UNSCHED`.
+- **A rule opened in the app's rule editor and saved without a change keeps its
+  meaning.** The editor modelled a clause as one row per column, with one
+  operator and the value as a number-or-text guess, and rewrote what it could
+  not show. `VISIT: {not_equal: SCREENING}` was saved as `equals`, the opposite
+  test; `LBORRES: {range: [0.5, 40]}` as the text `0.5, 40` (the spec check
+  then refused the save on a numeric column); a column with
+  `{greater_equal: 18, less: 65}` lost its second operator, and two rows for one
+  column overwrote each other; a Char column's `"001"` and `"007"` were saved as
+  the numbers 1 and 7, so `in: ["001", "002"]` could no longer select any row
+  and the rule could never fail; `"1.50"` became 1.5, and `"Smith, John"` was
+  split into two values. The editor now shows one row per column and operator,
+  keeps the value of a row you did not touch exactly as it was (type and
+  spelling; the operator is saved in its normal form, see Changed), reads a row
+  you changed by the declared type of its column (a number for a numeric
+  column, text for any other; greater, less and between always read a number,
+  except on a date column, where the text of the date is kept), and takes a
+  quoted list (`"Smith, John", Doe`; a missing value is `~`). A rule it cannot
+  show faithfully (an operator it does not know, or two spellings of one
+  operator on one column such as `range` with `min`) is not opened and says
+  why, instead of being rewritten, and the same operator twice for one column
+  is an error on Save, not an overwrite.
+- **A value the rule editor cannot read is refused, not dropped.** A range
+  rule's minimum of `0,5` (a decimal comma) was saved as no minimum, a between
+  row such as `18 - 65` vanished from the rule, `0,5, 10` became the bounds 0
+  and 5, and `empty` took any word to mean true; a row with a value and no
+  column, or a grouped row with a column and no condition name, was skipped, and
+  a blank Value box was saved as an empty text. Each is now an error on Save
+  that names the text (a grouped row without a condition name has none, so it
+  names its column), and the rule is left as it was. A blank Value box of an
+  `empty` row is still read as true. Decimals are written with a point. A range
+  rule's bounds are kept as they were (`max: 100000` is not rewritten as
+  `100000.0`).
+- **The qualification case `OQ-ROBUST-012` can now fail.** It is the only case
+  for `REQ-ROBUST-012` (bytes that are not valid in the declared encoding "shall
+  be reported rather than silently reinterpreted"), and its assertions accepted
+  every outcome the case could produce, including a reader that replaced the
+  bytes with U+FFFD and validated the delivery clean, so the requirement was
+  recorded as verified whatever `load_file()` and `check()` did with them. The
+  case now accepts an error condition, or a table whose verdict is not ok, with
+  a message naming the row and column `ID`, and whose stored ID is the delivered
+  bytes unchanged, and nothing else. It runs on the in-memory and the streaming
+  reader, with the bytes in the only row and in a row after the streaming
+  reader's first read block (where the refusal comes from `check()`), and reads
+  a delivery of valid multi-byte text through both as a control, so a refusal
+  can be attributed to the bytes. The package is unchanged: it refuses the bytes
+  today.
+- **A rule's `pattern` no longer matches an empty string.** The documented
+  behaviour (a missing value and an empty string do not match a pattern) held
+  for a missing value only: `""` matched `^$`, `.*` and every other expression
+  that accepts nothing, as an ordinary text. A pattern now matches neither an
+  empty string nor a missing value (`NA`, `NaN`), whatever the expression, in a
+  `condition` and in a `then`, in a table held in memory and in one scanned in
+  batches. **Specifications that relied on the old behaviour now fail:** a
+  `then` pattern such as `^[A-Z]*$` or `.*` used to accept an empty string and
+  now reports it, exactly as it already reported a missing value, and a
+  `condition` pattern no longer puts such a row in scope. Files are not
+  affected by the empty string itself, because an empty field is read as
+  missing; the change shows in a table whose columns hold a literal `""`, such
+  as a data frame handed to `check()` or `rule_check_col_condition()`. To test
+  for a missing or empty value, use `empty`. Text of spaces only stays text for
+  `pattern`. A column's own `pattern` is a different check and is unchanged.
+- **A rule's `pattern` now matches a number as its plain decimal text.** It
+  matched a number as R's `as.character()` writes it, in scientific notation
+  for round and small values: `100000` was `"1e+05"` and `0.00001` was
+  `"1e-05"`, so `^100000$` did not select a double 100000 but selected the
+  integer 100000, and a column read as `SAS Int` and the same column read as
+  `SAS Num` reached different verdicts. A number in a numeric column is now
+  matched as `100000` and `0.00001`: a whole number is written out in full,
+  whatever its size, and a fraction keeps at most 15 significant digits (so a
+  fraction that needs more can read as a whole number, as it does for a
+  column's own `pattern`, which already used this text). A pattern written
+  against the exponent form (`^1e[+]05$`) no longer matches. The rule reading
+  guide in the exported documents, `DTA_YAML_GUIDE.md`, the vignette and the
+  README now say what a pattern does with an empty, a missing and a numeric
+  value.
+- **A column's own `pattern` no longer misreads a `bit64::integer64` column.**
+  The plain decimal text it matches a number against wrote an `integer64`
+  value as `"0"` (the arithmetic read the 64-bit integer's bits as a double),
+  so a valid `integer64` value was reported as breaking `^100000$`. An
+  `integer64` value is now written exactly, as the rule operator `pattern`
+  writes it.
+- **Two qualification cases and one app test can now fail.** None of them
+  changes what the package or the app does.
+  - `OQ-ROBUST-003` (a delivery that is not readable as the declared format
+    "shall raise a condition rather than validate as an empty or partial
+    table") also passed when the delivery was read and given any verdict that was
+    not exactly `TRUE`, and when it produced no table. `OQ-ROBUST-013` (a
+    truncated compressed delivery) also passed when it produced no table, on an
+    archive of four lines cut after its header and the start of its first row, a
+    cut that left nothing a reader could validate. Both now accept one outcome,
+    an error condition from `load_file()` or `check()`, on the in-memory and the
+    streaming reader. `OQ-ROBUST-003` holds binary content and 3000 good rows
+    followed by a row of the wrong width, which is where a reader that stopped
+    would hold a partial table; `OQ-ROBUST-013` holds an archive of 20000 rows cut
+    in half, of which over a thousand complete rows can still be read by base
+    R, so that a refusal cannot be put down to an unreadable start. Each is
+    held against a twin that is read in full, so a refusal can be attributed to
+    the content.
+  - The app test of the sidebar's `suspendWhenHidden` contract read the setting
+    back with `outputOptions(output, id)`, which under `shiny::testServer()`
+    returns `NULL` for every output, so it passed whatever the app asked for. It
+    now records the `outputOptions()` calls the server makes and asserts the
+    exact set of outputs told `suspendWhenHidden = FALSE`: the sidebar's, the
+    two Delivery flags, and the outputs inside the modal dialogs. `edit_gate`,
+    which the app opts out with the sidebar, was not named by the old test at
+    all.
+- **Three qualification cases were added and five were strengthened.**
+  `OQ-CONT-064` pins that the metadata of an object saved by an older release
+  is upgraded by the entry points (`REQ-CONT-029`), `OQ-VAL-054` that a column's
+  `pattern` reads a `bit64::integer64` column correctly (`REQ-VAL-009`), and
+  `OQ-APP-084` that the rule editor refuses a value left in a row whose column
+  was cleared, an `empty` row given a word it cannot read as true or false, and
+  a grouped row whose condition name was cleared (`REQ-APP-064`). `OQ-APP-082`
+  also covers a rule with an operator the editor does not know. `OQ-APP-078`
+  and `OQ-APP-081` failed to notice an editor that did not open or a Save that
+  did nothing, and now fail on both; `OQ-TMPL-151` compared only the id and the
+  type of a column, where `REQ-TMPL-065` says nothing else about it changes,
+  and now compares every property. Strengthening `OQ-APP-080` showed that the
+  rule editor's refusal of a list did not quote the list it refused, as
+  `REQ-APP-064` says it does: a list with a double quote that is never closed,
+  text after a closing quote and a quote inside an unquoted value are now
+  refused with the text named. That message is the only change to the app in
+  this entry.
+- **The documentation was corrected where it contradicted the code.**
+  `DTA_YAML_GUIDE.md` said that a missing value in a `then` clause is a
+  violation under every operator; a missing value satisfies `empty: true` and
+  `not_in`. The template-authoring skill said that the errors of `lint_dta()`
+  never appear as rows of their own in `validate_template()`'s result; for a
+  dataset template they do, with the linter's severity, and the skill and the
+  template repository's README now list the places where the JSON Schemas and
+  `validate_template()` differ, among them that a misspelt key inside an
+  option, a party slot or a vocabulary slot is marked by neither. The help of
+  `validate_template()` gave two `lint_dta()` codes as errors only. The
+  `private-templates` vignette listed neither the schemas nor
+  `.vscode/settings.json` among the files `create_template_repo()` writes, and
+  said `examples = FALSE` writes only the README, `.gitignore` and CI files.
+  The installation sections state the requirement of R 4.2.0 and S7 1.0.0, the
+  operator tables name the accepted spellings `equal` and `not_equal`, and the
+  README and the site say what a range rule does with an open side, equal
+  bounds and `range` next to `min` or `max`.
+
 ## [0.29.0] - 2026-11-23
 
 ### Added
@@ -5487,7 +5793,8 @@ All of the following belong to the manifest verification work above.
 
 - Initial internal release
 
-[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.26.0...v0.27.0

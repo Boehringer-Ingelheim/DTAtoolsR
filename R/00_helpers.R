@@ -1,7 +1,7 @@
 #' Null-Coalescing Operator
 #'
 #' `%||%` is used throughout the package but only became part of base R in
-#' 4.4.0, while `DESCRIPTION` declares `R (>= 4.1.0)`. Importing it from
+#' 4.4.0, while `DESCRIPTION` declares `R (>= 4.2.0)`. Importing it from
 #' `rlang` keeps the package working on the older R versions it claims to
 #' support.
 #'
@@ -512,6 +512,16 @@ dta_resolve_stream_mode <- function(
 #' \code{\link{validation_status}()}, \code{\link{results}()},
 #' \code{\link{messages}()} or \code{\link{inspect}()}, or write it out with
 #' \code{\link{write_validation_report}()}.
+#'
+#' @section A table whose bytes are not valid in its encoding:
+#' A table loaded lazily (\code{stream = "always"}, or \code{"auto"} on a file
+#' large enough to stream) is read for the first time by the scan, so bytes
+#' that are not valid in its file's declared encoding can be met there, further
+#' down than the first block \code{load_file()} read. \code{check()} then
+#' stops with a condition of class \code{dta_encoding_invalid}, the class
+#' \code{\link{load_file}()} raises for the same bytes met earlier and
+#' documents, together with what the scan leaves unread. It returns no object,
+#' so no table of that call is given a verdict.
 #' @param x An object to check: a \code{\link{DTA}}, or any
 #'   \code{\link{DTADataSet}} subclass.
 #' @param ... Named arguments for the individual methods; see the per-method

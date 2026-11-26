@@ -9,7 +9,7 @@
 # written for one version of the software say nothing certain about another.
 
 suite_revision: 1
-package_version: 0.29.0
+package_version: 0.30.0
 
 areas:
   - area: CORE
@@ -26,16 +26,16 @@ areas:
     min_tests: 47
   - area: VAL
     title: Validation engine and result accessors
-    min_tests: 48
+    min_tests: 49
   - area: RULE
     title: Cross-column and grouped rules
-    min_tests: 47
+    min_tests: 52
   - area: FILE
     title: File handlers and readers
     min_tests: 61
   - area: CONT
     title: Container deliveries (zip archives, SAS transport libraries)
-    min_tests: 63
+    min_tests: 64
   - area: MATRIX
     title: Matrix datasets (type matrix)
     min_tests: 59
@@ -44,10 +44,10 @@ areas:
     min_tests: 32
   - area: META
     title: Transfer metadata
-    min_tests: 22
+    min_tests: 23
   - area: TMPL
     title: Templates, inheritance and controlled vocabulary
-    min_tests: 149
+    min_tests: 158
   - area: EXPORT
     title: Document and data export
     min_tests: 77
@@ -56,10 +56,10 @@ areas:
     min_tests: 18
   - area: APP
     title: The interactive application
-    min_tests: 70
+    min_tests: 81
   - area: ROBUST
     title: Error handling, integrity and isolation
-    min_tests: 17
+    min_tests: 18
   - area: PERF
     title: End-to-end workflows and behaviour at scale
     min_tests: 25

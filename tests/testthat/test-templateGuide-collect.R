@@ -1275,4 +1275,13 @@ test_that("the guide's value text spells the study tokens out", {
   expect_identical(
     .tgc_value_text("s${study.id}_x"), "s(the study ID you enter)_x"
   )
+  # The file-name forms say what differs from the plain token.
+  expect_identical(
+    .tgc_value_text("s${study.id_underscore}_x"),
+    "s(the study ID you enter, hyphens written as underscores)_x"
+  )
+  expect_identical(
+    .tgc_value_text("${study.protocol_id_underscore}"),
+    "(the protocol ID you enter, hyphens written as underscores)"
+  )
 })

@@ -75,7 +75,19 @@ requirements:
     risk: high
     category: functional
     covers: [rule_check_col_condition]
-    source: R/evaluateRules.R
+    source: R/evaluateRules.R (dta_pattern_mask)
+    notes: >
+      Not matching holds whatever the expression: ^$ and .* select neither, so
+      a pattern in a THEN clause counts both as violations, as it counts a
+      missing value for every operator, and a pattern in an IF clause leaves
+      their rows out of scope. Text of spaces only is not an empty string; the
+      empty operator (REQ-RULE-008) is the one that treats blanks as empty. A
+      column's own pattern (REQ-VAL-009) is a separate check, and an empty
+      string is a value there (LIM-036). A file never delivers an empty string,
+      because an empty field is read as missing (REQ-FILE-004); the case is a
+      table built in R. Until the operator was brought into line with this
+      statement an empty string matched like any other text, and the case that
+      claimed to verify it ran ^$ on a column holding no empty string (DEV-019).
 
   - id: REQ-RULE-008
     text: >
@@ -148,7 +160,10 @@ requirements:
     text: >
       A range rule shall report every value outside its inclusive bounds, and
       shall accept its bounds either as a range of two values or as separate
-      min and max values.
+      min and max values. The two bounds may be equal; a lower bound greater
+      than the upper bound shall be refused with a condition of class
+      dta_rule_invalid_range. Giving a range together with min or max shall
+      be refused with a condition of class dta_rule_range_conflict.
     risk: high
     category: functional
     covers: [DTARuleColRange, rule_check_range]
@@ -411,3 +426,25 @@ requirements:
     notes: >
       The same file with the column declared R character has no duplicate
       among the spellings: T and TRUE are two keys there.
+
+  - id: REQ-RULE-037
+    text: >
+      The pattern operator shall match a number against its plain decimal
+      text, never in scientific notation, so that 100000 is matched as 100000
+      and 0.00001 as 0.00001, and a whole number shall reach the same verdict
+      held as an integer and as a double, with the table held in memory and
+      scanned in batches alike and whatever the batch size.
+    risk: high
+    category: functional
+    covers: [rule_check_col_condition, check, load_file, messages]
+    source: R/evaluateRules.R (dta_pattern_mask); R/columnSpecChecks.R (dta_numeric_text)
+    notes: >
+      R writes the double 100000 as 1e+05 and 0.00001 as 1e-05, and the integer
+      100000 as 100000. Matched as R writes them, one pattern gave a column
+      read as SAS Int a verdict that the same numbers read as SAS Num did not
+      get, because the first is held as integers and the second as doubles
+      (DEV-020). The text is the one a column's own pattern is matched against
+      (REQ-VAL-009): a whole number in full, a fraction to at most 15
+      significant digits, so a fraction that needs more can read as a whole
+      number. A value that is not a number (a logical, a date, a factor) is
+      matched as the text R writes for it.

@@ -66,6 +66,8 @@ For now, it is only possible to install the development version from GitHub:
 remotes::install_github("Boehringer-Ingelheim/DTAtoolsR")
 ```
 
+DTAtools requires R 4.2.0 or later and S7 1.0.0 or later (DESCRIPTION: `R (>= 4.2.0)`, `S7 (>= 1.0.0)`).
+
 ## Quickstart
 
 ```r
@@ -1081,8 +1083,17 @@ my-templates/
     starter_terms.dta-vocabulary.yaml
   export-templates/
     README.md
+  schemas/
+    dta-template-library.schema.json
+    dta-app.schema.json
+  .vscode/settings.json
   .github/workflows/validate-templates.yml
+  .claude/skills/dta-template-authoring/
 ```
+
+The two JSON Schemas and `.vscode/settings.json` make the Red Hat YAML
+extension in VS Code mark a wrong `kind`, an unquoted `version` or a misspelt
+key while a template is written; `validate_template()` stays the authority.
 
 `lint_template_repo(".")` at the repository root validates the
 four folders and reports a template file in the wrong place (for example a
@@ -1317,8 +1328,8 @@ The most versatile rule type. When `condition` is satisfied for a row, the
 
 Supported operators in both `condition` and `then`:
 
-- `equals`: String / Number
-- `not_equals`: String / Number
+- `equals` (alias `equal`): String / Number
+- `not_equals` (alias `not_equal`): String / Number
 - `greater_equal`: Number
 - `greater`: Number
 - `less_equal`: Number
@@ -1328,7 +1339,15 @@ Supported operators in both `condition` and `then`:
 - `in`: List of strings / numbers
 - `not_in`: List of strings / numbers
 - `empty`: Boolean
-- `pattern`: Regex string
+- `pattern`: Regex string. A missing value and an empty string never match
+  (not even `^$` or `.*`; use `empty` to test for them), and a number is matched
+  as its plain decimal text, `100000` and not `1e+05` (a fraction keeps at most
+  15 significant digits)
+
+The app's rule editor shows one row per column and operator, keeps the value of
+a row you did not touch, and refuses to open a rule it cannot show faithfully;
+the details are in the
+[YAML guide](DTA_YAML_GUIDE.md#col_condition--row-level-if--then).
 
 ```yaml
 rules:
@@ -1381,7 +1400,7 @@ rules:
 #### `col_range`
 
 Ensures that all values in a numeric column fall within `[min, max]`. The bounds can also be
-given as `range: [18, 65]` in place of `min`/`max`.
+given as `range: [18, 65]` in place of `min`/`max`; give one form or the other, not both.
 
 ```yaml
 rules:
@@ -1391,6 +1410,10 @@ rules:
     min: 18
     max: 65
 ```
+
+Unless `range` is used, both `min` and `max` must be written; put `-.inf` for `min` or `.inf` for `max` to leave that side open. The
+two bounds may be equal, whereas a `min` greater than `max` is refused. Giving `range` together with `min` or `max` is refused too. In the app,
+a blank Minimum or Maximum box is an open side and is saved as `-.inf` or `.inf`; both boxes blank is refused.
 
 #### `col_unique`
 
@@ -1560,6 +1583,20 @@ underscores. Its `title` is a nonblank string and `text` is plain text with
 paragraph breaks; empty text is allowed while drafting. The app supports
 adding, editing, deleting and reordering sections. Empty `study` and `sections`
 are omitted from YAML, so legacy documents need no migration.
+
+`dtatools_version` records the DTAtools release that last saved the file, for
+example `dtatools_version: 0.30.0`. It is written by the app, not by you: every
+time the app writes a specification as YAML (the text in its YAML editor and an
+exported file as well as a save) it replaces the value with its own release, so
+a file the app has not written yet simply has none, and leaving it out of a
+file you write by hand is correct. A document with no other metadata
+gets no stamp. The value must be a bare version number, quoted if it has only
+two parts (`'1.0'`, not `1.0`, which YAML reads as a number), and a template
+can neither set nor carry it over. Writing a `DTAMetaData` out with
+`as.list()` and `yaml::write_yaml()` yourself does not stamp it. A file that
+carries the field is refused by a DTAtools release that predates it, which
+rejects `dtatools_version` as an unknown metadata key; delete the line to read
+such a file with that release.
 
 The extra transmission entries above are optional text, not executed services.
 They do not implement encryption, delivery, checksum verification, blinding

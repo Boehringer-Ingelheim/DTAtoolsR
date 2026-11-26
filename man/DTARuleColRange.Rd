@@ -21,17 +21,20 @@ property is a character vector for consistency with the other rule
 classes, but a range rule must name exactly one column; more than one is
 an error (class \code{dta_rule_range_columns}) when the rule is constructed.}
 
-\item{range}{Numeric vector or list of length 2 (lower, upper). Legacy
-argument for range checks; it is used only when both \code{min} and
-\code{max} are \code{NULL}, and is ignored otherwise.}
+\item{range}{Numeric vector or list of length 2, \code{c(lower, upper)}. An
+alternative to \code{min} and \code{max}; giving it together with \code{min} or \code{max} is
+an error of class \code{dta_rule_range_conflict}.}
 
 \item{description}{Character or NULL. Free-text description of the rule.}
 
 \item{min}{Numeric. Lower bound of the allowed range. Required unless
-\code{range} is given, and must be less than \code{max}.}
+\code{range} is given, and must not be greater than \code{max} (the two may be
+equal; a greater \code{min} is an error of class \code{dta_rule_invalid_range}).
+\code{-Inf} leaves the lower side open.}
 
 \item{max}{Numeric. Upper bound of the allowed range. Required unless
-\code{range} is given, and must be greater than \code{min}.}
+\code{range} is given, and must not be less than \code{min}. \code{Inf} leaves the upper
+side open.}
 }
 \value{
 An object of class \code{DTARuleColRange}.

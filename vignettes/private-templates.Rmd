@@ -205,7 +205,12 @@ my-templates/
     starter_terms.dta-vocabulary.yaml
   export-templates/
     README.md
+  schemas/
+    dta-template-library.schema.json
+    dta-app.schema.json
+  .vscode/settings.json
   .github/workflows/validate-templates.yml
+  .claude/skills/dta-template-authoring/
 ```
 
 - `README.md` — the comprehensive authoring guide: all template features,
@@ -224,12 +229,24 @@ my-templates/
   `values_from:`.
 - `export-templates/README.md` — says where Word templates (`.docx` files with `{PLACEHOLDER}` markers) for
   export go; drop `.docx` files into this folder.
+- `schemas/dta-template-library.schema.json` and `schemas/dta-app.schema.json`
+  — JSON Schemas for the four template file kinds and for `dta-app.yaml`.
+- `.vscode/settings.json` — points the Red Hat YAML extension in VS Code at the
+  two schemas. With the extension installed and the repository folder opened as
+  the workspace, they flag a wrong `kind`, an unquoted `version`, a misspelt key
+  or an invalid `role` while you type. They check the shape of one file only:
+  `validate_template()` stays the authority on everything else, and is stricter
+  or looser in a few places that the repository's `README.md` lists.
 - CI scaffolding, controlled by the `ci` argument (default `TRUE`, meaning
   `"github"` only): `"github"` writes `.github/workflows/validate-templates.yml`
   (GitHub Actions); `"bitbucket"` writes `bitbucket-pipelines.yml`; `"jenkins"`
   writes `Jenkinsfile`. Pass a character vector to write more than one, e.g.
   `ci = c("github", "jenkins")`. See "CI for a private template repository"
   below for what each file is for and which one applies to your Bitbucket.
+- `.claude/skills/dta-template-authoring/` — an agent skill (argument
+  `agent_skill`, default `TRUE`) that gives coding agents the working method for
+  a template library: the layered layout, releasing a change, when to use
+  `extends:` and when `mixins:`, and how to triage every validator finding.
 
 The four YAML files are a small, cross-referencing worked example, not stubs
 to fill in from nothing — the whole directory already passes
@@ -239,10 +256,13 @@ placeholder metadata, keeping the `id@version` references between the files
 (`starter_dataset@1.0`, `starter_terms@1.0`, `starter_supplier`) in step with
 whatever you rename.
 
-Pass `examples = FALSE` for a bare scaffold — `README.md`, `.gitignore` and
-whichever CI file(s) `ci` asks for, with none of the starter files and none of
-the folders. Until you add a template, such a repository (and its CI) fails
-validation with `no_templates`. Pass `ci = FALSE` to skip CI scaffolding
+Pass `examples = FALSE` for a bare scaffold — `README.md`, `.gitignore`, the two
+schemas and `.vscode/settings.json` (written whatever `examples` says),
+whichever CI file(s) `ci` asks for and, while `agent_skill = TRUE` (the
+default), the agent skill files under `.claude/skills/dta-template-authoring/`,
+with none of the starter files and none of the template folders
+(`templates/`, `parties/`, `vocabulary/`, `export-templates/`). Until you add a
+template, such a repository (and its CI) fails validation with `no_templates`. Pass `ci = FALSE` to skip CI scaffolding
 entirely. By default,
 `create_template_repo()` refuses to touch a directory where any file it would
 write already exists — it aborts, naming every conflict, and writes nothing at
@@ -616,6 +636,15 @@ dataset:
       values: ${study.id}
 ```
 
+For file names there are two more tokens, `${study.id_underscore}` and
+`${study.protocol_id_underscore}`: the same values with every hyphen (`-`)
+written as an underscore and nothing else changed, so `1001-0190` becomes
+`1001_0190`. With the study identifier `1001-0190`,
+`filename: ^s${study.id_underscore}_<<yyyyMMddHHmm>>\.csv$` accepts only files
+named like `s1001_0190_202611181200.csv`. They are resolved, escaped and
+checked exactly like the plain tokens, and the document's own study identity
+keeps its hyphens.
+
 Inside a regular expression (a `filename` with `pattern: true`, a column's
 `pattern:`, a rule's `pattern` condition) the identifier is escaped and so
 matched literally; everywhere else -- the metadata too, e.g.
@@ -631,7 +660,8 @@ one is refused when the specification is built. The tokens are listed in
 the scaffolded `README.md` section "Date masks in patterns".
 
 `validate_template()` builds the template with the study option's first
-`choices:` suggestion, else the stand-ins `STUDY-ID` and `PROT-ID`; give the option a
+`choices:` suggestion, else the stand-ins `STUDY-ID` and `PROT-ID` (`STUDY_ID` and
+`PROT_ID` for an `_underscore` token); give the option a
 realistic suggestion if a column constrains the identifier's shape. It warns
 with `study_token_unanswered` when no option or base value supplies a study
 field the template uses, and with `token_unknown` for any other `${...}`
@@ -1414,10 +1444,18 @@ multi-select: each term is listed as "CODE — Label" with its description
 underneath, and searching a word from the description finds the term too.
 Chosen terms are shown as removable chips inside the box. "All",
 "None" and "Default" links fill or clear the selection in one click, next to
-a live "n of m selected" count. `min:` is shown as "Choose at least n." and
-is enforced when the document is created. An emptied slot means no terms,
-not "back to the default": the control opens holding the default, and
-whatever it holds when the document is created is what is applied. `target:` is always
+a live "n of m selected" count. A `min:` of 1 or more marks the control with a
+"Required" badge, and only a `min:` above 1 adds the hint "Choose at least n.";
+the floor is enforced when the document is created. An emptied slot is not "back to
+the default": the control opens holding the default, and whatever it holds
+when the document is created is what is applied. A control holding nothing
+("None", or the chips cleared) builds the column with no permitted values at
+all, neither `values:` nor a `values_from:` binding, so no value is checked
+against a list (the column's type, length and `nullable` still are). The
+dialog cannot tell a control that was cleared from one that never held a term,
+so a slot with no `default:` that the author leaves alone builds its column the
+same way. A slot whose column must stay constrained says `min: 1`, and then
+cannot be created empty. `target:` is always
 `datasets.<dataset id>.columns.<column>.values`; a slot whose target names a
 dataset or column the template does not build fails loudly rather than
 silently doing nothing.
@@ -1431,7 +1469,9 @@ closed `enum` in the produced document. There is deliberately no "advisory"
 mode that would let non-conforming data through: the only way to express that
 today is to emit no `values:` at all, which turns the check for that column
 completely off, and a check that is silently absent is worse than the problem
-it would solve.
+it would solve. An author who empties a slot ("0 of n selected"), or leaves a
+slot with no `default:` empty, does switch that column's list check off for
+their document, which is why a template that must not allow it says `min: 1`.
 
 ### Where a binding may be written
 
@@ -1476,10 +1516,11 @@ definition it was built from, the creation date, its `extends:` lineage (and the
 `selections` the user actually made, and — for any dataset built from a
 dataset template — that dataset's own template provenance.
 
-`metadata.template` is **machine-owned**: it is one of exactly two metadata
-fields (`import_issues` is the other) that a template author can never set
-from `base.metadata` or an option effect — the allowed-field list used to
-validate both is derived from the same set that excludes it. A template
+`metadata.template` is **machine-owned**: it is one of exactly three metadata
+fields (`import_issues` and `dtatools_version` are the others) that a template
+author can never set from `base.metadata` or an option effect — the
+allowed-field list used to validate both is derived from the same set that
+excludes it. A template
 author who could set this field could forge a document's own provenance,
 which the rebase feature below would then blindly trust.
 
@@ -1596,3 +1637,15 @@ Multibranch Pipeline scanning it) rather than an `on:` block in the file
 itself — Jenkinsfiles carry no triggers the way a GitHub Actions workflow
 does. `create_template_repo(ci = c("bitbucket", "jenkins"))` (or any
 combination including `"github"`) writes whichever of the three you ask for.
+
+None of the three blocks anything on its own. The app reads the branch named
+in its source (`#main` above), so a merge into that branch is a release, and
+a failed pipeline only stops it if the host refuses to merge without a green
+build. Make the check required on that branch and let changes reach it
+through pull requests only. On GitHub that is a branch protection rule or
+ruleset with "Require status checks to pass before merging" that selects
+`validate-templates`; on Bitbucket use its merge check on successful builds,
+which counts a Jenkins build only if Jenkins reports its build status back to
+Bitbucket (the generated `Jenkinsfile` does not do that by itself). The run on
+`main` after a merge reports a failure too
+late, because the change is by then on the branch the app reads.

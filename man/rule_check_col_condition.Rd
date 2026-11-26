@@ -12,7 +12,7 @@ rule_check_col_condition(rule, df, numeric_cache = NULL)
 \item \verb{@id} character
 \item \verb{@type} = "col_condition"
 \item \verb{@condition} list: named by column, each with one or more of:
-\code{equals}, \code{not_equals}, \verb{in}, \code{not_in},
+\code{equals} (or \code{equal}), \code{not_equals} (or \code{not_equal}), \verb{in}, \code{not_in},
 \code{greater}, \code{less}, \code{greater_equal}, \code{less_equal}, \code{min}, \code{max},
 \code{range}, \code{pattern}, \code{empty}
 \item \verb{@then} list: same structure as \verb{@condition}
@@ -47,11 +47,22 @@ naming the column and the offending key.
 
 Supported operators per column:
 \itemize{
-\item Equality: \code{equals}, \code{not_equals}
+\item Equality: \code{equals} (or \code{equal}), \code{not_equals} (or \code{not_equal})
 \item Set: \verb{in}, \code{not_in}
 \item Numeric comparisons: \code{greater}, \code{less}, \code{greater_equal}, \code{less_equal},
 \code{min}, \code{max}, \code{range}
-\item Text: \code{pattern} (a regular expression; row passes when the value matches)
+\item Text: \code{pattern} (a Perl-compatible regular expression; row passes when the
+value matches). A missing value (\code{NA}, \code{NaN}) and an empty string never
+match, whatever the expression: \verb{^$} and \verb{.*} select neither, so a \code{then}
+\code{pattern} counts them as violations and an \code{if} \code{pattern} leaves their rows
+out of scope. Text of spaces only is not empty here, and is matched like
+any other text. Use \code{empty} to test for missing or empty values. A number
+is matched as its plain decimal text, never in scientific notation (\code{100000}
+is matched as \code{"100000"}, not \code{"1e+05"}; a fraction keeps at most 15
+significant digits), so a whole number gets the same
+verdict whether it is stored as an integer or as a double. Any other value
+is matched as \code{as.character()} writes it, so a logical is \code{"TRUE"} or
+\code{"FALSE"}.
 \item Emptiness: \code{empty} (TRUE means empty: \code{NA}, \code{NaN}, \code{""}, or a text value
 that is only whitespace; FALSE means not empty)
 }

@@ -624,6 +624,14 @@ requirements:
     category: integrity
     covers: [upgrade_dta]
     source: R/containerAssignments.R (dta_upgrade, dta_is_stale, upgrade_dta); plan PLAN-container-manager.md D15 and section 4.12
+    notes: >
+      A document counts as saved by an older version when it, one of its
+      datasets or its metadata lacks a property the current class has, so the
+      metadata alone is enough. A document saved before metadata.dtatools_version
+      existed has every property of the DTA and of its datasets, and its
+      metadata could not be read as a list (what the YAML writer reads) or be
+      given that property until upgrade_dta() was called by hand; no function
+      that reads or writes the document noticed (OQ-CONT-064).
 
   - id: REQ-CONT-030
     text: >

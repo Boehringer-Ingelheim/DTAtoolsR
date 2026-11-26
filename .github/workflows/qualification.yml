@@ -91,7 +91,7 @@ jobs:
             any::rcmdcheck
             any::testthat
             any::R6
-            cran::S7@0.2.2
+            any::S7
           needs: check
 
       # --install-tests so the run can report the developer suite as

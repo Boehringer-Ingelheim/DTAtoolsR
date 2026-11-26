@@ -188,12 +188,11 @@ test_that("labels() is exported, not left to base::labels' silent fallback", {
   # pkgload::load_all()'s default of TRUE merely papers over) an unexported
   # `labels()` is invisible to a caller; the call falls through to
   # base::labels.default, which does not error -- it silently returns a
-  # plausible-looking wrong value. getNamespaceExports() reports the real
-  # NAMESPACE-declared exports regardless of load_all()'s export_all default,
-  # so this check catches the silent fallback without needing to flip global
-  # session state.
-  exported <- getNamespaceExports(asNamespace("DTAtools"))
-  expect_true("labels" %in% exported)
+  # plausible-looking wrong value. The NAMESPACE file is read as it is, so this
+  # check catches the silent fallback without needing to flip global session
+  # state (getNamespaceExports() under load_all() would not list `labels`: see
+  # helper-namespace-exports.R).
+  expect_true("labels" %in% declared_exports())
 
   ds <- create_example_DTADataSetTabular(2)
   expect_identical(labels(ds), names(tables(ds)))

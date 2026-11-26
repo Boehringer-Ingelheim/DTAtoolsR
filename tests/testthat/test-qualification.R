@@ -71,7 +71,7 @@ test_that("every shipped requirement satisfies the schema and is reachable", {
   # is not exported means the requirement is about something a user cannot
   # call, which is a mistake in the requirement rather than in the code.
   api <- qual_read_api(qual_root())
-  expect_setequal(api, getNamespaceExports("DTAtools"))
+  expect_setequal(api, declared_exports())
   expect_true(all(unique(unlist(reqs$covers)) %in% api))
 })
 
