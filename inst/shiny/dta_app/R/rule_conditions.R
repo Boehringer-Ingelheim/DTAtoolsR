@@ -70,9 +70,30 @@ form_value_error <- function(where, problem, .envir = parent.frame()) {
 # optional point, an optional exponent. No decimal comma, no hex, no Inf/NaN/NA.
 form_number_pattern <- "^[+-]?([0-9]+[.]?[0-9]*|[.][0-9]+)([eE][+-]?[0-9]+)?$"
 
+# The number a text that matches `form_number_pattern` spells. R's own
+# as.numeric() is not correctly rounded where `long double` is no wider than
+# `double` (macOS arm64) and reads some 17-digit decimals one ulp off, so the
+# text is rewritten in JSON's number grammar and read by jsonlite, whose parser
+# uses the C library's strtod. Overflow (`1e400`) is Inf either way.
+form_parse_number <- function(text) {
+  parts <- regmatches(
+    text, regexec("^([+-]?)([0-9]*)[.]?([0-9]*)([eE][+-]?[0-9]+)?$", text)
+  )[[1]]
+  whole <- sub("^0+(?=[0-9])", "", parts[3], perl = TRUE)
+  json <- paste0(
+    if (parts[2] == "-") "-", if (nzchar(whole)) whole else "0",
+    if (nzchar(parts[4])) paste0(".", parts[4]), parts[5]
+  )
+  value <- tryCatch(
+    jsonlite::parse_json(paste0("[", json, "]"))[[1]],
+    error = function(e) NULL
+  )
+  if (is.numeric(value) && length(value) == 1L) as.double(value) else as.numeric(text)
+}
+
 form_read_number <- function(txt, where) {
   text <- trimws(txt)
-  value <- if (grepl(form_number_pattern, text)) as.numeric(text) else NA_real_
+  value <- if (grepl(form_number_pattern, text)) form_parse_number(text) else NA_real_
   if (!is.finite(value)) {
     form_value_error(where, "{.val {txt}} is not a number; write decimals with a point.")
   }
@@ -102,7 +123,7 @@ form_number_text <- function(x) {
     }
     for (digits in 15:17) {
       text <- sprintf("%.*g", digits, v)
-      if (as.numeric(text) == v) {
+      if (form_parse_number(text) == v) {
         return(text)
       }
     }

@@ -107,6 +107,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **The rule editor changed a long decimal by one unit in the last place on
+  Apple-silicon Macs.** R's own `as.numeric()` is not correctly rounded there,
+  so a number such as `123456789.12345679` came back from the Value box as the
+  next double up when only the operator had been changed. The box is now read
+  by the same correctly rounded parser the rule phrasing already uses
+  (`jsonlite`), after the text has been rewritten in JSON's number grammar so
+  that every spelling the editor accepted before (`+5`, `5.`, `.5`, `007`,
+  `1E5`) is accepted still.
 - **Ten classes could not be built under S7 1.0.0.** They passed their
   parent to `new_object()` by the name `.parent`, which S7 1.0.0 no longer
   has: constructing a file handler, a dataset, a column structure or a rule

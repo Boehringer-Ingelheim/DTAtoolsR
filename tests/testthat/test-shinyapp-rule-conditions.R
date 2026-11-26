@@ -448,7 +448,7 @@ test_that("numbers are shown so that reading them back gives the same number", {
   expect_identical(show(-2.5), "-2.5")
 
   # and an operator changed with the text left alone reads the shown text back
-  for (x in c(100000, 1e-5, 0.30000000000000004, 0.5, 1e15, -2.5, 123456789.123456789)) {
+  for (x in c(100000, 1e-5, 0.30000000000000004, 0.5, 1e15, -2.5, 123456789 + 8285045 / 2^26)) {
     row <- app_fn("condition_to_form_rows")(list(A = list(equals = x)))[[1]]
     out <- app_fn("form_rows_to_condition")(
       list(list(col = "A", op = "greater", val = row$val, orig = row)),
@@ -456,6 +456,27 @@ test_that("numbers are shown so that reading them back gives the same number", {
     )
     expect_identical(out, list(A = list(greater = x)), info = format(x, digits = 17))
   }
+})
+
+test_that("every spelling of a number the editor accepts reads as the number it spells", {
+  # Expected values are written out by hand; none comes from as.numeric(), whose
+  # rounding differs on macOS arm64 for long decimals (the reader is jsonlite's).
+  read <- app_fn("form_read_number")
+  spelled <- list(
+    "5" = 5, "+5" = 5, "-5" = -5, "5." = 5, ".5" = 0.5, "-.5" = -0.5,
+    "007" = 7, "000" = 0, "0.50" = 0.5, "1e5" = 1e5, "1E5" = 1e5,
+    "1e+05" = 1e5, "1e-05" = 1e-5, "2.5e3" = 2500, "-0" = 0,
+    " 12 " = 12, "0.1" = 0.1, "100000" = 1e5, "1e308" = 1e308
+  )
+  for (txt in names(spelled)) {
+    expect_identical(read(txt, "A"), spelled[[txt]], info = txt)
+  }
+  # a text longer than 15 digits is read to the nearest double, whatever the
+  # platform: 0.12345679 * 2^26 = 8285044.93, so the nearest double is built from
+  # integers, two exact operations that involve no text parser
+  expect_identical(read("123456789.12345679", "A"), 123456789 + 8285045 / 2^26)
+  expect_error(read("1e400", "A"), class = "dta_form_value_error")
+  expect_error(read("1,5", "A"), class = "dta_form_value_error")
 })
 
 test_that("a list is shown so that a value with a comma or a quote reads back as itself", {
