@@ -240,7 +240,7 @@ Ohne Q4 entfällt Schritt 1, die übrigen rücken auf.
 - **Q2 stellt die Qualifikation ehrlicher dar.** Auf einer Maschine ohne shiny, pandoc oder TinyTeX erscheinen mehr Anforderungen als `partially verified`. Vorher prüfen, welche Pakete die CI-Läufer haben (Q3 hängt daran).
 - **W12 löscht qualifizierte Anforderungen.** Die Meta-Checks der Suite erzwingen koordinierte Änderungen (Index, Manifest, API-Liste); ein PR, der nur den Code löscht, scheitert in der Qualifikation.
 - **P1 kann alles verschieben.** Bestätigt die Probe das XSS, ist W7 vor allem anderen dran.
-- **Archivierung (Q8).** Ohne Bereinigung verletzt der Bericht die Repository-Regel gegen Erwähnungen von Assistenten (er nennt die verwendeten Modelle). Bereinigen heißt: den Abschnitt "Reviewer" und die Methodennotizen entfernen, nicht den Inhalt der Befunde ändern.
+- **Archivierung (Q8).** Ohne Bereinigung verletzt der Bericht die Repository-Regel gegen Erwähnungen von Assistenten (er nennt die verwendeten Modelle). Bereinigt wurde so: Modellnamen und die Dateiliste des Arbeitsverzeichnisses sind aus dem Bericht entfernt, Werkzeugnamen (auch in wörtlichen Zitaten von Pfaden) durch einen Platzhalter ersetzt, Arbeitsanweisungen und Laufprotokolle nicht archiviert; der Inhalt der Befunde ist sonst unverändert.
 - **Restrisiko aus dem Review selbst:** nicht oder nur oberflächlich gelesen wurden rund 200 YAML-Fixtures unter `inst/qualification/fx/`, etwa 50 Template-Fixture-Ordner, Binär-Fixtures (nur über Generatoren und Hashes), Teile von `private-templates.Rmd` und des Skeleton-READMEs sowie rund 470 `man/*.Rd`-Seiten ohne Gegenlesen. Keiner der Fehler dort ist bekannt, aber auch keiner ausgeschlossen.
 - **Unvollständig bleibt, was der Review nie ausgeführt hat:** Aussagen über Laufzeitverhalten sind in den Befunden als `inferred` markiert. Wo ein PR davon abhängt, ist der rote Lauf Teil des PR (P2, P4, `c1-spec-36`).
 
@@ -252,4 +252,6 @@ Ohne Q4 entfällt Schritt 1, die übrigen rücken auf.
 
 ## 8. Freigabe
 
-Offen. Die Umsetzung beginnt nach deinen Antworten auf Q1–Q10 (Defaults siehe Empfehlungen) mit Schritt 0.
+**Entschieden am 26.11.2026: alle zehn Empfehlungen angenommen** (Q1 (a), Q2 (a), Q3 (a), Q4 (a), Q5, Q6 (a), Q7 (a), Q8 (a), Q9 ja, Q10 unverändert). Die Umsetzung beginnt mit Schritt 0 (Proben P1–P6) und dem Archiv der Review-Belege (Q8) in `thoughts/shared/reviews/2026-11/`. Die Wellen folgen der Reihenfolge in Abschnitt 5; jede beginnt erst nach dem Merge der vorherigen Paarung.
+
+Zum Archiv (Q8): Begriffe, die die Repository-Regel gegen Erwähnungen von Assistenten verbietet, sind dort durch Platzhalter ersetzt (`[assistant-tool]`, `[model]`), auch in wörtlichen Zitaten von Repository-Pfaden; die Original-Zitate stehen in der Sicherungskopie außerhalb des Repositorys. Die Arbeitsanweisungen an die Reviewer (Briefe) sind nicht archiviert.
