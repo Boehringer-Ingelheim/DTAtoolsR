@@ -29,11 +29,27 @@ tvs_library <- function(env = parent.frame()) {
       "  columns:",
       "    - id: VISIT",
       "      type: SAS Char",
+      tvs_extra_lines("      "),
       "      values_from: visit@1.0"
     ),
     file.path(root, "templates", "bound_ds.dta-dataset-template.yaml")
   )
   root
+}
+
+# What the targeted column carries besides its values, written once for every
+# shape of it: OQ-TMPL-151 reads it back, and emptying a slot must not touch it.
+tvs_extra <- list(
+  label = "Visit", length = 8L, nullable = FALSE, description = "Visit code"
+)
+tvs_extra_lines <- function(indent) {
+  paste0(
+    indent,
+    c(
+      "label: Visit", "length: 8", "nullable: false",
+      "description: Visit code"
+    )
+  )
 }
 
 # One creation template over the library, written to `<id>.dta-template.yaml`.
@@ -45,12 +61,16 @@ tvs_template <- function(root, id, slot_lines, kind = "imported") {
     imported = "  - template: bound_ds@1.0",
     inline = c(
       "  - id: ds1", "    type: tabular", "    files: {filename: x.csv, type: csv}",
-      "    columns:", "      - id: VISIT", "        type: SAS Char", "        values_from: visit@1.0"
+      "    columns:", "      - id: VISIT", "        type: SAS Char", tvs_extra_lines("        "),
+      "        values_from: visit@1.0"
     ),
     matrix = c(
       "  - id: ds1", "    type: matrix", "    files: {filename: x.tsv, type: tsv}",
       "    row_labels:",
-      "      - {id: VISIT, header: visit, type: SAS Char, nullable: No, values_from: visit@1.0}",
+      paste0(
+        "      - {id: VISIT, header: visit, type: SAS Char, label: Visit, length: 8, nullable: No, ",
+        "description: Visit code, values_from: visit@1.0}"
+      ),
       "      - {id: OTHER, header: other, type: SAS Char, nullable: No}",
       "    matrix:", "      cells: {type: SAS Num}"
     )
@@ -125,7 +145,22 @@ test_that("OQ-TMPL-151 | choosing None builds the column with no permitted value
     qa_check(paste(kind, ": None builds the document"), isTRUE(none$ok))
     col <- tvs_column(none)
     qa_step(paste(kind, ": None leaves the column with no permitted values"), NULL, col@values)
-    qa_step(paste(kind, ": and changes nothing else about the column"), c("VISIT", "SAS Char"), c(col@id, as.list(col)$type))
+    # "Nothing else about the column": every property but the permitted values
+    # is what the template wrote (tvs_extra, with the id and the type), and is
+    # the same as on the column built with the slot left untouched.
+    other <- function(column) {
+      listed <- as.list(column)
+      listed[setdiff(names(listed), c("values", "values_from"))]
+    }
+    qa_step(
+      paste(kind, ": the column keeps its id, type, label, length, nullable flag and description"),
+      c(list(id = "VISIT", type = "SAS Char"), tvs_extra),
+      other(col)[c("id", "type", names(tvs_extra))]
+    )
+    qa_step(
+      paste(kind, ": every property but the values is the same as with the slot left untouched"),
+      other(tvs_column(silent)), other(col)
+    )
 
     written <- engine$dta_to_yaml_text(none$value)
     qa_check(paste(kind, ": the document serialises"), isTRUE(written$ok))

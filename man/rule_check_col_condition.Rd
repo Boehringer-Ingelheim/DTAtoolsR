@@ -12,7 +12,7 @@ rule_check_col_condition(rule, df, numeric_cache = NULL)
 \item \verb{@id} character
 \item \verb{@type} = "col_condition"
 \item \verb{@condition} list: named by column, each with one or more of:
-\code{equals}, \code{not_equals}, \verb{in}, \code{not_in},
+\code{equals} (or \code{equal}), \code{not_equals} (or \code{not_equal}), \verb{in}, \code{not_in},
 \code{greater}, \code{less}, \code{greater_equal}, \code{less_equal}, \code{min}, \code{max},
 \code{range}, \code{pattern}, \code{empty}
 \item \verb{@then} list: same structure as \verb{@condition}
@@ -47,7 +47,7 @@ naming the column and the offending key.
 
 Supported operators per column:
 \itemize{
-\item Equality: \code{equals}, \code{not_equals}
+\item Equality: \code{equals} (or \code{equal}), \code{not_equals} (or \code{not_equal})
 \item Set: \verb{in}, \code{not_in}
 \item Numeric comparisons: \code{greater}, \code{less}, \code{greater_equal}, \code{less_equal},
 \code{min}, \code{max}, \code{range}

@@ -127,7 +127,12 @@ requirements:
       the file held: 007 in a declared Int column is the number 7 and is
       matched as "7". A code whose leading zeros matter must be declared
       SAS Char. Before the fix a pattern declared on a numeric column was never
-      evaluated at all, so a delivery could break it without any report.
+      evaluated at all, so a delivery could break it without any report. A
+      64-bit integer (bit64 integer64, which no file read produces) is an
+      integer like any other, and is matched as the digits it holds: it keeps
+      its bits in a double, which were once read as a tiny number and written
+      as "0", so that a valid 100000 was reported as breaking ^100000$
+      (OQ-VAL-054).
 
   - id: REQ-VAL-010
     text: >

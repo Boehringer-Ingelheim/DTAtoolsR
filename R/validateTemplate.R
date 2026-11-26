@@ -1985,21 +1985,28 @@
 #' `app_config_misplaced` (a `dta-app.yaml` anywhere but directly in the
 #' repository root), and the [lint_dta()] errors `rule_invalid`,
 #' `rule_id_duplicate`, `rule_column_undeclared`, `rule_range_non_numeric`,
-#' `rule_condition_operator_invalid`, `rule_condition_numeric_on_text`,
-#' `rule_condition_value_unfit`, `rule_condition_value_outside_values` (only for `equals`/`in`; the negated
+#' `rule_condition_operator_invalid`, `rule_condition_numeric_on_text` (also a
+#' warning, see below), `rule_condition_value_unfit` (also a warning, see
+#' below), `rule_condition_value_outside_values` (only for `equals`/`in`; the negated
 #' operators raise no finding), `group_constraint_unknown_condition`, and
 #' `file_name_conflict` (file entries of two datasets could take the same file
 #' name; the linter's warning is an error here). Any other [lint_dta()] code
 #' (see its Codes section) is passed on with the linter's severity.
 #' The linter codes come from the columns and rules of a dataset template's
 #' body, and from every instantiated variant of a creation template.
-#' Warnings: the linter's `rules_without_columns`, `rule_not_checkable` and
-#' `format_narrower_than_length`, plus `kind_unknown`, `id_missing`, `version_missing`,
+#' Warnings: the linter's `rules_without_columns`, `rule_not_checkable`,
+#' `format_narrower_than_length`, `column_id_shadows_field` (a column `X.<field>`
+#' beside a column `X`, where `<field>` is a column field such as `values`) and,
+#' in the cases that are not errors, `rule_condition_numeric_on_text` (the column
+#' is a date, which a file read holds as text) and `rule_condition_value_unfit`
+#' (a number is written where the column holds text), plus `kind_unknown`, `id_missing`, `version_missing`,
 #' `version_unparseable`, `target_invalid`, `party_slot_invalid`,
 #' `vocab_slot_unresolved`, `dataset_template_unresolved`, `patch_incoherent`,
 #' `dataset_no_files` (a dataset template body, or a dataset built by a
 #' non-abstract creation template, that declares no files, so nothing can be
-#' loaded into it; a patch may still supply them, hence a warning),
+#' loaded into it; a dataset template's body is judged before any patch, which
+#' may still supply the files, hence a warning, whereas a creation template is
+#' judged on the dataset it builds, after patching, so a patch there clears it),
 #' `token_unknown` (a `${...}` placeholder in a creation or dataset template
 #' other than `${today}`, `${version}`, `${study.id}`, `${study.protocol_id}`
 #' and their file-name forms `${study.id_underscore}` and

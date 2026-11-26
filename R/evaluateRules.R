@@ -1226,7 +1226,7 @@ evaluate_conditions <- function(conditions, df, numeric_cache = NULL) {
 #'   - `@id` character
 #'   - `@type` = "col_condition"
 #'   - `@condition` list: named by column, each with one or more of:
-#'       `equals`, `not_equals`, `in`, `not_in`,
+#'       `equals` (or `equal`), `not_equals` (or `not_equal`), `in`, `not_in`,
 #'       `greater`, `less`, `greater_equal`, `less_equal`, `min`, `max`,
 #'       `range`, `pattern`, `empty`
 #'   - `@then` list: same structure as `@condition`
@@ -1249,7 +1249,7 @@ evaluate_conditions <- function(conditions, df, numeric_cache = NULL) {
 #' naming the column and the offending key.
 #'
 #' Supported operators per column:
-#' - Equality: `equals`, `not_equals`
+#' - Equality: `equals` (or `equal`), `not_equals` (or `not_equal`)
 #' - Set: `in`, `not_in`
 #' - Numeric comparisons: `greater`, `less`, `greater_equal`, `less_equal`,
 #'   `min`, `max`, `range`

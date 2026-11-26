@@ -307,7 +307,7 @@
         "transmission": { "type": ["object", "null"] },
         "error_handling": { "type": ["string", "null"] },
         "authorized_for_corrections": { "description": "Text, or a list of contacts." },
-        "study": { "type": ["object", "null"], "description": "id and protocol_id are available as ${study.id} and ${study.protocol_id}." },
+        "study": { "type": ["object", "null"], "description": "id and protocol_id are available as ${study.id} and ${study.protocol_id}, and with every hyphen written as an underscore as ${study.id_underscore} and ${study.protocol_id_underscore}." },
         "sections": { "type": ["object", "null"] }
       }
     },

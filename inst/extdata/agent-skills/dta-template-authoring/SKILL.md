@@ -131,7 +131,8 @@ Each has bitten someone; the reason is why it is not a style preference.
 - **Write every reference with an explicit version token**: `id@latest`
   (follow) or `id@1.2` (pin). A bare `id` also means latest but reads like an
   oversight. Party-slot `profiles:` are the exception: they take plain ids
-  only, and `id@1.0` there silently never matches.
+  only; `id@1.0` there never matches a profile, and the validator reports it as
+  `party_slot_invalid` (unknown profile id).
 - **Do not invent**: no `metadata.template`, `metadata.import_issues` or
   `metadata.dtatools_version` (the app owns them), no `${…}` token other than
   `${today}`, `${version}`, `${study.id}`, `${study.protocol_id}` and their

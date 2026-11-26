@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-11-25
+
 ### Added
 
 - `create_template_repo()` writes two JSON Schemas to `schemas/`
@@ -32,14 +34,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   fails on it; the template guide spells them out.
 - A specification's `metadata:` now records which DTAtools release wrote it, in
   a new `dtatools_version` field (new last argument of `DTAMetaData()`). The
-  app sets it every time it saves the YAML, so it names the release that last
-  saved the file; a file the app has not saved has none, and nothing is
-  filled in retroactively. It is machine-owned like `template`: a template can
-  neither set nor carry it over, it never shows up as a change in a version
-  summary or a rebase, and the linters accept it only as a bare version
-  number. A document with no other metadata is not stamped. A DTAtools release
-  that predates the field rejects it as an unknown metadata key, so a file the
-  app has saved is not readable by one until the line is deleted.
+  app sets it every time it writes the specification as YAML, which is a save
+  and also the text shown in its YAML editor and an exported file, so it names
+  the release that last wrote the document; a file the app has not written has
+  none, and nothing is filled in retroactively. It is machine-owned like
+  `template`: a template can neither set nor carry it over, it never shows up
+  as a change in a version summary or a rebase, and the linters accept it only
+  as a bare version number. A document with no other metadata is not stamped.
+  A DTAtools release older than 0.30.0 rejects the field as an unknown metadata
+  key, so a file the app has saved is not readable by one until the line is
+  deleted.
 - **Bytes that are not valid in a delimited file's encoding are refused with a
   condition class of their own, `dta_encoding_invalid`.** For UTF-8, the
   encoding such a file is read as unless its handler declares another, the
@@ -66,19 +70,81 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   classes. Documented under `?load_file`, `?check` and `?validate_file_stream`;
   qualified by `REQ-ROBUST-018` and `OQ-ROBUST-018`.
 
+### Changed
+
+- **DTAtools now requires S7 1.0.0 or later, and R 4.2.0 or later.** S7 1.0.0
+  (CRAN, 2026-11-19) renamed the first argument of `new_object()` and the
+  attribute in which an object keeps its class, and itself needs R 4.2.0. The
+  lockfile and the Connect manifest record S7 1.0.0, and CI no longer pins S7
+  to 0.2.2. An object saved with `saveRDS()` by this version can no longer be
+  read under an S7 older than 1.0.0; objects saved by earlier versions are read
+  and upgraded as before.
+- **A range rule given both `range` and `min`/`max` is refused** (condition
+  class `dta_rule_range_conflict`); `range` used to be ignored without a word
+  when `min` and `max` were both given. A
+  lower bound greater than the upper bound now carries the class
+  `dta_rule_invalid_range`.
+- **The rule editor writes the engine's normal form of an operator.** Saving a
+  rule written with `range: [lo, hi]` stores `min: lo` and `max: hi`, `equal`
+  becomes `equals` and `not_equal` becomes `not_equals`. The test is the same;
+  only the spelling in the saved YAML changes, on the first save of such a rule.
+- **A vocabulary slot with no `default:` that the author leaves empty now builds
+  its column with no permitted values.** The options dialog reports a control
+  holding nothing the same way whether the author cleared it or never filled
+  it, so such a slot used to leave the column bound to the dataset template's
+  whole vocabulary and now removes that list check, as "None" does. Give the slot
+  `min: 1` to keep the column constrained; the document is then not created
+  until a term is chosen. No bundled template is affected.
+- **The template-repository guide and the `private-templates` vignette now say
+  that the CI file only gates a merge when the check is required.** The app
+  reads the deploy branch (`#main` in `DTATOOLS_TEMPLATE_SOURCES`), so a merge
+  is a release, and the generated GitHub and Bitbucket pipelines run on pull
+  requests (a Jenkins job runs when its own trigger says so) but cannot stop one
+  by themselves. Both documents tell a library owner to make
+  `validate-templates` a required check on that branch, and say that a Jenkins
+  build only counts for Bitbucket's merge check when Jenkins reports its build
+  status back. The generated CI files are unchanged.
+
 ### Fixed
 
+- **Ten classes could not be built under S7 1.0.0.** They passed their
+  parent to `new_object()` by the name `.parent`, which S7 1.0.0 no longer
+  has: constructing a file handler, a dataset, a column structure or a rule
+  failed with `argument "_parent" is missing`. The parent is now passed by
+  position, which every S7 version accepts.
+- **`upgrade_dta()` and the upgrade the entry points run by themselves saw
+  nothing to do under S7 1.0.0.** The class an object was saved with is read
+  and re-stamped through S7 instead of through the attribute `S7_class`, which
+  S7 1.0.0 stores as `_S7_class`; an object restored from an older version is
+  detected as stale and upgraded as it was before.
+- **Removing a container, or clearing a file entry's container reference,
+  failed under S7 1.0.0** with `invalid type of argument[3]: 'symbol'`: S7
+  1.0.0 stores an unset (`NULL`) property as a symbol, which the document's
+  container check read as a container id.
+- **`names`, `print` and `labels` no longer leave placeholder objects in the
+  package namespace** (S7 1.0.0 creates them for every method registered on a
+  base generic; the package now removes them when it is built).
+- The app no longer shows a dataset as passed, and its validation summary no
+  longer reads "VALIDATION PASSED", while a table bound to it has not been
+  validated. One validated table was enough for the status map to call the
+  whole dataset passed: after a second file was uploaded, a file replaced or a
+  delivery added to a dataset that had already passed, the next check of any
+  other dataset turned it green again and offered the certifying summary,
+  although "Loaded files" still listed the new table as not validated yet. A
+  dataset now reads "pending" until every table bound to it has been
+  validated; a failing table still reads "fail".
 - **A range rule with only a minimum or only a maximum can be saved in the
   app.** A blank Minimum or Maximum box is now an open side, saved as `-.inf`
   or `.inf`, and the rule reopens with that box blank; before, the save failed
   with a type error. A range rule whose minimum equals its maximum was refused
   and is now accepted.
-- `dta_is_stale()` now looks at a document's metadata as well as the document
-  and its datasets. A `DTA` saved with `saveRDS()` by an older release has
-  metadata without the properties added since, and no entry point noticed: the
-  metadata could not be read or written until `upgrade_dta()` was called by
-  hand. The app was not affected, because it upgrades a restored session
-  unconditionally.
+- **The metadata of a `DTA` saved by an older release is upgraded by the entry
+  points.** Such a `DTA` (saved with `saveRDS()`) has metadata without the
+  properties added since, and the check that decides whether a document needs
+  upgrading looked only at the document and its datasets, so no entry point
+  noticed: the metadata could not be read or written until `upgrade_dta()` was
+  called by hand. The check now looks at the metadata too. The app was not
+  affected, because it upgrades a restored session unconditionally.
 - **"None" in a vocabulary slot of the "Create from template" dialog now does
   what it says.** Emptying a slot (the **None** link, or clearing the chips)
   showed "0 of n selected", but the document still came out with every term of
@@ -106,22 +172,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   the numbers 1 and 7, so `in: ["001", "002"]` could no longer select any row
   and the rule could never fail; `"1.50"` became 1.5, and `"Smith, John"` was
   split into two values. The editor now shows one row per column and operator,
-  keeps a row you did not touch exactly as it was (type and spelling), reads a
-  row you changed by the declared type of its column (a number for a numeric
-  column, text for any other), and takes a quoted list (`"Smith, John", Doe`; a
-  missing value is `~`). A rule it cannot show faithfully (an operator it does
-  not know, or two spellings of one operator on one column such as `range` with
-  `min`) is not opened and says why, instead of being rewritten, and the same
-  operator twice for one column is an error on Save, not an overwrite.
+  keeps the value of a row you did not touch exactly as it was (type and
+  spelling; the operator is saved in its normal form, see Changed), reads a row
+  you changed by the declared type of its column (a number for a numeric
+  column, text for any other; greater, less and between always read a number,
+  except on a date column, where the text of the date is kept), and takes a
+  quoted list (`"Smith, John", Doe`; a missing value is `~`). A rule it cannot
+  show faithfully (an operator it does not know, or two spellings of one
+  operator on one column such as `range` with `min`) is not opened and says
+  why, instead of being rewritten, and the same operator twice for one column
+  is an error on Save, not an overwrite.
 - **A value the rule editor cannot read is refused, not dropped.** A range
   rule's minimum of `0,5` (a decimal comma) was saved as no minimum, a between
   row such as `18 - 65` vanished from the rule, `0,5, 10` became the bounds 0
   and 5, and `empty` took any word to mean true; a row with a value and no
   column, or a grouped row with a column and no condition name, was skipped, and
   a blank Value box was saved as an empty text. Each is now an error on Save
-  that names the text, and the rule is left as it was. Decimals are written with
-  a point. A range rule's bounds are kept as they were (`max: 100000` is not
-  rewritten as `100000.0`).
+  that names the text (a grouped row without a condition name has none, so it
+  names its column), and the rule is left as it was. A blank Value box of an
+  `empty` row is still read as true. Decimals are written with a point. A range
+  rule's bounds are kept as they were (`max: 100000` is not rewritten as
+  `100000.0`).
 - **The qualification case `OQ-ROBUST-012` can now fail.** It is the only case
   for `REQ-ROBUST-012` (bytes that are not valid in the declared encoding "shall
   be reported rather than silently reinterpreted"), and its assertions accepted
@@ -196,72 +267,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
     two Delivery flags, and the outputs inside the modal dialogs. `edit_gate`,
     which the app opts out with the sidebar, was not named by the old test at
     all.
-
-### Changed
-
-- **A range rule given both `range` and `min`/`max` is refused** (condition
-  class `dta_rule_range_conflict`); `range` used to be silently ignored. A
-  lower bound greater than the upper bound now carries the class
-  `dta_rule_invalid_range`.
-- **The rule editor writes the engine's normal form of an operator.** Saving a
-  rule written with `range: [lo, hi]` stores `min: lo` and `max: hi`, `equal`
-  becomes `equals` and `not_equal` becomes `not_equals`. The test is the same;
-  only the spelling in the saved YAML changes, on the first save of such a rule.
-- **A vocabulary slot with no `default:` that the author leaves empty now builds
-  its column with no permitted values.** The options dialog reports a control
-  holding nothing the same way whether the author cleared it or never filled
-  it, so such a slot used to leave the column bound to the dataset template's
-  whole vocabulary and now removes that list check, as "None" does. Give the slot
-  `min: 1` to keep the column constrained; the document is then not created
-  until a term is chosen. No bundled template is affected.
-- **The template-repository guide and the `private-templates` vignette now say
-  that the CI file only gates a merge when the check is required.** The app
-  reads the deploy branch (`#main` in `DTATOOLS_TEMPLATE_SOURCES`), so a merge
-  is a release, and the generated pipelines run on pull requests but cannot
-  stop one by themselves. Both documents tell a library owner to make
-  `validate-templates` a required check on that branch. The generated CI files
-  are unchanged.
-
-## [0.30.0] - 2026-11-23
-
-### Changed
-
-- **DTAtools now requires S7 1.0.0 or later, and R 4.2.0 or later.** S7 1.0.0
-  (CRAN, 2026-11-19) renamed the first argument of `new_object()` and the
-  attribute in which an object keeps its class, and itself needs R 4.2.0. The
-  lockfile and the Connect manifest record S7 1.0.0, and CI no longer pins S7
-  to 0.2.2. An object saved with `saveRDS()` by this version can no longer be
-  read under an S7 older than 1.0.0; objects saved by earlier versions are read
-  and upgraded as before.
-
-### Fixed
-
-- **Ten classes could not be built under S7 1.0.0.** They passed their
-  parent to `new_object()` by the name `.parent`, which S7 1.0.0 no longer
-  has: constructing a file handler, a dataset, a column structure or a rule
-  failed with `argument "_parent" is missing`. The parent is now passed by
-  position, which every S7 version accepts.
-- **`upgrade_dta()` and the upgrade the entry points run by themselves saw
-  nothing to do under S7 1.0.0.** The class an object was saved with is read
-  and re-stamped through S7 instead of through the attribute `S7_class`, which
-  S7 1.0.0 stores as `_S7_class`; an object restored from an older version is
-  detected as stale and upgraded as it was before.
-- **Removing a container, or clearing a file entry's container reference,
-  failed under S7 1.0.0** with `invalid type of argument[3]: 'symbol'`: S7
-  1.0.0 stores an unset (`NULL`) property as a symbol, which the document's
-  container check read as a container id.
-- **`names`, `print` and `labels` no longer leave placeholder objects in the
-  package namespace** (S7 1.0.0 creates them for every method registered on a
-  base generic; the package now removes them when it is built).
-- The app no longer shows a dataset as passed, and its validation summary no
-  longer reads "VALIDATION PASSED", while a table bound to it has not been
-  validated. One validated table was enough for the status map to call the
-  whole dataset passed: after a second file was uploaded, a file replaced or a
-  delivery added to a dataset that had already passed, the next check of any
-  other dataset turned it green again and offered the certifying summary,
-  although "Loaded files" still listed the new table as not validated yet. A
-  dataset now reads "pending" until every table bound to it has been
-  validated; a failing table still reads "fail".
+- **Three qualification cases were added and five were strengthened.**
+  `OQ-CONT-064` pins that the metadata of an object saved by an older release
+  is upgraded by the entry points (`REQ-CONT-029`), `OQ-VAL-054` that a column's
+  `pattern` reads a `bit64::integer64` column correctly (`REQ-VAL-009`), and
+  `OQ-APP-084` that the rule editor refuses a value left in a row whose column
+  was cleared, an `empty` row given a word it cannot read as true or false, and
+  a grouped row whose condition name was cleared (`REQ-APP-064`). `OQ-APP-082`
+  also covers a rule with an operator the editor does not know. `OQ-APP-078`
+  and `OQ-APP-081` failed to notice an editor that did not open or a Save that
+  did nothing, and now fail on both; `OQ-TMPL-151` compared only the id and the
+  type of a column, where `REQ-TMPL-065` says nothing else about it changes,
+  and now compares every property. Strengthening `OQ-APP-080` showed that the
+  rule editor's refusal of a list did not quote the list it refused, as
+  `REQ-APP-064` says it does: a list with a double quote that is never closed,
+  text after a closing quote and a quote inside an unquoted value are now
+  refused with the text named. That message is the only change to the app in
+  this entry.
+- **The documentation was corrected where it contradicted the code.**
+  `DTA_YAML_GUIDE.md` said that a missing value in a `then` clause is a
+  violation under every operator; a missing value satisfies `empty: true` and
+  `not_in`. The template-authoring skill said that the errors of `lint_dta()`
+  never appear as rows of their own in `validate_template()`'s result; for a
+  dataset template they do, with the linter's severity, and the skill and the
+  template repository's README now list the places where the JSON Schemas and
+  `validate_template()` differ, among them that a misspelt key inside an
+  option, a party slot or a vocabulary slot is marked by neither. The help of
+  `validate_template()` gave two `lint_dta()` codes as errors only. The
+  `private-templates` vignette listed neither the schemas nor
+  `.vscode/settings.json` among the files `create_template_repo()` writes, and
+  said `examples = FALSE` writes only the README, `.gitignore` and CI files.
+  The installation sections state the requirement of R 4.2.0 and S7 1.0.0, the
+  operator tables name the accepted spellings `equal` and `not_equal`, and the
+  README and the site say what a range rule does with an open side, equal
+  bounds and `range` next to `min` or `max`.
 
 ## [0.29.0] - 2026-11-23
 

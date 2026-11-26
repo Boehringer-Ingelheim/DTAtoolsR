@@ -546,6 +546,46 @@ deviations:
     opened: 2026-11-24
     closed: 2026-11-24
 
+  - id: DEV-021
+    title: The rule editor's refusal of a list with a double quote that is never closed did not name the text typed
+    status: closed
+    severity: minor
+    affects: [REQ-APP-064]
+    observed: >
+      A Value box of an in or not_in row holding a list with a double quote
+      that was never closed, such as "Smith, John, Doe, was refused on Save, the
+      rule was left as it was and the form stayed open, but the message named
+      only the clause, the column and the operator ("THEN: column LBNAM, in
+      (list): the list has a double quote that is never closed.") and not the
+      list. The same held for the other two refusals of a list: a value in
+      double quotes not followed by a comma, and a double quote in the middle of
+      an unquoted value. The refusals of a number that is not a number and of a
+      between row with more than two bounds quoted the text they refused.
+    expected: >
+      REQ-APP-064: a value typed into the rule editor that it cannot read is
+      refused on Save with a message that names the text, a list with a double
+      quote that is never closed included. The changelog entry for the rule
+      editor says the same of every one of its refusals.
+    impact: >
+      Nothing was saved wrongly: the rule was left as it was. The cost was that
+      a user who typed a long list into a row of a rule with several rows had
+      the row to find by its column and operator, not by the text. The defect
+      was never released: the rule editor round trip is unreleased work.
+    workaround: >
+      Look for the quote in the Value box of the row the message names; a value
+      that holds a double quote is written inside double quotes with the quote
+      doubled.
+    resolution: >
+      Closed by naming the list typed in the three refusals of
+      form_split_list(), with the same {.val} formatting the refusals of a number
+      and of a between row use. OQ-APP-080 asserts the corrected behaviour for
+      all three.
+    reference: >
+      inst/shiny/dta_app/R/rule_conditions.R (form_split_list, form_where);
+      inst/qualification/tests/test-OQ-APP-ruleroundtrip.R (OQ-APP-080)
+    opened: 2026-11-25
+    closed: 2026-11-25
+
 limitations:
   - id: LIM-001
     title: A row whose every field is empty is dropped by the CSV reader

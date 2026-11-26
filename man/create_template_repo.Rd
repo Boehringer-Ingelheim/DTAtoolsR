@@ -23,8 +23,9 @@ writes the four starter templates into \verb{templates/}, \verb{parties/} and
 \verb{vocabulary/} beneath \code{path}, plus the commented-out \code{dta-app.yaml} and
 \code{export-templates/README.md}. \code{README.md} stays at the repository root.
 When \code{FALSE}, only \code{README.md},
-\code{.gitignore}, the JSON Schemas with their editor setting and (if \code{ci}
-asks for any provider) its CI file(s) are
+\code{.gitignore}, the two JSON Schemas and \code{.vscode/settings.json} (which are
+written whatever \code{examples} says), the CI file(s) \code{ci} asks for and, while
+\code{agent_skill = TRUE} (the default), the agent skill files are
 written -- no template files, for a caller who wants the scaffolding
 without the worked example. Such a repository has no templates yet, so
 \code{\link[=validate_template]{validate_template()}} reports the error \code{no_templates} and the generated

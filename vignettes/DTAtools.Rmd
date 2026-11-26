@@ -64,6 +64,8 @@ remotes::install_github("Boehringer-Ingelheim/DTAtoolsR")
 library(DTAtools)
 ```
 
+DTAtools requires R 4.2.0 or later and S7 1.0.0 or later (DESCRIPTION: `R (>= 4.2.0)`, `S7 (>= 1.0.0)`).
+
 ```{r}
 library(DTAtools)
 ```
@@ -954,8 +956,8 @@ The most versatile rule type. When `condition` is satisfied for a row, the
 
 | Operator        | Applies to        | Example                          |
 |-----------------|-------------------|----------------------------------|
-| `equals`        | string / number   | `equals: "YES"`                  |
-| `not_equals`    | string / number   | `not_equals: "DROPPED"`          |
+| `equals` (alias `equal`) | string / number   | `equals: "YES"`                  |
+| `not_equals` (alias `not_equal`) | string / number   | `not_equals: "DROPPED"`          |
 | `empty`         | any (`true/false`)| `empty: true`                    |
 | `in`            | list              | `in: [V01, V02, EOT]`            |
 | `not_in`        | list              | `not_in: [REJECTED]`             |

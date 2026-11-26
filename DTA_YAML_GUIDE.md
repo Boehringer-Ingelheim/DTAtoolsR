@@ -52,7 +52,7 @@ The key set is **closed**: any key not listed here is a hard error.
 | `error_handling` | string | Procedure when delivered data fails validation (who is notified, deadlines, re-delivery). |
 | `authorized_for_corrections` | string or list of strings | Names/roles allowed to request corrections. |
 | `sections` | mapping | Ordered free-text agreement sections. See below. |
-| `dtatools_version` | string, machine-written | The DTAtools release that last saved the file, e.g. `"0.29.0"`. The app overwrites it on every save; leave it out when writing a file by hand. |
+| `dtatools_version` | string, machine-written | The DTAtools release that last saved the file, e.g. `"0.30.0"`. The app overwrites it every time it writes the specification as YAML (the text shown in its YAML editor and an exported file included, not only a save); leave it out when writing a file by hand. A DTAtools release older than 0.30.0 does not know the key and rejects a file that carries it, as an unknown metadata key, until the line is deleted. |
 
 Never write `template:` — it is machine-owned provenance. `dtatools_version:` is
 machine-written too; if you do write it, it must be a bare version number.
@@ -638,7 +638,8 @@ words. Rules must only reference declared columns.
 ### `col_condition` — row-level IF → THEN
 
 For each row where **all** `condition` clauses hold, **all** `then` clauses must
-hold. Missing values in THEN count as a violation.
+hold. A missing value in THEN counts as a violation, except under `empty: true`
+and `not_in`, which a missing value satisfies.
 
 ```yaml
 - id: not_done_requires_reason
@@ -658,7 +659,7 @@ Operators (several on one column are ANDed):
 
 | Operator | Value | Meaning |
 | --- | --- | --- |
-| `equals` / `not_equals` | scalar | equality (numeric compare if both sides are numbers) |
+| `equals` (alias `equal`) / `not_equals` (alias `not_equal`) | scalar | equality (numeric compare if both sides are numbers) |
 | `in` / `not_in` | list | set membership |
 | `greater`, `less`, `greater_equal`, `less_equal` | number | numeric comparison |
 | `min` + `max` | numbers | one inclusive band (either alone also works) |
@@ -670,8 +671,9 @@ Each column may appear only once per clause; merge its operators.
 
 **What `pattern` does with missing, empty and numeric values.** A missing value
 and an empty string match no pattern, not even `^$` or `.*`. In a `then` clause
-that makes them violations, exactly as a missing value is for every operator; in
-a `condition` clause it leaves their rows out of scope. Text of spaces only is
+that makes them violations, as a missing value is under most operators
+(`empty: true` and `not_in` are the two that a missing value satisfies); in a
+`condition` clause it leaves their rows out of scope. Text of spaces only is
 ordinary text for `pattern` (it is `empty` that counts blanks), so use `empty`
 to ask whether a value is missing or empty. A number is matched as its plain
 decimal text, never in scientific notation: `100000` is matched as `100000`, not

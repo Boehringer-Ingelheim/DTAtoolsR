@@ -55,7 +55,7 @@ linter reports none of the six codes below, so check them by eye:
 | `id_filename_mismatch` | every file name starts with its `id` |
 | `file_ignored` | every template YAML carries its kind's suffix |
 | `kind_suffix_mismatch` | each suffix names the same kind as `kind:` |
-| `party_profile_invalid` | each profile's `role` is `supplier`, `receiver` or `any`, with `affiliation` a mapping and `contacts` a list |
+| `party_profile_invalid` | each profile is a YAML mapping with `kind: dta_party_profile`, a non-empty `id` and `version`, and, if given, a `role` of `supplier`, `receiver` or `any`; that is all the code checks, so also check by eye that `affiliation` is a mapping and every contact a mapping, because the reader drops a malformed contact with only a console warning, not a finding |
 | `export_template_no_placeholders` | each `.docx` in `export-templates/` contains `{PLACEHOLDER}` markers |
 
 DTAtools 0.28.0 and earlier also misread slots a child writes: a required
@@ -136,7 +136,7 @@ can be legitimate in a finished change; say why in your report when one does.
 | `dataset_missing` | error | A dataset template needs a singular `dataset:` body. |
 | `dataset_id_missing` | error | The dataset body needs an `id`, even when every import renames it with `as:`. |
 | `dataset_field_invalid` | error | A dataset's `id`, `name` or `description` must be a single text value. |
-| `dataset_no_files` | warning | A dataset template's body, or a dataset a concrete template builds, declares no files (no `files:`, or an empty one), so nothing can be loaded into it. A patch may still supply them. |
+| `dataset_no_files` | warning | A dataset template's body, or a dataset a concrete template builds, declares no files (no `files:`, or an empty one), so nothing can be loaded into it. A dataset template's own body is judged before any patch, which may still supply the files; a concrete template is judged on the dataset it builds, after patching, so a patch there clears the finding. |
 | `column_spec_invalid` | error | A column is rejected by the column specification (for example an example value longer than its declared length). Correct the column as the message says. |
 
 ### Layout and naming
@@ -186,7 +186,7 @@ as an error; none may stay.
 | `values_from_pattern` | error | A column cannot have both `values_from` and `pattern`. |
 | `values_and_values_from` | warning | Delete the literal `values:`; the binding wins anyway. |
 | `values_from_terms_invalid` | error | `include:`/`exclude:` name a code the vocabulary does not have (check case and quoting), or a term was removed upstream (see the recipe in repository-architecture.md). |
-| `vocab_slot_invalid` | error | Target must be `datasets.<as>.columns.<column id>.values` of a dataset the template builds, or, for a matrix dataset, `datasets.<as>.row_labels.<row label id>.values` -- the id may contain spaces or dots and is read whole; `mode` `closed`/`open`; `include`/`exclude`/`default` codes must exist; `min` a whole number. |
+| `vocab_slot_invalid` | error | Target must be `datasets.<as>.columns.<column id>.values` of a dataset the template builds, or, for a matrix dataset, `datasets.<as>.row_labels.<row label id>.values` -- the id may contain spaces or dots and is read whole; `mode` `closed`/`open`; `include`/`exclude`/`default` codes must exist; `min` a whole number (the schema requires an integer, but the engine truncates a fraction: `min: 1.5` silently becomes 1, with no finding). |
 | `vocabulary_extends_failed` | error | Vocabulary inheritance failed: a cycle, or `remove_terms` naming a code the parent does not have. |
 | `target_invalid` | warning | An option `target` or effect `path` is not a real field. Use a supported metadata field (README "base: metadata") or a `dataset.` path that resolves. |
 | `target_machine_owned` | error | Never target `metadata.template`, `metadata.import_issues` or `metadata.dtatools_version`. Remove it. |
@@ -197,10 +197,10 @@ as an error; none may stay.
 | Code | Sev | Fix |
 | --- | --- | --- |
 | `instantiate_failed` | error | The concrete template (or one `[choice]` of its variants) cannot be built. Fix any other finding for it first; then read the message. Frequent causes: a `required:` path nothing fills ("1 required field not filled … base.metadata.…": set it in this template or mix in a block that provides it); a sealed path changed; no datasets after inheritance; a patch that does not apply. If it reports a required party slot with no profile selected, no profile in the library can fill that slot: add one with the slot's role, or name an existing one in its `profiles:`. |
-| `file_name_conflict` | error | File entries of two different datasets can take the same file name. Make the file names or patterns distinct. Unlike the other `lint_dta()` pass-through codes below, this one is an error here, not a warning. |
+| `file_name_conflict` | error | File entries of two different datasets can take the same file name. Make the file names or patterns distinct. The linter reports it as a warning; here it is an error. |
 | `token_unknown` | warning | A `${...}` placeholder other than `${today}`, `${version}`, `${study.id}`, `${study.protocol_id}`, `${study.id_underscore}` and `${study.protocol_id_underscore}` in a creation or dataset template, or a `${version}` inside a dataset, is left in the document as literal text. Correct the spelling, or move `${version}` out of the dataset. |
 | `study_token_unanswered` | warning | A dataset or metadata value uses `${study.id}`, `${study.protocol_id}` or an `_underscore` form of either, but no option and no base metadata supplies that study field, so a new document cannot be created from it. Add an option, or a base value, for `metadata.study.id` / `metadata.study.protocol_id`. |
-| `lint_dta()` codes | warning | The DTA built, but its columns and rules have a weakness (a format narrower than the length, a rule that cannot be checked). Fix the dataset template or the patch. The `lint_dta()` *errors* never appear as rows of their own: a DTA with such an error cannot be built, so they arrive inside an `instantiate_failed` message ("(rule_condition_value_outside_values) Rule 'x' … uses value(s) 'LOST' …", "(rule_column_undeclared) …"). |
+| `lint_dta()` codes | warning or error | The linter's own findings, passed on with its severity. A dataset template's columns and rules are linted directly, so every finding, errors included, is a row of its own (as `column_spec_invalid` above). A creation template is built first and only a built DTA is linted: a linter error means the DTA cannot be built and arrives inside an `instantiate_failed` message ("(rule_condition_value_outside_values) Rule 'x' … uses value(s) 'LOST' …", "(rule_column_undeclared) …"), while the linter's warnings (a format narrower than the length, a rule that cannot be checked) are rows of their own. Fix the dataset template or the patch. |
 
 ## Beyond the linter
 

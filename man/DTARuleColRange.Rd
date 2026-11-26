@@ -28,10 +28,13 @@ an error of class \code{dta_rule_range_conflict}.}
 \item{description}{Character or NULL. Free-text description of the rule.}
 
 \item{min}{Numeric. Lower bound of the allowed range. Required unless
-\code{range} is given, and must not be greater than \code{max}.}
+\code{range} is given, and must not be greater than \code{max} (the two may be
+equal; a greater \code{min} is an error of class \code{dta_rule_invalid_range}).
+\code{-Inf} leaves the lower side open.}
 
 \item{max}{Numeric. Upper bound of the allowed range. Required unless
-\code{range} is given, and must not be less than \code{min}.}
+\code{range} is given, and must not be less than \code{min}. \code{Inf} leaves the upper
+side open.}
 }
 \value{
 An object of class \code{DTARuleColRange}.

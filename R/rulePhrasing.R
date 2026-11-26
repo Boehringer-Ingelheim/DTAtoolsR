@@ -1613,7 +1613,10 @@
       "true or false value reads as TRUE or FALSE.",
       "A missing value and an empty text never match a pattern, whatever the",
       "pattern says; text of spaces only is matched like any other text, and",
-      "the test is empty is the one that finds missing and blank values.",
+      paste0(
+        "the test ", .RULE_LQ, "is empty", .RULE_RQ,
+        " is the one that finds missing and blank values."
+      ),
       "It is case-sensitive unless the pattern itself says",
       "otherwise, and is satisfied when it matches any part of the value, unless",
       "the pattern itself is tied to the start or the end of the value.",
