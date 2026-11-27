@@ -22,7 +22,11 @@
 #'   `right_scope`. A `requires` constraint names `if` and `then` conditions,
 #'   with optional `if_scope` and `then_scope`. Each scope is `"any"` or
 #'   `"all"` and defaults to `"any"`. All condition names must be defined in
-#'   `conditions`.
+#'   `conditions`. A constraint accepts exactly the keys named here for its
+#'   type; any other key, a misspelt scope (`then_scop`) or a key of the other
+#'   type (`if_scope` on a `mutually_exclusive` constraint) included, is an
+#'   error of class `dta_group_constraint_unknown_key` that names it, never a
+#'   key read as its default.
 #' @return An object of class `DTARuleGroupCondition`.
 #'
 #' @examples
@@ -166,6 +170,17 @@ dta_normalize_group_constraints <- function(constraints, condition_names) {
     scope
   }
 
+  # The keys a constraint of each type reads, and no others. A key outside its
+  # type's list is a misspelling or belongs to the other type, and the reader
+  # would drop it and put the default in its place -- for a scope, "any" where
+  # the author wrote "all", which changes what the rule enforces.
+  allowed_keys <- list(
+    mutually_exclusive = c("id", "type", "message", "left", "right", "left_scope", "right_scope"),
+    requires = c("id", "type", "message", "if", "then", "if_scope", "then_scope")
+  )
+
+  # Every key is read with `[[`, which matches a name exactly: `$` would let an
+  # absent `left` be answered by `left_scope`.
   out <- lapply(seq_along(constraints), function(i) {
     cst <- constraints[[i]]
     if (!is.list(cst) || length(cst) == 0) {
@@ -176,30 +191,56 @@ dta_normalize_group_constraints <- function(constraints, condition_names) {
       ))
     }
 
-    ctype <- cst$type %||% ""
+    ctype <- cst[["type"]] %||% ""
     ctype <- switch(as.character(ctype),
       not_both = "mutually_exclusive",
       implies = "requires",
       as.character(ctype)
     )
 
-    cid <- cst$id %||% paste0("constraint_", i)
-    msg <- cst$message %||% NULL
+    cid <- cst[["id"]] %||% paste0("constraint_", i)
+    msg <- cst[["message"]] %||% NULL
+
+    if (ctype %in% names(allowed_keys)) {
+      allowed <- allowed_keys[[ctype]]
+      given <- names(cst) %||% rep("", length(cst))
+      unknown <- unique(given[!given %in% allowed])
+      if (length(unknown) > 0L) {
+        shown <- ifelse(nzchar(unknown), unknown, "(no name)")
+        # No cli pluralisation here: with several values in the message it
+        # cannot tell which one counts.
+        noun <- if (length(shown) == 1L) "key" else "keys"
+        cli_abort(
+          c(
+            "Unknown {noun} {.val {shown}} in constraint {.val {cid}} (index {.val {i}}).",
+            "i" = "A {.val {ctype}} constraint accepts exactly {.val {allowed}}."
+          ),
+          class = "dta_group_constraint_unknown_key",
+          keys = unknown
+        )
+      }
+    }
 
     if (identical(ctype, "mutually_exclusive")) {
-      left <- cst$left %||% cst[["if"]]
-      right <- cst$right %||% cst[["then"]]
+      left <- cst[["left"]]
+      right <- cst[["right"]]
       if (!is.character(left) || length(left) != 1 || !nzchar(left)) {
-        cli_abort(c(
-          "Invalid constraint {.val {cid}} (index {.val {i}}).",
-          x = "Type {.val mutually_exclusive} requires a non-empty {.field left} condition name."
-        ))
+        cli_abort(
+          c(
+            "Invalid constraint {.val {cid}} (index {.val {i}}).",
+            x = "Type {.val mutually_exclusive} requires a non-empty {.field left} condition name."
+          ),
+          class = "dta_group_constraint_missing_condition"
+        )
       }
       if (!is.character(right) || length(right) != 1 || !nzchar(right)) {
-        cli_abort(c(
-          "Invalid constraint {.val {cid}} (index {.val {i}}).",
-          x = "Type {.val mutually_exclusive} requires a non-empty {.field right} condition name."
-        ))
+        cli_abort(
+          c(
+            "Invalid constraint {.val {cid}} (index {.val {i}}).",
+            x = "Type {.val mutually_exclusive} requires a non-empty {.field right} condition name."
+          ),
+          class = "dta_group_constraint_missing_condition"
+        )
       }
       unknown <- setdiff(c(left, right), condition_names)
       if (length(unknown) > 0) {
@@ -214,26 +255,32 @@ dta_normalize_group_constraints <- function(constraints, condition_names) {
         type = ctype,
         left = left,
         right = right,
-        left_scope = normalize_scope(cst$left_scope, "left_scope"),
-        right_scope = normalize_scope(cst$right_scope, "right_scope"),
+        left_scope = normalize_scope(cst[["left_scope"]], "left_scope"),
+        right_scope = normalize_scope(cst[["right_scope"]], "right_scope"),
         message = msg
       ))
     }
 
     if (identical(ctype, "requires")) {
-      if_name <- cst[["if"]] %||% cst$left
-      then_name <- cst[["then"]] %||% cst$right
+      if_name <- cst[["if"]]
+      then_name <- cst[["then"]]
       if (!is.character(if_name) || length(if_name) != 1 || !nzchar(if_name)) {
-        cli_abort(c(
-          "Invalid constraint {.val {cid}} (index {.val {i}}).",
-          x = "Type {.val requires} requires a non-empty {.field if} condition name."
-        ))
+        cli_abort(
+          c(
+            "Invalid constraint {.val {cid}} (index {.val {i}}).",
+            x = "Type {.val requires} requires a non-empty {.field if} condition name."
+          ),
+          class = "dta_group_constraint_missing_condition"
+        )
       }
       if (!is.character(then_name) || length(then_name) != 1 || !nzchar(then_name)) {
-        cli_abort(c(
-          "Invalid constraint {.val {cid}} (index {.val {i}}).",
-          x = "Type {.val requires} requires a non-empty {.field then} condition name."
-        ))
+        cli_abort(
+          c(
+            "Invalid constraint {.val {cid}} (index {.val {i}}).",
+            x = "Type {.val requires} requires a non-empty {.field then} condition name."
+          ),
+          class = "dta_group_constraint_missing_condition"
+        )
       }
       unknown <- setdiff(c(if_name, then_name), condition_names)
       if (length(unknown) > 0) {
@@ -248,8 +295,8 @@ dta_normalize_group_constraints <- function(constraints, condition_names) {
         type = ctype,
         `if` = if_name,
         `then` = then_name,
-        if_scope = normalize_scope(cst$if_scope, "if_scope"),
-        then_scope = normalize_scope(cst$then_scope, "then_scope"),
+        if_scope = normalize_scope(cst[["if_scope"]], "if_scope"),
+        then_scope = normalize_scope(cst[["then_scope"]], "then_scope"),
         message = msg
       ))
     }

@@ -279,8 +279,9 @@ build_template_datasets <- function(def, index, selections, source_label = NULL,
       # column to a vocabulary too, and the binding has to be expanded BEFORE
       # the list is serialised. read_dataset_from_yaml() builds real
       # DTAColumnSpec objects, which know nothing of `values_from` -- an
-      # unexpanded binding would reach do.call(DTAColumnSpec, x) and fail
-      # there, naming an "unused argument" rather than the template.
+      # unexpanded binding would reach specs_from_list() and be refused there
+      # as an unknown column field (dta_column_unknown_field), naming the key
+      # rather than the template.
       ref <- expand_column_vocabularies(ref, resolve_vocab, dataset_name = ref$id)
       ref <- apply_vocabulary_slot_overrides(ref, vocab_overrides)
       ref <- resolve_dataset_tokens(ref, token_env, ref$id)

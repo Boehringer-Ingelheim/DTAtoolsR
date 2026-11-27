@@ -585,3 +585,54 @@ requirements:
       never select a row and nothing would say so. It is the operator that is
       wrong for the column, not an operand value, so the code is the one of an
       operator that cannot be used (REQ-SPEC-036 states the operand check).
+
+  # ---- a specification is read strictly ------------------------------------------
+
+  - id: REQ-SPEC-038
+    text: >
+      A dataset of type file shall be refused, with a condition of class
+      dta_file_columns_key, when it declares columns, and with class
+      dta_file_rules_key, when it declares rules, by DTADataSetFactory() and by
+      dta_dataset_from_list(); an empty list declares nothing and shall be
+      accepted. lint_dta() shall report each as one finding at severity error,
+      with the code file_columns_key and file_rules_key, so that
+      read_dataset_from_yaml() and read_dta_from_yaml() refuse the document
+      with a condition of class dta_lint_error. A dataset of type tabular shall
+      keep its columns and rules, and a file dataset that declares neither shall
+      lint with zero rows.
+    risk: high
+    category: functional
+    covers: [DTADataSetFactory, dta_dataset_from_list, lint_dta, read_dataset_from_yaml, read_dta_from_yaml]
+    source: R/00_helpers.R (DTADataSetFactory); R/lintDTA.R (dta_lint_file_keys); thoughts/shared/reviews/2026-11 c1-spec-17
+    notes: >
+      A file dataset reads no rows, so nothing it holds could be judged by a
+      column or a rule. The keys were dropped without a word, so a specification
+      that declared constraints for a file dataset was read as having none, and
+      check() reported the arrival of the file alone. The mirror-image
+      misplacements on a matrix dataset have always been refused
+      (REQ-MATRIX-049).
+
+  - id: REQ-SPEC-039
+    text: >
+      A column read from a list, whether a YAML columns entry, a dataset built
+      by dta_dataset_from_list() or a matrix row label, shall carry only the
+      keys id, label, type, format, length, nullable, pattern, values,
+      examples, description and colclass, written exactly (a matrix row label
+      also carries header, which is read before the column is built). Any other key,
+      an abbreviation of one of them included (example for examples, desc for
+      description), shall be refused with a condition of class
+      dta_column_unknown_field that names every unknown key and lists the keys a
+      column accepts, and that never prints the value of an unknown key.
+      lint_dta() shall report such a column as column_spec_invalid at severity
+      error, naming the key.
+    risk: high
+    category: functional
+    covers: [specs_from_list, dta_dataset_from_list, lint_dta, read_dataset_from_yaml]
+    source: R/DTAColumnSpecCollection-class.R (dta_column_spec_from_list); thoughts/shared/reviews/2026-11 t-core-3-37
+    notes: >
+      The keys went to do.call(), which completes a name from its first letters,
+      so a misspelt constraint such as nulable was an error but an abbreviated
+      one such as null was read as nullable, and a key R could not place made
+      R print the whole of its value, in the language of the system, into its
+      own error. A specification with an abbreviated key that used to load is
+      now refused (CHANGELOG, Unreleased).

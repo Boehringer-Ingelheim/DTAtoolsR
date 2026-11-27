@@ -1437,8 +1437,8 @@
   # DTAColumnSpec constructor rejects (an example longer than its length, a
   # value that does not fit the type, an invalid pattern) would only surface
   # once some creation template imports it. Build each column here instead.
-  # Keys the constructor does not take (values_from, ...) are dropped; they are
-  # resolved elsewhere.
+  # `values_from` is dropped (the template engine resolves it elsewhere); any
+  # other key the constructor does not take is a column_spec_invalid finding.
   #
   # The columns are read with plain yaml::read_yaml(), as the app's own
   # read_dataset_template() does: `def` was parsed with the version-preserving
@@ -1446,8 +1446,7 @@
   # "5" and be rejected for a reason the app never sees.
   #
   # Columns and rules go through lint_dta() together, so a rule naming an
-  # undeclared column is caught here too. lint_dta() builds columns with
-  # do.call(), so the keys the constructor does not take are dropped first.
+  # undeclared column is caught here too.
   plain <- tryCatch(yaml::read_yaml(path), error = function(e) NULL)
   plain_ds <- plain[["dataset"]]
   # Study tokens resolved to the dry-run stand-ins first, as a creation would
@@ -1486,9 +1485,12 @@
   }
   spec_key <- dta_dataset_spec_key(plain_ds)
   cols <- Filter(is.list, plain_ds[[spec_key]] %||% list())
-  # A row label of a matrix also carries `header`.
-  col_keys <- c(names(formals(DTAColumnSpec)), if (identical(spec_key, "row_labels")) "header")
-  cols <- lapply(cols, function(col) col[intersect(names(col), col_keys)])
+  # `values_from` is the one key a template column carries that the column does
+  # not: it binds the column to a vocabulary and is resolved elsewhere. Every
+  # other key goes to the lint as written, so a misspelt or abbreviated one is a
+  # column_spec_invalid here and not an abort when a creation template imports
+  # the dataset.
+  cols <- lapply(cols, function(col) col[setdiff(names(col), "values_from")])
   # A matrix template is linted as the dataset it is, so its `matrix:` block is
   # judged too; a tabular one stays a bare columns + rules input.
   lint_input <- if (identical(spec_key, "row_labels")) {
@@ -1501,6 +1503,13 @@
     list(columns = cols, rules = plain_ds[["rules"]] %||% list())
   }
   lint <- tryCatch(lint_dta(lint_input), error = function(e) NULL)
+  # A file dataset reads no rows and refuses columns and rules when it is built;
+  # the bare columns + rules input above never meets that rule, so say so here.
+  if (identical(plain_ds[["type"]], "file")) {
+    body_id <- plain_ds[["id"]]
+    label <- if (is.character(body_id) && length(body_id) == 1L && !is.na(body_id) && nzchar(body_id)) body_id else id
+    lint <- rbind(lint, dta_lint_file_keys(plain_ds, label))
+  }
   for (i in seq_len(if (is.null(lint)) 0L else nrow(lint))) {
     row <- lint[i, , drop = FALSE]
     add(

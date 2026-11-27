@@ -60,7 +60,7 @@ dataset:
       format: SAS $50.
       nullable: No
       description: Data supplier's internal accession number used to trace the genetic specimen.
-      example: TEST0001_17
+      examples: TEST0001_17
       pattern: ^TEST0001_[0-9]+$
     - id: GFTESTCD
       label: Short Name of Genomic Measurement
@@ -134,7 +134,7 @@ dataset:
       format: SAS $50.
       nullable: Yes
       description: "A published symbol for the portion of the genome serving as a locus for the experiment/test. Obtained from the genomic symbol list maintained in the HUGO Gene Nomenclature Committee (HGNC) database for human genetic data (www.genenames.org). Example: toRNA: POSTN (Example) miRNA: Leave blank"
-      example:
+      examples:
         - "toRNA: POSTN"
     - id: GFGENLOC
       label: Genetic Location
@@ -154,7 +154,7 @@ dataset:
       format: SAS $50.
       nullable: Yes
       description: A unique identifier for the sequence used as the reference to identify the genetic variation in the result. Should reflect the level of granularity collected.
-      example:
+      examples:
         - Ensembl Gene name
         - miRBase name
     - id: GFPVRID

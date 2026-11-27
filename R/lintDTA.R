@@ -518,7 +518,9 @@ dta_specs_findings <- function(columns, rules, declared = NULL) {
 #' `matrix_file_type`, `matrix_field_missing`,
 #' `matrix_columns_count_unsatisfiable`, `matrix_row_key_invalid`,
 #' `matrix_key_nullable`, `matrix_rule_id_reserved`,
-#' `row_label_header_position` and `row_label_header_invalid`, a code named
+#' `row_label_header_position` and `row_label_header_invalid`, `file_columns_key`
+#' and `file_rules_key` (a `file` dataset has no `columns` or `rules`: it reads
+#' no rows, so they would never be evaluated), a code named
 #' after the matrix reader's own condition for a `matrix:` block it refuses
 #' (`matrix_field_unknown`, `matrix_header_invalid`, ...; `matrix_invalid` when
 #' it has none), `file_container_invalid`,
@@ -1006,7 +1008,11 @@ dta_lint_dataset_list <- function(d, label, container_ids = NULL) {
     }
     out <- rbind(out, dta_lint_files_list(d[["files"]], label, container_ids))
     if (!(type %in% c("tabular", "matrix"))) {
-      return(rbind(out, dta_lint_matrix_keys(d, label, is_matrix = FALSE)))
+      return(rbind(
+        out,
+        dta_lint_file_keys(d, label),
+        dta_lint_matrix_keys(d, label, is_matrix = FALSE)
+      ))
     }
   }
   is_matrix <- identical(type, "matrix")
@@ -1032,6 +1038,27 @@ dta_lint_dataset_list <- function(d, label, container_ids = NULL) {
   out <- rbind(out, dta_lint_specs_lists(columns, d[["rules"]], label, key = key))
   if (is_matrix) {
     out <- rbind(out, dta_lint_matrix_block(d[["matrix"]], label, d[[key]], d[["rules"]]))
+  }
+  out
+}
+
+# `columns` and `rules` on a file dataset. It reads no rows, so the factory
+# refuses both (dta_file_columns_key, dta_file_rules_key); the lint says so for
+# every dataset of the document at once, before anything is built.
+dta_lint_file_keys <- function(d, label) {
+  out <- dta_lint_empty()
+  # An empty list declares nothing and drops nothing, as in the factory.
+  if (length(d[["columns"]]) > 0L) {
+    out <- rbind(out, dta_lint_row(
+      label, "dataset", label, "error", "file_columns_key",
+      "A file dataset has no 'columns': it only checks that its files arrive and reads no rows. Use type: tabular to describe what a file holds."
+    ))
+  }
+  if (length(d[["rules"]]) > 0L) {
+    out <- rbind(out, dta_lint_row(
+      label, "dataset", label, "error", "file_rules_key",
+      "A file dataset has no 'rules': it only checks that its files arrive and reads no rows. Use type: tabular to describe what a file holds."
+    ))
   }
   out
 }
@@ -1327,17 +1354,15 @@ dta_lint_specs_lists <- function(columns, rules, dataset, key = "columns") {
     built <- tryCatch(
       {
         if (!is.list(raw)) cli::cli_abort("A column must be a mapping.")
-        # `header` is a key one dataset type over; do.call() would report it
-        # with R's own, translated "unused argument" message. (Other keys are
-        # left to do.call(): it matches them partially, and `example:` for
-        # `examples:` is in files that exist.)
+        # `header` is a key one dataset type over, and says so; every other key
+        # a column does not take is refused by name in dta_column_spec_from_list().
         if ("header" %in% names(raw)) {
           cli::cli_abort(
             "{.field header} belongs to a row label of a matrix dataset ({.code type: matrix}); a column has none.",
             class = "dta_column_header_misplaced"
           )
         }
-        do.call(DTAColumnSpec, raw)
+        dta_column_spec_from_list(raw)
       },
       error = function(e) e
     )
@@ -1363,7 +1388,10 @@ dta_lint_specs_lists <- function(columns, rules, dataset, key = "columns") {
       error = function(e) e
     )
     if (inherits(built, "error")) {
-      unknown <- if (is.list(raw) && identical(raw[["type"]], "group_condition")) {
+      # A constraint key that is not its type's is the finding; the condition
+      # names it carries (`if` on a mutually_exclusive one) are not judged then.
+      unknown <- if (is.list(raw) && identical(raw[["type"]], "group_condition") &&
+        !inherits(built, "dta_group_constraint_unknown_key")) {
         dta_group_unknown_conditions(raw[["constraints"]], names(raw[["conditions"]]))
       } else {
         character(0)

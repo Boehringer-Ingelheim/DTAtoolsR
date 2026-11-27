@@ -45,7 +45,9 @@ row-label id contains whitespace: write the exact header text under
 \code{matrix_file_type}, \code{matrix_field_missing},
 \code{matrix_columns_count_unsatisfiable}, \code{matrix_row_key_invalid},
 \code{matrix_key_nullable}, \code{matrix_rule_id_reserved},
-\code{row_label_header_position} and \code{row_label_header_invalid}, a code named
+\code{row_label_header_position} and \code{row_label_header_invalid}, \code{file_columns_key}
+and \code{file_rules_key} (a \code{file} dataset has no \code{columns} or \code{rules}: it reads
+no rows, so they would never be evaluated), a code named
 after the matrix reader's own condition for a \verb{matrix:} block it refuses
 (\code{matrix_field_unknown}, \code{matrix_header_invalid}, ...; \code{matrix_invalid} when
 it has none), \code{file_container_invalid},

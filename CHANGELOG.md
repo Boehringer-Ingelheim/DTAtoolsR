@@ -36,6 +36,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **Breaking: a specification is read strictly, so a specification that used to
+  load can now be rejected.** A key the reader does not know used to be dropped,
+  completed from its first letters, or read as its default, and nothing said so.
+  Now it is an error that names it. Three places were lenient:
+  - A `type: file` dataset that declares `columns:` or `rules:` is refused
+    (`dta_file_columns_key`, `dta_file_rules_key`; `lint_dta()` reports
+    `file_columns_key` and `file_rules_key`, and `validate_template()` does for a
+    dataset template). A file dataset reads no rows, so the constraints were
+    never evaluated, and the document read as passing without them. An empty
+    `columns: []` or `rules: []` declares nothing and is still accepted. Describe
+    the content with `type: tabular`, or delete the keys.
+  - The keys of a group-condition constraint are checked against its type:
+    `id`, `type`, `message`, `left`, `right`, `left_scope`, `right_scope` for
+    `mutually_exclusive` (`not_both`), and `id`, `type`, `message`, `if`, `then`,
+    `if_scope`, `then_scope` for `requires` (`implies`). Any other key is refused
+    (`dta_group_constraint_unknown_key`), so a misspelt `then_scop: all` is no
+    longer read as the default `any`, and neither is the scope of the other type
+    (`if_scope` on a `mutually_exclusive` constraint) nor `if`/`then` written for
+    `left`/`right`. A constraint that names no `left`, `right`, `if` or `then`
+    is refused as such (`dta_group_constraint_missing_condition`); `left_scope`
+    with no `left` no longer reads as a left condition called by the scope's
+    value.
+  - A column, and a matrix row label, takes exactly the keys of
+    `DTAColumnSpec()` (`id`, `label`, `type`, `format`, `length`, `nullable`,
+    `pattern`, `values`, `examples`, `description`, `colclass`; a row label also
+    `header`). An abbreviation such as `example:` for `examples:` or `desc:` for
+    `description:`, which R completed silently, is refused
+    (`dta_column_unknown_field`, reported by `lint_dta()` as
+    `column_spec_invalid`), and the error lists the keys a column accepts and
+    names the unknown key without printing its value (R's own "unused argument"
+    error printed the whole value, in the language of the system).
+    `validate_template()` no longer drops an unknown key from the columns of a
+    dataset template before it lints them, so the same finding appears there
+    and not first when a creation template imports the dataset. The bundled
+    `gf_dataset.yaml` and `gf_smrnaseq` dataset template wrote `example:`;
+    they write `examples:` now, as does any template or specification of your
+    own that did the same.
+  Qualification: REQ-SPEC-038, REQ-SPEC-039, REQ-RULE-038, REQ-TMPL-067 and
+  REQ-TMPL-068, with OQ-SPEC-064 to OQ-SPEC-067, OQ-RULE-061, OQ-TMPL-160 and
+  OQ-TMPL-161.
 - A validation result recorded before the import axis existed (no
   `result_version`), read from a persisted artifact or held in memory, is
   refused by `validation_errors()` (and so by `messages(source = "artifact")`

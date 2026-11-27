@@ -1,4 +1,4 @@
-# Grouped rules. REQ-RULE-022 .. REQ-RULE-028.
+# Grouped rules. REQ-RULE-022 .. REQ-RULE-028 and REQ-RULE-038.
 #
 # A grouped rule says something about a subject rather than about a row: that
 # a subject cannot both have failed and have reported a result, or that having
@@ -293,5 +293,61 @@ test_that("OQ-RULE-049 | groups are ordered independently of the session locale 
   qa_step(
     "and the groups come back in C-collation order, upper case first",
     sort(labels, method = "radix"), labels
+  )
+})
+
+# ---- the keys of a constraint -------------------------------------------------
+#
+# REQ-RULE-038. A scope that is misspelt is not "any" by default: it is a
+# constraint the author wrote one way and the rule enforces another.
+
+test_that("OQ-RULE-061 | a constraint key that is not one of its type's keys is refused, naming it | REQ-RULE-038", {
+  build <- function(constraint) {
+    tryCatch(
+      DTARuleGroupCondition(
+        id = "grp_keys", group_by = "SUBJ",
+        conditions = rg_conditions(), constraints = list(constraint)
+      ),
+      error = function(e) e
+    )
+  }
+
+  err <- build(list(type = "requires", `if` = "failed", then = "reported", then_scop = "all"))
+  qa_check(
+    "a misspelt scope on a requires constraint is refused with the class dta_group_constraint_unknown_key",
+    inherits(err, "dta_group_constraint_unknown_key")
+  )
+  qa_step("and the condition names the misspelt key", "then_scop", err$keys)
+
+  err <- build(list(type = "mutually_exclusive", left = "failed", right = "reported", left_scop = "all"))
+  qa_step("a misspelt scope on a mutually_exclusive constraint is named too", "left_scop", err$keys)
+
+  err <- build(list(type = "mutually_exclusive", left = "failed", rigth = "reported"))
+  qa_step("a misspelt condition key is an unknown key, not a missing one", "rigth", err$keys)
+
+  err <- build(list(
+    type = "mutually_exclusive", left = "failed", right = "reported",
+    if_scope = "all", then_scope = "all"
+  ))
+  qa_step(
+    "the scope keys of the other type are refused, not dropped",
+    c("if_scope", "then_scope"), sort(err$keys, method = "radix")
+  )
+
+  err <- build(list(type = "mutually_exclusive", right = "reported", left_scope = "all"))
+  qa_check(
+    "left_scope with no left is a missing condition name, not a left condition called all",
+    inherits(err, "dta_group_constraint_missing_condition") &&
+      !grepl("unknown condition", conditionMessage(err), fixed = TRUE)
+  )
+
+  rule <- build(list(
+    type = "not_both", id = "k", message = "m", left = "failed", right = "reported",
+    left_scope = "all", right_scope = "any"
+  ))
+  qa_step(
+    "a constraint with every key of its type is built and keeps the scopes written",
+    list(left = "failed", right = "reported", left_scope = "all", right_scope = "any"),
+    rule@constraints[[1]][c("left", "right", "left_scope", "right_scope")]
   )
 })
