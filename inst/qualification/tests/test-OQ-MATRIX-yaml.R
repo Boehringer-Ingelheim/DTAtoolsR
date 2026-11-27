@@ -262,31 +262,3 @@ test_that("OQ-MATRIX-055 | header: No on a row label that is not the first and a
     FALSE, any(c("row_label_header_position", "row_label_header_invalid") %in% linted(two("a", "d")))
   )
 })
-
-test_that("OQ-MATRIX-057 | a matrix dataset saved in the earlier format is refused, alone and inside a document, and current ones are not | REQ-MATRIX-059", {
-  doc <- suppressMessages(read_dta_from_yaml(system.file("extdata", "matrix_dta.yaml", package = "DTAtools")))
-  refused <- function(expr) inherits(mx_error(expr), "dta_matrix_format_outdated")
-  qa_step("a current document is upgraded without a refusal", FALSE, refused(upgrade_dta(doc)))
-  qa_step("and a current matrix dataset too", FALSE, refused(upgrade_dta(doc@datasets[["gene_counts"]])))
-
-  # What the earlier format left on an object: corner_mode on its matrix settings.
-  settings <- doc@datasets[["gene_counts"]]@matrix
-  attr(settings, "corner_mode") <- "named"
-  old <- doc@datasets[["gene_counts"]]
-  attr(old, "matrix") <- settings
-  path <- mx_path(
-    "gene_id\tgene_name\tS0001\nENSG00000000003\tTSPAN6\t1\n", "matrix_gene_counts.tsv"
-  )
-  qa_step("upgrade_dta() refuses the dataset", TRUE, refused(upgrade_dta(old)))
-  qa_step("check() refuses it", TRUE, refused(check(old, quiet = TRUE, persist = FALSE)))
-  qa_step("load_file() refuses it", TRUE, refused(load_file(old, file = path, stream = "never")))
-  qa_step("lint_dta() refuses it", TRUE, refused(lint_dta(old)))
-
-  # Inside a document, beside the current mature_counts dataset.
-  sets <- doc@datasets
-  sets[["gene_counts"]] <- old
-  attr(doc, "datasets") <- sets
-  qa_step("upgrade_dta() refuses the document", TRUE, refused(upgrade_dta(doc)))
-  qa_step("check() refuses the document", TRUE, refused(check(doc, quiet = TRUE)))
-  qa_step("lint_dta() refuses the document", TRUE, refused(lint_dta(doc)))
-})

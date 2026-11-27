@@ -7,8 +7,7 @@
 container_findings(x)
 }
 \arguments{
-\item{x}{A \code{\link{DTA}} object. An object restored from an older
-version is upgraded first.}
+\item{x}{A \code{\link{DTA}} object.}
 }
 \value{
 A data frame with the character columns \code{dataset},

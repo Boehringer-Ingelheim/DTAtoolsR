@@ -281,9 +281,7 @@ dta_check_spec_cardinality <- function(x, max_objects = dta_max_spec_objects()) 
 # metadata) so the user continues in the full DTA workspace: they can fill in the
 # metadata, add more datasets and export a complete DTA (rather than being stuck
 # in a restricted dataset-only view).
-# Returns the usual dta_try() list plus three flags:
-#   dataset_only    : always FALSE now (a dataset YAML is wrapped into a full
-#                     DTA); retained for back-compat with callers/old sessions.
+# Returns the usual dta_try() list plus two flags:
 #   has_metadata    : TRUE when the source YAML carried a `metadata:` section.
 #   wrapped_dataset : TRUE when a standalone dataset YAML was wrapped into a new
 #                     empty DTA (used only for an informative load message).
@@ -296,7 +294,7 @@ dta_read_yaml <- function(path) {
   if (!raw$ok) {
     return(list(
       ok = FALSE, value = NULL, error = raw$error,
-      dataset_only = FALSE, has_metadata = FALSE, wrapped_dataset = FALSE
+      has_metadata = FALSE, wrapped_dataset = FALSE
     ))
   }
   y <- raw$value
@@ -305,7 +303,6 @@ dta_read_yaml <- function(path) {
 
   if (is_dta) {
     res <- dta_try(DTAtools::read_dta_from_yaml(path))
-    res$dataset_only <- FALSE
     res$has_metadata <- has_metadata
     res$wrapped_dataset <- FALSE
     return(res)
@@ -318,7 +315,6 @@ dta_read_yaml <- function(path) {
     ds <- DTAtools::read_dataset_from_yaml(path)
     DTAtools::DTA(datasets = ds)
   })
-  res$dataset_only <- FALSE
   res$has_metadata <- FALSE
   res$wrapped_dataset <- isTRUE(res$ok)
   res
@@ -327,7 +323,7 @@ dta_read_yaml <- function(path) {
 # Validate a raw YAML STRING as a DTA/DTADataSet by staging it to a temp file
 # and reusing dta_read_yaml() (which checks YAML syntax FIRST, then DTA/dataset
 # structure). Returns the same list shape as dta_read_yaml() -- so callers get
-# ok/value/error plus dataset_only/has_metadata/wrapped_dataset. Used by the
+# ok/value/error plus has_metadata/wrapped_dataset. Used by the
 # editable Raw YAML tab so a save only replaces the loaded document when the text
 # is BOTH valid YAML AND a valid DTA / DTADataSet (a bare dataset YAML is wrapped
 # into a new empty DTA, exactly like loading one on the landing page).
@@ -347,7 +343,7 @@ dta_read_yaml_text <- function(text) {
     return(list(
       ok = FALSE, value = NULL,
       error = "Could not stage the YAML text for validation.",
-      dataset_only = FALSE, has_metadata = FALSE, wrapped_dataset = FALSE
+      has_metadata = FALSE, wrapped_dataset = FALSE
     ))
   }
   dta_read_yaml(tmp)
@@ -1367,9 +1363,9 @@ dta_bound_item_name <- function(type, filename) {
 # reading only those two axes paints it green while ok is FALSE. n_import_errors
 # is therefore weighed exactly like the other two counts.
 #
-# NA is not a pass. A validation artifact written before the import axis existed
-# reports n_import_errors = NA ("unknown"), and its recorded `ok` is whatever the
-# two-axis run concluded -- so an NA import count can arrive alongside ok = TRUE.
+# NA is not a pass. A run that did not settle the import axis reports
+# n_import_errors = NA ("unknown"), and its recorded `ok` is whatever the other
+# two axes concluded -- so an NA import count can arrive alongside ok = TRUE.
 # That combination means "re-run check(force = TRUE)", not "clean", and gets its
 # own third state rather than being folded into pass or fail. The column being
 # entirely ABSENT is a different situation (an object older than the column
@@ -5288,6 +5284,12 @@ dta_restore_session <- function(dump, table_dir = NULL) {
     dta@datasets[[nm]] <- ds
   }
   dta
+}
+
+# What a snapshot is stamped with: restore reads back only a snapshot written
+# by the version that is running.
+dta_snapshot_version <- function() {
+  as.character(utils::packageVersion("DTAtools"))
 }
 
 # The name the autosave slot is filed under. The browser's localStorage id is

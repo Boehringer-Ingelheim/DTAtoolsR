@@ -284,55 +284,6 @@ test_that("the default container with an ADaM container and an archive-taking do
   expect_identical(nrow(container_findings(ld(dta, c(main, adam)))), 0L)
 })
 
-# An object as an older version saved it: no `containers`, no `provenance`.
-cf_age_class <- function(cls) {
-  parent <- cls@parent
-  parent_old <- if (inherits(parent, "S7_class") && !identical(parent@name, "S7_object")) {
-    cf_age_class(parent)
-  } else {
-    S7::S7_object
-  }
-  own <- setdiff(names(cls@properties), names(parent@properties))
-  S7::new_class(cls@name,
-    package = "DTAtools", parent = parent_old,
-    properties = cls@properties[setdiff(own, c("containers", "provenance", "file_handlers"))],
-    validator = function(self) NULL
-  )
-}
-cf_age <- function(obj) {
-  if (is.environment(obj) || is.data.frame(obj)) {
-    return(obj)
-  }
-  if (inherits(obj, "S7_object")) {
-    cur <- S7::S7_class(obj)
-    if (!identical(cur@package, "DTAtools")) {
-      return(obj)
-    }
-    for (p in setdiff(names(attributes(obj)), c("class", "S7_class"))) {
-      attr(obj, p) <- cf_age(attr(obj, p))
-    }
-    for (p in intersect(c("containers", "provenance", "file_handlers"), names(cur@properties))) attr(obj, p) <- NULL
-    obj <- stamp_old_class(obj, cf_age_class(cur))
-    return(obj)
-  }
-  if (is.list(obj)) {
-    for (i in seq_along(obj)) if (!is.null(obj[[i]])) obj[[i]] <- cf_age(obj[[i]])
-  }
-  obj
-}
-
-test_that("check() and container_findings() work on a stale document without upgrade_dta()", {
-  old <- cf_age(cont_dta("csv"))
-  expect_true(dta_is_stale(old))
-  f <- container_findings(old)
-  expect_identical(names(f), cf_cols)
-  expect_identical(nrow(f), 0L)
-  old1 <- cf_age(DTA(datasets = list(tab_ds("ae", list(DTAFileCSV("ae.csv"))))))
-  checked <- NULL
-  expect_no_error(checked <- cf_check(old1))
-  expect_identical(nrow(attr(checked, "last_container_findings")), 0L)
-})
-
 test_that("a loose deliverable archive under a default container agrees with routing (N23)", {
   dta <- DTA(
     datasets = list(file_ds("docs", DTAFileAny("report.zip")), tab_ds("ae", list(DTAFileCSV("ae.csv")))),
@@ -492,18 +443,20 @@ test_that("a provenance record without a file name counts as no record", {
   }
 })
 
-test_that("a stale document holding a loose table under a container entry is unrecorded", {
+test_that("a table with no record of how it arrived, under an implied container, is unrecorded", {
   d <- DTA(
     datasets = list(tab_ds("ae", list(DTAFileCSV("ae.csv", container = "delivery.zip")))),
     containers = list()
   )
   d <- ld(d, cont_write("ae.csv", CONT_AE_CSV))
-  old <- cf_age(d)
-  expect_true(dta_is_stale(old))
-  f <- container_findings(old)
+  # The record load_file() leaves is what tells a loose file from an unrecorded one.
+  ds <- d@datasets[["ae"]]
+  ds@provenance <- list()
+  d@datasets[["ae"]] <- ds
+  f <- container_findings(d)
   expect_identical(f$status, "unrecorded")
   expect_identical(f$container, "delivery.zip")
-  checked <- cf_check(old)
+  checked <- cf_check(d)
   expect_false(attr(checked, "last_validation_ok"))
   expect_identical(attr(checked, "last_container_findings")$status, "unrecorded")
 })

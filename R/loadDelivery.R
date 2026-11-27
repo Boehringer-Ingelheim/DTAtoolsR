@@ -156,8 +156,6 @@
 load_delivery <- function(x, files, stream = getOption("DTAtools.stream", "auto"),
                           on_error = c("abort", "skip"), exdir = NULL, route = NULL, datasets = NULL) {
   on_error <- match.arg(on_error)
-  # An object restored from an older version lacks properties its class now has.
-  if (dta_is_stale(x)) x <- dta_upgrade(x)
   if (!is.null(exdir) && (!is.character(exdir) || length(exdir) != 1 || is.na(exdir) || !nzchar(exdir))) {
     # The path is a field, not part of the message: in the app it is a server path.
     cli::cli_abort("Cannot create a directory in {.arg exdir}.", class = "dta_delivery_bad_input", exdir = exdir)

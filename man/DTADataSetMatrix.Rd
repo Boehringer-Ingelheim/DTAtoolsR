@@ -135,9 +135,7 @@ subclasses \code{dta_matrix_header_fewer}, \code{dta_matrix_header_more},
 \code{dta_matrix_header_empty}),
 \code{dta_matrix_preamble} or \code{dta_matrix_delimiter}. A row label whose
 \code{header} is not one text or \code{FALSE} aborts with
-\code{dta_row_label_header_invalid}, and a matrix dataset saved in the
-earlier format (see \code{\link{upgrade_dta}()}) with
-\code{dta_matrix_format_outdated}.
+\code{dta_row_label_header_invalid}.
 }
 
 \examples{

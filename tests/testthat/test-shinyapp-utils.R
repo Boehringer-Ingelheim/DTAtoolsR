@@ -848,7 +848,6 @@ test_that("dta_read_yaml loads a real DTA YAML and reports has_metadata / not wr
   res <- app_fn("dta_read_yaml")(app_fixture_path("clinical_dta.yaml"))
 
   expect_true(res$ok)
-  expect_false(res$dataset_only)
   expect_true(res$has_metadata)
   expect_false(res$wrapped_dataset)
   expect_equal(app_fn("dta_dataset_names")(res$value), "clinical_data")
@@ -858,7 +857,6 @@ test_that("dta_read_yaml wraps a standalone dataset YAML into a new DTA (no meta
   res <- app_fn("dta_read_yaml")(app_fixture_path("gf_dataset.yaml"))
 
   expect_true(res$ok)
-  expect_false(res$dataset_only)
   expect_false(res$has_metadata)
   expect_true(res$wrapped_dataset)
   expect_equal(app_fn("dta_dataset_names")(res$value), "gf_data_specs_pattern")

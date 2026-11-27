@@ -485,7 +485,6 @@ file_name_conflicts <- function(x) {
   if (!inherits(x, "DTAtools::DTA")) {
     cli::cli_abort("{.arg x} must be a {.cls DTA} object.")
   }
-  if (dta_is_stale(x)) x <- dta_upgrade(x)
   dta_file_name_conflicts_slots(dta_conflict_slots(x))
 }
 

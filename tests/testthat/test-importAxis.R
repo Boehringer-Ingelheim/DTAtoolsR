@@ -28,9 +28,9 @@ example_import_errors <- function() {
   )
 }
 
-legacy_details <- function(ok = TRUE, columnspec_valid = TRUE) {
-  # Exactly the shape validate_table_detailed() returned before the import axis
-  # existed: no import_valid, no n_import_errors, no result_version.
+# The details of a scan that stopped early (fail_fast): the import axis was
+# never settled, so it is unknown rather than clean.
+unknown_details <- function(ok = TRUE, columnspec_valid = TRUE) {
   list(
     ok = ok,
     columnspec_valid = columnspec_valid,
@@ -39,7 +39,11 @@ legacy_details <- function(ok = TRUE, columnspec_valid = TRUE) {
     n_rule_errors = 0,
     columnspec_errors = list(summarised_error = NULL, full_error = NULL),
     rule_results = list(),
-    rule_errors = list()
+    rule_errors = list(),
+    import_valid = NA,
+    n_import_errors = NA_integer_,
+    import_errors = NULL,
+    result_version = 2L
   )
 }
 
@@ -85,37 +89,7 @@ test_that("ok is the conjunction of three independent axes", {
 })
 
 
-test_that("pre-v2 details migrate to unknown, never to clean", {
-  migrated <- dta_migrate_validation_details(legacy_details(ok = TRUE))
-
-  # NA, not TRUE/0: an artifact written before import checking existed must not
-  # assert a clean import axis it never checked.
-  expect_true(is.na(migrated$import_valid))
-  expect_false(isTRUE(migrated$import_valid))
-  expect_identical(migrated$n_import_errors, NA_integer_)
-  expect_true("import_errors" %in% names(migrated))
-  expect_null(migrated$import_errors)
-  expect_identical(migrated$result_version, 1L)
-
-  # The recorded ok is left exactly as recorded, never recomputed from
-  # incomplete data.
-  expect_true(migrated$ok)
-  expect_false(
-    dta_migrate_validation_details(legacy_details(ok = FALSE, columnspec_valid = FALSE))$ok
-  )
-
-  # A current result is returned untouched.
-  ds <- create_example_DTADataSetTabular(2)
-  current <- validate_table_detailed(
-    ds@specs,
-    as.data.frame(ds@tables[["tab1"]]),
-    verbose = FALSE
-  )
-  expect_identical(dta_migrate_validation_details(current), current)
-})
-
-
-test_that("a pre-v2 artifact is migrated on read and reported as unknown", {
+test_that("a pre-v2 artifact is refused on read, never read as a clean import axis", {
   artifact_dir <- file.path(tempdir(), "dta_import_axis_artifacts")
   on.exit(unlink(artifact_dir, recursive = TRUE), add = TRUE)
 
@@ -129,8 +103,12 @@ test_that("a pre-v2 artifact is migrated on read and reported as unknown", {
   path <- ds@validation_index[["tab1"]]$artifact_path
   expect_true(file.exists(path))
 
-  # Rewrite the artifact in the pre-import-axis shape, with a recorded ok of
-  # TRUE that must survive the migration untouched.
+  # The current artifact reads back.
+  expect_identical(
+    validation_errors(ds, table = "tab1", source = "artifact")$result_version, 2L
+  )
+
+  # Rewrite the artifact in the pre-import-axis shape.
   stored <- readRDS(path)
   stored$import_valid <- NULL
   stored$n_import_errors <- NULL
@@ -139,25 +117,21 @@ test_that("a pre-v2 artifact is migrated on read and reported as unknown", {
   stored$ok <- TRUE
   saveRDS(stored, path)
 
-  details <- validation_errors(ds, table = "tab1", source = "artifact")
-  expect_true(is.na(details$import_valid))
-  expect_identical(details$n_import_errors, NA_integer_)
-  expect_identical(details$result_version, 1L)
-  expect_true(details$ok)
-
-  msgs <- messages(ds, source = "artifact", as_tibble = FALSE)
-  # The column contract holds even though the import frame is populated.
-  expect_named(
-    msgs,
-    c("id", "dataset", "target", "severity", "source", "rule_id", "row", "column", "keyword", "message")
+  expect_error(
+    validation_errors(ds, table = "tab1", source = "artifact"),
+    class = "dta_validation_details_outdated"
+  )
+  expect_error(
+    messages(ds, source = "artifact", as_tibble = FALSE),
+    class = "dta_validation_details_outdated"
   )
 
-  import_rows <- msgs[msgs$source == "import", , drop = FALSE]
-  expect_equal(nrow(import_rows), 1)
-  expect_equal(import_rows$severity, "warning")
-  expect_equal(
-    import_rows$message,
-    "validation artifact predates import checking (result_version 1); re-run check(force = TRUE)"
+  # The same shape held in memory is refused alike.
+  entry <- stored
+  ds@validation_store[["tab1"]] <- entry
+  expect_error(
+    validation_errors(ds, table = "tab1", source = "memory"),
+    class = "dta_validation_details_outdated"
   )
 })
 
@@ -196,7 +170,7 @@ test_that("import messages match the rule message column contract exactly", {
   expect_identical(dta_import_messages_to_df("ds", "tab", clean), dta_empty_messages())
 
   # Unknown -> exactly one warning row.
-  unknown <- dta_import_messages_to_df("ds", "tab", dta_migrate_validation_details(legacy_details()))
+  unknown <- dta_import_messages_to_df("ds", "tab", unknown_details())
   expect_equal(nrow(unknown), 1)
   expect_identical(names(unknown), names(rule_df))
   expect_equal(unknown$severity, "warning")
@@ -257,19 +231,6 @@ test_that("validation_status() and results() carry n_import_errors", {
   res_stub <- results(fresh)
   expect_true("n_import_errors" %in% names(res_stub))
   expect_true(is.na(res_stub$n_import_errors))
-
-  # An index entry written before the axis existed is unknown, not clean.
-  legacy_entry <- list(
-    validated_at = Sys.time(),
-    ok = TRUE,
-    run_id = "run",
-    validation_run = "run",
-    n_columnspec_errors = 0L,
-    n_rule_errors = 0L
-  )
-  row <- dta_validation_result_to_row("tab1", "validated", legacy_entry)
-  expect_true("n_import_errors" %in% names(row))
-  expect_true(is.na(row$n_import_errors))
 
   # Both dta_results_from_status() branches. The empty branch is called with a
   # zero-length dataset name here: it recycles `dataset_name` into a zero-row
@@ -420,7 +381,7 @@ test_that("flattened inspect records keep an unknown import axis unknown", {
     type = "import",
     headline = "h",
     message = "m",
-    details = dta_migrate_validation_details(legacy_details())
+    details = unknown_details()
   )
 
   flat <- dta_flatten_inspect_record(record)

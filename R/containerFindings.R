@@ -19,8 +19,7 @@
 #' }
 #' A file that arrived inside its container, and any file whose entries need no
 #' container, produce no row.
-#' @param x A \code{\link{DTA}} object. An object restored from an older
-#'   version is upgraded first.
+#' @param x A \code{\link{DTA}} object.
 #' @return A data frame with the character columns \code{dataset},
 #'   \code{item} (table name or file path), \code{file} (the delivered file
 #'   name, \code{NA} when unrecorded), \code{container} (the container file
@@ -50,7 +49,6 @@ container_findings <- function(x) {
   if (!inherits(x, "DTAtools::DTA")) {
     cli::cli_abort("{.arg x} must be a {.cls DTA} object.")
   }
-  if (dta_is_stale(x)) x <- dta_upgrade(x)
 
   cols <- c("dataset", "item", "file", "container", "arrived", "status", "message")
   slots <- dta_delivery_slots(x)

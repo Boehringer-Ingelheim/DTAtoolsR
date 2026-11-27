@@ -656,9 +656,9 @@ After `check()`, use these functions to inspect what happened:
 plus `dataset`, `target` and the roll-up columns `n_targets`, `n_validated`,
 `n_valid`, `n_invalid`, `n_skipped`, `n_not_validated`.
 
-`n_import_errors` is `NA` rather than `0` when the recorded result predates the
-import axis — unknown, not zero. `messages()` returns a warning row saying as
-much, and `check(x, force = TRUE)` re-validates to replace the stale artifact.
+`n_import_errors` is `NA` rather than `0` for a table that has not been validated
+-- unknown, not zero. A validation result recorded by an older version of DTAtools
+is refused by `validation_errors()`; `check(x, force = TRUE)` records a current one.
 
 ```{r inspect_results}
 # Summary per table
@@ -3093,7 +3093,6 @@ datasets:
 | `container_assignments(x)` | List where every file entry must arrive: its container, or none |
 | `container_findings(x)` | List the files not verified inside their container            |
 | `file_name_conflicts(x)` | Find file entries of different datasets that could match the same file |
-| `upgrade_dta(x)` | Re-stamp a `DTA` or dataset saved by an older version with the current classes |
 | `read_file(handler, file)`  | Read a file using a file handler (`DTAFileCSV`, etc.)        |
 | `check(x, force, persist, quiet, …)` | Validate all datasets / tables; returns updated object |
 | `validate_file_stream(specs, path, …)` | Validate a delimited file by scanning it, without loading it |

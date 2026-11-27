@@ -334,8 +334,7 @@ dta_import_error_messages <- function(import_errors) {
 dta_import_messages_to_df <- function(dataset_name, table_name, details) {
   import_valid <- details$import_valid
 
-  # Unknown (an artifact written before the import axis existed) is reported,
-  # not assumed clean.
+  # Unknown (the scan stopped early) is reported, not assumed clean.
   if (is.null(import_valid) || is.na(import_valid)) {
     return(data.frame(
       dataset = dataset_name,
@@ -346,18 +345,10 @@ dta_import_messages_to_df <- function(dataset_name, table_name, details) {
       row = NA_real_,
       column = NA_character_,
       keyword = NA_character_,
-      message = if (isTRUE(attr(details, "partial_scan")) ||
-        isTRUE(details$result_version >= 2L)) {
-        paste0(
-          "import checking was not settled: the scan stopped early (fail_fast) ",
-          "before every value was read; re-run check(force = TRUE) without fail_fast"
-        )
-      } else {
-        paste0(
-          "validation artifact predates import checking (result_version 1); ",
-          "re-run check(force = TRUE)"
-        )
-      },
+      message = paste0(
+        "import checking was not settled: the scan stopped early (fail_fast) ",
+        "before every value was read; re-run check(force = TRUE) without fail_fast"
+      ),
       stringsAsFactors = FALSE
     ))
   }
@@ -1015,7 +1006,7 @@ dta_flatten_inspect_record <- function(record) {
     if (!is.null(details$ok)) extra$details_ok <- isTRUE(details$ok)
     if (!is.null(details$columnspec_valid)) extra$details_columnspec_valid <- isTRUE(details$columnspec_valid)
     if (!is.null(details$rules_valid)) extra$details_rules_valid <- isTRUE(details$rules_valid)
-    # NA ("unknown", a pre-import-axis artifact) must stay NA here: isTRUE()
+    # NA ("unknown") must stay NA here: isTRUE()
     # would report it as FALSE and invent a failure that was never observed.
     if (!is.null(details$import_valid)) {
       extra$details_import_valid <- if (is.na(details$import_valid)) NA else isTRUE(details$import_valid)

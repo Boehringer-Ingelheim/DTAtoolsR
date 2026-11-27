@@ -41,41 +41,6 @@ dta_creation_template_dirs <- function() {
   unique(dirs)
 }
 
-# List available creation-template files by basename, across every library
-# root's templates/ folder. Templates end in ".dta-template.yaml" or
-# ".dta-template.yml". A basename present in more than one root is listed once
-# and resolves to the earliest.
-list_dta_creation_templates <- function() {
-  files <- unlist(
-    lapply(
-      file.path(dta_creation_template_dirs(), "templates"),
-      list.files,
-      pattern = "\\.dta-template\\.ya?ml$",
-      ignore.case = TRUE,
-      full.names = FALSE
-    ),
-    use.names = FALSE
-  )
-  sort(unique(files %||% character(0)))
-}
-
-# Resolve creation-template file path by basename, searching in precedence
-# order. basename() stays as a path-traversal guard: a template name can never
-# escape the directory it was found in.
-get_dta_creation_template_path <- function(template_name) {
-  if (is.null(template_name) || !nzchar(template_name)) {
-    return(NULL)
-  }
-  nm <- basename(template_name)
-  for (dir in dta_creation_template_dirs()) {
-    full <- file.path(dir, "templates", nm)
-    if (file.exists(full)) {
-      return(full)
-    }
-  }
-  NULL
-}
-
 # Read and minimally validate a creation template YAML.
 # Returns dta_try() with value = normalized template list.
 read_dta_creation_template <- function(template_path) {

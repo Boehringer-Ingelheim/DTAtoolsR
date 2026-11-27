@@ -40,11 +40,6 @@ test_that("the helpers are write-safe", {
   ds2 <- dta_set_provenance(ds, "k", list(file = "f", container = character(), via = "file"))
   expect_named(dta_provenance(ds2), "k")
   expect_identical(dta_provenance(dta_set_provenance(ds2, "k", NULL)), list())
-  # An object without the slot comes back unchanged.
-  Old <- S7::new_class("Old", properties = list(id = S7::class_character))
-  o <- Old(id = "x")
-  expect_identical(dta_set_provenance(o, "k", list()), o)
-  expect_identical(dta_provenance(o), list())
 })
 
 test_that("provenance travels with a dataset inside a DTA", {
@@ -53,7 +48,7 @@ test_that("provenance travels with a dataset inside a DTA", {
   expect_named(dta_provenance(datasets(d, "ae")), "ae")
 })
 
-test_that("dta_set_provenance() skips only an object without the slot; other errors propagate", {
+test_that("dta_set_provenance() lets a real error propagate", {
   ds <- tab_ds("ae", list(DTAFileCSV("ae.csv")))
   # A key that cannot index a list is a real error, not a reason to drop the record.
   expect_error(dta_set_provenance(ds, character(0), list(file = "f", container = character(), via = "file")))

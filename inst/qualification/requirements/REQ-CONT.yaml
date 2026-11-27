@@ -610,28 +610,9 @@ requirements:
     covers: [load_file]
     source: R/DTAFile-class.R (dta_load_file_container); plan PLAN-container-manager.md section 4.9
 
-  - id: REQ-CONT-029
-    text: >
-      upgrade_dta() shall re-create every DTAtools object inside a DTA or a
-      dataset saved by an older version with the current class definition,
-      giving a property the old object lacks its default and keeping every
-      other value, shall return a current object with identical property
-      values, and shall refuse anything else. A matrix dataset saved in the
-      earlier matrix format is the one object of an older version that is not
-      upgraded but refused (REQ-MATRIX-059). The functions that read or write
-      such an object shall do the same by themselves.
-    risk: medium
-    category: integrity
-    covers: [upgrade_dta]
-    source: R/containerAssignments.R (dta_upgrade, dta_is_stale, upgrade_dta); plan PLAN-container-manager.md D15 and section 4.12
-    notes: >
-      A document counts as saved by an older version when it, one of its
-      datasets or its metadata lacks a property the current class has, so the
-      metadata alone is enough. A document saved before metadata.dtatools_version
-      existed has every property of the DTA and of its datasets, and its
-      metadata could not be read as a list (what the YAML writer reads) or be
-      given that property until upgrade_dta() was called by hand; no function
-      that reads or writes the document noticed (OQ-CONT-064).
+  # REQ-CONT-029 (upgrade_dta()) is retired: DTAtools promises to read no object saved by an
+  # older version before 1.0.0. Its cases OQ-CONT-047 and OQ-CONT-064 went with
+  # it, and the area floor fell from 64 to 62. The id is not reused.
 
   - id: REQ-CONT-030
     text: >

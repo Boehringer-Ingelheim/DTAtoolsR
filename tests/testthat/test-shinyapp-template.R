@@ -29,7 +29,7 @@ local_packaged_templates_only <- function(.local_envir = parent.frame()) {
   )
 }
 
-# ---- dta_creation_templates_dir / list_dta_creation_templates / get_dta_creation_template_path ----
+# ---- dta_creation_templates_dir ----
 
 test_that("dta_creation_templates_dir() resolves to a library root that exists", {
   fn <- app_fn("dta_creation_templates_dir")
@@ -40,39 +40,6 @@ test_that("dta_creation_templates_dir() resolves to a library root that exists",
   # A library ROOT: the template sits in its templates/ folder, not beside it.
   expect_true(file.exists(file.path(dir, "templates", "biomarker_gf.dta-template.yaml")))
   expect_false(file.exists(file.path(dir, "biomarker_gf.dta-template.yaml")))
-})
-
-test_that("list_dta_creation_templates() finds the real bundled template", {
-  fn <- app_fn("list_dta_creation_templates")
-  result <- fn()
-
-  expect_true("biomarker_gf.dta-template.yaml" %in% result)
-})
-
-test_that("get_dta_creation_template_path() resolves the real bundled template to an existing file", {
-  fn <- app_fn("get_dta_creation_template_path")
-  result <- fn("biomarker_gf.dta-template.yaml")
-
-  expect_true(file.exists(result))
-  expect_equal(basename(result), "biomarker_gf.dta-template.yaml")
-  expect_equal(
-    normalizePath(result, winslash = "/"),
-    normalizePath(
-      system.file("extdata", "library", "templates", "biomarker_gf.dta-template.yaml", package = "DTAtools"),
-      winslash = "/"
-    )
-  )
-})
-
-test_that("get_dta_creation_template_path() returns NULL without throwing for no/empty name", {
-  fn <- app_fn("get_dta_creation_template_path")
-  expect_null(fn(NULL))
-  expect_null(fn(""))
-})
-
-test_that("get_dta_creation_template_path() returns NULL for an unknown template name", {
-  fn <- app_fn("get_dta_creation_template_path")
-  expect_null(fn("totally-not-a-real-template.dta-template.yaml"))
 })
 
 # ---- read_dta_creation_template --------------------------------------------
@@ -265,8 +232,8 @@ test_that("${version} reaches version_history after the options are applied", {
   local_packaged_templates_only()
   create <- app_fn("create_dta_from_template")
   read_tpl <- app_fn("read_dta_creation_template")
-  path <- app_fn("get_dta_creation_template_path")("biomarker_gf.dta-template.yaml")
-  expect_false(is.null(path))
+  path <- system.file("extdata", "library", "templates", "biomarker_gf.dta-template.yaml", package = "DTAtools")
+  expect_true(nzchar(path))
 
   def <- read_tpl(path)
   expect_true(def$ok)
@@ -285,8 +252,8 @@ test_that("${today} resolves to the creation date, not a literal token", {
   local_packaged_templates_only()
   create <- app_fn("create_dta_from_template")
   read_tpl <- app_fn("read_dta_creation_template")
-  path <- app_fn("get_dta_creation_template_path")("biomarker_gf.dta-template.yaml")
-  expect_false(is.null(path))
+  path <- system.file("extdata", "library", "templates", "biomarker_gf.dta-template.yaml", package = "DTAtools")
+  expect_true(nzchar(path))
 
   res <- create(read_tpl(path)$value, path, list())
   expect_true(res$ok)
@@ -360,25 +327,6 @@ test_that("dta_creation_template_dirs() puts DTAtools.template_dir first", {
   dirs <- fn()
   expect_equal(normalizePath(dirs[[1]]), normalizePath(tmp))
   expect_gt(length(dirs), 1)
-})
-
-test_that("get_dta_creation_template_path() prefers an earlier directory and cannot escape", {
-  fn <- app_fn("get_dta_creation_template_path")
-  tmp <- tempfile()
-  dir.create(tmp)
-  on.exit(unlink(tmp, recursive = TRUE, force = TRUE), add = TRUE)
-  dir.create(file.path(tmp, "templates"))
-  shadow <- file.path(tmp, "templates", "biomarker_gf.dta-template.yaml")
-  writeLines("kind: dta_creation_template", shadow)
-
-  old <- options(DTAtools.template_dir = tmp)
-  on.exit(options(old), add = TRUE)
-  expect_equal(
-    normalizePath(fn("biomarker_gf.dta-template.yaml")),
-    normalizePath(shadow)
-  )
-  # basename() guard: a traversal attempt resolves to a bare name, not a path.
-  expect_null(fn("../../etc/passwd"))
 })
 
 # ---- resolve_template_dataset_path -----------------------------------------

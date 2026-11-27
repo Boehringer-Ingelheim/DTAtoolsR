@@ -888,9 +888,6 @@ method(load_file, DTADataSetTabular) <- function(
   name = dta_default_table_name(file),
   stream = getOption("DTAtools.stream", "auto")
 ) {
-  # An object restored from an older version lacks properties its class now has.
-  if (dta_is_stale(x)) x <- dta_upgrade(x)
-
   # Shared with the file dataset's method rather than restated. The guard this
   # replaces was `handler_index < 1 || handler_index > length(x@files)`, run on
   # a value that could be NULL, NA, length > 1 or character -- so `"1"` reached
@@ -1286,9 +1283,9 @@ S7::method(validation_errors, DTADataSetTabular) <- function(
   if (source %in% c("auto", "memory")) {
     in_memory <- x@validation_store[[table_name]]
     if (!is.null(in_memory)) {
-      # Migrated on read as well: a store entry can have been restored from a
-      # session that predates the import axis.
-      return(dta_as_validation_details(dta_migrate_validation_details(in_memory)))
+      return(dta_as_validation_details(dta_assert_current_details(
+        in_memory, sprintf("The validation result held for table '%s'", table_name)
+      )))
     }
   }
 
@@ -1305,10 +1302,11 @@ S7::method(validation_errors, DTADataSetTabular) <- function(
     )
   }
 
-  # Tagged and migrated on read, so memory and artifact results stay identical.
-  dta_as_validation_details(
-    dta_migrate_validation_details(readRDS(entry$artifact_path))
-  )
+  # Tagged on read, so memory and artifact results stay identical.
+  dta_as_validation_details(dta_assert_current_details(
+    readRDS(entry$artifact_path),
+    sprintf("The validation artifact for table '%s'", table_name)
+  ))
 }
 
 
@@ -1488,8 +1486,6 @@ S7::method(check, DTADataSetTabular) <- function(
   # dataset has a missing target to name it in.
   .container_globs = NULL
 ) {
-  if (dta_is_stale(x)) x <- dta_upgrade(x)
-
   # Matched here rather than only downstream so a typo is reported once, before
   # any table is touched, instead of after the first one has been scanned.
   on_missing_column <- match.arg(on_missing_column, c("scan", "stop"))
@@ -1782,8 +1778,8 @@ S7::method(check, DTADataSetTabular) <- function(
     # `import_errors` merges typing with everything else the scan folded into
     # the import axis. Taking the merged frame put a different KIND of value in
     # @import_issues depending on how the table happened to be held. The
-    # fallback keeps working against a result (or a restored store entry) that
-    # predates the split.
+    # fallback serves a result that carries no import_typing_errors (a
+    # structural failure).
     #
     # The field's PRESENCE decides, not its contents. Testing the value for
     # NULL could not tell an empty typing axis from a result written before the

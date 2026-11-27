@@ -1247,7 +1247,6 @@ server <- function(input, output, session) {
     status = list(), # dataset name -> "pass" | "fail" | "pending" | "nodata"
     pending_upload = NULL, # deferred upload awaiting an overwrite confirmation
     example_target = NULL, # list(ds_idx, hi) the example-file modal loads into
-    dataset_only = FALSE, # legacy flag; a loaded dataset YAML is now wrapped into a full DTA (never set TRUE)
     is_example = FALSE, # TRUE when the bundled example DTA is loaded (enables example-file pickers)
     md_token = 0, # bump to re-render metadata editor
     contacts_token = 0, # bump to re-render contacts list
@@ -1860,6 +1859,9 @@ server <- function(input, output, session) {
         # Re-checked by restore_session: the file must have been written for
         # the user now asking for it (NULL == NULL where nobody signs in).
         user = session$user,
+        # Re-checked by restore_session: only the version that wrote a
+        # snapshot reads it back.
+        dtatools_version = dta_snapshot_version(),
         dump = store$dump(isolate(rv$dta)),
         yaml_text = isolate(rv$yaml_text),
         structure = isolate(rv$structure),
@@ -1867,7 +1869,6 @@ server <- function(input, output, session) {
         uploads = isolate(rv$uploads),
         last_delivery = isolate(rv$last_delivery),
         status = isolate(rv$status),
-        dataset_only = isolate(rv$dataset_only),
         is_example = isolate(rv$is_example),
         version_locked = isolate(rv$version_locked),
         version_baseline_yaml = isolate(rv$version_baseline_yaml),
@@ -1902,7 +1903,7 @@ server <- function(input, output, session) {
     invisible(f)
   }
 
-  apply_loaded <- function(dta, yaml_text, dataset_only = FALSE, is_example = FALSE,
+  apply_loaded <- function(dta, yaml_text, is_example = FALSE,
                            wrapped_dataset = FALSE, versioned = FALSE,
                            start_editing = FALSE) {
     names_ds <- dta_dataset_names(dta)
@@ -1922,7 +1923,6 @@ server <- function(input, output, session) {
     rv$main_view <- "dataset"
     rv$status <- stats::setNames(rep("pending", length(names_ds)), names_ds)
     rv$active <- if (length(names_ds) > 0) names_ds[1] else NULL
-    rv$dataset_only <- isTRUE(dataset_only)
     rv$is_example <- isTRUE(is_example)
     rv$md_token <- rv$md_token + 1
     rv$contacts_token <- rv$contacts_token + 1
@@ -2263,7 +2263,6 @@ server <- function(input, output, session) {
     rv$load_failure <- NULL
     removeModal()
     apply_loaded(res$value, txt,
-      dataset_only = isTRUE(res$dataset_only),
       wrapped_dataset = isTRUE(res$wrapped_dataset),
       versioned = TRUE
     )
@@ -2332,7 +2331,7 @@ server <- function(input, output, session) {
     }
     removeModal()
     apply_loaded(res$value, txt,
-      dataset_only = isTRUE(res$dataset_only), is_example = TRUE,
+      is_example = TRUE,
       wrapped_dataset = isTRUE(res$wrapped_dataset), versioned = TRUE
     )
     showNotification(sprintf("Example \u201c%s\u201d loaded.", sel), type = "message")
@@ -2445,7 +2444,7 @@ server <- function(input, output, session) {
     # so it is not gated behind the "Create new version" flow. start_editing =
     # TRUE: an empty document is unusable read-only -- see apply_loaded().
     apply_loaded(created$value, yaml_text,
-      dataset_only = FALSE, is_example = FALSE, wrapped_dataset = FALSE,
+      is_example = FALSE, wrapped_dataset = FALSE,
       versioned = FALSE, start_editing = TRUE
     )
     showNotification(
@@ -2458,13 +2457,10 @@ server <- function(input, output, session) {
   # --- landing: create new DTA from a template ----------------------------
   #
   # Two-step modal, both steps backed by dta_template_index_cached() (template_
-  # index.R) rather than the legacy list_dta_creation_templates()/get_dta_
-  # creation_template_path() pair -- those still exist (template_core.R) but
-  # have no remaining callers in the app; template files are read through
-  # read_dta_creation_template() and load_template_definition(). That is what
-  # makes a configured private source (template_sources.R) visible here the
-  # same way
-  # the packaged demo always was, with no separate code path for either:
+  # index.R); template files are read through read_dta_creation_template() and
+  # load_template_definition(). That is what makes a configured private source
+  # (template_sources.R) visible here the same way the packaged demo always
+  # was, with no separate code path for either:
   #
   #   1. show_template_picker_modal() -- pick a template and a version.
   #   2. show_template_options_modal() -- fill in options, party slots,
@@ -2946,7 +2942,7 @@ server <- function(input, output, session) {
     # autosave apply_loaded() already does, instead of arriving read-only and
     # needing a second, corrective persist.
     apply_loaded(created$value, yaml_text,
-      dataset_only = FALSE, is_example = FALSE, wrapped_dataset = FALSE,
+      is_example = FALSE, wrapped_dataset = FALSE,
       start_editing = TRUE
     )
     showNotification(
@@ -4784,11 +4780,7 @@ server <- function(input, output, session) {
 
   # After a spec edit, refresh the in-memory YAML text + editor and persist.
   sync_yaml_text <- function() {
-    res <- if (isolate(rv$dataset_only)) {
-      dta_dataset_to_yaml_text(isolate(rv$dta), isolate(rv$active))
-    } else {
-      dta_to_yaml_text(isolate(rv$dta))
-    }
+    res <- dta_to_yaml_text(isolate(rv$dta))
     if (isTRUE(res$ok)) {
       rv$yaml_text <- res$value
       set_yaml_editor(res$value)
@@ -9738,7 +9730,6 @@ server <- function(input, output, session) {
       }
     }
     rv$status <- new_status
-    rv$dataset_only <- isTRUE(res$dataset_only)
     rv$active <- if (!is.null(prev_active) && prev_active %in% new_names) {
       prev_active
     } else if (length(new_names) > 0) {
@@ -9753,9 +9744,8 @@ server <- function(input, output, session) {
     # version_history), so the Raw tab must be re-serialised from the document
     # rather than simply echoing what was pasted -- sync_yaml_text() reads
     # rv$dta via isolate(), which is why this has to run down here, after
-    # rv$dta and rv$dataset_only are both already up to date. It also pushes
-    # the editor and autosaves, replacing the plain autosave() this handler
-    # used to end on.
+    # rv$dta is already up to date. It also pushes the editor and autosaves,
+    # replacing the plain autosave() this handler used to end on.
     sync_yaml_text()
     rv$yaml_msg <- list(ok = TRUE, error = NULL)
     showNotification(
@@ -10421,7 +10411,7 @@ server <- function(input, output, session) {
         fid <- get_file_id(dsname, hi, rec$table)
         st <- dta_lookup(tstatus, rec$table, "pending")
         # "unknown" is the third tick state: the table was validated, but by a
-        # run that predates import checking, so its import axis is unknown --
+        # run that did not settle its import axis, so that axis is unknown --
         # neither the green pass nor the red fail (see dta_table_status_map()).
         icon_ch <- switch(st,
           pass = "\u2714",
@@ -10481,24 +10471,18 @@ server <- function(input, output, session) {
       v <- tryCatch(S7::prop(md, field), error = function(e) NULL)
       if (is.null(v) || length(v) == 0) "" else as.character(v)[1]
     }
-    dataset_only <- isTRUE(rv$dataset_only)
     title <- getf("title")
     if (!nzchar(title)) {
-      title <- if (dataset_only) {
-        dta_dataset_names(rv$dta)[1] %||% "Dataset"
-      } else {
-        paste("Untitled", cfg$document$abbr)
-      }
+      title <- paste("Untitled", cfg$document$abbr)
     }
     version <- getf("version")
     date <- getf("date")
     div(
       class = "workspace-header",
       div(class = "ws-title", title),
-      if (dataset_only || nzchar(version) || nzchar(date)) {
+      if (nzchar(version) || nzchar(date)) {
         div(
           class = "ws-meta",
-          if (dataset_only) tags$span(class = "ws-pill", "Dataset \u2014 no metadata"),
           if (nzchar(version)) tags$span(class = "ws-pill", paste0("v", version)),
           if (nzchar(date)) tags$span(class = "ws-pill", date)
         )
@@ -10857,7 +10841,7 @@ server <- function(input, output, session) {
           tags$h2(class = "landing-drop-title", if (isTRUE(cfg$document$custom)) paste("Load a", cfg$document$abbr, "file") else "Load a DTA / DTS specification file"),
           div(
             class = "landing-drop-hint",
-            "A full DTA with metadata or a standalone dataset specification is accepted. A dataset-only file opens without a Metadata section."
+            "A full DTA with metadata or a standalone dataset specification is accepted. A standalone dataset is wrapped into a new document."
           ),
           div(
             class = "dropzone",
@@ -10996,29 +10980,6 @@ server <- function(input, output, session) {
   })
 
   # --- restore previous session ------------------------------------------
-  # The fallback of a restore whose document cannot be upgraded: the document
-  # read again from its YAML text, with the data bound in `old` carried over
-  # (and its validation, where the dataset's specification is unchanged). NULL
-  # when there is no usable text.
-  rebuild_from_yaml <- function(old, yaml_text) {
-    if (!is.character(yaml_text) || length(yaml_text) != 1 || !nzchar(yaml_text)) {
-      return(NULL)
-    }
-    r <- dta_read_yaml_text(yaml_text)
-    if (!isTRUE(r$ok)) {
-      return(NULL)
-    }
-    new <- r$value
-    for (nm in dta_dataset_names(new)) {
-      old_ds <- tryCatch(old@datasets[[nm]], error = function(e) NULL)
-      if (is.null(old_ds)) next
-      same_specs <- identical(dta_specs_signature(old_ds), dta_specs_signature(dta_get_dataset(new, nm)))
-      moved <- dta_transfer_bound_data(new, nm, old_ds, keep_validation = same_specs)
-      if (isTRUE(moved$ok)) new <- moved$value
-    }
-    new
-  }
-
   observeEvent(input$restore_session, {
     sf <- session_file()
     if (is.null(sf) || !file.exists(sf)) {
@@ -11036,73 +10997,38 @@ server <- function(input, output, session) {
       showNotification("Cannot restore a session saved by a different user.", type = "error")
       return()
     }
-    # Prefer the saveRDS-safe dump (tables as Arrow files, or data.frames in
-    # older session files); fall back to a legacy `dta` field.
-    restored <- if (!is.null(saved$dump)) {
-      tryCatch(
-        dta_restore_session(saved$dump, table_dir = attr(session_tables(), "dir")),
-        error = function(e) NULL
+    # A snapshot holds objects of the classes that wrote it, and nothing here
+    # converts them: only the version that wrote it reads it back.
+    if (!identical(saved$dtatools_version, dta_snapshot_version())) {
+      showNotification(
+        "Could not restore the previous session: it was saved by a different version of DTAtools.",
+        type = "error"
       )
-    } else {
-      saved$dta
+      return()
     }
+    # The saveRDS-safe dump: tables as Arrow files, or data.frames.
+    restored <- tryCatch(
+      dta_restore_session(saved$dump, table_dir = attr(session_tables(), "dir")),
+      error = function(e) NULL
+    )
     if (is.null(restored)) {
       showNotification("Could not restore the previous session.", type = "error")
       return()
     }
-    # A document saved by an older version has the classes it was saved with:
-    # re-stamp them with the current ones. When that fails, rebuild the document
-    # from its YAML text and carry the bound data over.
-    upgrade_error <- NULL
-    upgraded <- tryCatch(DTAtools::upgrade_dta(restored), error = function(e) {
-      upgrade_error <<- e
-      NULL
-    })
-    from_yaml <- is.null(upgraded)
-    if (from_yaml) {
-      upgraded <- rebuild_from_yaml(restored, saved$yaml_text)
-      if (is.null(upgraded)) {
-        showNotification(
-          if (inherits(upgrade_error, "dta_matrix_format_outdated")) {
-            "Could not restore the previous session: it holds a matrix dataset saved in an earlier format. Open its YAML and write the header text of each row label as its 'header'."
-          } else {
-            "Could not restore the previous session."
-          },
-          type = "error", duration = if (inherits(upgrade_error, "dta_matrix_format_outdated")) NULL else 5
-        )
-        return()
-      }
-    }
-    restored <- upgraded
-    if (!is.null(saved$dump)) {
-      store <- session_tables()
-      store$adopt(restored, saved$dump)
-      own("autosave", c(sf, attr(store, "dir")))
-    }
+    store <- session_tables()
+    store$adopt(restored, saved$dump)
+    own("autosave", c(sf, attr(store, "dir")))
     rv$dta <- restored
     rv$load_errors <- dta_load_errors_empty() # a log is not saved; its files are gone
     rv$yaml_text <- saved$yaml_text
     # Rebuilt, not read back: what a slot shows (the effective container) follows
-    # the restored document, which an older save may not have described.
+    # the restored document.
     rv$structure <- build_structure(restored)
     rv$last_delivery <- saved$last_delivery
     rv$pending_delivery <- NULL
     rv$main_view <- "dataset"
     ups <- saved$uploads %||% list()
-    rv$uploads <- lapply(ups, function(recs) {
-      if (length(recs) == 0) {
-        return(list())
-      }
-      if (is.character(recs)) {
-        # Legacy session files stored a bare character vector of paths. Re-derive
-        # the table name with dta_bound_item_name() rather than a bare
-        # file_path_sans_ext(): a compression suffix has to come off first, so a
-        # restored "x.csv.gz" binds to table "x" exactly as load_file() would.
-        lapply(recs, function(f) list(file = f, table = dta_bound_item_name("tabular", f)))
-      } else {
-        recs
-      }
-    })
+    rv$uploads <- lapply(ups, function(recs) if (length(recs) == 0) list() else recs)
     # The extracted files a restored file dataset re-reads belong to this
     # session again: the retention sweep spares what a live session owns, and
     # cleanup and the budget only look at owned directories.
@@ -11133,7 +11059,6 @@ server <- function(input, output, session) {
     if (length(saved_active) == 1L && is.na(saved_active)) saved_active <- NULL
     rv$active <- saved_active %||%
       (if (length(restored_names) > 0) restored_names[1] else NULL)
-    rv$dataset_only <- isTRUE(saved$dataset_only)
     rv$is_example <- isTRUE(saved$is_example)
     # A session file written before the versioning feature existed has none
     # of these fields. The fallback is to treat the restored document as a
@@ -11174,14 +11099,7 @@ server <- function(input, output, session) {
     rv$md_token <- rv$md_token + 1
     rv$contacts_token <- rv$contacts_token + 1
     rv$doc_token <- rv$doc_token + 1
-    showNotification(
-      if (from_yaml) {
-        "Previous session restored from its YAML text: it was saved by an older version of the app. Run Check again to refresh the results."
-      } else {
-        "Previous session restored."
-      },
-      type = if (from_yaml) "warning" else "message", duration = if (from_yaml) 10 else 5
-    )
+    showNotification("Previous session restored.", type = "message", duration = 5)
     # A restored RDS object skips every constructor, so it is checked here
     # rather than trusted; the findings stay listed in the Spec check panel.
     notify_spec_check(restored, "Restored session")

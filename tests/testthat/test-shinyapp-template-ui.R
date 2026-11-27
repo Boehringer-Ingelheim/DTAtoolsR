@@ -959,8 +959,7 @@ test_that("with no private source configured, the picker opens and offers the pa
   # description -- inst/extdata/library/templates/*.dta-template.yaml is owned and
   # concurrently edited elsewhere; this only pins the STRUCTURAL guarantee
   # that dta_template_include_builtin() defaults to TRUE with nothing private
-  # configured (template_sources.R), so the packaged directory is scanned
-  # exactly as list_dta_creation_templates() always scanned it.
+  # configured (template_sources.R), so the packaged directory is scanned.
   local_clean_template_env()
   app_fn("dta_template_index_invalidate")()
 

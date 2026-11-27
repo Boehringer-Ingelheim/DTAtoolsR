@@ -35,10 +35,10 @@ areas:
     min_tests: 61
   - area: CONT
     title: Container deliveries (zip archives, SAS transport libraries)
-    min_tests: 64
+    min_tests: 62
   - area: MATRIX
     title: Matrix datasets (type matrix)
-    min_tests: 59
+    min_tests: 58
   - area: STREAM
     title: Streaming validation and engine parity
     min_tests: 32
