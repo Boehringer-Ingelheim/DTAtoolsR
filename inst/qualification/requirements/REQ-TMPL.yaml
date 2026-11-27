@@ -1583,3 +1583,36 @@ requirements:
       a slot with no default that is left alone builds its column with no
       permitted values; a template that needs the column constrained gives the
       slot a min of 1.
+
+  - id: REQ-TMPL-067
+    text: >
+      validate_template() shall report, for a dataset template of type file
+      that declares a non-empty columns or a non-empty rules, the code
+      file_columns_key or file_rules_key at severity "error", the same codes and
+      severity lint_dta() reports for the same dataset; a dataset template of
+      type file that declares neither, or an empty list of either, shall not be
+      reported for them.
+    risk: medium
+    category: functional
+    covers: [validate_template, lint_dta]
+    source: R/validateTemplate.R (.dta_template_check_dataset_tpl); REQ-SPEC-038
+
+  - id: REQ-TMPL-068
+    text: >
+      validate_template() shall report a column of a dataset template that
+      carries a key other than the eleven keys of REQ-SPEC-039, values_from and,
+      for a matrix row label, header, a misspelt key and an abbreviation such
+      as example included, as
+      column_spec_invalid at severity "error" naming the key, the same finding
+      lint_dta() reports for the same column; a column that carries values_from
+      and no other unknown key shall not be reported for it.
+    risk: medium
+    category: functional
+    covers: [validate_template, lint_dta]
+    source: R/validateTemplate.R (.dta_template_check_dataset_tpl); REQ-SPEC-039
+    notes: >
+      values_from binds a column to a vocabulary and is resolved by the template
+      engine, so it is the one key a template column carries that a column does
+      not. Every other key was dropped before the lint, so a template that
+      spelt a key in a way a column refuses validated clean and failed only
+      when a creation template imported it.

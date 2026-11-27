@@ -448,3 +448,26 @@ requirements:
       significant digits, so a fraction that needs more can read as a whole
       number. A value that is not a number (a logical, a date, a factor) is
       matched as the text R writes for it.
+
+  - id: REQ-RULE-038
+    text: >
+      A group constraint shall carry only the keys of its type, written exactly:
+      id, type, message, left, right, left_scope and right_scope for
+      mutually_exclusive (alias not_both), and id, type, message, if, then,
+      if_scope and then_scope for requires (alias implies). A rule shall be
+      refused when it is constructed, with a condition of class
+      dta_group_constraint_unknown_key that names every other key, a misspelt
+      scope or the scope of the other type included, and a constraint whose
+      left, right, if or then is absent shall be refused with a condition of
+      class dta_group_constraint_missing_condition; a left_scope with no left
+      is therefore a missing left, never a left condition named by the scope.
+    risk: high
+    category: interface
+    covers: [DTARuleGroupCondition]
+    source: R/DTARuleGroupCondition-class.R (dta_normalize_group_constraints); thoughts/shared/reviews/2026-11 c1-spec-49
+    notes: >
+      A scope that was misspelt was read as its default, any, where the author
+      wrote all, so the rule enforced something other than what it said and
+      nothing said so (REQ-RULE-026 rejects the other mistyped constraints at
+      construction for the same reason). A rule whose conditions are read from a
+      slot assigned after construction is not normalised and is not covered.

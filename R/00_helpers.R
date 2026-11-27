@@ -670,8 +670,15 @@ DTAColumnSpecStructureFactory <- function(
 #' @param type Character. Dataset type, \code{"tabular"}, \code{"file"} or
 #'   \code{"matrix"}.
 #' @param columns A list with column specifications (optional). Not allowed for
-#'   a \code{"matrix"}, whose row-label columns are given as \code{row_labels}.
-#' @param rules A list of rules specifications (optional)
+#'   a \code{"matrix"}, whose row-label columns are given as \code{row_labels},
+#'   and not allowed, unless empty, for a \code{"file"} dataset, which reads no
+#'   rows: either is an error (classes \code{dta_matrix_columns_key} and
+#'   \code{dta_file_columns_key}). A column accepts exactly the keys of
+#'   \code{\link{DTAColumnSpec}}; any other key is an error of class
+#'   \code{dta_column_unknown_field}, and a key is never completed from its first
+#'   letters.
+#' @param rules A list of rules specifications (optional). Not allowed, unless
+#'   empty, for a \code{"file"} dataset (class \code{dta_file_rules_key}).
 #' @param files Specification of the dataset's file handlers (optional). Either
 #'   a single named list -- one handler, the shape a YAML \code{files:} mapping
 #'   parses to -- or an unnamed list of such lists, one per handler, the shape a
@@ -765,6 +772,32 @@ DTADataSetFactory <- function(
       ),
       class = "dta_matrix_columns_key"
     )
+  }
+
+  if (identical(type, "file")) {
+    # A file dataset reads no rows, so nothing it holds could be judged by
+    # columns or rules. Dropping them without a word would let a specification
+    # that declares constraints pass with none of them evaluated. An EMPTY list
+    # declares nothing and drops nothing: a template that keeps its parent's
+    # `rules: []` for a dataset it turns into a file one is not an error.
+    if (length(columns) > 0L) {
+      cli_abort(
+        c(
+          "A {.val file} dataset has no {.field columns}.",
+          "i" = "It only checks that its files arrive; it reads no rows. Use {.code type: tabular} to describe what a file holds."
+        ),
+        class = "dta_file_columns_key"
+      )
+    }
+    if (length(rules) > 0L) {
+      cli_abort(
+        c(
+          "A {.val file} dataset has no {.field rules}.",
+          "i" = "It only checks that its files arrive; it reads no rows. Use {.code type: tabular} to describe what a file holds."
+        ),
+        class = "dta_file_rules_key"
+      )
+    }
   }
 
   file_handlers <- dta_file_handlers_from_list(files)

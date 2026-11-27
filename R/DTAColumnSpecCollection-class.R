@@ -380,7 +380,11 @@ import_specs_from_yaml <- function(file) {
 #'
 #' @importFrom cli cli_abort
 #' @param columns A list of column specification lists. Each must contain at
-#'   least an `id`. `NULL` or an empty list yields a collection with no
+#'   least an `id`, and may carry only the keys of [DTAColumnSpec()] written
+#'   exactly: any other key, an abbreviation such as `example` for `examples`
+#'   included, is refused with a condition of class
+#'   `dta_column_unknown_field` that names it and lists the keys a column
+#'   accepts. `NULL` or an empty list yields a collection with no
 #'   columns -- and a `DTADataSetTabular` built on such a collection no longer
 #'   validates as a pass: `check()` records status `"unspecified"` (`ok = NA`)
 #'   for any table checked against zero column specs, rather than reporting a
@@ -427,9 +431,7 @@ specs_from_list <- function(
   }
 
   if (length(columns) > 0) {
-    dta_columns <- lapply(columns, function(x) {
-      do.call(DTAColumnSpec, x)
-    })
+    dta_columns <- lapply(columns, dta_column_spec_from_list)
     lapply(dta_columns, dta_warn_numeric_values_on_text_column)
   }
 
@@ -437,6 +439,51 @@ specs_from_list <- function(
     columns = dta_columns,
     rules = dta_rules
   ))
+}
+
+#' @title One Column Specification From a Mapping
+#' @description
+#' Builds a `DTAColumnSpec` from the mapping a YAML `columns:` (or a matrix's
+#' `row_labels:`) entry is read as, after checking its keys by name.
+#'
+#' The keys are checked here, before `do.call()`, for two reasons. `do.call()`
+#' matches names partially, so `example:` would reach `examples` and `desc:`
+#' reach `description` without a word; an author who misspells a key must be
+#' told, not read as having written another one. And an unknown key makes R put
+#' the whole of the key's value into its own "unused argument" error, which
+#' never returns for a YAML alias bomb: only the name of a key is ever printed
+#' here, never its value.
+#' @param x A mapping (a named list). A value that is not a list is left to
+#'   `do.call()`, as it always was.
+#' @return A `DTAColumnSpec`.
+#' @keywords internal
+dta_column_spec_from_list <- function(x) {
+  if (is.list(x)) {
+    allowed <- names(formals(DTAColumnSpec))
+    given <- names(x) %||% rep("", length(x))
+    unknown <- unique(given[!given %in% allowed])
+    if (length(unknown) > 0L) {
+      column <- x[["id"]]
+      where <- if (is.character(column) && length(column) == 1L && !is.na(column)) {
+        paste0("column ", encodeString(column, quote = "\""))
+      } else {
+        "a column"
+      }
+      shown <- ifelse(nzchar(unknown), unknown, "(no name)")
+      # No cli pluralisation here: with several values in the message it
+      # cannot tell which one counts.
+      noun <- if (length(shown) == 1L) "field" else "fields"
+      cli::cli_abort(
+        c(
+          "Unknown {noun} {.val {shown}} in {where}.",
+          "i" = "A column accepts exactly {.val {allowed}}; a name is not completed from its first letters."
+        ),
+        class = "dta_column_unknown_field",
+        keys = unknown
+      )
+    }
+  }
+  do.call(DTAColumnSpec, x)
 }
 
 #' @title Warn About Permitted Values YAML Read as Numbers

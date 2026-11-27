@@ -1073,8 +1073,8 @@ dataset_has_vocabulary_binding <- function(ds) {
 # Replace every column's `values_from:` binding with a plain `values:` vector.
 #
 # THIS IS THE POINT OF THE WHOLE FEATURE. `values_from` is authoring syntax; it
-# must never reach DTAColumnSpec (which would reject it as an unused argument
-# in specs_from_list()'s do.call()) and must never survive into a produced
+# must never reach DTAColumnSpec (specs_from_list() refuses it as an unknown
+# column field, dta_column_unknown_field) and must never survive into a produced
 # document (a DTA YAML handed to a supplier has to be readable without access
 # to the vocabulary library that shaped it).
 #

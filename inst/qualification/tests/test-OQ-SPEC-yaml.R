@@ -1,5 +1,5 @@
 # Reading and writing a specification. REQ-SPEC-001 .. REQ-SPEC-006,
-# REQ-SPEC-014 .. REQ-SPEC-017 and REQ-SPEC-025.
+# REQ-SPEC-014 .. REQ-SPEC-017, REQ-SPEC-025, REQ-SPEC-038 and REQ-SPEC-039.
 #
 # The specification is the agreement between the two parties to a transfer.
 # Everything the package later decides follows from how it was read, so a
@@ -393,5 +393,231 @@ test_that("OQ-SPEC-046 | a dataset entry without an id is refused | REQ-SPEC-025
       id = dta[["lb_current"]]@id, name = dta[["lb_current"]]@name,
       description = dta[["lb_current"]]@description
     )
+  )
+})
+
+# ---- a specification is read strictly ----------------------------------------
+#
+# A key the reader does not know is an error that names it. It is never read as
+# another key, as a default, or as nothing: a constraint dropped without a word
+# reads as a delivery that satisfied it.
+
+sy_cond <- function(expr) {
+  tryCatch(
+    {
+      force(expr)
+      NULL
+    },
+    error = function(e) e
+  )
+}
+
+sy_file_dataset <- function(...) {
+  list(id = "report", type = "file", files = list(type = "any", filename = "report.pdf"), ...)
+}
+
+test_that("OQ-SPEC-064 | a file dataset that declares columns or rules is refused when it is built | REQ-SPEC-038", {
+  columns <- list(list(id = "ID", type = "SAS Char", length = 8))
+  rules <- list(list(id = "u", type = "col_unique", columns = "ID"))
+  files <- list(type = "any", filename = "report.pdf")
+
+  qa_check(
+    "columns on a file dataset is refused with the class dta_file_columns_key",
+    inherits(sy_cond(DTADataSetFactory("file", id = "report", files = files, columns = columns)), "dta_file_columns_key")
+  )
+  qa_check(
+    "rules on a file dataset is refused with the class dta_file_rules_key",
+    inherits(sy_cond(DTADataSetFactory("file", id = "report", files = files, rules = rules)), "dta_file_rules_key")
+  )
+  qa_check(
+    "the same refusal reaches a dataset built from a list, as a YAML file is",
+    inherits(sy_cond(dta_dataset_from_list(sy_file_dataset(columns = columns))), "dta_file_columns_key")
+  )
+
+  qa_check(
+    "an empty columns and an empty rules declare nothing, and a file dataset accepts them",
+    inherits(
+      DTADataSetFactory("file", id = "report", files = files, columns = list(), rules = list()),
+      "DTAtools::DTADataSetFile"
+    )
+  )
+
+  # The control: the same keys on a tabular dataset, whose files must be readable.
+  tabular <- DTADataSetFactory(
+    "tabular",
+    id = "t", files = list(type = "csv", filename = "t.csv"), columns = columns, rules = rules
+  )
+  qa_step(
+    "a tabular dataset keeps the one column and the one rule it declares",
+    list(columns = "ID", rules = 1L),
+    list(columns = names(specs(tabular)), rules = length(rules(specs(tabular))))
+  )
+})
+
+test_that("OQ-SPEC-065 | lint_dta() reports columns and rules on a file dataset and a document carrying either is not read | REQ-SPEC-038", {
+  dir <- qa_tempdir()
+  header <- c("id: report", "type: file", "files:", "  type: any", "  filename: report.pdf")
+  write <- function(name, extra = character()) {
+    path <- file.path(dir, name)
+    writeLines(c(header, extra), path)
+    path
+  }
+  columns <- write("file_columns.yaml", c("columns:", "  - id: ID", "    type: SAS Char", "    length: 8"))
+  rules <- write("file_rules.yaml", c("rules:", "  - id: u", "    type: col_unique", "    columns: ID"))
+  both <- write("file_both.yaml", c(
+    "columns:", "  - id: ID", "    type: SAS Char", "    length: 8",
+    "rules:", "  - id: u", "    type: col_unique", "    columns: ID"
+  ))
+  clean <- write("file_clean.yaml")
+
+  qa_step("columns alone is one finding, file_columns_key", "file_columns_key", lint_dta(columns)$code)
+  qa_step("rules alone is one finding, file_rules_key", "file_rules_key", lint_dta(rules)$code)
+  qa_step(
+    "both are two findings, one each, all errors",
+    list(codes = c("file_columns_key", "file_rules_key"), severities = c("error", "error")),
+    list(codes = sort(lint_dta(both)$code), severities = lint_dta(both)$severity)
+  )
+  qa_step("a file dataset that declares neither lints clean", 0L, nrow(lint_dta(clean)))
+
+  qa_check(
+    "a dataset file carrying columns is not read",
+    inherits(sy_cond(read_dataset_from_yaml(columns)), "dta_lint_error")
+  )
+  qa_check(
+    "a dataset file carrying rules is not read",
+    inherits(sy_cond(read_dataset_from_yaml(rules)), "dta_lint_error")
+  )
+  qa_step("while the clean file dataset is read", "report", read_dataset_from_yaml(clean)@id)
+
+  # The same file dataset inside a document, as a transfer specification is written.
+  document <- function(name, dataset_lines) {
+    path <- file.path(dir, name)
+    writeLines(
+      c(
+        "metadata:", "  title: A file dataset", "  version: \"1\"",
+        "datasets:", paste0("  - ", dataset_lines[1]), paste0("    ", dataset_lines[-1])
+      ),
+      path
+    )
+    path
+  }
+  in_document <- document("doc_columns.yaml", c(
+    header, "columns:", "  - id: ID", "    type: SAS Char", "    length: 8"
+  ))
+  qa_check(
+    "a document whose file dataset declares columns is not read",
+    inherits(sy_cond(read_dta_from_yaml(in_document)), "dta_lint_error")
+  )
+  qa_step(
+    "while the same document with a file dataset that declares neither is read",
+    "report",
+    names(datasets(read_dta_from_yaml(document("doc_clean.yaml", header))))
+  )
+})
+
+test_that("OQ-SPEC-066 | a column key that is not exactly an allowed key is refused, naming it and listing the allowed keys | REQ-SPEC-039", {
+  allowed <- c(
+    "id", "label", "type", "format", "length", "nullable", "pattern",
+    "values", "examples", "description", "colclass"
+  )
+  refused <- function(...) {
+    sy_cond(specs_from_list(list(list(id = "A", type = "SAS Char", ...))))
+  }
+
+  typo <- refused(exmaples = "x")
+  qa_check("a misspelt key is refused with the class dta_column_unknown_field", inherits(typo, "dta_column_unknown_field"))
+  qa_step("the condition names the misspelt key", "exmaples", typo$keys)
+  qa_step(
+    "and the message lists every allowed key",
+    setNames(rep(TRUE, length(allowed)), allowed),
+    vapply(allowed, function(key) grepl(key, conditionMessage(typo), fixed = TRUE), logical(1))
+  )
+
+  # R completes a name from its first letters; the specification does not.
+  for (abbreviated in c("example", "desc", "null", "pat")) {
+    column <- list(list(id = "A", type = "SAS Char"))
+    column[[1]][[abbreviated]] <- "x"
+    err <- sy_cond(specs_from_list(column))
+    qa_step(paste0("the abbreviation ", abbreviated, " is refused, not completed"), abbreviated, err$keys)
+  }
+
+  # The same refusal reaches a dataset built from a list, and the row labels of a
+  # matrix, whose own key `header` is not a misspelling.
+  qa_step(
+    "a misspelt key in a tabular dataset built from a list is refused",
+    "nulable",
+    sy_cond(dta_dataset_from_list(list(
+      id = "t", type = "tabular", files = list(type = "csv", filename = "t.csv"),
+      columns = list(list(id = "A", type = "SAS Char", nulable = FALSE))
+    )))$keys
+  )
+  matrix_dataset <- function(label) {
+    dta_dataset_from_list(list(
+      id = "m", type = "matrix", files = list(type = "tsv", filename = "m.tsv"),
+      row_labels = list(label), matrix = list(cells = list(type = "SAS Num"))
+    ))
+  }
+  qa_step(
+    "a misspelt key in a matrix row label is refused",
+    "nulable",
+    sy_cond(matrix_dataset(list(id = "G", type = "SAS Char", header = "gene", nulable = FALSE)))$keys
+  )
+  qa_step(
+    "while a row label with header and every other key right is built",
+    "G",
+    names(specs(matrix_dataset(list(id = "G", type = "SAS Char", header = "gene", nullable = FALSE))))
+  )
+
+  value <- refused(zz = "SENTINEL_VALUE_Q7")
+  qa_check(
+    "an unknown key is named without printing its value",
+    inherits(value, "dta_column_unknown_field") &&
+      !grepl("SENTINEL_VALUE_Q7", conditionMessage(value), fixed = TRUE)
+  )
+
+  # `values` excludes `pattern` and `examples`, so three columns use the eleven keys.
+  qa_step(
+    "columns that use every allowed key are built and keep their ids",
+    c("A", "B", "C"),
+    names(specs_from_list(list(
+      list(
+        id = "A", label = "L", type = "SAS Char", length = 8, nullable = FALSE,
+        values = c("X", "Y"), description = "d", colclass = "study_info"
+      ),
+      list(id = "B", type = "SAS Char", format = "SAS $8.", pattern = "^[A-Z]+$"),
+      list(id = "C", type = "SAS Char", examples = "X")
+    )))
+  )
+})
+
+test_that("OQ-SPEC-067 | lint_dta() reports a misspelt or abbreviated column key as an invalid column, naming it | REQ-SPEC-039", {
+  dir <- qa_tempdir()
+  write <- function(name, key) {
+    path <- file.path(dir, name)
+    writeLines(
+      c(
+        "id: t", "type: tabular", "files:", "  type: csv", "  filename: t.csv",
+        "columns:", "  - id: ID", "    type: SAS Char", "    length: 8",
+        paste0("    ", key, ": x")
+      ),
+      path
+    )
+    path
+  }
+  typo <- lint_dta(write("typo.yaml", "exmaples"))
+  qa_step("a misspelt key is one column_spec_invalid finding", "column_spec_invalid", typo$code[typo$severity == "error"])
+  qa_check("whose message names the key", grepl("exmaples", typo$message[typo$code == "column_spec_invalid"], fixed = TRUE))
+
+  abbreviated <- lint_dta(write("abbreviated.yaml", "example"))
+  qa_step(
+    "an abbreviated key is the same finding, not accepted as examples",
+    "column_spec_invalid", abbreviated$code[abbreviated$severity == "error"]
+  )
+
+  exact <- lint_dta(write("exact.yaml", "examples"))
+  qa_step("the exact spelling lints clean", 0L, sum(exact$code == "column_spec_invalid"))
+  qa_check(
+    "and the document with the misspelt key is not read",
+    inherits(sy_cond(read_dataset_from_yaml(write("typo2.yaml", "exmaples"))), "dta_lint_error")
   )
 })

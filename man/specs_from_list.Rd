@@ -8,7 +8,11 @@ specs_from_list(columns, rules = list())
 }
 \arguments{
 \item{columns}{A list of column specification lists. Each must contain at
-least an \code{id}. \code{NULL} or an empty list yields a collection with no
+least an \code{id}, and may carry only the keys of \code{\link[=DTAColumnSpec]{DTAColumnSpec()}} written
+exactly: any other key, an abbreviation such as \code{example} for \code{examples}
+included, is refused with a condition of class
+\code{dta_column_unknown_field} that names it and lists the keys a column
+accepts. \code{NULL} or an empty list yields a collection with no
 columns -- and a \code{DTADataSetTabular} built on such a collection no longer
 validates as a pass: \code{check()} records status \code{"unspecified"} (\code{ok = NA})
 for any table checked against zero column specs, rather than reporting a
