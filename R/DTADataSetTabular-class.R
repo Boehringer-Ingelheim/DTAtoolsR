@@ -1823,6 +1823,11 @@ S7::method(check, DTADataSetTabular) <- function(
       n_columnspec_errors = details$n_columnspec_errors,
       n_rule_errors = details$n_rule_errors,
       n_import_errors = details$n_import_errors,
+      # The rows the verdict is about. A table with none is valid, deliberately,
+      # but no value check ran on it; the summary below says so, and has to be
+      # able to when this entry is reused by a later check() that skips the
+      # table.
+      n_rows = dta_validated_row_count(current_table, details),
       run_id = run_id,
       validation_run = validation_run,
       artifact_path = artifact_path,
@@ -1889,11 +1894,51 @@ S7::method(check, DTADataSetTabular) <- function(
           "{n_valid} of {n_total} {table_word} valid; {n_unchecked} not checked"
         )
       } else {
-        cli::cli_alert_success("{n_total} {table_word} passed validation")
+        # Every table is valid. A table with a header and no rows is valid too,
+        # on purpose -- an analysis that yielded nothing is a legitimate result
+        # -- but nothing was looked at in it: every value check is `not_checked`
+        # and every rule passes vacuously. "Passed validation" certified that.
+        n_empty <- sum(vapply(
+          val_status$table,
+          function(t) {
+            entry <- x@validation_index[[t]]
+            isTRUE(entry$ok) && isTRUE(entry$n_rows == 0)
+          },
+          logical(1)
+        ))
+        n_filled <- n_total - n_empty
+        if (n_empty == 0) {
+          cli::cli_alert_success("{n_total} {table_word} passed validation")
+        } else if (n_filled == 0) {
+          cli::cli_alert_warning(
+            "{n_total} {table_word} checked, with 0 rows: no value check was run"
+          )
+        } else {
+          cli::cli_alert_warning(
+            "{n_filled} of {n_total} {table_word} passed validation; {n_empty} had 0 rows, so no value check was run on {?it/them}"
+          )
+        }
       }
     }
   }
 
   # Return the updated dataset so validation state is not lost
   invisible(x)
+}
+
+#' @title Rows a Validation Run Looked At
+#' @description
+#' The number of rows the verdict recorded for a table is about: the table's own
+#' count when it is held in memory, the scan's count when it was streamed.
+#' @param table The table that was validated.
+#' @param details The validation details the run returned.
+#' @return A single number, or `NA_real_` when it cannot be told.
+#' @keywords internal
+dta_validated_row_count <- function(table, details) {
+  n <- if (dta_table_is_lazy(table)) {
+    attr(details, "n_rows_scanned")
+  } else {
+    tryCatch(nrow(table), error = function(e) NULL)
+  }
+  if (is.numeric(n) && length(n) == 1 && !is.na(n)) as.numeric(n) else NA_real_
 }

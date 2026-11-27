@@ -116,7 +116,10 @@ below), \code{rule_condition_value_outside_values} (only for \code{equals}/\verb
 operators raise no finding), \code{group_constraint_unknown_condition}, and
 \code{file_name_conflict} (file entries of two datasets could take the same file
 name; the linter's warning is an error here). Any other \code{\link[=lint_dta]{lint_dta()}} code
-(see its Codes section) is passed on with the linter's severity.
+(see its Codes section) is passed on with the linter's severity. When the
+linter itself aborts it has judged nothing, and that is reported as the error
+\code{lint_failed}, carrying the cause, rather than as a template without
+findings.
 The linter codes come from the columns and rules of a dataset template's
 body, and from every instantiated variant of a creation template.
 Warnings: the linter's \code{rules_without_columns}, \code{rule_not_checkable},

@@ -1111,3 +1111,24 @@ limitations:
       table built in R. A delivery that must not hold an empty string
       constrains the column with a pattern that needs a character, or with the
       empty operator in a rule.
+
+  - id: LIM-037
+    title: A table with a header and no rows is valid, though no value check ran on it
+    affects: [REQ-VAL-041, REQ-ROBUST-010]
+    reference: >
+      R/validationFunctions.R (validate_table_detailed); R/DTADataSetTabular-class.R
+      (check); tests/test-OQ-VAL-notrun.R (OQ-VAL-058)
+    consequence: >
+      A table with the declared columns and no rows is valid on all three
+      axes: it breaks no constraint, so every value check, every column rule
+      and every uniqueness rule passes vacuously, and the per-check report lists
+      the value checks as not checked. A tabular dataset cannot demand a
+      minimum number of rows (only a matrix declares row bounds). check() says
+      so in words: the dataset line reports the table as having 0 rows with no
+      value check run, and the line of a dataset inside a DTA and the summary of
+      the DTA add the number of such tables; but ok stays TRUE in
+      validation_status() and results().
+      A supplier export that stops after the header, or a delivery of the
+      template file, therefore validates. A delivery that must carry
+      observations is guarded by its row count, which the delivering side reads
+      from the loaded table with nrow().

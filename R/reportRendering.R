@@ -866,6 +866,7 @@
     minimum = paste0("The value is below the declared minimum (", spec_text, ")."),
     maximum = paste0("The value is above the declared maximum (", spec_text, ")."),
     finite = "The value must be finite (not Inf or -Inf).",
+    dta_check_not_run = "A column specification that can be turned into checks, so that the column's values are examined.",
     rowLabelHeader = paste0(
       "The header line must hold ",
       if (nzchar(spec_text)) paste0("\"", spec_text, "\"") else "an empty field",
@@ -890,6 +891,13 @@
 .report_columnspec_actual_text <- function(row1, html = TRUE) {
   kw <- if ("columnspec_keyword" %in% names(row1)) as.character(row1[["columnspec_keyword"]]) else NA_character_
   data_val <- if ("columnspec_data" %in% names(row1)) row1[["columnspec_data"]] else NA
+
+  # The values of this column were not looked at, so there is no offending value
+  # to show -- and "(missing / not present)" below would say the opposite of what
+  # is true of a column that is in the table.
+  if (identical(kw, "dta_check_not_run")) {
+    return("(no check was run on this column)")
+  }
 
   if (identical(kw, "required") || is.na(data_val) || !nzchar(as.character(data_val))) {
     # `additionalProperties` reaches this through the NA `data` test, not the

@@ -549,3 +549,64 @@ requirements:
       A check of a subset judges only its own datasets; rebuilding the finding
       table from that run alone would turn a dataset that exceeds its file count
       into a passing one.
+
+  - id: REQ-VAL-039
+    text: >
+      A column whose specification cannot be turned into a check shall be
+      reported as a failure of the table, never as a pass: validate_table()
+      and check() shall report such a table as not valid, with one column
+      specification finding of keyword dta_check_not_run for each such column,
+      naming the column, ahead of the findings of the columns that could be
+      checked, which are reported as usual. The per-check report shall list
+      the checks that were not run as failed, and the console shall not say
+      that the column specification checks passed. The in-memory engine and
+      the streaming engine shall report the same finding, once, whatever the
+      batch size, and a missing column shall not hide it, including in a run
+      that stops at the missing column without reading a row.
+    risk: high
+    category: functional
+    covers: [check, validate_table, validation_status, messages]
+    source: R/columnSpecChecks.R (dta_columnspec_not_run_errors); R/validationFunctions.R; R/streamingValidation.R
+    notes: >
+      A check that did not run produces no finding of its own, and a verdict
+      derived from the findings that were produced reads that as a pass. The
+      warning of class dta_columnspec_schema_failed stays as a hint at the
+      cause and is not the verdict. Only a column whose structure cannot say
+      how it validates reaches this, which no factory builds, so the case
+      assigns a bare DTAColumnSpecStructure to a column.
+
+  - id: REQ-VAL-040
+    text: >
+      A column declared with the SAS backend and with neither a type nor a
+      format (type: SAS) shall be refused when the column is built, with an
+      error of class dta_spec_bare_backend, and lint_dta() shall report such a
+      column as a column_spec_invalid error naming it; a YAML specification
+      holding one shall not load.
+    risk: high
+    category: functional
+    covers: [DTAColumnSpec, DTAColumnSpecStructureFactory, lint_dta, read_dta_from_yaml]
+    source: R/00_helpers.R (DTAColumnSpecStructureFactory)
+    notes: >
+      A bare backend declares nothing, so its column used to build and lint
+      clean and then lose every value check at check time. A SAS structure
+      built directly with a length and no type is a different, deliberate state
+      (REQ-TYPE-004) and is not refused. A bare R backend is not refused: it
+      validates as text, so every constraint of the column still runs.
+
+  - id: REQ-VAL-041
+    text: >
+      A table with the declared columns and no rows shall be valid, and check()
+      shall not announce it as having passed validation: for a dataset it shall
+      say that the table had 0 rows and that no value check was run, counting
+      the tables with rows and those without when both are present, and the
+      line of a dataset and the summary of a whole DTA shall keep their verdict
+      and add the number of such tables of the datasets that run checked and
+      that no value check was run on them.
+    risk: medium
+    category: functional
+    covers: [check, validation_status]
+    source: R/DTADataSetTabular-class.R (check); R/DTA-class.R (dta_overall_summary_message)
+    notes: >
+      The verdict is deliberate and unchanged (LIM-037): an empty table is a
+      legitimate result, and a tabular dataset has no way to demand a minimum
+      number of rows. Only what is said about it changes.

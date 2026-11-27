@@ -480,7 +480,7 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
     .amb-set-all .form-group { margin-bottom: 0; }
     .loaded-file-row .file-finding { font-size: .75rem; border-radius: 999px; padding: 1px 8px; border: 1px solid var(--bi-pending-border); color: var(--bi-ink); }
     .loaded-file-row .ff-outside { border-color: var(--bi-fail-border); }
-    .loaded-file-row .ff-unverified, .loaded-file-row .ff-unrecorded { border-color: var(--bi-warn-border); }
+    .loaded-file-row .ff-unverified, .loaded-file-row .ff-unrecorded, .loaded-file-row .ff-not_checkable { border-color: var(--bi-warn-border); }
 
     .msg-hint { font-size: .8125rem; color: var(--bi-grey); line-height: 1.45; }
 
@@ -1576,10 +1576,11 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
 
 # Status chip HTML ---------------------------------------------------------
 #
-# `packaging` ("none", "unverified" or "outside") is the dataset's verdict on how
-# its files arrived. Nothing may read Passed while a finding exists, so a content
-# pass with a finding says so and takes the amber (unverified) or red (outside)
-# class; `status` itself stays the content status.
+# `packaging` ("none", "unverified", "not_checkable" or "outside") is the
+# dataset's verdict on how its files arrived. Nothing may read Passed while a
+# finding exists, so a content pass with a finding says so and takes the amber
+# (unverified, or the packaging check could not run) or red (outside) class;
+# `status` itself stays the content status.
 status_display <- function(status, packaging = "none") {
   if (!identical(status, "pass")) {
     return(status)
@@ -1587,17 +1588,19 @@ status_display <- function(status, packaging = "none") {
   switch(packaging,
     outside = "fail",
     unverified = "nodata",
+    not_checkable = "nodata",
     status
   )
 }
 
 status_chip <- function(status, packaging = "none") {
   status <- match.arg(status, c("pass", "fail", "pending", "nodata"))
-  packaging <- match.arg(packaging, c("none", "unverified", "outside"))
+  packaging <- match.arg(packaging, c("none", "unverified", "not_checkable", "outside"))
   label <- switch(status,
     pass = switch(packaging,
       outside = "Content passed \u00B7 not inside its container",
       unverified = "Passed \u00B7 packaging not verified",
+      not_checkable = "Passed \u00B7 packaging not checkable",
       "Passed"
     ),
     fail = "Failed",

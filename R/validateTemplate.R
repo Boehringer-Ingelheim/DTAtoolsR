@@ -971,7 +971,7 @@
           # Lint only what built: a failed build is already instantiate_failed.
           # The class invariant keeps errors out of a built DTA, so in practice
           # these are the linter's warnings.
-          lint <- tryCatch(lint_dta(build_res$value), error = function(e) NULL)
+          lint <- .dta_template_lint_rows(build_res$value)
           for (i in seq_len(if (is.null(lint)) 0L else nrow(lint))) {
             add(
               # A template library must not ship overlapping file names: the
@@ -1099,6 +1099,27 @@
   sprintf(
     "Dataset '%s' declares no files, so nothing can be loaded into it. Add a 'files:' entry (filename and type).",
     as.character(dataset_id)[[1]]
+  )
+}
+
+# lint_dta() over `x`, as findings. A linter that aborts has judged nothing, and
+# "nothing" must not read as "no findings": a template whose columns and rules
+# were never examined would come back clean and its repository's CI would go
+# green. The abort is a finding of its own, an error, carrying the cause.
+.dta_template_lint_rows <- function(x) {
+  tryCatch(
+    lint_dta(x),
+    error = function(e) {
+      data.frame(
+        dataset = "", object = "linter", id = NA_character_,
+        severity = "error", code = "lint_failed",
+        message = paste0(
+          "aborted, so this template's columns and rules were not judged: ",
+          conditionMessage(e)
+        ),
+        stringsAsFactors = FALSE
+      )
+    }
   )
 }
 
@@ -1500,7 +1521,7 @@
   } else {
     list(columns = cols, rules = plain_ds[["rules"]] %||% list())
   }
-  lint <- tryCatch(lint_dta(lint_input), error = function(e) NULL)
+  lint <- .dta_template_lint_rows(lint_input)
   for (i in seq_len(if (is.null(lint)) 0L else nrow(lint))) {
     row <- lint[i, , drop = FALSE]
     add(
@@ -1991,7 +2012,10 @@
 #' operators raise no finding), `group_constraint_unknown_condition`, and
 #' `file_name_conflict` (file entries of two datasets could take the same file
 #' name; the linter's warning is an error here). Any other [lint_dta()] code
-#' (see its Codes section) is passed on with the linter's severity.
+#' (see its Codes section) is passed on with the linter's severity. When the
+#' linter itself aborts it has judged nothing, and that is reported as the error
+#' `lint_failed`, carrying the cause, rather than as a template without
+#' findings.
 #' The linter codes come from the columns and rules of a dataset template's
 #' body, and from every instantiated variant of a creation template.
 #' Warnings: the linter's `rules_without_columns`, `rule_not_checkable`,

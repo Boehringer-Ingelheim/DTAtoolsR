@@ -1305,3 +1305,68 @@ test_that("OQ-CONT-062 | the application refuses an edit that makes two datasets
     qa_step("and the one conflict that was there is the only one", 1L, nrow(DTAtools::file_name_conflicts(rv$dta)))
   })
 })
+
+test_that("OQ-CONT-065 | a packaging check that cannot be carried out reads as not checkable in the dataset list, the Delivery view, the summary button and the report, and never as a pass | REQ-CONT-034 | tags: white-box", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+  ap_notes()
+
+  # No document the application can hold makes container_findings() fail, so it
+  # is replaced. DTAtools::check() calls it too, so the replacement passes the
+  # real function through until the case switches it, after the check has run.
+  real <- DTAtools::container_findings
+  sw <- new.env(parent = emptyenv())
+  sw$failing <- FALSE
+  testthat::local_mocked_bindings(
+    container_findings = function(x) {
+      if (isTRUE(sw$failing)) stop("packaging unavailable", call. = FALSE)
+      real(x)
+    },
+    .package = "DTAtools"
+  )
+
+  spec <- ap_doc(AP_DEFAULT)
+  good <- cont_zip(list(ae.csv = CONT_AE_CSV, dm.csv = CONT_DM_CSV), name = "delivery.zip")
+  ap_serve(app, {
+    session$setInputs(dta_file = cont_fi(spec, "spec.yaml"))
+    session$setInputs(delivery_files = cont_fi(good, "delivery.zip"))
+    session$setInputs(check_all = 1)
+    qa_step("the content of both files passes", c(ae = "pass", dm = "pass"), unlist(rv$status))
+    qa_step("control: while the check works a conforming delivery has no finding", 0L, nrow(findings_now()))
+    qa_check("and the report is PASSED", grepl("VALIDATION PASSED", validation_report_html(), fixed = TRUE))
+
+    # The check can no longer run. The cached findings know nothing of that, so an
+    # inert attribute on the document makes them recompute.
+    sw$failing <- TRUE
+    touched <- rv$dta
+    attr(touched, "qa_touch") <- TRUE
+    rv$dta <- touched
+    session$flushReact()
+
+    qa_step("the content verdict is untouched", c(ae = "pass", dm = "pass"), unlist(rv$status))
+    qa_step(
+      "every dataset's packaging is not checkable",
+      c("not_checkable", "not_checkable"), findings_now()$status
+    )
+
+    html <- validation_report_html()
+    qa_check("the report is INCOMPLETE", grepl("VALIDATION INCOMPLETE", html, fixed = TRUE))
+    qa_check("and is never PASSED", !grepl("VALIDATION PASSED", html, fixed = TRUE))
+    qa_check("nor FAILED, since nothing was found against the files", !grepl("VALIDATION FAILED", html, fixed = TRUE))
+
+    button <- ap_text(output$validation_report_ui)
+    qa_check("the summary button is offered", grepl('id="dl_validation_summary"', button, fixed = TRUE))
+    qa_check("but is a warning, not a pass", grepl("btn-warning", button, fixed = TRUE) && !grepl("btn-success", button, fixed = TRUE))
+    qa_check("and says the packaging is not checkable", grepl("not checkable", button, fixed = TRUE))
+
+    nav <- ap_text(output$dataset_nav_ui)
+    qa_check("a dataset whose content passed is not listed as passed", !grepl("Passed all checks", nav, fixed = TRUE))
+    qa_check("it says the packaging could not be checked", grepl("could not be checked", nav, fixed = TRUE))
+
+    rv$main_view <- "delivery"
+    session$flushReact()
+    view <- ap_text(output$dataset_detail)
+    qa_check("the Delivery view reads Packaging not checkable", grepl("Packaging not checkable", view, fixed = TRUE))
+    qa_check("and never Packaging conforms", !grepl("Packaging conforms", view, fixed = TRUE))
+  })
+})

@@ -1663,3 +1663,71 @@ test_that("OQ-TMPL-150 | an unknown key under data_types is an app_config_unknow
     )
   )
 })
+
+test_that("OQ-TMPL-160 | a creation template whose linter aborts is reported as the error lint_failed, and fails the repository lint | REQ-TMPL-067", {
+  # A file-name pattern that is not a regular expression makes the linter abort
+  # in its conflict scan: the first dataset's pattern has an unclosed bracket.
+  pattern_lines <- function(first) {
+    c(
+      "kind: dta_creation_template",
+      "id: pattern_tpl",
+      'version: "1.0"',
+      "base:",
+      "  metadata:",
+      "    title: Pattern Template",
+      "datasets:",
+      "  - id: a",
+      "    type: tabular",
+      sprintf("    files: {filename: '%s', type: csv, pattern: true}", first),
+      "    columns:",
+      "      - {id: COL1, type: SAS Char}",
+      "  - id: b",
+      "    type: tabular",
+      "    files: {filename: 'vs_[0-9]+[.]csv$', type: csv, pattern: true}",
+      "    columns:",
+      "      - {id: COL1, type: SAS Char}"
+    )
+  }
+  root <- qa_tempdir()
+  tmpl_put(root, "templates/pattern.dta-template.yaml", pattern_lines("lab_[0-9]+[.]csv$"))
+  qa_step("control: with a valid pattern the template is clean", 0L, nrow(validate_template(root)))
+
+  tmpl_put(root, "templates/pattern.dta-template.yaml", pattern_lines("lab_[0-9.csv"))
+  result <- validate_template(root)
+
+  qa_step("the abort is the one row reported", "lint_failed", result$code)
+  qa_step("at severity error", "error", result$severity)
+  qa_step("naming the file", "pattern.dta-template.yaml", basename(result$file))
+  qa_check("and carrying the pattern the linter stopped at", grepl("lab_[0-9.csv", result$message, fixed = TRUE))
+
+  aborted <- tryCatch(suppressMessages(lint_template_repo(root)), error = function(e) e)
+  qa_check("the repository lint aborts on it", inherits(aborted, "dta_template_lint_error"))
+})
+
+test_that("OQ-TMPL-161 | a dataset template whose linter aborts is reported as the error lint_failed | REQ-TMPL-067 | tags: white-box", {
+  # The body of a dataset template is linted without its files, so no template
+  # makes the linter abort here; it is replaced by one that does.
+  root <- qa_tempdir()
+  tmpl_put(root, "templates/body.dta-dataset-template.yaml", c(
+    "kind: dta_dataset_template",
+    "id: body_tpl",
+    'version: "1.0"',
+    "dataset:",
+    "  id: ds2",
+    "  type: tabular",
+    "  files: {filename: y.csv, type: csv}",
+    "  columns:",
+    "    - {id: COL2, type: SAS Char}"
+  ))
+  qa_step("control: the template is clean while the linter works", 0L, nrow(validate_template(root)))
+
+  testthat::local_mocked_bindings(
+    lint_dta = function(...) stop("the linter fell over"),
+    .package = "DTAtools"
+  )
+  result <- validate_template(root)
+
+  qa_step("the abort is the one row reported", "lint_failed", result$code)
+  qa_step("at severity error", "error", result$severity)
+  qa_check("carrying the cause", grepl("the linter fell over", result$message, fixed = TRUE))
+})

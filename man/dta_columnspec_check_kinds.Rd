@@ -7,10 +7,14 @@
 dta_columnspec_check_kinds()
 }
 \value{
-A data frame with columns \code{check}, \code{keyword} and \code{matrix_only}. The
-matrix-only keywords (header, dimension, range and finiteness findings of a
-matrix dataset) are counted in every tally, but only reported in a summary
-built with \code{matrix = TRUE}.
+A data frame with columns \code{check}, \code{keyword}, \code{matrix_only} and
+\code{only_when_found}. The matrix-only keywords (header, dimension, range and
+finiteness findings of a matrix dataset) are counted in every tally, but
+only reported in a summary built with \code{matrix = TRUE}. The one
+\code{only_when_found} keyword, \code{dta_check_not_run}, is not a constraint a
+column declares but the finding that a column's constraints could not be
+run; it is listed in a summary only when it holds a finding, because
+"no check failed to run" is the ordinary state and not worth a row.
 }
 \description{
 Every constraint keyword \code{as_json_schema()} can emit, paired with the human

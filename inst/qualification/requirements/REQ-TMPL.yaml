@@ -1583,3 +1583,23 @@ requirements:
       a slot with no default that is left alone builds its column with no
       permitted values; a template that needs the column constrained gives the
       slot a min of 1.
+
+  - id: REQ-TMPL-067
+    text: >
+      validate_template() shall report a linter that aborts as a row with code
+      lint_failed at severity "error", carrying the cause, for each dataset
+      template body and each instantiated creation template it runs the linter
+      over, and not as a template without findings; lint_template_repo() shall
+      therefore abort on such a repository under fail_on = "error".
+    risk: medium
+    category: functional
+    covers: [validate_template, lint_template_repo]
+    source: R/validateTemplate.R (.dta_template_lint_rows)
+    notes: >
+      A linter that aborts has judged nothing. Reading that as zero rows made a
+      template whose columns and rules were never examined come back clean, and
+      a repository's CI go green. A creation template whose file name pattern
+      is not a regular expression makes the linter abort in its conflict scan
+      (OQ-TMPL-160); the body of a dataset template is linted without its files,
+      so no template reaches the abort there and OQ-TMPL-161 replaces the
+      linter with one that fails.

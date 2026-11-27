@@ -12,7 +12,7 @@ dta_compile_columnspec_schemas(specs)
 \value{
 A list with one element per column, each a list of \code{name} (the
 expected column name) and \code{schema} (the column's schema, or \code{NULL} when it
-could not be derived).
+could not be derived, in which case \code{error} holds the cause).
 }
 \description{
 Derives the \code{as_json_schema()} form of every column in a collection, paired
@@ -31,8 +31,12 @@ Compiling once and passing the result in makes that cost proportional to the
 spec rather than to the data.
 
 A column whose schema cannot be derived (\code{as_json_schema()} errors) gets a
-\code{NULL} schema and is warned about here, once for the whole scan rather than
-once per batch -- \code{dta_columnspec_errors()} then skips its value checks
-entirely, exactly as it does for a column absent from \code{schemas}.
+\code{NULL} schema, the cause is recorded on its entry, and it is warned about
+here, once for the whole scan rather than once per batch.
+\code{dta_columnspec_errors()} then skips its value checks entirely, exactly as it
+does for a column absent from \code{schemas} -- which is NOT the same as the
+column passing them. The callers that settle the verdict report every such
+column as a finding (see \code{\link[=dta_columnspec_not_run_errors]{dta_columnspec_not_run_errors()}}), so a check that
+could not run is never read as one that ran and found nothing.
 }
 \keyword{internal}

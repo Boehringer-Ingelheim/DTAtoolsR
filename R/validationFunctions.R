@@ -24,7 +24,10 @@
 #' ran. The table's columns must be EXACTLY the declared ones: a column the
 #' specs do not describe fails the axis just as an absent declared column does. A check no
 #' column declares reports as `not_applicable`; one the run could not settle
-#' reports as `not_checked`. Neither is a pass.
+#' reports as `not_checked`. Neither is a pass. A column whose specification
+#' cannot be turned into a check at all is not a pass either: it is reported as
+#' a finding of keyword `dta_check_not_run`, one per column, and the table is not
+#' valid.
 #' @return The input table, unchanged, if valid. If the table has column spec
 #'   errors, returns a list with `summarised_error`, `full_error`,
 #'   `columnspec_checks` (the per-check breakdown described above),
@@ -209,6 +212,23 @@ validate_table_detailed <- function(specs, table, verbose = TRUE, max_errors = N
     if (nrow(full_error) == 0) {
       full_error <- NULL
     }
+  }
+
+  # A column whose checks could not be run. `dta_columnspec_errors()` skipped
+  # its value checks, which is not the same as the column passing them: with no
+  # finding the table would be reported valid on data nobody examined. The
+  # findings go AHEAD of everything else, so that the retention cap below cannot
+  # push them out of the frame that is kept, and in the same place on the
+  # streaming path, so both engines report the same frame.
+  not_run_error <- dta_columnspec_not_run_errors(columnspec_schemas)
+  if (!is.null(not_run_error)) {
+    full_error <- if (is.null(full_error)) {
+      not_run_error
+    } else {
+      rbind(not_run_error, full_error)
+    }
+    rownames(full_error) <- NULL
+    summarised_error <- dta_summarise_columnspec_errors(full_error)
   }
 
   # A column the specs do not declare. `dta_columnspec_errors()` iterates the

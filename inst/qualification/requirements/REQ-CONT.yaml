@@ -714,3 +714,25 @@ requirements:
       A transport file and a SAS dataset share one normalisation. The fixture
       sdtm.xpt holds the VS variable VSDT as the SAS days 23968, 23968 and
       23969, which are 2025-08-15, 2025-08-15 and 2025-08-16 (REQ-FILE-037).
+
+  - id: REQ-CONT-034
+    text: >
+      In the interactive application, a packaging check that cannot be carried
+      out shall never read as a pass. When container_findings() fails for the
+      document, every dataset shall carry the packaging state "not checkable":
+      the Delivery view shall read Packaging not checkable and never Packaging
+      conforms, a dataset whose content passed shall not read as passed in the
+      dataset list, the validation summary button shall not be offered as a
+      pass and the validation summary shall read VALIDATION INCOMPLETE and never
+      VALIDATION PASSED, while a dataset whose content failed still reads
+      failed.
+    risk: high
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/R/utils_dta.R (dta_container_findings_or_not_checkable, dta_build_validation_report); inst/shiny/dta_app/app.R (dv_findings and its readers)
+    notes: >
+      The failure was turned into "no findings", which every reader reads as
+      packaging that conforms. REQ-CONT-025 and REQ-CONT-030 state the verdicts
+      for the findings that exist; this states the one for a check that did not
+      run. The case replaces container_findings() with one that fails, because no
+      document the application can hold makes it fail.

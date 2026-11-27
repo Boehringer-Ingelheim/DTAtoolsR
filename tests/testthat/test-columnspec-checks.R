@@ -947,6 +947,19 @@ test_that("a failed schema derivation warns once, naming the column, rather than
   expect_length(warnings, 1)
   expect_match(warnings, "BAD", fixed = TRUE)
   expect_null(schemas[[1]]$schema)
+
+  # The warning is only the hint at the cause. What the table is reported as is
+  # the verdict, and it must not depend on anyone having read the warning: a
+  # column whose checks could not run is a failure of the table, not a pass.
+  # Hand-derived: one column, one finding, nothing else to report.
+  details <- suppressWarnings(validate_table_detailed(
+    bad, data.frame(BAD = c("a", "b"), stringsAsFactors = FALSE),
+    verbose = FALSE
+  ))
+  expect_false(details$ok)
+  expect_false(details$columnspec_valid)
+  expect_identical(details$n_columnspec_errors, 1L)
+  expect_identical(as.character(details$columnspec_errors$full_error$keyword), "dta_check_not_run")
 })
 
 
@@ -1036,7 +1049,10 @@ test_that("an NA column is filled from columnspec for required only", {
 
 test_that("every vocabulary keyword has a tally slot and a report label", {
   kinds <- dta_columnspec_check_kinds()
-  expect_equal(sum(!kinds$matrix_only), 8)
+  # The eight legacy checks and the one that reports a column whose checks
+  # could not be run; that one is listed only when it holds a finding.
+  expect_equal(sum(!kinds$matrix_only), 9)
+  expect_equal(kinds$keyword[kinds$only_when_found], "dta_check_not_run")
   expect_true(all(kinds$check %in% names(`__DTAtools_columnspec_check_labels__`)))
   expect_true(all(kinds$check %in% names(`__DTAtools_columnspec_check_absent__`)))
   expect_setequal(names(dta_empty_columnspec_tally()$n_errors), kinds$keyword)
