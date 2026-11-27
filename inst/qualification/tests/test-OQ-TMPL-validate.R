@@ -1,9 +1,10 @@
 # validate_template(): the codes it emits, and its strict/kinds/path arguments.
 # REQ-TMPL-001 .. REQ-TMPL-018, REQ-TMPL-031, REQ-TMPL-033, REQ-TMPL-034,
 # REQ-TMPL-057, REQ-TMPL-058 (its dry-run half), REQ-TMPL-059,
-# REQ-TMPL-061 and REQ-TMPL-062.
+# REQ-TMPL-061, REQ-TMPL-062, REQ-TMPL-067 and REQ-TMPL-068.
 #
-# Every fixture below lives under fx/t/ and is built to trigger
+# OQ-TMPL-160 and OQ-TMPL-161, at the end of the file, write their own small
+# libraries to qa_tempdir(). Every other fixture below lives under fx/t/ and is built to trigger
 # EXACTLY the one code its test names -- verified by running validate_template()
 # over it and reading back what actually came out, not by reasoning about the
 # source alone. Where a fixture is abstract: true, that is deliberate: it stops
@@ -1664,7 +1665,84 @@ test_that("OQ-TMPL-150 | an unknown key under data_types is an app_config_unknow
   )
 })
 
-test_that("OQ-TMPL-160 | a creation template whose linter aborts is reported as the error lint_failed, and fails the repository lint | REQ-TMPL-067", {
+# ---- a file dataset template refuses columns and rules ------------------------
+
+test_that("OQ-TMPL-160 | validate_template() reports columns and rules on a file dataset template the way lint_dta() does | REQ-TMPL-067", {
+  validate <- function(extra = NULL) {
+    root <- file.path(qa_tempdir(), paste0("lib", sample.int(1e6, 1L)))
+    dir.create(file.path(root, "templates"), recursive = TRUE)
+    writeLines(
+      c(
+        "kind: dta_dataset_template", "id: fd", "version: \"1.0\"",
+        "dataset:", "  id: report", "  type: file",
+        "  files: {filename: report.pdf, type: any}",
+        extra
+      ),
+      file.path(root, "templates", "fd.dta-dataset-template.yaml")
+    )
+    validate_template(root)
+  }
+
+  res <- validate(c(
+    "  columns:", "    - {id: ID, type: SAS Char}",
+    "  rules:", "    - {id: u, type: col_unique, columns: [ID]}"
+  ))
+  expected <- c("file_columns_key", "file_rules_key")
+  qa_step("both codes are reported", expected, intersect(expected, res$code))
+  qa_step("each at severity error", c("error", "error"), res$severity[match(expected, res$code)])
+
+  body <- list(
+    id = "report", type = "file", files = list(filename = "report.pdf", type = "any"),
+    columns = list(list(id = "ID", type = "SAS Char")),
+    rules = list(list(id = "u", type = "col_unique", columns = "ID"))
+  )
+  linted <- lint_dta(list(datasets = list(body)))
+  qa_step(
+    "lint_dta() on the same dataset reports the same two codes at the same severity",
+    c("error", "error"), linted$severity[match(expected, linted$code)]
+  )
+
+  # The controls: neither key, and an empty list of each, are not reported.
+  qa_step("a file dataset template with neither key is clean", 0L, nrow(validate()))
+  qa_step(
+    "and an empty columns and an empty rules declare nothing",
+    0L, sum(validate(c("  columns: []", "  rules: []"))$code %in% expected)
+  )
+})
+
+test_that("OQ-TMPL-161 | validate_template() reports a misspelt or abbreviated column key of a dataset template, but not values_from | REQ-TMPL-068", {
+  validate <- function(column) {
+    root <- file.path(qa_tempdir(), paste0("lib", sample.int(1e6, 1L)))
+    dir.create(file.path(root, "templates"), recursive = TRUE)
+    writeLines(
+      c(
+        "kind: dta_dataset_template", "id: tpl", "version: \"1.0\"",
+        "dataset:", "  id: ds1", "  type: tabular",
+        "  files: {filename: x.csv, type: csv}",
+        "  columns:", paste0("    - ", column)
+      ),
+      file.path(root, "templates", "tpl.dta-dataset-template.yaml")
+    )
+    validate_template(root)
+  }
+
+  typo <- validate("{id: A, type: SAS Char, exmaples: x}")
+  qa_step("a misspelt key is one column_spec_invalid finding, an error", "error", typo$severity[typo$code == "column_spec_invalid"])
+  qa_check("whose message names the key", grepl("exmaples", typo$message[typo$code == "column_spec_invalid"], fixed = TRUE))
+
+  abbreviated <- validate("{id: A, type: SAS Char, example: x}")
+  qa_step(
+    "an abbreviated key is the same finding, not completed to examples",
+    "error", abbreviated$severity[abbreviated$code == "column_spec_invalid"]
+  )
+
+  bound <- validate("{id: A, type: SAS Char, values_from: {vocabulary: nowhere}}")
+  qa_step("values_from alone is not reported for the column", 0L, sum(bound$code == "column_spec_invalid"))
+  exact <- validate("{id: A, type: SAS Char, examples: x}")
+  qa_step("and the exact spelling is clean", 0L, sum(exact$code == "column_spec_invalid"))
+})
+
+test_that("OQ-TMPL-162 | a creation template whose linter aborts is reported as the error lint_failed, and fails the repository lint | REQ-TMPL-069", {
   # A file-name pattern that is not a regular expression makes the linter abort
   # in its conflict scan: the first dataset's pattern has an unclosed bracket.
   pattern_lines <- function(first) {
@@ -1704,7 +1782,7 @@ test_that("OQ-TMPL-160 | a creation template whose linter aborts is reported as 
   qa_check("the repository lint aborts on it", inherits(aborted, "dta_template_lint_error"))
 })
 
-test_that("OQ-TMPL-161 | a dataset template whose linter aborts is reported as the error lint_failed | REQ-TMPL-067 | tags: white-box", {
+test_that("OQ-TMPL-163 | a dataset template whose linter aborts is reported as the error lint_failed | REQ-TMPL-069 | tags: white-box", {
   # The body of a dataset template is linted without its files, so no template
   # makes the linter abort here; it is replaced by one that does.
   root <- qa_tempdir()

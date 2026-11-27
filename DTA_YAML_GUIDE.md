@@ -157,9 +157,9 @@ A list. Each dataset:
 | `name` | Short human-readable name (`Laboratory results`), shown in the app and as the heading in exported documents. Always write it. |
 | `description` | Longer free text: what the deliverable contains and why. Write it whenever there is more to say than the name. |
 | `files` | One file handler (mapping) or a list of handlers. |
-| `columns` | `tabular` only (section 4). |
+| `columns` | `tabular` only (section 4). A `file` dataset reads no rows, so `columns` on it is an error, never ignored. |
 | `row_labels`, `matrix` | `matrix` only (section 6). |
-| `rules` | `tabular` (section 5) and `matrix` (on its row label columns). |
+| `rules` | `tabular` (section 5) and `matrix` (on its row label columns). On a `file` dataset it is an error, never ignored. |
 
 No other keys (`template_source/version/date` are machine-written).
 
@@ -397,6 +397,8 @@ column and an undeclared extra column are both errors. Declare every column.
 | `pattern` | Regex every non-missing value must match (Perl syntax). **Unanchored by default — always wrap in `^…$`.** |
 | `examples` | Example values; must match `pattern` if one is given. |
 | `colclass` | Optional category: `patient_info`, `measurement_patient`, `measurement`, `visit_related`, `date_related`, `study_info`, `wide_format`, `long_format`, `wide_and_long_format`. |
+
+A column takes exactly the keys in this table, written exactly: any other key, and an abbreviation such as `example` for `examples`, is refused with an error that names it and lists the keys a column accepts. (A matrix row label also takes `header`, section 6.)
 
 **Column ids.** An `id` is compared with the header of the delivered file
 character for character. The match is case-sensitive and codepoint-exact:
@@ -741,6 +743,7 @@ Define named row conditions, then constrain how they co-occur inside each group.
 - `mutually_exclusive`: `left` and `right` must not both hold (per their scopes).
 - Scopes: `any` (≥ 1 row in the group) or `all` (every row). Default `any`.
 - Constraint `id`s unique within the rule; names in `if/then/left/right` must be defined under `conditions`.
+- A constraint takes exactly the keys shown for its type, plus `id`, `type` and `message`. Any other key is an error that names it: a misspelt scope (`then_scop`) or the scope of the other type (`if_scope` on a `mutually_exclusive` constraint) is never read as the default `any`.
 
 ### Writing meaningful rules
 
@@ -813,9 +816,12 @@ datasets:
 ```
 
 A matrix dataset has `row_labels` and `matrix` **instead of** `columns`;
-writing `columns` on a matrix, or `row_labels`/`matrix` on another type, is an
-error. `files` takes `csv` or `tsv` handlers with a header line (`has_header`
-must stay `true`); the file may arrive loose or in a container like any other.
+writing `columns` on a matrix, `row_labels`/`matrix` on another type, or
+`columns`/`rules` on a `file` dataset, is an error.
+
+A matrix `files` entry takes `csv` or `tsv` handlers with a header line
+(`has_header` must stay `true`); the file may arrive loose or in a container
+like any other.
 
 ### `row_labels` — the leading columns
 

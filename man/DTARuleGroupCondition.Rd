@@ -32,7 +32,11 @@ names two conditions in \code{left} and \code{right}, with optional \code{left_s
 \code{right_scope}. A \code{requires} constraint names \code{if} and \code{then} conditions,
 with optional \code{if_scope} and \code{then_scope}. Each scope is \code{"any"} or
 \code{"all"} and defaults to \code{"any"}. All condition names must be defined in
-\code{conditions}.}
+\code{conditions}. A constraint accepts exactly the keys named here for its
+type; any other key, a misspelt scope (\code{then_scop}) or a key of the other
+type (\code{if_scope} on a \code{mutually_exclusive} constraint) included, is an
+error of class \code{dta_group_constraint_unknown_key} that names it, never a
+key read as its default.}
 }
 \value{
 An object of class \code{DTARuleGroupCondition}.

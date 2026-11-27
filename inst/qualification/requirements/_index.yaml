@@ -20,7 +20,7 @@ areas:
     min_tests: 23
   - area: SPEC
     title: Specifications, YAML and factories
-    min_tests: 41
+    min_tests: 45
   - area: TYPE
     title: Declared types and typing at read
     min_tests: 47
@@ -29,7 +29,7 @@ areas:
     min_tests: 53
   - area: RULE
     title: Cross-column and grouped rules
-    min_tests: 52
+    min_tests: 53
   - area: FILE
     title: File handlers and readers
     min_tests: 61
@@ -47,7 +47,7 @@ areas:
     min_tests: 23
   - area: TMPL
     title: Templates, inheritance and controlled vocabulary
-    min_tests: 160
+    min_tests: 162
   - area: EXPORT
     title: Document and data export
     min_tests: 77

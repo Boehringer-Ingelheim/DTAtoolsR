@@ -105,7 +105,7 @@ test_that("lint names the row label a header finding belongs to", {
   expect_match(l$message[l$code == "row_label_header_position"], "Row label 'B'", fixed = TRUE)
 })
 
-test_that("header on a tabular column is named as a row-label key, and other keys still match partially", {
+test_that("header on a tabular column is named as a row-label key, and another unknown key is refused by name", {
   body <- function(column) {
     list(
       id = "t", type = "tabular", files = list(type = "csv", filename = "t.csv"),
@@ -117,9 +117,13 @@ test_that("header on a tabular column is named as a row-label key, and other key
   expect_length(msg, 1L)
   expect_match(msg, "row label of a matrix dataset", fixed = TRUE)
 
-  # `example:` reaches `examples` by R's partial matching, as it always has.
+  # `example:` used to reach `examples` by R's partial matching; a key is read
+  # by its exact name now (see test-strict-spec-keys.R).
   l <- lint_dta(body(list(id = "A", type = "SAS Char", example = "x")))
-  expect_false("column_spec_invalid" %in% l$code)
+  msg <- l$message[l$code == "column_spec_invalid"]
+  expect_length(msg, 1L)
+  expect_false(grepl("row label of a matrix dataset", msg, fixed = TRUE))
+  expect_match(msg, "\"example\"", fixed = TRUE)
 })
 
 test_that("a header text of spaces only is an empty field wherever it is put in words", {

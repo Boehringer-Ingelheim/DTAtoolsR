@@ -19,9 +19,16 @@ DTADataSetFactory(
 \code{"matrix"}.}
 
 \item{columns}{A list with column specifications (optional). Not allowed for
-a \code{"matrix"}, whose row-label columns are given as \code{row_labels}.}
+a \code{"matrix"}, whose row-label columns are given as \code{row_labels},
+and not allowed, unless empty, for a \code{"file"} dataset, which reads no
+rows: either is an error (classes \code{dta_matrix_columns_key} and
+\code{dta_file_columns_key}). A column accepts exactly the keys of
+\code{\link{DTAColumnSpec}}; any other key is an error of class
+\code{dta_column_unknown_field}, and a key is never completed from its first
+letters.}
 
-\item{rules}{A list of rules specifications (optional)}
+\item{rules}{A list of rules specifications (optional). Not allowed, unless
+empty, for a \code{"file"} dataset (class \code{dta_file_rules_key}).}
 
 \item{files}{Specification of the dataset's file handlers (optional). Either
 a single named list -- one handler, the shape a YAML \code{files:} mapping

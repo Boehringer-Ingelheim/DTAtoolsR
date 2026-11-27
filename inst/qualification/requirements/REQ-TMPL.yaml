@@ -1586,6 +1586,39 @@ requirements:
 
   - id: REQ-TMPL-067
     text: >
+      validate_template() shall report, for a dataset template of type file
+      that declares a non-empty columns or a non-empty rules, the code
+      file_columns_key or file_rules_key at severity "error", the same codes and
+      severity lint_dta() reports for the same dataset; a dataset template of
+      type file that declares neither, or an empty list of either, shall not be
+      reported for them.
+    risk: medium
+    category: functional
+    covers: [validate_template, lint_dta]
+    source: R/validateTemplate.R (.dta_template_check_dataset_tpl); REQ-SPEC-038
+
+  - id: REQ-TMPL-068
+    text: >
+      validate_template() shall report a column of a dataset template that
+      carries a key other than the eleven keys of REQ-SPEC-039, values_from and,
+      for a matrix row label, header, a misspelt key and an abbreviation such
+      as example included, as
+      column_spec_invalid at severity "error" naming the key, the same finding
+      lint_dta() reports for the same column; a column that carries values_from
+      and no other unknown key shall not be reported for it.
+    risk: medium
+    category: functional
+    covers: [validate_template, lint_dta]
+    source: R/validateTemplate.R (.dta_template_check_dataset_tpl); REQ-SPEC-039
+    notes: >
+      values_from binds a column to a vocabulary and is resolved by the template
+      engine, so it is the one key a template column carries that a column does
+      not. Every other key was dropped before the lint, so a template that
+      spelt a key in a way a column refuses validated clean and failed only
+      when a creation template imported it.
+
+  - id: REQ-TMPL-069
+    text: >
       validate_template() shall report a linter that aborts as a row with code
       lint_failed at severity "error", carrying the cause, for each dataset
       template body and each instantiated creation template it runs the linter
@@ -1600,6 +1633,6 @@ requirements:
       template whose columns and rules were never examined come back clean, and
       a repository's CI go green. A creation template whose file name pattern
       is not a regular expression makes the linter abort in its conflict scan
-      (OQ-TMPL-160); the body of a dataset template is linted without its files,
-      so no template reaches the abort there and OQ-TMPL-161 replaces the
+      (OQ-TMPL-162); the body of a dataset template is linted without its files,
+      so no template reaches the abort there and OQ-TMPL-163 replaces the
       linter with one that fails.
