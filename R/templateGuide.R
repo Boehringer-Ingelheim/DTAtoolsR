@@ -101,7 +101,15 @@ write_template_guide <- function(
     )
   }
 
-  stubs <- vapply(chosen, function(e) .tg_has(e[["build_note"]]), logical(1))
+  # The same fact the document prints as "Problems found": a template whose
+  # guide lists a problem is reported here too, so the warning and the table
+  # cannot disagree (a failed comparison with a dataset template has a row but
+  # no build_note).
+  stubs <- vapply(
+    chosen,
+    function(e) .tg_has(e[["build_note"]]) || nrow(.tg_entry_problems(guide, e)) > 0L,
+    logical(1)
+  )
   if (any(stubs)) {
     cli::cli_warn(
       "Could not describe {.val {ids[stubs]}} completely; the guide lists the problem.",
@@ -855,20 +863,31 @@ write_template_guide <- function(
     paste0("DTAtools ", .tg_chr(guide[["library"]][["package_version"]]))
   )
   doc <- .tg_kv(doc, keys, vapply(vals, dash, character(1), USE.NAMES = FALSE))
-  pr <- guide[["problems"]]
-  if (.tg_n(pr) > 0L) {
-    involved <- c(
-      e[["id"]], e[["lineage"]][["id"]], e[["mixins"]][["id"]],
-      refs[["dataset_templates"]][["id"]], refs[["vocabularies"]][["id"]], refs[["parties"]][["id"]]
-    )
-    hit <- pr[["File"]] == .tg_chr(e[["file"]]) |
-      vapply(pr[["File"]], function(f) any(startsWith(f, paste0(involved, "."))), logical(1))
-    if (any(hit)) {
-      doc <- .tg_par(doc, "Problems found", bold = TRUE, color = THEME_COLORS$primary_dark, keep_next = TRUE, before = 4)
-      doc <- .tg_table(doc, pr[hit, , drop = FALSE], widths = c(2.4, 3.9))
-    }
+  pr <- .tg_entry_problems(guide, e)
+  if (nrow(pr) > 0L) {
+    doc <- .tg_par(doc, "Problems found", bold = TRUE, color = THEME_COLORS$primary_dark, keep_next = TRUE, before = 4)
+    doc <- .tg_table(doc, pr, widths = c(2.4, 3.9))
   }
   doc
+}
+
+# The rows of the guide's problem list that belong to one template: those of its
+# own file, and of every file that carries an id the template builds on or uses.
+# The document prints exactly these, and write_template_guide() warns when there
+# are any.
+.tg_entry_problems <- function(guide, e) {
+  pr <- guide[["problems"]]
+  if (.tg_n(pr) == 0L) {
+    return(data.frame(File = character(0), Problem = character(0), stringsAsFactors = FALSE))
+  }
+  refs <- e[["refs"]]
+  involved <- c(
+    e[["id"]], e[["lineage"]][["id"]], e[["mixins"]][["id"]],
+    refs[["dataset_templates"]][["id"]], refs[["vocabularies"]][["id"]], refs[["parties"]][["id"]]
+  )
+  hit <- pr[["File"]] == .tg_chr(e[["file"]]) |
+    vapply(pr[["File"]], function(f) any(startsWith(f, paste0(involved, "."))), logical(1))
+  pr[hit, , drop = FALSE]
 }
 
 # ---- cover and furniture ----------------------------------------------------

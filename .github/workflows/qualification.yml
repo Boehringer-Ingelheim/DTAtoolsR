@@ -119,7 +119,7 @@ jobs:
           path: qualification-output
           retention-days: 30
 
-      - name: Fail on a FAIL verdict
+      - name: Fail unless the verdict is a PASS
         if: always()
         run: Rscript .github/scripts/qualification_verdict.R
         shell: bash

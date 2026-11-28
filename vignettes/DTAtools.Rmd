@@ -2563,8 +2563,11 @@ Three rules govern block markers:
 - A value supplied through `template_variables` overrides a marker of either
   kind and is always rendered as text.
 
-Anything left unrendered by those rules is named in a warning, alongside the
-existing report of markers the catalogue does not recognise.
+Anything left unrendered by those rules is named in a warning (class
+`dta_template_blocks_unrendered`), alongside the existing report of markers the
+catalogue does not recognise (class `dta_template_placeholders_unresolved`). Both
+are raised whatever `quiet` is, also through `write_dta(template = )`: `quiet`
+does not silence them, and the app shows them as a notification.
 
 #### Repeating a region per dataset
 
@@ -2642,6 +2645,15 @@ tinytex::install_tinytex()
 DOCX under a `.pdf` name. The output is verified to start with the `%PDF`
 signature before it is handed back, so a failed conversion never leaves a
 mislabelled file behind.
+
+A backend that is installed can still fail on the day. The export then moves on
+to the next one and still writes the PDF, but it always warns — whatever `quiet`
+says — with a condition of class `dta_pdf_backend_fallback`: it names each
+backend that failed and why, the backend that made the file and, when that was
+TinyTeX or pandoc, that the running page header and footer are not in the
+document. A machine whose only backend is TinyTeX or pandoc is not a fallback
+and is not warned, so check `dta_pdf_backend()$name` first if the header and
+footer matter.
 
 ### Export a Standalone HTML Validation Report
 

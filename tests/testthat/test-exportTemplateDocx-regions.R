@@ -469,7 +469,10 @@ test_that("a dataset value that spells a block token renders as text inside a re
   out <- tempfile(fileext = ".docx")
   on.exit(unlink(out, force = TRUE), add = TRUE)
 
-  export_with_template(dta, template, out, quiet = TRUE)
+  expect_warning(
+    export_with_template(dta, template, out, quiet = TRUE),
+    class = "dta_template_blocks_unrendered"
+  )
 
   expect_identical(.docx_paragraphs(out), c("{SIGNATURES_TABLE}", "{SIGNATURES_TABLE}"))
   expect_length(.region_table_cells(.region_docx_summary(out)), 0)
@@ -559,7 +562,10 @@ test_that("a template block with the same spelling as a region value still rende
   out <- tempfile(fileext = ".docx")
   on.exit(unlink(out, force = TRUE), add = TRUE)
 
-  export_with_template(dta, template, out, quiet = TRUE)
+  expect_warning(
+    export_with_template(dta, template, out, quiet = TRUE),
+    class = "dta_template_blocks_unrendered"
+  )
 
   expect_true("{SIGNATURES_TABLE}" %in% .docx_paragraphs(out))
   expect_match(.docx_text(out), "Emily Turner", fixed = TRUE)

@@ -224,7 +224,8 @@ requirements:
       export_with_template() shall replace every placeholder present in a
       user-supplied Word template with the corresponding value extracted from
       the DTA, shall leave a placeholder with no corresponding value
-      untouched, and shall warn, naming it, when it does.
+      untouched, and shall warn, naming it, when it does -- with quiet = TRUE
+      as well (REQ-EXPORT-048).
     risk: high
     category: functional
     covers: [export_with_template]
@@ -873,3 +874,79 @@ requirements:
     category: functional
     covers: [write_dta]
     source: R/documentBuilders.R; PLAN-matrix-dataset.md 4
+
+  - id: REQ-EXPORT-047
+    text: >
+      When the PDF written by write_dta(), write_dta(template = ) or
+      write_dataset_metadata() is made by a conversion backend other than the
+      first one available on the machine, the export shall still write the PDF
+      and shall signal, whatever quiet is, a warning of class
+      dta_pdf_backend_fallback. The condition shall carry the reason each
+      earlier backend failed (field failed, named by backend) and the backend
+      that made the file (field used), and its message shall name both. When
+      the backend that made the file is TinyTeX or pandoc, the field
+      furniture_lost shall be TRUE and the message shall state that the running
+      page header and footer are not in the PDF; when it is LibreOffice, which
+      keeps them, furniture_lost shall be FALSE and no such loss shall be
+      claimed. No such warning shall be signalled when the first backend made
+      the PDF, nor when the only backend available did.
+    risk: high
+    category: functional
+    covers: [write_dta, write_dataset_metadata, dta_pdf_backend]
+    source: R/exportDocuments.R (.convert_docx_to_pdf, .warn_pdf_backend_fallback); decision Q7 of the November 2026 review
+    notes: >
+      The fallback itself is deliberate: many machines have only TinyTeX, and an
+      error would refuse them a PDF. What it must not be is silent, because the
+      two re-typesetting routes drop the running header and footer, the part of
+      the document that identifies it on every page. A conversion that fails on
+      every backend still aborts and lists every failure (REQ-EXPORT-008).
+      write_template_guide() converts through the same function and so warns
+      the same way.
+
+  - id: REQ-EXPORT-048
+    text: >
+      export_with_template(), and write_dta(template = ) through it, shall
+      signal, whatever quiet is, a warning of class
+      dta_template_blocks_unrendered whose field tokens lists every block
+      placeholder and every {#DATASETS} or {/DATASETS} region marker that is
+      still in the finished document -- a block naming a dataset the document
+      does not contain, a block that is not alone in its paragraph, a region
+      that is never closed or never opened -- and, when a region marker is among
+      them, the same warning shall also have class
+      dta_template_region_malformed. An inline placeholder without a value shall
+      be reported by a warning of class dta_template_placeholders_unresolved
+      with the same field. quiet = TRUE shall silence neither warning: of what
+      write_dta() and export_with_template() print it silences the progress
+      message. A template whose blocks all render shall raise neither warning.
+    risk: high
+    category: functional
+    covers: [export_with_template, write_dta]
+    source: R/exportTemplateBlocks.R (.tv_render_blocks); R/exportTemplateDocx.R
+    notes: >
+      The block warning used to be gated on quiet, and write_dta(template = )
+      and the application both pass quiet = TRUE to the template export, so a
+      typo such as {COLUMN_SPECS:ADLS} produced a document with that text in it
+      and no warning from either. REQ-EXPORT-014 already required a warning for
+      an inline placeholder; this requirement extends it to block placeholders
+      and region markers and fixes the classes. The application shows the
+      warning to the user (REQ-APP-066).
+
+  - id: REQ-EXPORT-049
+    text: >
+      The Word, PDF and Markdown documents written by write_dta() and
+      write_dataset_metadata() shall word the expected count of a file entry
+      that declares a minimum and no maximum as "n or more", and the total of a
+      dataset in which any file entry has no maximum as "n or more files",
+      where n is the sum of the minimums; they shall never end a range at 0 or
+      state a total whose upper end is below its lower end. An entry with both
+      limits keeps "n", or "n to m" when they differ, and a dataset whose
+      entries all have a maximum keeps the total "n to m files".
+    risk: medium
+    category: functional
+    covers: [write_dta, write_dataset_metadata]
+    source: R/documentData.R (.file_specs_df, .file_count_sentence)
+    notes: >
+      An open maximum is how check() and print() already read it: any number of
+      files from the minimum upward is accepted. The documents used to read the
+      missing maximum as 0 and printed "2 to 0" for the entry and "3 to 1 files"
+      for a dataset with one exact file and one open entry.

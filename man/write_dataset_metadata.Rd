@@ -26,7 +26,8 @@ write_dataset_metadata(
 
 \item{format}{Character. Output format: "docx", "pdf", or "md". If NULL
 (the default), inferred from the file extension, falling back to "docx"
-when the file has none.}
+when the file has none. A PDF that a fallback backend made warns with class
+\code{dta_pdf_backend_fallback}, as for \code{\link[=write_dta]{write_dta()}}.}
 
 \item{overwrite}{Logical. Whether to overwrite existing files. Default: FALSE.}
 
@@ -44,7 +45,9 @@ Default: TRUE. Applies to every format.}
 and optionally \code{organization} (or \code{org}) fields, or a data.frame with
 columns \code{Organization}, \code{Name}, \code{Role}.}
 
-\item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
+\item{quiet}{Logical. If TRUE, suppresses the progress message ("Document
+saved ..."); warnings, such as the one for a PDF made by a fallback
+backend, are never suppressed. Default is FALSE.}
 
 \item{document_name}{Optional character: what this kind of document is
 called, shown as the main title of the export; the dataset specification

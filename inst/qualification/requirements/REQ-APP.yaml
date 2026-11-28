@@ -1147,3 +1147,21 @@ requirements:
     notes: >
       The editor's hint promises "a minimum and/or maximum". An open side is
       stored as minus or plus infinity, written -.inf or .inf in YAML.
+
+  - id: REQ-APP-066
+    text: >
+      When the Word export through a template of the library leaves a block
+      placeholder, a region marker or a placeholder without a value in the
+      document, the application shall show the person who pressed Export a
+      warning notification that lists those placeholders, and shall still
+      deliver the document. A template that is filled completely shall show no
+      such warning.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R (export_do); R/exportTemplateBlocks.R
+    notes: >
+      The export function warns whatever quiet is (REQ-EXPORT-048), but a
+      warning raised inside a Shiny handler reaches only the server's console,
+      so the person exporting read "exported successfully" for a document with
+      the literal placeholder in it.

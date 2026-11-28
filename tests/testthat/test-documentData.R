@@ -360,6 +360,108 @@ test_that(".file_count_sentence states the total count and how to read the names
   )
 })
 
+# ---- an open maximum (c4-tmpl-export-22) --------------------------------------
+#
+# A file entry with a minimum and no maximum accepts any number of files from
+# the minimum upward: the engine never compares a count with a missing maximum,
+# and print_info() words it "n or more". The documents used to read the missing
+# maximum as 0 and state an impossible range ("2 to 0"; for a whole dataset
+# "3 to 1 files").
+#
+# Every expected string below is derived by hand from the declared counts:
+# one.csv is exactly 1 file, part_.*  is at least 2 and has no upper limit.
+
+.dd_open_files <- function() {
+  list(
+    DTAFileCSV("one.csv"),
+    DTAFileCSV("part_.*\\.csv$", pattern = TRUE, min_number_of_files = 2)
+  )
+}
+
+.dd_open_dataset <- function() {
+  DTADataSetFile(id = "parts", files = .dd_open_files())
+}
+
+test_that(".file_specs_df words an open maximum as 'n or more'", {
+  expect_identical(.file_specs_df(.dd_open_files())$`Expected Count`, c("1", "2 or more"))
+
+  # An open minimum is a different thing and already read correctly: at most 3.
+  at_most <- list(DTAFileCSV("p_.*", pattern = TRUE, max_number_of_files = 3))
+  expect_identical(.file_specs_df(at_most)$`Expected Count`, "0 to 3")
+})
+
+test_that(".file_count_sentence totals an open maximum as 'n or more'", {
+  # 1 exactly + at least 2, no upper limit: at least 3.
+  expect_identical(
+    .file_count_sentence(.dd_open_files(), explain = FALSE),
+    "3 or more files are expected for this dataset in total."
+  )
+  # One open entry alone; the minimum is the whole lower bound.
+  expect_identical(
+    .file_count_sentence(.dd_open_files()[2], explain = FALSE),
+    "2 or more files are expected for this dataset in total."
+  )
+  # A minimum of 0 with no maximum accepts anything, including nothing.
+  anything <- list(DTAFileCSV("x_.*", pattern = TRUE, min_number_of_files = 0))
+  expect_identical(
+    .file_count_sentence(anything, explain = FALSE),
+    "0 or more files are expected for this dataset in total."
+  )
+  # A bounded set is unchanged: [1,1] + [1,3] -> 2 to 4 (see the test above).
+})
+
+test_that("the Markdown export of a dataset with an open maximum reads 'or more', never 'to 0'", {
+  out <- tempfile(fileext = ".md")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dataset_metadata(.dd_open_dataset(), out, quiet = TRUE)
+  lines <- readLines(out, encoding = "UTF-8")
+
+  expect_true(any(startsWith(lines, "3 or more files are expected for this dataset in total.")))
+  row <- grep("Regex pattern", lines, value = TRUE)
+  expect_length(row, 1L)
+  expect_match(row, "| 2 or more |", fixed = TRUE)
+  expect_false(any(grepl("to 0", lines, fixed = TRUE)))
+  expect_false(any(grepl("3 to 1", lines, fixed = TRUE)))
+})
+
+test_that("the Word export of a dataset with an open maximum reads 'or more', never 'to 0'", {
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dataset_metadata(.dd_open_dataset(), out, quiet = TRUE)
+  cells <- .docx_paragraphs(out)
+
+  expect_true(any(startsWith(cells, "3 or more files are expected for this dataset in total.")))
+  expect_true("2 or more" %in% cells)
+  expect_false(any(grepl("to 0", cells, fixed = TRUE)))
+  expect_false(any(grepl("3 to 1", cells, fixed = TRUE)))
+})
+
+test_that("write_dta and the {DATASETS} template block say 'or more' for an open maximum", {
+  dta <- create_example_DTA()
+  dta@datasets <- list(parts = .dd_open_dataset())
+
+  md <- tempfile(fileext = ".md")
+  docx <- tempfile(fileext = ".docx")
+  filled <- tempfile(fileext = ".docx")
+  template <- .make_template("{DATASETS}")
+  on.exit(unlink(c(md, docx, filled, template), force = TRUE), add = TRUE)
+  write_dta(dta, md, quiet = TRUE)
+  write_dta(dta, docx, quiet = TRUE)
+  export_with_template(dta, template, filled, quiet = TRUE, fallback = FALSE)
+
+  md_lines <- readLines(md, encoding = "UTF-8")
+  expect_true(any(startsWith(md_lines, "3 or more files are expected for this dataset in total.")))
+  expect_match(grep("Regex pattern", md_lines, value = TRUE), "| 2 or more |", fixed = TRUE)
+  # The template block fills the table only; the built-in layout adds the
+  # sentence above it.
+  for (path in c(docx, filled)) {
+    cells <- .docx_paragraphs(path)
+    expect_true("2 or more" %in% cells, info = path)
+    expect_false(any(grepl("to 0", cells, fixed = TRUE)), info = path)
+  }
+  expect_true(any(startsWith(.docx_paragraphs(docx), "3 or more files are expected")))
+})
+
 test_that(".dataset_facts shows the template date as the dataset document does", {
   # Both go through .format_document_date(): a missing date is no row (it used
   # to read "NA" here), a given one is shown as written.

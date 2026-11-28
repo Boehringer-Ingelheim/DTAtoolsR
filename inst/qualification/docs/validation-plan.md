@@ -224,8 +224,9 @@ the report states which of them did not.
    defect that is not closed affects it — is judged the same way, together
    with that defect's impact statement and workaround.
 
-A verdict of `PASS WITH NOT-EXECUTED TESTS` requires the reviewer's judgement
-on point 5. A verdict marked `(PARTIAL)` cannot support a complete claim about
+A verdict of `NOT EXECUTED` means no test case passed; it supports no claim at
+all and is not accepted by the CI gate. A verdict of
+`PASS WITH NOT-EXECUTED TESTS` requires the reviewer's judgement on point 5. A verdict marked `(PARTIAL)` cannot support a complete claim about
 the software: a filter or a stage selection was applied, and the run should be
 repeated in full before it is signed.
 

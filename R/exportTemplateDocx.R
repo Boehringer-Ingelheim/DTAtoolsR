@@ -98,7 +98,14 @@
 #' @param output Character. Path to the `.docx` file to create.
 #' @param variables Optional named list of additional or overriding placeholder
 #'   values. Names may include or omit the surrounding braces. Default: `NULL`.
-#' @param quiet Logical. If `TRUE`, suppresses console output. Default: `FALSE`.
+#' @param quiet Logical. If `TRUE`, suppresses the progress message and the
+#'   warning that announces the `fallback` below. It never suppresses the
+#'   warnings about placeholders that stayed in the finished document: an inline
+#'   placeholder without a value (class `dta_template_placeholders_unresolved`)
+#'   and a block placeholder or `{#DATASETS}` / `{/DATASETS}` marker that could
+#'   not be rendered (class `dta_template_blocks_unrendered`, plus
+#'   `dta_template_region_malformed` when a marker is among them). Both carry
+#'   the leftover `tokens`. Default: `FALSE`.
 #' @param fallback Logical. If `TRUE` (default) and template processing fails,
 #'   fall back to the standard programmatic document produced by [write_dta()].
 #'   The substitution is signalled as a **warning** condition (unless `quiet =
@@ -179,7 +186,7 @@ export_with_template <- function(
 
   tryCatch(
     {
-      .replace_docx_placeholders(template, all_vars, output, dta = dta, quiet = quiet)
+      .replace_docx_placeholders(template, all_vars, output, dta = dta)
       if (!isTRUE(quiet)) {
         cli::cli_alert_success("Document exported with template to {.file {output}}")
       }
@@ -814,11 +821,12 @@ dta_template_placeholders <- function(dta = NULL) {
 #' @param dta A [DTA] object, passed through to [.tv_render_blocks()] so a block
 #'   placeholder left alone by the substitution above can be rendered.
 #' @param output_path Character. Path to the `.docx` to create.
-#' @param quiet Logical. Suppress the warning about block placeholders left
-#'   unchanged. Default `FALSE`.
-#' @return Invisibly returns `output_path`.
+#' @return Invisibly returns `output_path`. Placeholders that stayed in the
+#'   document are reported with warnings (`dta_template_placeholders_unresolved`
+#'   for inline ones, `dta_template_blocks_unrendered` for block placeholders and
+#'   region markers); there is no switch that silences them.
 #' @keywords internal
-.replace_docx_placeholders <- function(template_path, variables, dta, output_path, quiet = FALSE) {
+.replace_docx_placeholders <- function(template_path, variables, dta, output_path) {
   # No requireNamespace() guards here: xml2, zip and officer are all hard
   # Imports, so they cannot be missing at this point.
   out_dir <- dirname(output_path)
@@ -888,10 +896,14 @@ dta_template_placeholders <- function(dta = NULL) {
     # to interpolate e.g. `{NOT_A_FIELD}` as an R expression.
     items <- gsub("}", "}}", gsub("{", "{{", unresolved, fixed = TRUE), fixed = TRUE)
     names(items) <- rep("*", length(items))
-    cli::cli_warn(c(
-      "!" = "Some template placeholders had no matching value and were left unchanged:",
-      items
-    ))
+    cli::cli_warn(
+      c(
+        "!" = "Some template placeholders had no matching value and were left unchanged:",
+        items
+      ),
+      class = "dta_template_placeholders_unresolved",
+      tokens = unresolved
+    )
   }
 
   # Zipped, rendered and validated on a staging file beside output_path, and
@@ -906,7 +918,6 @@ dta_template_placeholders <- function(dta = NULL) {
         stage,
         dta = dta,
         blocks = c(region_blocks, blocks),
-        quiet = quiet,
         bare = names(region_blocks)
       )
       invisible(NULL)

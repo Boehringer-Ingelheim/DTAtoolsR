@@ -1361,6 +1361,12 @@ qual_verdict <- function(tests_df, meta_df, dev_status, partial) {
   stale <- sum(dev_status$status_run == "not_reproduced")
   verdict <- if (failed > 0 || meta_failed > 0 || stale > 0) {
     "FAIL"
+  } else if (!any(tests_df$status == "pass")) {
+    # No failure is not a pass: a verdict that begins with PASS says something
+    # was shown to hold, which needs a test case that did. A run that selected
+    # no test (stages = character(0)) or in which every test skipped has shown
+    # nothing, and must not read as, or be gated as, a success.
+    return("NOT EXECUTED")
   } else if (any(tests_df$status == "skip")) {
     "PASS WITH NOT-EXECUTED TESTS"
   } else {
@@ -1783,6 +1789,14 @@ qual_read_index <- function(root) {
 #'   deviation register, the meta-consistency checks, the environment record
 #'   and the path to the bundle. Its `print()` method summarises the run.
 #'
+#'   The verdict is `"FAIL"` when any executed test case failed or errored, any
+#'   meta check failed or a registered deviation stopped reproducing;
+#'   `"NOT EXECUTED"` when no test case passed (a run of no stage, or one whose
+#'   cases were all skipped), which claims nothing; otherwise `"PASS"`, or
+#'   `"PASS WITH NOT-EXECUTED TESTS"` when some case was skipped. A run that
+#'   used a filter or only some stages marks a `PASS` or `FAIL` verdict
+#'   `"(PARTIAL)"`.
+#'
 #' @seealso [qualification_requirements()] for the requirements being verified.
 #' @export
 #' @examples
@@ -1948,7 +1962,11 @@ run_qualification <- function(output_dir,
       stages_requested = stages, stages_run = stages, scale = scale,
       filter = filter %||% NA_character_, partial = partial,
       formats_requested = formats, seed = seed,
-      hash_algorithm = qual_hash_algorithm()
+      hash_algorithm = qual_hash_algorithm(),
+      # Known up front, and the report names it: it is rendered before the
+      # manifest is written, so setting it afterwards left every real report
+      # with "sha256sum -c " and no file (c4-tmpl-export-02).
+      hash_manifest = if (identical(qual_hash_algorithm(), "sha256")) "SHA256SUMS" else "MD5SUMS"
     ),
     verdict = verdict,
     summary = list(
@@ -1990,16 +2008,11 @@ run_qualification <- function(output_dir,
 
   report_paths <- qual_write_report(x, bundle_dir, formats)
   x$run$formats_rendered <- report_paths
-  x$run$hash_manifest <- if (identical(qual_hash_algorithm(), "sha256")) {
-    "SHA256SUMS"
-  } else {
-    "MD5SUMS"
-  }
   qual_write_summary_txt(x, bundle_dir)
 
   # results/run.json (the serialised x$run) is written last, so that it can
-  # record formats_rendered, hash_manifest and results_json_hash, none of which
-  # exist when results.json is built. The hash quoted in the report and in
+  # record formats_rendered and results_json_hash, neither of which exists when
+  # results.json is built. The hash quoted in the report and in
   # SUMMARY.txt is that of results.json, taken before this write.
   jsonlite::write_json(
     x$run, file.path(bundle_dir, "results", "run.json"),

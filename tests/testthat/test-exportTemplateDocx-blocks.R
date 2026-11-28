@@ -661,7 +661,10 @@ test_that("a block token in a header is left untouched and never reaches the bod
   out <- tempfile(fileext = ".docx")
   on.exit(unlink(out, force = TRUE), add = TRUE)
 
-  export_with_template(dta, template, out, quiet = TRUE)
+  expect_warning(
+    export_with_template(dta, template, out, quiet = TRUE),
+    class = "dta_template_blocks_unrendered"
+  )
 
   ex <- tempfile("block_hdr_out_")
   dir.create(ex)
@@ -845,7 +848,10 @@ test_that("a substituted value that spells a block token is never mistaken for a
   out <- tempfile(fileext = ".docx")
   on.exit(unlink(out, force = TRUE), add = TRUE)
 
-  export_with_template(dta, template, out, quiet = TRUE)
+  expect_warning(
+    export_with_template(dta, template, out, quiet = TRUE),
+    class = "dta_template_blocks_unrendered"
+  )
 
   summary <- .block_docx_summary(out)
   expect_equal(sum(summary$content_type == "table cell"), 0)
@@ -872,7 +878,10 @@ test_that("a one-cell table whose only content is a block token is left untouche
   out <- tempfile(fileext = ".docx")
   on.exit(unlink(out, force = TRUE), add = TRUE)
 
-  export_with_template(dta, template, out, quiet = TRUE)
+  expect_warning(
+    export_with_template(dta, template, out, quiet = TRUE),
+    class = "dta_template_blocks_unrendered"
+  )
 
   summary <- .block_docx_summary(out)
   cell_text <- .block_table_cells(summary)
@@ -1105,4 +1114,124 @@ test_that("{DATASETS} prints the spaced ids in its column table and its rule wor
   expect_identical(cells[cells %in% .block_spaced_ids], .block_spaced_ids)
   expect_true(grepl("Visit Date (UTC)", descriptions[["ukey"]], fixed = TRUE))
   expect_true(grepl("{DATASET_ID}", .docx_text(out), fixed = TRUE))
+})
+
+# ---- unrendered placeholders are always reported (c4-tmpl-export-29) ---------
+#
+# `quiet` mutes progress messages. A block placeholder or a {#DATASETS} marker
+# that is still in the finished document is a defect of that document, not
+# console chatter, so it is reported with the class
+# dta_template_blocks_unrendered whatever `quiet` says -- and therefore also
+# through write_dta(template =) and the app, which both hand the template export
+# quiet = TRUE. A malformed region marker additionally carries the class
+# dta_template_region_malformed. The condition's `tokens` field lists what was
+# left, exactly as it stands in the document.
+
+.unrendered_cases <- function() {
+  list(
+    unknown_dataset = list(lines = "{COLUMN_SPECS:NOPE}", tokens = "{COLUMN_SPECS:NOPE}", region = FALSE),
+    inside_a_sentence = list(lines = "Columns: {COLUMN_SPECS}", tokens = "{COLUMN_SPECS}", region = FALSE),
+    unclosed_region = list(lines = c("BEFORE", "{#DATASETS}", "text"), tokens = "{#DATASETS}", region = TRUE),
+    lone_closing_marker = list(lines = "{/DATASETS}", tokens = "{/DATASETS}", region = TRUE)
+  )
+}
+
+test_that("export_with_template reports a block placeholder it could not render, with quiet = TRUE", {
+  dta <- create_example_DTA()
+  for (name in names(.unrendered_cases())) {
+    case <- .unrendered_cases()[[name]]
+    template <- .make_template(case$lines)
+    out <- tempfile(fileext = ".docx")
+    w <- expect_warning(
+      export_with_template(dta, template, out, quiet = TRUE, fallback = FALSE),
+      class = "dta_template_blocks_unrendered"
+    )
+    expect_identical(w$tokens, case$tokens, label = name)
+    expect_identical(inherits(w, "dta_template_region_malformed"), case$region, label = name)
+    # Reporting it does not stop the export: the document is written, as before.
+    expect_true(file.exists(out), label = name)
+    unlink(c(template, out), force = TRUE)
+  }
+})
+
+test_that("write_dta(template =) reports an unrendered placeholder whatever quiet is", {
+  dta <- create_example_DTA()
+  for (name in names(.unrendered_cases())) {
+    case <- .unrendered_cases()[[name]]
+    template <- .make_template(case$lines)
+    for (quiet in c(TRUE, FALSE)) {
+      out <- tempfile(fileext = ".docx")
+      w <- suppressMessages(expect_warning(
+        write_dta(dta, out, template = template, quiet = quiet),
+        class = "dta_template_blocks_unrendered",
+        label = paste(name, "quiet =", quiet)
+      ))
+      expect_identical(w$tokens, case$tokens, label = name)
+      unlink(out, force = TRUE)
+    }
+    unlink(template, force = TRUE)
+  }
+})
+
+test_that("a template whose blocks all render raises no placeholder warning, quiet or not", {
+  dta <- create_example_DTA()
+  template <- .make_template(c("BEFORE", "{COLUMN_SPECS}", "{#DATASETS}", "{DATASET_ID}", "{/DATASETS}"))
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(c(template, out), force = TRUE), add = TRUE)
+
+  expect_no_warning(
+    export_with_template(dta, template, out, quiet = TRUE, fallback = FALSE),
+    class = "dta_template_blocks_unrendered"
+  )
+  suppressMessages(expect_no_warning(
+    export_with_template(dta, template, out, quiet = FALSE, fallback = FALSE, overwrite = TRUE),
+    class = "dta_template_blocks_unrendered"
+  ))
+})
+
+test_that("quiet still mutes the progress message of the template export", {
+  dta <- create_example_DTA()
+  template <- .make_template("{COLUMN_SPECS}")
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(c(template, out), force = TRUE), add = TRUE)
+
+  expect_no_message(export_with_template(dta, template, out, quiet = TRUE, fallback = FALSE))
+  expect_message(
+    export_with_template(dta, template, out, quiet = FALSE, fallback = FALSE, overwrite = TRUE),
+    class = "cliMessage"
+  )
+})
+
+test_that("an unknown inline placeholder is reported with its own class, with quiet = TRUE too", {
+  dta <- create_example_DTA()
+  template <- .make_template("Hello {NOT_A_FIELD}")
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(c(template, out), force = TRUE), add = TRUE)
+
+  w <- expect_warning(
+    write_dta(dta, out, template = template, quiet = TRUE),
+    class = "dta_template_placeholders_unresolved"
+  )
+  expect_identical(w$tokens, "{NOT_A_FIELD}")
+  # An inline token and a block token are different warnings with different classes.
+  expect_false(inherits(w, "dta_template_blocks_unrendered"))
+})
+
+test_that("no Word template shipped with the package leaves a block placeholder behind", {
+  # The warning is no longer optional, so a template of ours that tripped it
+  # would raise it on every export of every user (the app included).
+  dir <- system.file("extdata", "word-templates", package = "DTAtools")
+  templates <- list.files(dir, pattern = "[.]docx$", full.names = TRUE)
+  # A guaranteed package asset: its absence is a failure, not a skip.
+  expect_gt(length(templates), 0L)
+  dta <- create_example_DTA()
+  # The two values the app always supplies for the bundled template.
+  app_variables <- list("{DATASETS_SUMMARY}" = "", "{YAML_EMBEDDED}" = "")
+  for (template in templates) {
+    out <- tempfile(fileext = ".docx")
+    expect_no_warning(
+      export_with_template(dta, template, out, variables = app_variables, quiet = TRUE, fallback = FALSE)
+    )
+    unlink(out, force = TRUE)
+  }
 })

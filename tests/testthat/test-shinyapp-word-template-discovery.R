@@ -573,3 +573,72 @@ test_that("a correct library lists its template and shows no layout warning", {
     expect_no_match(frame, "No creation templates were found", fixed = TRUE)
   })
 })
+
+# ---- the custom Word export reports what the template left unfilled ----------
+#
+# export_with_template() warns whenever a block placeholder or a region marker is
+# still in the finished document, whatever `quiet` says. The app hands it
+# quiet = TRUE, and a warning inside a Shiny handler only reaches the server's
+# console, so the person who pressed Export saw a clean "exported successfully"
+# for a document with {COLUMN_SPECS:NOPE} printed in it (c4-tmpl-export-29).
+# The app now shows the warning to the user, and still delivers the document.
+
+# Every notification the app shows, with its type, in `notices` of the calling test.
+mock_notices <- function(env = parent.frame()) {
+  env$notices <- list()
+  testthat::local_mocked_bindings(
+    showNotification = function(ui, ..., type = "default") {
+      env$notices[[length(env$notices) + 1L]] <- list(
+        text = paste(as.character(ui), collapse = ""), type = type
+      )
+      invisible(NULL)
+    },
+    .package = "shiny", .env = env
+  )
+}
+
+app_export_word_custom <- function(template_lines) {
+  root <- make_library()
+  dir.create(file.path(root, "export-templates"))
+  tmpl <- .make_template(template_lines)
+  file.copy(tmpl, file.path(root, "export-templates", "house.docx"))
+  unlink(tmpl)
+  writeLines(
+    c("exports:", "  bundled_word_templates: false", "  document: [word_template]"),
+    file.path(root, "dta-app.yaml")
+  )
+  use_libraries(root)
+
+  out <- list()
+  shiny::testServer(app_server_dir(), {
+    rv$dta <- app_fixture_dta()
+    session$setInputs(
+      export_format = "word", export_word_mode = "custom",
+      export_template_select = "library:house.docx", export_include_yaml_word = FALSE
+    )
+    session$setInputs(export_do = 1)
+    out$name <<- export_state$file_name
+    out$exists <<- !is.null(export_state$file_path) && file.exists(export_state$file_path)
+  })
+  out
+}
+
+test_that("a custom Word export tells the user which block placeholder stayed in the document", {
+  mock_notices()
+  res <- app_export_word_custom(c("Agreement {DTA_TITLE}", "{COLUMN_SPECS:NOPE}"))
+
+  warned <- Filter(function(n) identical(n$type, "warning"), notices)
+  expect_length(warned, 1L)
+  expect_match(warned[[1]]$text, "{COLUMN_SPECS:NOPE}", fixed = TRUE)
+  # The document is still delivered, as it was before.
+  expect_match(res$name, "[.]docx$")
+  expect_true(res$exists)
+})
+
+test_that("a custom Word export that fills every placeholder shows no warning", {
+  mock_notices()
+  res <- app_export_word_custom(c("Agreement {DTA_TITLE}", "{COLUMN_SPECS}"))
+
+  expect_length(Filter(function(n) identical(n$type, "warning"), notices), 0L)
+  expect_true(res$exists)
+})

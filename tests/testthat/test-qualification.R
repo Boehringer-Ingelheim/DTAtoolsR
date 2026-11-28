@@ -556,3 +556,144 @@ test_that("a run filter that selects no test in any stage aborts instead of pass
   )
   expect_s3_class(bundle, "dta_qualification")
 })
+
+# ---- a run that executed nothing is not a pass (c4-tmpl-export-03) -----------
+#
+# The verdict was derived from the ABSENCE of failures, so a run that executed
+# no test at all (stages = character(0), a documented mode) had none and read
+# "PASS (PARTIAL)" -- printed green, and accepted by the CI gate. A verdict that
+# begins with PASS is a claim that something was shown to hold: it needs at
+# least one test case that passed.
+
+test_that("a run in which no test case passed is NOT EXECUTED, never a PASS", {
+  meta_ok <- data.frame(ok = TRUE)
+  dev_ok <- data.frame(status_run = "reproduced")
+
+  # Nothing ran, partial or not.
+  none <- qual_tests_empty()
+  expect_identical(qual_verdict(none, meta_ok, dev_ok, partial = TRUE), "NOT EXECUTED")
+  expect_identical(qual_verdict(none, meta_ok, dev_ok, partial = FALSE), "NOT EXECUTED")
+  # Everything that ran was skipped: nothing was shown to hold either.
+  skipped <- data.frame(status = c("skip", "skip"))
+  expect_identical(qual_verdict(skipped, meta_ok, dev_ok, partial = FALSE), "NOT EXECUTED")
+
+  # A failure still outranks it, and one passing case is enough to be a PASS.
+  expect_identical(qual_verdict(none, data.frame(ok = FALSE), dev_ok, partial = TRUE), "FAIL (PARTIAL)")
+  expect_identical(
+    qual_verdict(data.frame(status = c("pass", "skip")), meta_ok, dev_ok, partial = FALSE),
+    "PASS WITH NOT-EXECUTED TESTS"
+  )
+  expect_identical(qual_verdict(data.frame(status = "pass"), meta_ok, dev_ok, partial = TRUE), "PASS (PARTIAL)")
+})
+
+test_that("run_qualification(stages = character()) ends NOT EXECUTED in the object, SUMMARY.txt and the report", {
+  skip_on_cran()
+  dir <- withr::local_tempdir()
+  res <- run_qualification(
+    dir,
+    stages = character(0), formats = "md", quiet = TRUE, include_unit_tests = "never"
+  )
+
+  expect_identical(res$verdict, "NOT EXECUTED")
+  summary_lines <- readLines(file.path(res$bundle_dir, "SUMMARY.txt"))
+  expect_true(any(grepl("^Verdict +: NOT EXECUTED$", summary_lines)))
+  report <- readLines(file.path(res$bundle_dir, "report", "qualification-report.md"))
+  expect_true(any(grepl("NOT EXECUTED", report, fixed = TRUE)))
+  expect_false(any(grepl("PASS", summary_lines[grepl("^Verdict", summary_lines)], fixed = TRUE)))
+})
+
+test_that("the CI gate stops on every verdict that is not a PASS", {
+  skip_if_no_source_tree("the CI gate script lives in the source tree")
+  script <- test_path("..", "..", ".github", "scripts", "qualification_verdict.R")
+  skip_if_not(file.exists(script), "the .github scripts are not part of this copy of the package")
+  # Absolute: the script runs from another working directory.
+  script <- normalizePath(script)
+
+  gate_status <- function(verdict) {
+    dir <- withr::local_tempdir(.local_envir = parent.frame())
+    out_dir <- file.path(dir, "qualification-output", "bundle")
+    dir.create(out_dir, recursive = TRUE)
+    writeLines(
+      c("DTAtools qualification QUAL-x", "", paste("Verdict          :", verdict)),
+      file.path(out_dir, "SUMMARY.txt")
+    )
+    res <- withr::with_dir(
+      dir,
+      suppressWarnings(system2(
+        file.path(R.home("bin"), "Rscript"), c("--no-init-file", shQuote(script)),
+        stdout = TRUE, stderr = TRUE
+      ))
+    )
+    attr(res, "status") %||% 0L
+  }
+
+  for (ok in c("PASS", "PASS (PARTIAL)", "PASS WITH NOT-EXECUTED TESTS")) {
+    expect_identical(gate_status(ok), 0L, label = ok)
+  }
+  for (bad in c("FAIL", "FAIL (PARTIAL)", "NOT EXECUTED")) {
+    expect_false(identical(gate_status(bad), 0L), label = bad)
+  }
+})
+
+# ---- the report names the manifest it tells the auditor to check (c4-tmpl-export-02)
+#
+# The report was written before run$hash_manifest was set, so every real
+# report's evidence inventory read "Verify with `sha256sum -c ` from the bundle
+# directory." -- a command with no file in it, in the signed document. The
+# helper test above passes a hand-built `run` list that run_qualification()
+# never produces; this one reads the report of an actual run.
+
+test_that("the report of a real run quotes a complete verification command naming the manifest", {
+  skip_on_cran()
+  dir <- withr::local_tempdir()
+  res <- run_qualification(
+    dir,
+    stages = character(0), formats = "md", quiet = TRUE, include_unit_tests = "never"
+  )
+  # What the manifest is called follows from the hash algorithm tools offers.
+  has_sha256 <- "sha256sum" %in% getNamespaceExports("tools")
+  manifest <- if (has_sha256) "SHA256SUMS" else "MD5SUMS"
+  tool <- if (has_sha256) "sha256sum" else "md5sum"
+  report <- readLines(file.path(res$bundle_dir, "report", "qualification-report.md"))
+
+  expect_true(file.exists(file.path(res$bundle_dir, manifest)))
+  expect_true(any(report == sprintf("Verify with `%s -c %s` from the bundle directory.", tool, manifest)))
+  expect_true(any(startsWith(report, sprintf("`%s` lists every file in this evidence bundle", manifest))))
+  expect_false(any(grepl("sum -c `", report, fixed = TRUE)))
+  expect_false(any(grepl("`the hash manifest`", report, fixed = TRUE)))
+})
+
+test_that("the report renderer keeps a PDF that a fallback backend made, and logs the fallback", {
+  # qual_safe() returns its default for ANY warning. The fallback warning of the
+  # PDF conversion (c4-tmpl-export-16) would therefore have discarded a good PDF
+  # and sent the report down the Unicode-engine route instead.
+  dir <- withr::local_tempdir()
+  md <- file.path(dir, "qualification-report.md")
+  writeLines("# report", md)
+  docx <- file.path(dir, "qualification-report.docx")
+  print(officer::read_docx(), target = docx)
+  logged <- character(0)
+  local_mocked_bindings(
+    dta_pdf_backend = function() list(name = "word", engine = "", available = c("word", "pandoc")),
+    .pdf_backends_available = function() c("word", "pandoc"),
+    .word_docx_to_pdf = function(docx_file, pdf_file) cli::cli_abort("word down"),
+    .pandoc_docx_to_pdf = function(docx_file, pdf_file) {
+      writeBin(charToRaw("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n"), pdf_file)
+      invisible(pdf_file)
+    },
+    qual_log = function(...) logged <<- c(logged, paste(unlist(list(...)), collapse = " "))
+  )
+  local_mocked_bindings(
+    render = function(...) stop("the Unicode-engine route must not run"),
+    .package = "rmarkdown"
+  )
+
+  got <- qual_render_pdf(md, docx)
+
+  expect_identical(
+    normalizePath(got, winslash = "/"),
+    normalizePath(file.path(dir, "qualification-report.pdf"), winslash = "/")
+  )
+  expect_identical(readBin(got, "raw", n = 4L), charToRaw("%PDF"))
+  expect_true(any(grepl("render pdf-fallback made by pandoc after word failed", logged, fixed = TRUE)))
+})

@@ -10169,14 +10169,38 @@ server <- function(input, output, session) {
             }
 
             # export_with_template() throws on error (caught below); no $ok.
-            DTAtools::export_with_template(
-              doc,
-              template = template_path,
-              output = output_file,
-              variables = variables,
-              quiet = TRUE,
-              fallback = FALSE,
-              overwrite = TRUE
+            #
+            # It WARNS whenever a placeholder or a region marker stayed in the
+            # finished document -- whatever `quiet` is -- and a warning raised
+            # inside a handler reaches only the server's console. The person
+            # who pressed Export would read "exported successfully" for a
+            # document with {COLUMN_SPECS:ADLS} printed in it, so the warning
+            # is shown to them. The document is still delivered.
+            notify_unfilled <- function(w) {
+              showNotification(
+                paste0(
+                  "The exported Word document still contains text that reads like a placeholder: ",
+                  paste(w$tokens, collapse = ", "),
+                  ". Either the template could not fill it, or a value of the document spells it. ",
+                  "The document was still exported."
+                ),
+                type = "warning",
+                duration = NULL
+              )
+              invokeRestart("muffleWarning")
+            }
+            withCallingHandlers(
+              DTAtools::export_with_template(
+                doc,
+                template = template_path,
+                output = output_file,
+                variables = variables,
+                quiet = TRUE,
+                fallback = FALSE,
+                overwrite = TRUE
+              ),
+              dta_template_blocks_unrendered = notify_unfilled,
+              dta_template_placeholders_unresolved = notify_unfilled
             )
           } else {
             # Built-in template. write_dta() throws on error; no $ok returned.

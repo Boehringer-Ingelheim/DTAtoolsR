@@ -554,11 +554,28 @@ qual_render_pdf <- function(md_path, docx_path) {
 
   usable_docx <- !is.null(docx_path) && !is.na(docx_path) && file.exists(docx_path)
   if (usable_docx && !is.null(qual_safe(dta_pdf_backend(), NULL))) {
+    # qual_safe() turns ANY warning into "no PDF", which would discard a
+    # converted PDF that a fallback backend did make. The fallback is recorded
+    # in the run log instead, naming the backend that failed and the one that
+    # made the file; the report's Word document carries no running header or
+    # footer of its own for the re-typesetting routes to lose.
     via_docx <- qual_safe(
-      {
-        .convert_docx_to_pdf(docx_path, pdf)
-        pdf
-      },
+      withCallingHandlers(
+        {
+          .convert_docx_to_pdf(docx_path, pdf)
+          pdf
+        },
+        dta_pdf_backend_fallback = function(w) {
+          qual_log(
+            "render", "pdf-fallback",
+            sprintf(
+              "made by %s after %s failed",
+              w$used, paste(names(w$failed), collapse = ", ")
+            )
+          )
+          invokeRestart("muffleWarning")
+        }
+      ),
       NA_character_
     )
     if (!is.na(via_docx) && file.exists(via_docx)) {

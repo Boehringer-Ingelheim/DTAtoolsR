@@ -885,9 +885,177 @@ test_that("conversion falls through to the next backend when the first fails", {
     }
   )
 
-  expect_no_error(.convert_docx_to_pdf(docx, out))
+  # The fallback is allowed to happen, never to happen unannounced (see below).
+  expect_warning(.convert_docx_to_pdf(docx, out), class = "dta_pdf_backend_fallback")
   expect_identical(tried, c("libreoffice", "pandoc"))
   expect_identical(readBin(out, what = "raw", n = 4L), charToRaw("%PDF"))
+})
+
+# ---- the fallback is never silent (c4-tmpl-export-16, decision Q7) -------------
+#
+# When the preferred backend fails and a later one produces the PDF, the file is
+# still written -- many machines legitimately have only TinyTeX -- but a warning
+# of class dta_pdf_backend_fallback always says which backend failed (and why),
+# which one produced the file, and, for the two routes that re-typeset the
+# document, that the running page header and footer are not in it. The condition
+# carries `used`, `failed` (named by backend) and `furniture_lost`; the tests
+# read those fields, not the wording.
+
+.stub_pdf_bytes <- function() charToRaw("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n")
+
+# A docx to convert and a destination, both cleaned up by the calling test.
+.fallback_fixture <- function(env = parent.frame()) {
+  docx <- tempfile(fileext = ".docx")
+  out <- tempfile(fileext = ".pdf")
+  withr::defer(unlink(c(docx, out), force = TRUE), envir = env)
+  print(officer::read_docx(), target = docx)
+  list(docx = docx, out = out)
+}
+
+test_that("a fallback to TinyTeX or pandoc warns with the failed backend, the reason and the loss", {
+  fx <- .fallback_fixture()
+  local_mocked_bindings(
+    .pdf_backends_available = function() c("word", "tinytex", "pandoc"),
+    .word_docx_to_pdf = function(docx_file, pdf_file) cli::cli_abort("Word refused {{the call}}"),
+    .tinytex_docx_to_pdf = function(docx_file, pdf_file) {
+      writeBin(.stub_pdf_bytes(), pdf_file)
+      invisible(pdf_file)
+    }
+  )
+
+  w <- expect_warning(.convert_docx_to_pdf(fx$docx, fx$out), class = "dta_pdf_backend_fallback")
+
+  expect_identical(w$used, "tinytex")
+  expect_identical(names(w$failed), "word")
+  expect_match(w$failed[["word"]], "Word refused", fixed = TRUE)
+  expect_true(w$furniture_lost)
+  # What a reader of the console sees: the failed backend, its reason with the
+  # braces intact, the backend that was used, and the consequence.
+  msg <- conditionMessage(w)
+  expect_match(msg, "word", fixed = TRUE)
+  expect_match(msg, "tinytex", fixed = TRUE)
+  expect_match(msg, "{the call}", fixed = TRUE)
+  expect_match(msg, "header and footer", fixed = TRUE)
+  # The PDF itself is delivered.
+  expect_identical(readBin(fx$out, "raw", n = 4L), charToRaw("%PDF"))
+})
+
+test_that("every backend that failed before the one that worked is named", {
+  fx <- .fallback_fixture()
+  local_mocked_bindings(
+    .pdf_backends_available = function() c("word", "libreoffice", "pandoc"),
+    .word_docx_to_pdf = function(docx_file, pdf_file) cli::cli_abort("word down"),
+    .soffice_docx_to_pdf = function(docx_file, pdf_file) cli::cli_abort("soffice down"),
+    .pandoc_docx_to_pdf = function(docx_file, pdf_file) {
+      writeBin(.stub_pdf_bytes(), pdf_file)
+      invisible(pdf_file)
+    }
+  )
+
+  w <- expect_warning(.convert_docx_to_pdf(fx$docx, fx$out), class = "dta_pdf_backend_fallback")
+
+  expect_identical(w$used, "pandoc")
+  expect_identical(names(w$failed), c("word", "libreoffice"))
+  expect_match(w$failed[["libreoffice"]], "soffice down", fixed = TRUE)
+})
+
+test_that("a fallback from Word to LibreOffice warns but does not claim a loss it does not cause", {
+  fx <- .fallback_fixture()
+  local_mocked_bindings(
+    .pdf_backends_available = function() c("word", "libreoffice"),
+    .word_docx_to_pdf = function(docx_file, pdf_file) cli::cli_abort("word down"),
+    .soffice_docx_to_pdf = function(docx_file, pdf_file) {
+      writeBin(.stub_pdf_bytes(), pdf_file)
+      invisible(pdf_file)
+    }
+  )
+
+  w <- expect_warning(.convert_docx_to_pdf(fx$docx, fx$out), class = "dta_pdf_backend_fallback")
+
+  expect_identical(w$used, "libreoffice")
+  expect_false(w$furniture_lost)
+  # LibreOffice keeps the running header and footer (see dta_pdf_backend()).
+  expect_false(grepl("header", conditionMessage(w), fixed = TRUE))
+})
+
+test_that("no warning when the first backend works, or when it is the only one", {
+  fx <- .fallback_fixture()
+  writer <- function(docx_file, pdf_file) {
+    writeBin(.stub_pdf_bytes(), pdf_file)
+    invisible(pdf_file)
+  }
+  # First of two works: nothing fell back.
+  local_mocked_bindings(
+    .pdf_backends_available = function() c("libreoffice", "pandoc"),
+    .soffice_docx_to_pdf = writer,
+    .pandoc_docx_to_pdf = function(docx_file, pdf_file) cli::cli_abort("never reached")
+  )
+  expect_no_warning(.convert_docx_to_pdf(fx$docx, fx$out), class = "dta_pdf_backend_fallback")
+
+  # A machine with TinyTeX alone is not a fallback, whatever TinyTeX loses.
+  local_mocked_bindings(
+    .pdf_backends_available = function() "tinytex",
+    .tinytex_docx_to_pdf = writer
+  )
+  expect_no_warning(.convert_docx_to_pdf(fx$docx, fx$out), class = "dta_pdf_backend_fallback")
+})
+
+test_that("write_dta, write_dta(template =) and write_dataset_metadata warn alike, whatever quiet says", {
+  local_mocked_bindings(
+    .pdf_backends_available = function() c("word", "pandoc"),
+    .word_docx_to_pdf = function(docx_file, pdf_file) cli::cli_abort("word down"),
+    .pandoc_docx_to_pdf = function(docx_file, pdf_file) {
+      writeBin(.stub_pdf_bytes(), pdf_file)
+      invisible(pdf_file)
+    }
+  )
+  dta <- create_example_DTA()
+  ds <- create_example_DTADataSetTabular(2)
+  template <- .make_template("Title: {DTA_TITLE}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+
+  runs <- list(
+    built_in = function(f, quiet) write_dta(dta, f, format = "pdf", quiet = quiet),
+    template = function(f, quiet) write_dta(dta, f, format = "pdf", template = template, quiet = quiet),
+    dataset = function(f, quiet) write_dataset_metadata(ds, f, format = "pdf", quiet = quiet)
+  )
+  for (name in names(runs)) {
+    for (quiet in c(TRUE, FALSE)) {
+      out <- tempfile(fileext = ".pdf")
+      w <- suppressMessages(expect_warning(
+        runs[[name]](out, quiet),
+        class = "dta_pdf_backend_fallback",
+        label = paste(name, "quiet =", quiet)
+      ))
+      expect_identical(w$used, "pandoc", label = name)
+      expect_identical(names(w$failed), "word", label = name)
+      expect_identical(readBin(out, "raw", n = 4L), charToRaw("%PDF"), label = name)
+      unlink(out, force = TRUE)
+    }
+  }
+})
+
+test_that("the fallback to TinyTeX is announced end to end, and the PDF is a real one", {
+  # No mocked converter below Word: TinyTeX really typesets the document. Only
+  # Word is made to fail, so the test needs TinyTeX alone, on any machine.
+  real <- .pdf_backends_available()
+  skip_if_not("tinytex" %in% real, "TinyTeX is not usable on this machine")
+  local_mocked_bindings(
+    .pdf_backends_available = function() c("word", "tinytex"),
+    .word_docx_to_pdf = function(docx_file, pdf_file) cli::cli_abort("word down")
+  )
+  out <- tempfile(fileext = ".pdf")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  w <- expect_warning(
+    write_dta(create_example_DTA(), out, format = "pdf", quiet = TRUE),
+    class = "dta_pdf_backend_fallback"
+  )
+
+  expect_identical(w$used, "tinytex")
+  expect_true(w$furniture_lost)
+  expect_identical(readBin(out, "raw", n = 4L), charToRaw("%PDF"))
+  expect_gt(file.info(out)$size, 4000)
 })
 
 test_that("the abort reports every backend that failed, with braces intact", {

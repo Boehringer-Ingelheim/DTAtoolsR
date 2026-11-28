@@ -601,14 +601,13 @@
 #' @param dta A [DTA] object.
 #' @param blocks Named character vector from [.tv_mark_block_paragraphs()] and
 #'   [.tv_expand_regions()] combined: sentinel to the token it replaced.
-#' @param quiet Logical. Suppress the warning about placeholders left behind.
 #' @param bare Character vector of sentinels (a subset of `names(blocks)`)
 #'   stamped by [.tv_expand_regions()] rather than [.tv_mark_block_paragraphs()]:
 #'   these render their dataset content without the generated dataset-name
 #'   heading a top-level `{DATASETS}` block would otherwise add.
 #' @return Invisibly, `docx_path`.
 #' @keywords internal
-.tv_render_blocks <- function(docx_path, dta, blocks = character(0), quiet = FALSE, bare = character(0)) {
+.tv_render_blocks <- function(docx_path, dta, blocks = character(0), bare = character(0)) {
   if (length(blocks) > 0) {
     doc <- officer::read_docx(docx_path)
     # Render in document order, whichever pass stamped a block: what a block
@@ -650,18 +649,29 @@
     print(doc, target = docx_path)
   }
 
+  # Not tied to `quiet`: a placeholder still in the finished document is a
+  # defect of that document, not console progress (c4-tmpl-export-29). write_dta()
+  # and the app hand the template export quiet = TRUE and must still report it.
   leftover <- .tv_scan_block_tokens(docx_path)
-  if (length(leftover) > 0 && !isTRUE(quiet)) {
+  if (length(leftover) > 0) {
     items <- gsub("}", "}}", gsub("{", "{{", leftover, fixed = TRUE), fixed = TRUE)
     names(items) <- rep("*", length(items))
-    cli::cli_warn(c(
-      "!" = "Some block placeholders were left unchanged:",
-      items,
-      i = "A block placeholder must be the only text in its paragraph, in the document body -- not inside a sentence, a table cell, a header or a footer.",
-      i = "A {.code :DATASET} argument must name a dataset the DTA contains.",
-      i = "Text that only reads like a placeholder because a value spelled one is listed here too, and is deliberately left as written.",
-      i = "A {{#DATASETS}} marker must be the only text in its paragraph, in the document body, and be closed by a {{/DATASETS}} paragraph further down; regions do not nest."
-    ))
+    malformed_region <- any(.tv_is_region_marker(leftover))
+    cli::cli_warn(
+      c(
+        "!" = "Some block placeholders were left unchanged:",
+        items,
+        i = "A block placeholder must be the only text in its paragraph, in the document body -- not inside a sentence, a table cell, a header or a footer.",
+        i = "A {.code :DATASET} argument must name a dataset the DTA contains.",
+        i = "Text that only reads like a placeholder because a value spelled one is listed here too, and is deliberately left as written.",
+        i = "A {{#DATASETS}} marker must be the only text in its paragraph, in the document body, and be closed by a {{/DATASETS}} paragraph further down; regions do not nest."
+      ),
+      class = c(
+        "dta_template_blocks_unrendered",
+        if (malformed_region) "dta_template_region_malformed"
+      ),
+      tokens = leftover
+    )
   }
   invisible(docx_path)
 }

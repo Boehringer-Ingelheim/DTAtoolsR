@@ -176,3 +176,34 @@ requirements:
     notes: >
       A mistyped filter selects nothing, and a run of nothing would otherwise
       end with no failing test and read as a pass.
+
+  - id: REQ-CORE-014
+    text: >
+      The verdict of a run in which no test case passed -- a run of no stage,
+      a run whose filter selects only skipped cases -- shall be "NOT EXECUTED",
+      and never one that begins with PASS; a failing test case, meta check or
+      deviation shall still give FAIL. The CI gate script shall fail on every
+      verdict that does not begin with PASS.
+    risk: high
+    category: integrity
+    covers: [run_qualification]
+    source: R/qualification.R (qual_verdict); .github/scripts/qualification_verdict.R
+    notes: >
+      A verdict derived from the absence of failures read PASS (PARTIAL) for a
+      run that executed nothing, printed it as a success and passed the gate.
+      The gate script is not part of the installed package, so the developer
+      suite (tests/testthat/test-qualification.R) holds the case that runs it.
+
+  - id: REQ-CORE-015
+    text: >
+      The report of a run shall name, in its evidence inventory, the hash
+      manifest of the bundle (SHA256SUMS, or MD5SUMS where this R has no
+      SHA-256) and quote the verification command with that file as its
+      argument.
+    risk: medium
+    category: integrity
+    covers: [run_qualification]
+    source: R/qualification-report.R (qual_report_inventory); R/qualification.R
+    notes: >
+      The report was written before the manifest name was recorded, so every
+      real report told the auditor to run "sha256sum -c " with no file.

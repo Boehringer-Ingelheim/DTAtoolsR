@@ -257,3 +257,98 @@ test_that("OQ-TMPL-114 | the guide's rules table describes each rule in the same
     !any(grepl("(^|\\s)(type|columns|condition|then):", tab$col2[-1]))
   )
 })
+
+# ---- REQ-TMPL-070: a problem in a guide is a warning --------------------------
+
+# A library root with the given files, each written into its kind folder.
+guide_scratch_library <- function(files, env = parent.frame()) {
+  root <- qa_tempdir(env)
+  for (name in names(files)) {
+    folder <- file.path(root, guide_folder(name))
+    dir.create(folder, recursive = TRUE, showWarnings = FALSE)
+    writeLines(files[[name]], file.path(folder, name))
+  }
+  root
+}
+
+test_that("OQ-TMPL-164 | a guide that lists a problem warns, and its document lists the same problem with its cause | REQ-TMPL-070 | tags: white-box", {
+  dataset_template <- c(
+    "kind: dta_dataset_template", "id: stu_dt", "version: '1.0'", "label: Study data",
+    "dataset:", "  id: stu", "  name: Study data", "  type: tabular",
+    "  files:", "    filename: stu.csv", "    type: csv",
+    "  columns:",
+    "    - {id: A, type: SAS Char, format: SAS $9., nullable: false}"
+  )
+  creation_template <- c(
+    "kind: dta_creation_template", "id: stu_ct", "version: '1.0'", "label: Study CT",
+    "base:", "  metadata:", "    title: T",
+    "datasets:", "  - template: stu_dt@1.0"
+  )
+
+  # (1) A problem that does not stop the guide: only the comparison with the
+  # dataset template failed, so no template has a note of its own. The problem
+  # is still a row of the document, and the guide warns because of that row.
+  lib <- guide_scratch_library(list(
+    "stu.dta-dataset-template.yaml" = dataset_template,
+    "stu_ct.dta-template.yaml" = creation_template
+  ))
+  testthat::local_mocked_bindings(
+    .tgc_template_dataset = function(ds, ctx, overrides = list(), token_env = NULL) {
+      ctx$problem("ignored", "COMPARISON-WITH-THE-DATASET-TEMPLATE-FAILED")
+      NULL
+    }
+  )
+  out <- tempfile("guides", tmpdir = qa_tempdir())
+  caught <- NULL
+  suppressMessages(withCallingHandlers(
+    write_template_guide(lib, out, templates = "stu_ct", quiet = TRUE),
+    warning = function(w) {
+      if (inherits(w, "dta_template_guide_problems")) caught <<- w
+      invokeRestart("muffleWarning")
+    }
+  ))
+  qa_check("the guide warns with class dta_template_guide_problems", !is.null(caught))
+  doc_text <- qa_docx_text(list.files(out, full.names = TRUE)[[1]])
+  qa_check(
+    "and the document lists the same problem",
+    grepl("COMPARISON-WITH-THE-DATASET-TEMPLATE-FAILED", doc_text, fixed = TRUE)
+  )
+})
+
+test_that("OQ-TMPL-165 | a dataset template that the strict reader refuses is listed in the guide as a problem of that template, with the key it refused | REQ-TMPL-070", {
+  lib <- guide_scratch_library(list(
+    "bad_dt.dta-dataset-template.yaml" = c(
+      "kind: dta_dataset_template", "id: bad_dt", "version: '1.0'", "label: Bad",
+      "dataset:", "  id: bad", "  name: Bad", "  type: tabular",
+      "  files:", "    filename: bad.csv", "    type: csv",
+      "  columns:",
+      "    - {id: A, type: SAS Char, format: SAS $9., nullble: true}"
+    ),
+    "bad_ct.dta-template.yaml" = c(
+      "kind: dta_creation_template", "id: bad_ct", "version: '1.0'", "label: Bad CT",
+      "base:", "  metadata:", "    title: T",
+      "datasets:", "  - template: bad_dt@1.0"
+    )
+  ))
+  out <- tempfile("guides", tmpdir = qa_tempdir())
+  caught <- NULL
+  suppressMessages(withCallingHandlers(
+    write_template_guide(lib, out, templates = "bad_ct", quiet = TRUE),
+    warning = function(w) {
+      if (inherits(w, "dta_template_guide_problems")) caught <<- w
+      invokeRestart("muffleWarning")
+    }
+  ))
+  qa_check("the guide of a template that cannot be built warns", !is.null(caught))
+
+  # The problems table of the document: one row per problem, the file it belongs
+  # to in the first cell. The creation template's own row names the key as well;
+  # what REQ-TMPL-070 adds is a row for the dataset template FILE that names it.
+  rows <- guide_rows(list.files(out, full.names = TRUE)[[1]])
+  own_rows <- Filter(function(r) identical(r[[1]], "bad_dt.dta-dataset-template.yaml"), rows)
+  qa_check("the document lists a problem row for the dataset template's own file", length(own_rows) > 0L)
+  qa_check(
+    "and that row names the key the reader refused",
+    any(vapply(own_rows, function(r) any(grepl("nullble", r, fixed = TRUE)), logical(1)))
+  )
+})

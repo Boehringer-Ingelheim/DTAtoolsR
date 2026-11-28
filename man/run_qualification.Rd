@@ -65,6 +65,14 @@ Invisibly, an object of class \code{dta_qualification} with the verdict,
 the per-test and per-expectation evidence, the traceability matrix, the
 deviation register, the meta-consistency checks, the environment record
 and the path to the bundle. Its \code{print()} method summarises the run.
+
+The verdict is \code{"FAIL"} when any executed test case failed or errored, any
+meta check failed or a registered deviation stopped reproducing;
+\code{"NOT EXECUTED"} when no test case passed (a run of no stage, or one whose
+cases were all skipped), which claims nothing; otherwise \code{"PASS"}, or
+\code{"PASS WITH NOT-EXECUTED TESTS"} when some case was skipped. A run that
+used a filter or only some stages marks a \code{PASS} or \code{FAIL} verdict
+\code{"(PARTIAL)"}.
 }
 \description{
 Runs the qualification suite that ships with the package and writes an

@@ -253,7 +253,8 @@
 }
 
 # One row per expected file: name or pattern, match type, format, expected count
-# ("n", or "min to max" when they differ) and description (pattern description
+# ("n", "min to max" when they differ, "min or more" when there is no maximum)
+# and description (pattern description
 # plus the file's `info`). `files` is a list of DTAFile objects; zero rows when
 # it is empty. When at least one entry declares a container, a sixth column
 # "Delivered In" holds the container (or "") of every entry; otherwise the five
@@ -291,7 +292,7 @@
   rows <- lapply(seq_along(files), function(i) {
     f <- files[[i]]
     min_n <- f@min_number_of_files %||% 0
-    max_n <- f@max_number_of_files %||% 0
+    max_n <- f@max_number_of_files
     match_type <- if (isTRUE(f@pattern)) "Regex pattern" else "Exact name"
 
     desc <- if (!is.null(f@pattern_description)) f@pattern_description else ""
@@ -307,10 +308,13 @@
       `File Name / Pattern` = if (!is.null(f@filename)) paste(f@filename, collapse = ", ") else MISSING_VALUE_DISPLAY,
       `Match Type` = match_type,
       `Format` = .file_format_label(f),
-      `Expected Count` = paste0(
-        min_n,
-        if (min_n != max_n) paste0(" to ", max_n) else ""
-      ),
+      `Expected Count` = if (is.null(max_n)) {
+        # No maximum: any number from the minimum upward is accepted, as
+        # check() and print_info() already treat it.
+        paste0(min_n, " or more")
+      } else {
+        paste0(min_n, if (min_n != max_n) paste0(" to ", max_n) else "")
+      },
       `Description` = desc,
       stringsAsFactors = FALSE,
       check.names = FALSE
@@ -470,21 +474,24 @@
 
 # The paragraph that introduces a dataset's file table: how many files are
 # expected in total (the sum over all file entries; "n to m files are" when the
-# minimum and maximum differ, "1 file is" for exactly one) and, with
+# minimum and maximum differ, "n or more files are" when any entry has no
+# maximum, "1 file is" for exactly one) and, with
 # `explain = TRUE`, how to read the file names. `files` is a list of DTAFile
 # objects; "" when it is empty.
 .file_count_sentence <- function(files, explain = TRUE) {
   if (is.null(files) || length(files) == 0) {
     return("")
   }
-  total_min <- sum(sapply(files, function(f) {
-    tryCatch(f@min_number_of_files %||% 0, error = function(e) 0)
-  }))
-  total_max <- sum(sapply(files, function(f) {
-    tryCatch(f@max_number_of_files %||% 0, error = function(e) 0)
-  }))
+  total_min <- sum(vapply(files, function(f) f@min_number_of_files %||% 0, numeric(1)))
+  maxima <- lapply(files, function(f) f@max_number_of_files)
+  # One entry without a maximum leaves the whole dataset without one: any
+  # number of files above the total minimum is acceptable.
+  open_ended <- any(vapply(maxima, is.null, logical(1)))
+  total_max <- sum(unlist(maxima))
 
-  count_txt <- if (total_min != total_max) {
+  count_txt <- if (open_ended) {
+    paste0(total_min, " or more files are")
+  } else if (total_min != total_max) {
     paste0(total_min, " to ", total_max, " files are")
   } else if (total_min == 1) {
     "1 file is"
