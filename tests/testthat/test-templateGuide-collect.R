@@ -1264,8 +1264,12 @@ test_that("a study option's default reaches both sides of the guide's comparison
   ))
   g <- .template_guide_collect(dir)
   expect_identical(nrow(g$problems), 0L)
-  cols <- entry_by_id(g$creation, "stu_ct")$datasets[[1]]$columns
+  ds <- entry_by_id(g$creation, "stu_ct")$datasets[[1]]
+  cols <- ds$columns
   expect_identical(sub("\n.*$", "", cols$Column), c("STUDYID", "PROTID"))
+  # "No column changed" only means something when the dataset template WAS built
+  # and compared: with its side missing every mark is blank as well.
+  expect_identical(ds$source_version, "1.0")
   expect_identical(cols$Change, c("", ""))
 })
 
@@ -1283,5 +1287,106 @@ test_that("the guide's value text spells the study tokens out", {
   expect_identical(
     .tgc_value_text("${study.protocol_id_underscore}"),
     "(the protocol ID you enter, hyphens written as underscores)"
+  )
+})
+
+# ---- a dataset template that no longer builds is reported, with its cause ----
+#
+# W2 made the dataset reader strict: a misspelt column key, or columns on a file
+# dataset, is now an error. The guide used to read every failure of its
+# dataset-template build as "no template to compare with" (NULL), so a template
+# that stopped building either lost its cause (the dataset page) or its change
+# marks without a word (the comparison in a creation template's guide). Every
+# way that build can fail now reports why, as a row of the guide's problem list.
+
+write_misspelt_key_library <- function(dir) {
+  write_lines(dir, "bad.dta-dataset-template.yaml", c(
+    "kind: dta_dataset_template", "id: bad_dt", "version: '1.0'", "label: Bad",
+    "dataset:", "  id: bad", "  name: Bad", "  type: tabular",
+    "  files:", "    filename: bad.csv", "    type: csv",
+    "  columns:",
+    "    - {id: A, type: SAS Char, format: SAS $9., nullble: true}"
+  ))
+}
+
+# A context whose problem() records what it is told.
+problem_log_ctx <- function() {
+  log <- new.env()
+  log$rows <- list()
+  list(
+    log = log,
+    ctx = list(
+      g = .dta_template_engine_get,
+      vocab = function(ref) NULL,
+      problem = function(file, msg) log$rows[[length(log$rows) + 1L]] <- c(basename(file), msg)
+    )
+  )
+}
+
+test_that("the page of a dataset template that no longer builds says why, not only that", {
+  dir <- withr::local_tempdir()
+  write_misspelt_key_library(dir)
+  g <- .template_guide_collect(dir)
+
+  rows <- g$problems[g$problems$File == "bad.dta-dataset-template.yaml", ]
+  expect_true(any(grepl("nullble", rows$Problem, fixed = TRUE)))
+})
+
+test_that(".tgc_build_dataset_template reports the cause of every failure and returns NULL", {
+  dir <- withr::local_tempdir()
+  write_misspelt_key_library(dir)
+  # (1) the dataset reader refuses the template's column
+  res <- problem_log_ctx()
+  built <- .tgc_build_dataset_template(file.path(dir, "templates", "bad.dta-dataset-template.yaml"), res$ctx)
+  expect_null(built)
+  expect_length(res$log$rows, 1L)
+  expect_identical(res$log$rows[[1]][[1]], "bad.dta-dataset-template.yaml")
+  expect_match(res$log$rows[[1]][[2]], "nullble", fixed = TRUE)
+
+  # (2) the file is not a readable dataset template at all
+  broken <- write_lines(dir, "broken.dta-dataset-template.yaml", c("kind: dta_dataset_template", "id: [unclosed"))
+  res <- problem_log_ctx()
+  expect_null(.tgc_build_dataset_template(broken, res$ctx))
+  expect_length(res$log$rows, 1L)
+  expect_identical(res$log$rows[[1]][[1]], "broken.dta-dataset-template.yaml")
+
+  # (3) a template that builds reports nothing
+  good <- withr::local_tempdir()
+  write_study_token_library(good)
+  res <- problem_log_ctx()
+  built <- .tgc_build_dataset_template(file.path(good, "templates", "stu.dta-dataset-template.yaml"), res$ctx)
+  expect_false(is.null(built))
+  expect_length(res$log$rows, 0L)
+})
+
+test_that("a comparison with the dataset template that cannot be made is a problem row, and the guide warns", {
+  dir <- withr::local_tempdir()
+  write_study_token_library(dir)
+  # The creation template builds; only the comparison side fails.
+  local_mocked_bindings(
+    .tgc_build_dataset_template = function(path, ctx, as_name = NULL, overrides = list(), token_env = NULL) {
+      ctx$problem(path, "COMPARISON-SIDE-FAILED")
+      NULL
+    }
+  )
+  g <- .template_guide_collect(dir)
+  expect_true(any(grepl("COMPARISON-SIDE-FAILED", g$problems$Problem, fixed = TRUE)))
+
+  out <- withr::local_tempdir()
+  expect_warning(
+    write_template_guide(dir, out, templates = "stu_ct", quiet = TRUE),
+    class = "dta_template_guide_problems"
+  )
+  # The table in the document and the warning rest on the same fact.
+  expect_true(any(grepl("COMPARISON-SIDE-FAILED", .docx_paragraphs(list.files(out, full.names = TRUE)), fixed = TRUE)))
+})
+
+test_that("a guide without any problem raises no problems warning", {
+  dir <- withr::local_tempdir()
+  write_study_token_library(dir)
+  out <- withr::local_tempdir()
+  expect_no_warning(
+    write_template_guide(dir, out, templates = "stu_ct", quiet = TRUE),
+    class = "dta_template_guide_problems"
   )
 })

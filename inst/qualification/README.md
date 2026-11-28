@@ -115,8 +115,10 @@ read, so that nothing in the report has to be taken on trust.
 ## Reviewing and signing
 
 1. Read `SUMMARY.txt`. The verdict is `PASS`, `PASS WITH NOT-EXECUTED TESTS`,
-   or `FAIL`. A run marked `(PARTIAL)` used a filter or ran only some stages,
-   and cannot support a complete claim.
+   `NOT EXECUTED` or `FAIL`. `NOT EXECUTED` means no test case passed (a run of
+   no stage, or one whose every case was skipped): nothing was shown to hold,
+   and it is no more a success than a failure. A run marked `(PARTIAL)` used a
+   filter or ran only some stages, and cannot support a complete claim.
 2. Open `report/qualification-report.md` (or the HTML or Word rendering).
 3. Check section 3 describes the system you intended to qualify.
 4. Check section 7, the traceability matrix, for requirements that are not

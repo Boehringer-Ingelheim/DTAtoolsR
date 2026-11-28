@@ -23,4 +23,11 @@ destination is only ever touched by the final rename, once
 \code{pdf_file} -- valid or not -- is therefore left completely alone by every
 failed attempt; only a successful conversion replaces it.
 }
+\details{
+When a backend after the first produced the PDF, the call warns with class
+\code{dta_pdf_backend_fallback} (see \code{\link[=.warn_pdf_backend_fallback]{.warn_pdf_backend_fallback()}}). When none
+did, it aborts and lists every failure. Every caller -- \code{\link[=write_dta]{write_dta()}} with
+or without a template, \code{\link[=write_dataset_metadata]{write_dataset_metadata()}}, \code{\link[=write_template_guide]{write_template_guide()}}
+-- passes through here, so they all behave alike.
+}
 \keyword{internal}

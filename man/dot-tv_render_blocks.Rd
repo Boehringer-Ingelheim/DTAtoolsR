@@ -4,13 +4,7 @@
 \alias{.tv_render_blocks}
 \title{Replace the stamped block-placeholder paragraphs with rendered Word content}
 \usage{
-.tv_render_blocks(
-  docx_path,
-  dta,
-  blocks = character(0),
-  quiet = FALSE,
-  bare = character(0)
-)
+.tv_render_blocks(docx_path, dta, blocks = character(0), bare = character(0))
 }
 \arguments{
 \item{docx_path}{Character. The .docx produced by pass 1; rewritten in place.}
@@ -19,8 +13,6 @@
 
 \item{blocks}{Named character vector from \code{\link[=.tv_mark_block_paragraphs]{.tv_mark_block_paragraphs()}} and
 \code{\link[=.tv_expand_regions]{.tv_expand_regions()}} combined: sentinel to the token it replaced.}
-
-\item{quiet}{Logical. Suppress the warning about placeholders left behind.}
 
 \item{bare}{Character vector of sentinels (a subset of \code{names(blocks)})
 stamped by \code{\link[=.tv_expand_regions]{.tv_expand_regions()}} rather than \code{\link[=.tv_mark_block_paragraphs]{.tv_mark_block_paragraphs()}}:

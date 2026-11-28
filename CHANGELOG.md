@@ -121,6 +121,67 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   the summary reads `VALIDATION INCOMPLETE`; a failure used to be read as "no
   findings".
 
+### Fixed
+
+- **A PDF that came from a fallback backend now says so.** `write_dta()`,
+  `write_dta(template = )` and `write_dataset_metadata()` (and
+  `write_template_guide()`) convert a Word document to PDF with the first
+  backend that works: Word, then LibreOffice, TinyTeX, pandoc. When Word failed
+  on the day, the PDF came from TinyTeX or pandoc without a word, although those
+  two routes re-typeset the document and leave out the running page header and
+  footer. The fallback is kept (many machines have only TinyTeX), but it always
+  warns now, whatever `quiet` says, with a condition of class
+  `dta_pdf_backend_fallback` that names every backend that failed with its
+  reason, the backend that made the file and, for TinyTeX and pandoc, that the
+  header and footer are not in it; the condition carries `used`, `failed` and
+  `furniture_lost`. A machine whose only backend is TinyTeX or pandoc is not
+  warned. The qualification report's PDF keeps such a fallback result and
+  records it in the run log.
+- **A template's unrendered block placeholders and broken `{#DATASETS}` markers
+  are always reported.** They were reported only with `quiet = FALSE`, and
+  `write_dta(template = )` and the app's Word export both pass `quiet = TRUE`,
+  so a template with a typo such as `{COLUMN_SPECS:ADLS}`, a block inside a
+  table cell or an unclosed region produced a document with the literal text in
+  it and no warning. The warning (class `dta_template_blocks_unrendered`, plus
+  `dta_template_region_malformed` when a region marker is among the leftovers;
+  both carry the `tokens`) is raised whatever `quiet` is: `quiet` no longer
+  silences it, only the progress message. The warning for an inline placeholder without a value
+  now has its own class, `dta_template_placeholders_unresolved`. The app shows
+  both to the user as a notification and still delivers the document. The
+  internal functions behind this no longer take a `quiet` argument.
+- **An open maximum number of files is no longer exported as a range ending at
+  0.** A file entry with a minimum and no maximum (`min_number_of_files: 2` only)
+  accepts any number of files from the minimum up, as `check()` and `print()`
+  already treated it, but the Word, PDF and Markdown documents printed
+  "2 to 0" in the file table, and "3 to 1 files are expected" for a dataset with
+  such an entry next to a single file. They read "2 or more" and "3 or more
+  files are expected for this dataset in total". A failure to read the count of
+  a file entry is an error now and is no longer turned into 0.
+- **The qualification verdict is no longer a PASS when nothing was executed.** A
+  run with no test case that passed (`stages = character()`, or a filter that
+  selects only skipped cases) read `PASS (PARTIAL)`, printed as a success, and
+  the CI gate accepted it. Its verdict is `NOT EXECUTED`, and
+  `.github/scripts/qualification_verdict.R` now fails on every verdict that does
+  not begin with `PASS`, not only on `FAIL`.
+- **The qualification report names the hash manifest it asks the auditor to
+  check.** The report is written before the manifest name was recorded, so every
+  report's evidence inventory read "Verify with `sha256sum -c ` from the bundle
+  directory" with no file in it.
+- **A dataset template that no longer builds is reported by the template guide
+  with its cause.** The guide read every failure of the dataset-template build
+  as "no template to compare with", so a dataset template rejected by the strict
+  specification reader (a misspelt column key, columns on a file dataset) lost
+  its change marks, or its cause, without a word. Each way that build can fail
+  is now a row of the guide's problem list with the reason, and
+  `write_template_guide()` warns with class `dta_template_guide_problems`
+  whenever the guide of a template lists a problem, not only when its own
+  sample could not be built.
+
+Qualification: REQ-EXPORT-047 to REQ-EXPORT-049, REQ-CORE-014, REQ-CORE-015,
+REQ-TMPL-070 and REQ-APP-066, with OQ-EXPORT-078 to OQ-EXPORT-081,
+OQ-CORE-014, OQ-CORE-015, OQ-TMPL-164, OQ-TMPL-165 and OQ-APP-085; the case
+OQ-CORE-004 now also tries the statuses `error` and `file_error`.
+
 ## [0.30.0] - 2026-11-25
 
 ### Added

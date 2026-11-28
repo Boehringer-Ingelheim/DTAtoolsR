@@ -106,7 +106,7 @@ tg_tables <- function(file) {
 # ---- selection and file names ----------------------------------------------
 
 test_that("one file per non-abstract template, named from the YAML", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   written <- tg_written()
   files <- list.files(file.path(tg_lib(), "templates"), "\\.dta-template\\.yaml$", full.names = TRUE)
   y <- lapply(files, yaml::read_yaml)
@@ -151,7 +151,7 @@ test_that("a building block has no guide of its own", {
 })
 
 test_that("an existing output aborts before anything is written", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   out <- withr::local_tempdir()
   precious <- file.path(out, "biomarker_gf_acme_v1.0_template_guide.docx")
   writeLines("precious", precious)
@@ -174,7 +174,7 @@ test_that("a bad format is refused before any work, and a single file selects it
     write_template_guide(tempfile("missing"), tempfile(), format = "md"),
     class = "dta_template_guide_format"
   )
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   out <- withr::local_tempdir()
   got <- write_template_guide(
     file.path(tg_lib(), "templates", "biomarker_gf_acme.dta-template.yaml"), out,
@@ -184,7 +184,7 @@ test_that("a bad format is refused before any work, and a single file selects it
 })
 
 test_that("a PDF made through a re-typesetting backend warns about the lost layout", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   local_mocked_bindings(
     dta_pdf_backend = function() list(name = "tinytex", engine = "", available = "tinytex"),
     .convert_docx_to_pdf = function(docx_file, pdf_file) writeLines("%PDF", pdf_file)
@@ -197,10 +197,35 @@ test_that("a PDF made through a re-typesetting backend warns about the lost layo
   expect_identical(list.files(out), "biomarker_gf_v1.0_template_guide.pdf")
 })
 
+test_that("a PDF whose preferred backend failed is announced even when the first backend looked fine", {
+  # write_template_guide() warns up front only about a re-typesetting FIRST
+  # backend. When Word is first and then fails, the document silently came from
+  # TinyTeX (c4-tmpl-export-46); the conversion itself now says so.
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
+  local_mocked_bindings(
+    .pdf_backends_available = function() c("word", "tinytex"),
+    .word_docx_to_pdf = function(docx_file, pdf_file) cli::cli_abort("word down"),
+    .tinytex_docx_to_pdf = function(docx_file, pdf_file) {
+      writeBin(charToRaw("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n"), pdf_file)
+      invisible(pdf_file)
+    }
+  )
+  out <- withr::local_tempdir()
+
+  w <- expect_warning(
+    write_template_guide(tg_lib(), out, templates = "biomarker_gf", format = "pdf", quiet = TRUE),
+    class = "dta_pdf_backend_fallback"
+  )
+
+  expect_identical(w$used, "tinytex")
+  expect_identical(names(w$failed), "word")
+  expect_identical(list.files(out), "biomarker_gf_v1.0_template_guide.pdf")
+})
+
 # ---- cover, properties, furniture -------------------------------------------
 
 test_that("cover title, properties, header and footer come from the template", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   written <- tg_written()
   for (id in c("biomarker_gf", "biomarker_gf_acme")) {
     y <- tg_yaml(id)
@@ -233,7 +258,7 @@ test_that("cover title, properties, header and footer come from the template", {
 })
 
 test_that("the organisation comes from the library unless given, and '' shows none", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   lib <- withr::local_tempdir()
   tg_copy_lib(lib)
   writeLines(
@@ -259,7 +284,7 @@ test_that("the organisation comes from the library unless given, and '' shows no
 # ---- layout: the user's complaints, pinned structurally ---------------------
 
 test_that("no narrow or crowded tables, and every table fits its section", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   for (file in tg_written()) {
     tabs <- tg_tables(file)
     expect_gt(length(tabs), 5)
@@ -273,7 +298,7 @@ test_that("no narrow or crowded tables, and every table fits its section", {
 })
 
 test_that("datasets sit in one landscape section", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   file <- tg_written()[["biomarker_gf_acme"]]
   ex <- tg_unzip(file)
   on.exit(unlink(ex, recursive = TRUE), add = TRUE)
@@ -293,7 +318,7 @@ test_that("datasets sit in one landscape section", {
 })
 
 test_that("every question and every built column is in the document", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   written <- tg_written()
   ds <- yaml::read_yaml(file.path(tg_lib(), "templates", "gf_smrnaseq.dta-dataset-template.yaml"))$dataset
   ids <- vapply(ds$columns, function(cl) cl$id, character(1))
@@ -309,7 +334,7 @@ test_that("every question and every built column is in the document", {
 })
 
 test_that("changes against the dataset template are marked", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   acme <- tg_text(tg_written()[["biomarker_gf_acme"]])
   expect_match(acme, "Changed by this template", fixed = TRUE)
   expect_match(acme, "Added by this template", fixed = TRUE)
@@ -318,7 +343,7 @@ test_that("changes against the dataset template are marked", {
 })
 
 test_that("sections that do not apply are left out, and the list on the cover matches", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   for (id in c("biomarker_gf", "biomarker_gf_acme")) {
     s <- officer::docx_summary(officer::read_docx(tg_written()[[id]]))
     h1 <- s$text[s$style_name %in% "heading 1"]
@@ -369,7 +394,7 @@ test_that("the file name is sanitised and drops an empty version", {
 
 test_that("a PDF is a real PDF when a backend exists", {
   skip_if(is.null(dta_pdf_backend()), "no PDF backend on this machine")
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   out <- withr::local_tempdir()
   got <- suppressWarnings(
     write_template_guide(tg_lib(), out, templates = "biomarker_gf", format = "pdf", quiet = TRUE)
@@ -405,7 +430,7 @@ tg_cell_texts <- function(file) {
 }
 
 test_that("a building block parent gets no 'everything else is the same' promise", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   dir <- tg_scratch(list(
     "biomarker_gf.dta-template.yaml" = sub(
       "^id: biomarker_gf$", "id: biomarker_gf\nabstract: true",
@@ -423,7 +448,7 @@ test_that("a building block parent gets no 'everything else is the same' promise
 })
 
 test_that("a term list is documented once, in the version the template pins", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   v1 <- readLines(file.path(tg_lib(), "vocabulary", "gf_tstdtl.dta-vocabulary.yaml"))
   v2 <- sub("^version: .*$", "version: \"2.0\"", v1)
   v2 <- sub("code: FRAGMENT COUNT", "code: NEWER ONLY", v2, fixed = TRUE)
@@ -438,7 +463,7 @@ test_that("a term list is documented once, in the version the template pins", {
 })
 
 test_that("a single template file documents that file's version, not the newest", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   old <- readLines(file.path(tg_lib(), "templates", "biomarker_gf.dta-template.yaml"))
   newer <- sub("^version: .*$", "version: \"2.0\"", old)
   dir <- tg_scratch(list("biomarker_gf_2.dta-template.yaml" = newer))
@@ -450,7 +475,7 @@ test_that("a single template file documents that file's version, not the newest"
 })
 
 test_that("a failed write removes what this call created and keeps what was there", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   out <- withr::local_tempdir()
   n <- 0L
   local_mocked_bindings(
@@ -468,7 +493,7 @@ test_that("a failed write removes what this call created and keeps what was ther
 })
 
 test_that("a failed write leaves a file that already existed alone", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   out <- withr::local_tempdir()
   keep <- file.path(out, "biomarker_gf_v1.0_template_guide.docx")
   writeLines("old", keep)
@@ -482,7 +507,7 @@ test_that("a failed write leaves a file that already existed alone", {
 })
 
 test_that("file names that differ only in case collide", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   mk <- function(id) {
     c(
       "kind: dta_creation_template", paste0("id: ", id), "version: '1.0'", "label: Case",
@@ -500,7 +525,7 @@ test_that("file names that differ only in case collide", {
 })
 
 test_that("organisation arguments are validated like write_dta, and '' still means none", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   out <- withr::local_tempdir()
   expect_error(
     write_template_guide(tg_lib(), out, templates = "biomarker_gf", organisation = c("a", "b"), quiet = TRUE),
@@ -517,7 +542,7 @@ test_that("organisation arguments are validated like write_dta, and '' still mea
 })
 
 test_that("questions, filled-in fields and the glossary use the reviewed wording", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   gf <- tg_text(tg_written()[["biomarker_gf"]])
   # No question of biomarker_gf is required (checked in the YAML).
   expect_null(tg_yaml("biomarker_gf")$required)
@@ -538,7 +563,7 @@ test_that("questions, filled-in fields and the glossary use the reviewed wording
 })
 
 test_that("a required question reads 'Must be answered' in the intro and the card", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   dir <- withr::local_tempdir()
   writeLines(c(
     "kind: dta_creation_template", "id: req_tpl", "version: '1.0'", "label: Required one",
@@ -559,7 +584,7 @@ test_that("a required question reads 'Must be answered' in the intro and the car
 })
 
 test_that("small tables stay on one page, and table widths follow the review", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   file <- tg_written()[["biomarker_gf"]]
   ex <- tg_unzip(file)
   on.exit(unlink(ex, recursive = TRUE), add = TRUE)
@@ -585,7 +610,7 @@ test_that("small tables stay on one page, and table widths follow the review", {
 })
 
 test_that("contact widths follow the review", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   file <- tg_written()[["biomarker_gf"]]
   ex <- tg_unzip(file)
   on.exit(unlink(ex, recursive = TRUE), add = TRUE)
@@ -739,7 +764,7 @@ tg_rules_template <- function() {
 }
 
 test_that("the rules table reads Rule ID | Description and shows the full wording of each rule", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   x <- tg_rules_template()
   dir <- tg_scratch()
   writeLines(yaml::as.yaml(x$tpl), tg_path(dir, "templates", "rules_tpl.dta-template.yaml"))
@@ -774,7 +799,7 @@ test_that("the rules table reads Rule ID | Description and shows the full wordin
 })
 
 test_that("rule labels are bold, lists are bullets, and no rule is set in monospace", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   x <- tg_rules_template()
   dir <- tg_scratch()
   writeLines(yaml::as.yaml(x$tpl), tg_path(dir, "templates", "rules_tpl.dta-template.yaml"))
@@ -792,7 +817,7 @@ test_that("rule labels are bold, lists are bullets, and no rule is set in monosp
 })
 
 test_that("the reading guide for rules appears once, before the first rules table", {
-  skip_if(!nzchar(tg_lib()), "bundled templates not installed")
+  expect_true(nzchar(tg_lib()), info = "the bundled template library is a package asset")
   x <- tg_rules_template()
   dir <- tg_scratch()
   writeLines(yaml::as.yaml(x$tpl), tg_path(dir, "templates", "rules_tpl.dta-template.yaml"))

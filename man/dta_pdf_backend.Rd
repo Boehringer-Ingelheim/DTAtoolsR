@@ -41,6 +41,17 @@ footers are lost.
 If none is present, install a LaTeX engine from R with
 \code{tinytex::install_tinytex()}; it needs no administrator rights and works on
 Windows, macOS and Linux.
+
+A backend that is present can still fail on the day (Word refuses the call,
+LibreOffice dies, a profile is locked). The export then moves on to the next
+backend, and \strong{warns} -- always, whatever \code{quiet} says -- with a condition
+of class \code{dta_pdf_backend_fallback}. It names every backend that failed with
+its reason and the backend that made the PDF; when that is TinyTeX or pandoc
+it states that the running page header and footer are not in the document.
+The condition carries \code{used}, \code{failed} (named by backend) and
+\code{furniture_lost}, so a script can trap it. A machine whose only backend is
+TinyTeX or pandoc is not a fallback and is not warned: check
+\code{dta_pdf_backend()$name} beforehand if the header and footer matter.
 }
 \examples{
 backend <- dta_pdf_backend()

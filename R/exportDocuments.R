@@ -28,7 +28,10 @@
 #' @param file Character. Output file path (with .docx, .pdf, or .md extension)
 #' @param format Character. Output format: "docx" (default), "pdf", or "md"
 #'   (GitHub-flavoured Markdown, see Details). If NULL, inferred from file
-#'   extension.
+#'   extension. A PDF is made from the Word document by the backend that
+#'   [dta_pdf_backend()] reports; when that backend fails and a later one makes
+#'   the file, the call warns with class `dta_pdf_backend_fallback`, naming the
+#'   failure and, where it applies, that the running header and footer are lost.
 #' @param overwrite Logical. Whether to overwrite existing files. Default: FALSE.
 #' @param include_signatures Logical. Whether to include the "Approval &
 #'   Signatures" section (DOCX, PDF and Markdown). It lists every contact
@@ -41,7 +44,11 @@
 #'   the signatories taken from the contacts (duplicates by name and
 #'   organization are skipped) in the built-in DOCX/PDF layout and in
 #'   Markdown; ignored with a `template`.
-#' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
+#' @param quiet Logical. If TRUE, suppresses the progress message ("Document
+#'   saved ..."). It never mutes a warning: a PDF that came from a fallback
+#'   backend, a block placeholder or region marker of a `template` that stayed
+#'   in the document, and a placeholder without a value are reported whatever
+#'   `quiet` says. Default is FALSE.
 #' @param include_yaml Logical. If `TRUE`, append the machine-readable YAML
 #'   specification as a final, small-font section of the built-in DOCX/PDF
 #'   layout. Requires `yaml_text`. Ignored -- with a warning -- for
@@ -996,6 +1003,17 @@ write_dta <- function(
 #' `tinytex::install_tinytex()`; it needs no administrator rights and works on
 #' Windows, macOS and Linux.
 #'
+#' A backend that is present can still fail on the day (Word refuses the call,
+#' LibreOffice dies, a profile is locked). The export then moves on to the next
+#' backend, and **warns** -- always, whatever `quiet` says -- with a condition
+#' of class `dta_pdf_backend_fallback`. It names every backend that failed with
+#' its reason and the backend that made the PDF; when that is TinyTeX or pandoc
+#' it states that the running page header and footer are not in the document.
+#' The condition carries `used`, `failed` (named by backend) and
+#' `furniture_lost`, so a script can trap it. A machine whose only backend is
+#' TinyTeX or pandoc is not a fallback and is not warned: check
+#' `dta_pdf_backend()$name` beforehand if the header and footer matter.
+#'
 #' @return `NULL` when no backend is available. Otherwise a list with:
 #'   \describe{
 #'     \item{`name`}{`"word"`, `"libreoffice"`, `"tinytex"` or `"pandoc"`.}
@@ -1367,6 +1385,47 @@ dta_pdf_backend <- function() {
   )
 }
 
+#' Announce that a PDF came from a backend other than the preferred one
+#'
+#' The conversion falls back to the next backend when one fails, because many
+#' machines legitimately have only TinyTeX and an error would be too harsh. It
+#' is never silent about it: a caller who asked for the document of a regulated
+#' agreement gets the PDF, and is told which backend failed and why, which one
+#' made the file, and -- for the two routes that re-typeset the document
+#' (`"tinytex"` and `"pandoc"`) -- that the running page header and footer are
+#' not in it. The warning is signalled once the PDF is already in place, so a
+#' caller that turns warnings into errors still finds the file (a caller with
+#' its own clean-up on failure, such as [write_template_guide()], decides what
+#' it does with it), and it is not tied to `quiet`: it is a statement about the
+#' document, not console progress.
+#'
+#' @param used Character. The backend that produced the PDF.
+#' @param failed Named character vector: the reason each earlier backend failed,
+#'   named by backend, in the order they were tried.
+#' @param pdf_file Character. Path of the PDF that was written.
+#' @return Called for the warning it signals, of class
+#'   `dta_pdf_backend_fallback`; the condition carries `used`, `failed` and
+#'   `furniture_lost` (`TRUE` when `used` is `"tinytex"` or `"pandoc"`).
+#' @keywords internal
+.warn_pdf_backend_fallback <- function(used, failed, pdf_file) {
+  furniture_lost <- used %in% c("tinytex", "pandoc")
+  reasons <- paste0(names(failed), ": ", .cli_escape(failed))
+  names(reasons) <- rep("x", length(reasons))
+  cli::cli_warn(
+    c(
+      "The PDF {.file {pdf_file}} was made by {.val {used}}, not by the preferred backend {.val {names(failed)[[1]]}}.",
+      reasons,
+      if (furniture_lost) {
+        c("!" = "This route re-typesets the document: the running page header and footer are not in the PDF.")
+      },
+      i = "Check the backends with {.run DTAtools::dta_pdf_backend()}.",
+      i = "Export with {.code format = \"docx\"} to keep the Word layout."
+    ),
+    class = "dta_pdf_backend_fallback",
+    used = used, failed = failed, furniture_lost = furniture_lost
+  )
+}
+
 #' Convert a DOCX to a PDF, or fail loudly
 #'
 #' Tries every backend reported by [.pdf_backends_available()] in priority order
@@ -1376,6 +1435,12 @@ dta_pdf_backend <- function() {
 #' [.is_pdf_file()] has accepted the staged output. A file already at
 #' `pdf_file` -- valid or not -- is therefore left completely alone by every
 #' failed attempt; only a successful conversion replaces it.
+#'
+#' When a backend after the first produced the PDF, the call warns with class
+#' `dta_pdf_backend_fallback` (see [.warn_pdf_backend_fallback()]). When none
+#' did, it aborts and lists every failure. Every caller -- [write_dta()] with
+#' or without a template, [write_dataset_metadata()], [write_template_guide()]
+#' -- passes through here, so they all behave alike.
 #'
 #' @param docx_file Character. Existing `.docx` to convert.
 #' @param pdf_file Character. Path of the `.pdf` to create.
@@ -1388,7 +1453,7 @@ dta_pdf_backend <- function() {
     cli::cli_abort(.pdf_no_backend_bullets())
   }
 
-  failures <- character(0)
+  failed <- character(0)
   for (backend in backends) {
     err <- tryCatch(
       {
@@ -1415,14 +1480,18 @@ dta_pdf_backend <- function() {
     )
 
     if (is.null(err)) {
+      # The PDF is in place. A backend after the first made it: say so.
+      if (length(failed) > 0) {
+        .warn_pdf_backend_fallback(used = backend, failed = failed, pdf_file = pdf_file)
+      }
       return(invisible(pdf_file))
     }
 
-    detail <- paste0(backend, ": ", .cli_escape(err))
-    names(detail) <- "x"
-    failures <- c(failures, detail)
+    failed[[backend]] <- err
   }
 
+  failures <- paste0(names(failed), ": ", .cli_escape(failed))
+  names(failures) <- rep("x", length(failures))
   cli::cli_abort(c(
     "PDF conversion failed; nothing was written to {.file {pdf_file}}.",
     failures,
@@ -1455,7 +1524,8 @@ dta_pdf_backend <- function() {
 #' @param file Character. Output file path
 #' @param format Character. Output format: "docx", "pdf", or "md". If NULL
 #'   (the default), inferred from the file extension, falling back to "docx"
-#'   when the file has none.
+#'   when the file has none. A PDF that a fallback backend made warns with class
+#'   `dta_pdf_backend_fallback`, as for [write_dta()].
 #' @param overwrite Logical. Whether to overwrite existing files. Default: FALSE.
 #' @param include_signatures Logical. Whether to include the signature section.
 #'   Default: TRUE. In every format the section appears only when
@@ -1467,7 +1537,9 @@ dta_pdf_backend <- function() {
 #' @param signature_list List of signatories, each a list with `name`, `role`
 #'   and optionally `organization` (or `org`) fields, or a data.frame with
 #'   columns `Organization`, `Name`, `Role`.
-#' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
+#' @param quiet Logical. If TRUE, suppresses the progress message ("Document
+#'   saved ..."); warnings, such as the one for a PDF made by a fallback
+#'   backend, are never suppressed. Default is FALSE.
 #' @param document_name Optional character: what this kind of document is
 #'   called, shown as the main title of the export; the dataset specification
 #'   follows beneath it. A vector is joined with `" / "`. `NULL` (the default)

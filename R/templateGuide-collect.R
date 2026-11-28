@@ -1419,23 +1419,54 @@
 # term list is not reported as a change; `token_env` does the same for the
 # study tokens (the creation build's own values, its option defaults included).
 # Without one -- a dataset template on its own -- the generic stand-ins are used.
+#
+# Every way this build can fail is a row of the guide's problem list, with its
+# cause. A NULL that says nothing reads, in the document, as "there is nothing to
+# compare with" or -- worse -- as "unchanged from the template": the dataset
+# reader is strict about keys it does not know (a misspelt column key, columns on
+# a file dataset), so a template that stopped building must not vanish quietly.
+# The three exits that give up return NULL; the two that only lose a refinement
+# (term-list narrowing, study tokens) keep the unrefined data and say so.
 .tgc_build_dataset_template <- function(path, ctx, as_name = NULL, overrides = list(), token_env = NULL) {
   g <- ctx$g
+  fail <- function(what) {
+    ctx$problem(path, paste0("The dataset template ", basename(path), " ", paste(what, collapse = " ")))
+    NULL
+  }
   rd <- g("read_dataset_template")(path)
   if (!isTRUE(rd$ok)) {
-    return(NULL)
+    return(fail(c("could not be read:", rd$error)))
   }
   b <- g("build_dataset_from_template")(
     rd$value,
     selections = list(), as_name = as_name, resolve_vocab = ctx$vocab
   )
   if (!isTRUE(b$ok)) {
-    return(NULL)
+    return(fail(c("could not be built:", b$error)))
   }
-  plain <- tryCatch(g("apply_vocabulary_slot_overrides")(b$value$dataset, overrides), error = function(e) b$value$dataset)
+  plain <- tryCatch(
+    g("apply_vocabulary_slot_overrides")(b$value$dataset, overrides),
+    error = function(e) {
+      ctx$problem(path, paste0(
+        "The term-list narrowing of ", basename(path), " could not be applied: ", conditionMessage(e)
+      ))
+      b$value$dataset
+    }
+  )
   env <- token_env %||% g("dta_template_dataset_env")(NULL, g("dta_template_dry_study")())
-  plain <- tryCatch(g("resolve_dataset_tokens")(plain, env), error = function(e) plain)
-  tryCatch(dta_dataset_from_list(plain), error = function(e) NULL)
+  plain <- tryCatch(
+    g("resolve_dataset_tokens")(plain, env),
+    error = function(e) {
+      ctx$problem(path, paste0(
+        "The study tokens of ", basename(path), " could not be resolved: ", conditionMessage(e)
+      ))
+      plain
+    }
+  )
+  tryCatch(
+    dta_dataset_from_list(plain),
+    error = function(e) fail(c("could not be read as a dataset:", conditionMessage(e)))
+  )
 }
 
 # "Added" when the id is not in the template, "Changed" when its row differs.

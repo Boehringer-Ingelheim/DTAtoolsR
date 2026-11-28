@@ -101,6 +101,8 @@ traceability matrix is built, which is why it cannot drift from the tests.
 **Traceability matrix**. The mapping from each requirement to the test cases
 that verify it and to their outcome. Section 7 of the report.
 
-**Verdict**. `PASS`, `PASS WITH NOT-EXECUTED TESTS`, or `FAIL`, optionally
-marked `(PARTIAL)` when a filter or a stage selection means the run cannot
-support a complete claim.
+**Verdict**. `PASS`, `PASS WITH NOT-EXECUTED TESTS`, `NOT EXECUTED` or `FAIL`.
+The first two, and `FAIL`, are optionally marked `(PARTIAL)` when a filter or a
+stage selection means the run cannot support a complete claim. `NOT EXECUTED`
+is the verdict of a run in which no test case passed; it is never marked
+`(PARTIAL)`, because it claims nothing.

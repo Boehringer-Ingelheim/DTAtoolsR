@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# CI step: fail the job when the qualification run's verdict is FAIL.
+# CI step: fail the job unless the qualification run's verdict is a PASS.
 #
 # A file rather than `Rscript -e '...'` in the workflow: a multi-line -e
 # argument is cut at the first newline by Rscript on Windows, and R's unix
@@ -14,4 +14,6 @@ if (length(summaries) == 0) stop("No qualification summary was produced.")
 text <- readLines(summaries[[1]])
 verdict <- sub("^Verdict[[:space:]]*:[[:space:]]*", "", grep("^Verdict", text, value = TRUE)[[1]])
 cat("Verdict:", verdict, "\n")
-if (startsWith(verdict, "FAIL")) stop("The qualification run failed.")
+# Not only FAIL: a run that executed nothing is "NOT EXECUTED", and that is not a
+# success either. Every verdict that says the evidence holds begins with PASS.
+if (!startsWith(verdict, "PASS")) stop("The qualification run did not pass (verdict: ", verdict, ").")

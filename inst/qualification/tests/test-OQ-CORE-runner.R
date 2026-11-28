@@ -187,6 +187,24 @@ test_that("OQ-CORE-004 | the verdict is FAIL whenever any evidence says so | REQ
       meta_ok, dev_ok, FALSE
     )
   )
+  # REQ-CORE-004 says "fails or errors": a case that throws and a stage that
+  # could not run at all are not statuses the first step above tries.
+  qa_step(
+    "a test case that raised an error gives FAIL",
+    "FAIL",
+    qual_verdict(
+      data.frame(status = c("pass", "error"), stringsAsFactors = FALSE),
+      meta_ok, dev_ok, FALSE
+    )
+  )
+  qa_step(
+    "a file that failed outside any test case gives FAIL",
+    "FAIL",
+    qual_verdict(
+      data.frame(status = c("pass", "file_error"), stringsAsFactors = FALSE),
+      meta_ok, dev_ok, FALSE
+    )
+  )
   qa_step(
     "a failing meta check gives FAIL even when every test passed",
     "FAIL",
@@ -681,4 +699,68 @@ test_that("OQ-CORE-013 | a filter that matches no test file in any stage aborts 
     inherits(err, "condition") && grepl("^NO-SUCH-TEST-FILE$", conditionMessage(err), fixed = TRUE)
   )
   qa_step("and no evidence bundle is left in the output directory", 0L, length(list.files(out)))
+})
+
+test_that("OQ-CORE-014 | a run in which no test case passed is NOT EXECUTED, never a PASS | REQ-CORE-014 | tags: white-box", {
+  meta_ok <- data.frame(ok = TRUE, stringsAsFactors = FALSE)
+  dev_ok <- data.frame(status_run = "reproduced", stringsAsFactors = FALSE)
+
+  qa_step(
+    "no test case at all gives NOT EXECUTED, partial or not",
+    c("NOT EXECUTED", "NOT EXECUTED"),
+    c(
+      qual_verdict(qual_tests_empty(), meta_ok, dev_ok, TRUE),
+      qual_verdict(qual_tests_empty(), meta_ok, dev_ok, FALSE)
+    )
+  )
+  qa_step(
+    "a run in which every case was skipped is NOT EXECUTED too",
+    "NOT EXECUTED",
+    qual_verdict(data.frame(status = c("skip", "skip"), stringsAsFactors = FALSE), meta_ok, dev_ok, FALSE)
+  )
+  qa_step(
+    "a failing meta check still outranks it",
+    "FAIL (PARTIAL)",
+    qual_verdict(qual_tests_empty(), data.frame(ok = FALSE), dev_ok, TRUE)
+  )
+  qa_step(
+    "one case that passed, and one skipped, is a PASS that says so",
+    "PASS WITH NOT-EXECUTED TESTS",
+    qual_verdict(data.frame(status = c("pass", "skip"), stringsAsFactors = FALSE), meta_ok, dev_ok, FALSE)
+  )
+
+  # The real run, end to end: nothing was executed, so nothing may read as a pass.
+  bundle <- run_qualification(
+    qa_tempdir(),
+    stages = character(0), scale = "quick", formats = "md", quiet = TRUE
+  )
+  qa_step("a run of no stage ends NOT EXECUTED", "NOT EXECUTED", bundle$verdict)
+  summary_lines <- readLines(file.path(bundle$bundle_dir, "SUMMARY.txt"))
+  qa_check(
+    "SUMMARY.txt carries that verdict",
+    any(grepl("^Verdict +: NOT EXECUTED$", summary_lines))
+  )
+})
+
+test_that("OQ-CORE-015 | the report names the hash manifest and quotes the command that verifies it | REQ-CORE-015", {
+  bundle <- run_qualification(
+    qa_tempdir(),
+    stages = character(0), scale = "quick", formats = "md", quiet = TRUE
+  )
+  # Which manifest and tool follow from whether this R offers SHA-256.
+  has_sha256 <- "sha256sum" %in% getNamespaceExports("tools")
+  manifest <- if (has_sha256) "SHA256SUMS" else "MD5SUMS"
+  tool <- if (has_sha256) "sha256sum" else "md5sum"
+  report <- readLines(file.path(bundle$bundle_dir, "report", "qualification-report.md"))
+
+  qa_check("that manifest is in the bundle", file.exists(file.path(bundle$bundle_dir, manifest)))
+  qa_step(
+    "the report quotes the command with the manifest as its argument",
+    sprintf("Verify with `%s -c %s` from the bundle directory.", tool, manifest),
+    report[startsWith(report, "Verify with")]
+  )
+  qa_check(
+    "and names the manifest where it says what the manifest covers",
+    any(startsWith(report, sprintf("`%s` lists every file in this evidence bundle", manifest)))
+  )
 })

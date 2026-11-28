@@ -1636,3 +1636,25 @@ requirements:
       (OQ-TMPL-162); the body of a dataset template is linted without its files,
       so no template reaches the abort there and OQ-TMPL-163 replaces the
       linter with one that fails.
+
+  - id: REQ-TMPL-070
+    text: >
+      write_template_guide() shall warn with class dta_template_guide_problems
+      whenever the guide of a template lists a problem in the document it
+      writes, whether or not the template's own sample could be built, and the
+      document shall list that same problem. A dataset template that the
+      dataset reader refuses, such as one with a misspelt column key, shall be
+      listed as a problem row of its own file that names the key it refused;
+      a comparison with a dataset template that could not be made shall be a
+      problem row too, so that a guide without change marks never reads as
+      "unchanged" without a row saying why it was not compared.
+    risk: medium
+    category: functional
+    covers: [write_template_guide]
+    source: R/templateGuide.R (.tg_entry_problems); R/templateGuide-collect.R (.tgc_build_dataset_template)
+    notes: >
+      The guide compares the dataset a creation template builds with the dataset
+      template it came from and marks what changed. A failure to build the
+      dataset template used to give no comparison, with nothing to say so, and
+      the guide read as "unchanged". The warning and the "Problems found" table
+      now rest on the same test.

@@ -949,7 +949,10 @@ one dataset, the bare form renders every applicable one under its own heading.
 
 A block marker must be **the only text in its paragraph**, and must sit in the
 document body rather than a header, a footer or a table cell; anything left over
-is named in a warning. Tables are sized to the template's own text column, and
+is named in a warning, whatever `quiet` says (class
+`dta_template_blocks_unrendered`, with `dta_template_region_malformed` added when
+a `{#DATASETS}` or `{/DATASETS}` marker is among it; the app shows it as a
+notification). `quiet` does not silence it. Tables are sized to the template's own text column, and
 headings use the template's `heading N` style when it defines one. A value
 supplied through `template_variables` overrides a marker of either kind and is
 always rendered as text.
@@ -997,6 +1000,16 @@ engine, which re-typeset the document and lose them.
 in which case `tinytex::install_tinytex()` adds one from R without
 administrator rights. `write_dta(format = "pdf")` verifies the `%PDF` signature
 and aborts, naming that command, rather than writing a DOCX under a `.pdf` name.
+
+When the backend `dta_pdf_backend()` reports first fails on the day (Word refuses
+the call, LibreOffice dies), the export moves on to the next one and still writes
+the PDF — but it always warns, whatever `quiet` says, with a condition of class
+`dta_pdf_backend_fallback`. The warning names each backend that failed and why,
+the backend that made the file and, for TinyTeX and pandoc, that the running page
+header and footer are not in it (`$used`, `$failed` and `$furniture_lost` carry
+the same facts for a script). A machine whose only backend is TinyTeX or pandoc
+is not a fallback and is not warned; read `dta_pdf_backend()$name` beforehand if
+the header and footer matter.
 
 ```r
 dta_pdf_backend()   # NULL, or a list naming the backend and engine

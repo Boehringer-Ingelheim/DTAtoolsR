@@ -14,7 +14,7 @@ package_version: 0.30.0
 areas:
   - area: CORE
     title: The qualification runner itself
-    min_tests: 13
+    min_tests: 15
   - area: ENV
     title: Installed system and environment
     min_tests: 23
@@ -47,16 +47,16 @@ areas:
     min_tests: 23
   - area: TMPL
     title: Templates, inheritance and controlled vocabulary
-    min_tests: 162
+    min_tests: 164
   - area: EXPORT
     title: Document and data export
-    min_tests: 77
+    min_tests: 81
   - area: REPORT
     title: The standalone HTML validation report
     min_tests: 18
   - area: APP
     title: The interactive application
-    min_tests: 81
+    min_tests: 82
   - area: ROBUST
     title: Error handling, integrity and isolation
     min_tests: 18

@@ -24,7 +24,14 @@ export_with_template(
 \item{variables}{Optional named list of additional or overriding placeholder
 values. Names may include or omit the surrounding braces. Default: \code{NULL}.}
 
-\item{quiet}{Logical. If \code{TRUE}, suppresses console output. Default: \code{FALSE}.}
+\item{quiet}{Logical. If \code{TRUE}, suppresses the progress message and the
+warning that announces the \code{fallback} below. It never suppresses the
+warnings about placeholders that stayed in the finished document: an inline
+placeholder without a value (class \code{dta_template_placeholders_unresolved})
+and a block placeholder or \verb{\{#DATASETS\}} / \verb{\{/DATASETS\}} marker that could
+not be rendered (class \code{dta_template_blocks_unrendered}, plus
+\code{dta_template_region_malformed} when a marker is among them). Both carry
+the leftover \code{tokens}. Default: \code{FALSE}.}
 
 \item{fallback}{Logical. If \code{TRUE} (default) and template processing fails,
 fall back to the standard programmatic document produced by \code{\link[=write_dta]{write_dta()}}.

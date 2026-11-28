@@ -128,7 +128,15 @@ test_that("custom study blocks share Word rendering without interpreting metadat
   ))
   out <- tempfile(fileext = ".docx")
   on.exit(unlink(c(template, out)), add = TRUE)
-  expect_no_warning(export_with_template(dta, template, out, quiet = TRUE, fallback = FALSE))
+  # The fixture's second agreement paragraph spells "{STUDY_TABLE}" as plain text
+  # (the point of the test: it is a value, not a placeholder). It is left as
+  # written, and the warning lists it, as it documents (c4-tmpl-export-29): no
+  # other token of the template is left over.
+  w <- expect_warning(
+    export_with_template(dta, template, out, quiet = TRUE, fallback = FALSE),
+    class = "dta_template_blocks_unrendered"
+  )
+  expect_identical(w$tokens, "{STUDY_TABLE}")
   summary <- officer::docx_summary(officer::read_docx(out))
   text <- summary$text
   expect_true(dta@metadata@study$id %in% text)

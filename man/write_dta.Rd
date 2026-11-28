@@ -29,7 +29,10 @@ write_dta(
 
 \item{format}{Character. Output format: "docx" (default), "pdf", or "md"
 (GitHub-flavoured Markdown, see Details). If NULL, inferred from file
-extension.}
+extension. A PDF is made from the Word document by the backend that
+\code{\link[=dta_pdf_backend]{dta_pdf_backend()}} reports; when that backend fails and a later one makes
+the file, the call warns with class \code{dta_pdf_backend_fallback}, naming the
+failure and, where it applies, that the running header and footer are lost.}
 
 \item{overwrite}{Logical. Whether to overwrite existing files. Default: FALSE.}
 
@@ -46,7 +49,11 @@ the signatories taken from the contacts (duplicates by name and
 organization are skipped) in the built-in DOCX/PDF layout and in
 Markdown; ignored with a \code{template}.}
 
-\item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
+\item{quiet}{Logical. If TRUE, suppresses the progress message ("Document
+saved ..."). It never mutes a warning: a PDF that came from a fallback
+backend, a block placeholder or region marker of a \code{template} that stayed
+in the document, and a placeholder without a value are reported whatever
+\code{quiet} says. Default is FALSE.}
 
 \item{include_yaml}{Logical. If \code{TRUE}, append the machine-readable YAML
 specification as a final, small-font section of the built-in DOCX/PDF

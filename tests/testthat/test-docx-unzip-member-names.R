@@ -93,7 +93,7 @@ for (case in names(hostile_names)) {
       seen <- .watch_extraction()
 
       expect_error(
-        DTAtools:::.replace_docx_placeholders(zp, list(), NULL, out, quiet = TRUE),
+        DTAtools:::.replace_docx_placeholders(zp, list(), NULL, out),
         "not a readable DOCX"
       )
       expect_false(seen$extracted)

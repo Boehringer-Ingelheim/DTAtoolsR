@@ -4,13 +4,7 @@
 \alias{.replace_docx_placeholders}
 \title{Replace placeholders in a DOCX template and write a new DOCX}
 \usage{
-.replace_docx_placeholders(
-  template_path,
-  variables,
-  dta,
-  output_path,
-  quiet = FALSE
-)
+.replace_docx_placeholders(template_path, variables, dta, output_path)
 }
 \arguments{
 \item{template_path}{Character. Path to the template \code{.docx}.}
@@ -21,12 +15,12 @@
 placeholder left alone by the substitution above can be rendered.}
 
 \item{output_path}{Character. Path to the \code{.docx} to create.}
-
-\item{quiet}{Logical. Suppress the warning about block placeholders left
-unchanged. Default \code{FALSE}.}
 }
 \value{
-Invisibly returns \code{output_path}.
+Invisibly returns \code{output_path}. Placeholders that stayed in the
+document are reported with warnings (\code{dta_template_placeholders_unresolved}
+for inline ones, \code{dta_template_blocks_unrendered} for block placeholders and
+region markers); there is no switch that silences them.
 }
 \description{
 Unzips \code{template_path}, substitutes placeholders in the main document part and

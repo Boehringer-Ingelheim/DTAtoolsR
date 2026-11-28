@@ -287,3 +287,66 @@ test_that("OQ-APP-031 | template suggestions preserve editable input | REQ-APP-0
     )
   )
 })
+
+test_that("OQ-APP-085 | the Word export through a template tells the user which placeholder stayed in the document, and still delivers it | REQ-APP-066", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+  lib <- qapp_with_library(c(
+    "exports:", "  bundled_word_templates: false", "  document: [word_template]"
+  ))
+  dir.create(file.path(lib, "export-templates"))
+  # One placeholder the exporter can fill, one block placeholder that names a
+  # dataset the document does not contain, so it stays as written.
+  template <- officer::read_docx()
+  template <- officer::body_add_par(template, "Agreement {DTA_TITLE}", style = "Normal")
+  template <- officer::body_add_par(template, "{COLUMN_SPECS:NOPE}", style = "Normal")
+  template <- officer::body_add_par(template, "Hello {NOT_A_FIELD}", style = "Normal")
+  print(template, target = file.path(lib, "export-templates", "house.docx"))
+  # And one the exporter fills completely.
+  clean <- officer::read_docx()
+  clean <- officer::body_add_par(clean, "Agreement {DTA_TITLE}", style = "Normal")
+  clean <- officer::body_add_par(clean, "{COLUMN_SPECS}", style = "Normal")
+  print(clean, target = file.path(lib, "export-templates", "clean.docx"))
+
+  notices <- list()
+  testthat::local_mocked_bindings(
+    showNotification = function(ui, ..., type = "default") {
+      notices[[length(notices) + 1L]] <<- list(text = paste(as.character(ui), collapse = ""), type = type)
+      invisible(NULL)
+    },
+    .package = "shiny"
+  )
+
+  delivered <- NA
+  delivered_clean <- NA
+  warned_house <- list()
+  warned_clean <- list()
+  shiny::testServer(app, {
+    session$setInputs(dta_client_id = strrep("r", 32))
+    session$setInputs(dta_file = qapp_file_input("clinical_dta.yaml"))
+    session$setInputs(
+      export_format = "word", export_word_mode = "custom",
+      export_template_select = "library:house.docx", export_include_yaml_word = FALSE
+    )
+    session$setInputs(export_do = 1)
+    delivered <<- !is.null(export_state$file_path) && file.exists(export_state$file_path)
+    warned_house <<- Filter(function(n) identical(n$type, "warning"), notices)
+
+    # The same session, a template that fills completely: no warning.
+    notices <<- list()
+    session$setInputs(export_template_select = "library:clean.docx")
+    session$setInputs(export_do = 2)
+    delivered_clean <<- !is.null(export_state$file_path) && file.exists(export_state$file_path)
+    warned_clean <<- Filter(function(n) identical(n$type, "warning"), notices)
+  })
+
+  qa_step("a block placeholder and an inline one each raise a warning notification", 2L, length(warned_house))
+  texts <- paste(vapply(warned_house, function(n) n$text, ""), collapse = " ")
+  qa_check(
+    "the notifications name both placeholders that stayed in the document",
+    grepl("{COLUMN_SPECS:NOPE}", texts, fixed = TRUE) && grepl("{NOT_A_FIELD}", texts, fixed = TRUE)
+  )
+  qa_step("and the document is still delivered", TRUE, delivered)
+  qa_step("a template that fills completely shows no warning", 0L, length(warned_clean))
+  qa_step("and its document is delivered", TRUE, delivered_clean)
+})
