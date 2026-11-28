@@ -86,6 +86,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   version that is running (the snapshot carries `dtatools_version`); any other
   is refused with a message saying so. It no longer upgrades an old document or
   rebuilds it from its YAML text.
+- **A check that cannot run is an error, never a pass. A specification that
+  used to pass can now fail.** A column whose specification cannot be turned
+  into a check lost every one of its value checks behind one warning, and the
+  table was reported valid on data nobody had looked at. `check()` and
+  `validate_table()` now report it as a finding of keyword `dta_check_not_run`
+  (one per column, once for the scan, ahead of the other findings) and the table
+  as not valid, in memory and streamed alike; the per-check report lists it as
+  failed, `messages()`, `explain_messages()`, `inspect()` and the HTML report
+  carry it, and the warning of class `dta_columnspec_schema_failed` stays as a
+  hint at the cause. A column declared `type: SAS` with no type and no format,
+  which used to build, lint clean and then lose its checks, is refused where it
+  is built (class `dta_spec_bare_backend`), reported by `lint_dta()` as a
+  `column_spec_invalid` error, and a YAML specification holding one no longer
+  loads. A SAS structure built directly with a length and no type is still a
+  valid object, and a column holding one is now an error at check time instead
+  of being skipped. A bare `type: R` is unchanged: it validates as text.
+- `validate_template()` no longer turns a `lint_dta()` that aborts into "no
+  findings": over a creation template and over a dataset template it reports the
+  error `lint_failed` with the cause, so `lint_template_repo()` fails on it.
+- A table with a header and no rows is still valid (`ok` stays `TRUE`; see
+  LIM-037 of the qualification register), but `check()` no longer says it
+  "passed validation": the line reports the table as having 0 rows with no value
+  check run, counting the tables with rows and those without when both are
+  present, and the line of a dataset inside `check()` of a `DTA` and its
+  `Validation PASSED` line add the number of such tables of the datasets that
+  run checked. The row count is recorded in the validation index entry of each
+  table.
+- In the app, a packaging check that cannot be carried out is a state of its own,
+  "not checkable", and never a pass. When `container_findings()` fails for the
+  document the Delivery view reads "Packaging not checkable" instead of
+  "Packaging conforms", a dataset whose content passed is not shown as passed in
+  the dataset list, the validation summary button is not offered as a pass and
+  the summary reads `VALIDATION INCOMPLETE`; a failure used to be read as "no
+  findings".
 
 ## [0.30.0] - 2026-11-25
 

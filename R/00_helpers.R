@@ -645,6 +645,24 @@ DTAColumnSpecStructureFactory <- function(
     )
   }
 
+  # `type: SAS` names a backend and declares nothing: no type, and no format to
+  # infer one from. A SAS structure cannot say how it validates without a type,
+  # so such a column used to build, lint clean and then lose every one of its
+  # value checks at check time. It is refused where it is written instead. (A
+  # structure built directly with a length and no type is a different, designed
+  # state -- see as_r_type() -- and is not reached from here.)
+  if (identical(backend, "SAS") &&
+    !.structure_value_is_set(type_info[["rest"]]) &&
+    !.structure_value_is_set(format_info[["rest"]])) {
+    cli_abort(
+      c(
+        "The SAS backend is named, but no type or format follows it.",
+        i = "Write the type after the backend, e.g. {.val SAS Char}, or give a format such as {.val SAS $10.}."
+      ),
+      class = "dta_spec_bare_backend"
+    )
+  }
+
   switch(backend,
     SAS = DTAtools::DTAColumnSpecStructureSAS(
       type = type_info[["rest"]],

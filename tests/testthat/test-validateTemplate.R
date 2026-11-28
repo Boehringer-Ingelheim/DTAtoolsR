@@ -3227,3 +3227,101 @@ test_that("when the parent cannot be resolved, slots added in the verb form are 
   expect_match(rows$message, "p_added_typo", fixed = TRUE)
   expect_false(any(grepl("p_modified_typo", result$message, fixed = TRUE)))
 })
+
+# ---- a linter that aborts has judged nothing ----------------------------------
+#
+# Both places that run lint_dta() over a template turned ANY error of the linter
+# into "no findings", so a template whose columns and rules were never examined
+# came back clean, and the repository's CI went green. The abort is a finding of
+# its own now.
+#
+# A creation template reaches the abort through a file-name pattern that is not a
+# regular expression: the conflict scan compiles it, and the linter fails there.
+# That is a real input, so it is a fixture. The body of a dataset template is
+# linted without its files, so no such input reaches the linter there, and the
+# linter is made to abort by a mock instead.
+
+# A creation template with two datasets; `first_pattern` is the file name pattern
+# of the first, the second is always a valid one that cannot clash with it.
+write_pattern_template <- function(dir, first_pattern) {
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: pattern_tpl",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Pattern Template",
+      "datasets:",
+      "  - id: a",
+      "    type: tabular",
+      sprintf("    files: {filename: '%s', type: csv, pattern: true}", first_pattern),
+      "    columns:",
+      "      - {id: COL1, type: SAS Char}",
+      "  - id: b",
+      "    type: tabular",
+      "    files: {filename: 'vs_[0-9]+[.]csv$', type: csv, pattern: true}",
+      "    columns:",
+      "      - {id: COL1, type: SAS Char}"
+    ),
+    lib_file(dir, "pattern.dta-template.yaml")
+  )
+}
+
+test_that("a creation template whose file name pattern is not a regular expression is an error, not a clean template", {
+  dir <- withr::local_tempdir()
+
+  # Control: the same template with a valid pattern validates clean, so the row
+  # below comes from the abort and from nothing else.
+  write_pattern_template(dir, "lab_[0-9]+[.]csv$")
+  expect_equal(nrow(validate_template(dir)), 0)
+
+  write_pattern_template(dir, "lab_[0-9.csv")
+  result <- validate_template(dir)
+
+  rows <- expect_code_row(result, "lint_failed", "error")
+  expect_equal(nrow(rows), 1)
+  expect_match(rows$file, "pattern.dta-template.yaml", fixed = TRUE)
+  # The cause travels with it, so the author can find the pattern.
+  expect_match(rows$message, "lab_[0-9.csv", fixed = TRUE)
+})
+
+test_that("a linter that aborts on a dataset template is an error, not a clean template", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: has_dataset_body",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: ds1",
+      "  type: tabular",
+      "  files: {filename: x.csv, type: csv}",
+      "  columns:",
+      "    - {id: COL1, type: SAS Char}"
+    ),
+    lib_file(dir, "has_dataset_body.dta-dataset-template.yaml")
+  )
+  expect_equal(nrow(validate_template(dir)), 0)
+
+  testthat::local_mocked_bindings(
+    lint_dta = function(...) stop("the linter fell over"),
+    .package = "DTAtools"
+  )
+  result <- validate_template(dir)
+
+  rows <- expect_code_row(result, "lint_failed", "error")
+  expect_equal(nrow(rows), 1)
+  expect_match(rows$message, "the linter fell over", fixed = TRUE)
+})
+
+test_that("a repository holding such a template does not pass lint_template_repo()", {
+  dir <- withr::local_tempdir()
+  write_pattern_template(dir, "lab_[0-9.csv")
+
+  # `fail_on = "error"` is the CI default: an error row has to fail it.
+  expect_error(
+    suppressMessages(lint_template_repo(dir)),
+    class = "dta_template_lint_error"
+  )
+})

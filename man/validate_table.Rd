@@ -43,7 +43,10 @@ failure names the check that failed and a pass says which checks actually
 ran. The table's columns must be EXACTLY the declared ones: a column the
 specs do not describe fails the axis just as an absent declared column does. A check no
 column declares reports as \code{not_applicable}; one the run could not settle
-reports as \code{not_checked}. Neither is a pass.
+reports as \code{not_checked}. Neither is a pass. A column whose specification
+cannot be turned into a check at all is not a pass either: it is reported as
+a finding of keyword \code{dta_check_not_run}, one per column, and the table is not
+valid.
 }
 \examples{
 specs <- DTAColumnSpecCollection(

@@ -26,7 +26,7 @@ areas:
     min_tests: 47
   - area: VAL
     title: Validation engine and result accessors
-    min_tests: 49
+    min_tests: 53
   - area: RULE
     title: Cross-column and grouped rules
     min_tests: 53
@@ -35,7 +35,7 @@ areas:
     min_tests: 61
   - area: CONT
     title: Container deliveries (zip archives, SAS transport libraries)
-    min_tests: 62
+    min_tests: 63
   - area: MATRIX
     title: Matrix datasets (type matrix)
     min_tests: 58
@@ -47,7 +47,7 @@ areas:
     min_tests: 23
   - area: TMPL
     title: Templates, inheritance and controlled vocabulary
-    min_tests: 160
+    min_tests: 162
   - area: EXPORT
     title: Document and data export
     min_tests: 77

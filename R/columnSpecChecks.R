@@ -591,13 +591,17 @@ dta_sas_numeric_format_bad <- function(x, w, d, decimals = TRUE) {
 #' spec rather than to the data.
 #'
 #' A column whose schema cannot be derived (`as_json_schema()` errors) gets a
-#' `NULL` schema and is warned about here, once for the whole scan rather than
-#' once per batch -- `dta_columnspec_errors()` then skips its value checks
-#' entirely, exactly as it does for a column absent from `schemas`.
+#' `NULL` schema, the cause is recorded on its entry, and it is warned about
+#' here, once for the whole scan rather than once per batch.
+#' `dta_columnspec_errors()` then skips its value checks entirely, exactly as it
+#' does for a column absent from `schemas` -- which is NOT the same as the
+#' column passing them. The callers that settle the verdict report every such
+#' column as a finding (see [dta_columnspec_not_run_errors()]), so a check that
+#' could not run is never read as one that ran and found nothing.
 #' @param specs A `DTAColumnSpecCollection`.
 #' @return A list with one element per column, each a list of `name` (the
 #'   expected column name) and `schema` (the column's schema, or `NULL` when it
-#'   could not be derived).
+#'   could not be derived, in which case `error` holds the cause).
 #' @keywords internal
 dta_compile_columnspec_schemas <- function(specs) {
   columns <- tryCatch(specs@columns, error = function(e) NULL)
@@ -623,15 +627,18 @@ dta_compile_columnspec_schemas <- function(specs) {
 
   lapply(seq_along(columns), function(i) {
     column_name <- spec_names[[i]]
+    cause <- NULL
     schema <- tryCatch(
       as_json_schema(columns[[i]]),
       error = function(e) {
-        # Not silent: a column whose schema fails to compile loses ALL of its
-        # value checks (type, length, pattern, enum) in both the materialising
-        # and streaming engines, which is worth a warning rather than a table
-        # that quietly reports "ok" on data it never actually examined. `NULL`
-        # is still returned so the scan itself is not interrupted -- the same
-        # degraded-but-running behaviour as before, just no longer silent.
+        # A column whose schema fails to compile loses ALL of its value checks
+        # (type, length, pattern, enum) in both the materialising and streaming
+        # engines. `NULL` is returned so the scan itself is not interrupted,
+        # and the cause is kept on the entry: whoever settles the verdict turns
+        # it into a finding (dta_columnspec_not_run_errors()), because a check
+        # that never ran must not read as one that found nothing. The warning
+        # stays as a hint at the cause, for the console.
+        cause <<- conditionMessage(e)
         cli::cli_warn(
           "Column {.val {column_name}} could not be compiled into a schema; its value checks are skipped.",
           class = "dta_columnspec_schema_failed"
@@ -639,8 +646,81 @@ dta_compile_columnspec_schemas <- function(specs) {
         NULL
       }
     )
-    list(name = column_name, schema = schema)
+    entry <- list(name = column_name, schema = schema)
+    if (!is.null(cause)) {
+      entry$error <- cause
+    }
+    entry
   })
+}
+
+#' @title Findings for the Columns Whose Checks Could Not Be Run
+#' @description
+#' One finding per column whose schema could not be compiled
+#' ([dta_compile_columnspec_schemas()] left it `NULL`). Its value checks did not
+#' run, so nothing can be said about its values -- and "nothing was found"
+#' would be a false statement, because nothing was looked for. Reported as an
+#' error: a specification that cannot be turned into a check is the author's to
+#' fix, and until it is fixed the table is not valid.
+#'
+#' Object-level, like a missing or an undeclared column: `row = NA`, one row
+#' per column and not one per table row or per batch, because it is a fact about
+#' the specification. `keyword` is `"dta_check_not_run"`, the class this finding
+#' travels under.
+#'
+#' Callers put these rows AHEAD of the cell findings, so that a retention cap
+#' cannot push them out of the frame that is kept, and so that both engines
+#' order them alike.
+#' @param schemas Compiled schemas, from [dta_compile_columnspec_schemas()].
+#' @return A data frame of errors in the shape `dta_columnspec_errors()` uses, or
+#'   `NULL` when every column compiled.
+#' @keywords internal
+dta_columnspec_not_run_errors <- function(schemas) {
+  if (length(schemas) == 0) {
+    return(NULL)
+  }
+
+  skipped <- which(vapply(schemas, function(entry) is.null(entry$schema), logical(1)))
+  if (length(skipped) == 0) {
+    return(NULL)
+  }
+
+  names_out <- vapply(
+    schemas[skipped],
+    function(entry) {
+      nm <- entry$name
+      if (is.character(nm) && length(nm) == 1 && !is.na(nm) && nzchar(nm)) nm else NA_character_
+    },
+    character(1)
+  )
+  causes <- vapply(
+    schemas[skipped],
+    function(entry) {
+      cause <- entry$error
+      if (is.character(cause) && length(cause) == 1 && !is.na(cause) && nzchar(cause)) {
+        paste0(" (", cause, ")")
+      } else {
+        ""
+      }
+    },
+    character(1)
+  )
+  label <- ifelse(is.na(names_out), "An unnamed column", paste0("Column '", names_out, "'"))
+
+  out <- data.frame(
+    row = NA_integer_,
+    column = names_out,
+    keyword = "dta_check_not_run",
+    message = paste0(
+      label, " was not checked: its specification cannot be turned into a check",
+      causes, "."
+    ),
+    columnspec = NA_character_,
+    data = NA_character_,
+    stringsAsFactors = FALSE
+  )
+  rownames(out) <- NULL
+  out
 }
 
 # ---- whole-table evaluation -------------------------------------------------
@@ -728,8 +808,11 @@ dta_columnspec_errors <- function(specs, table, schemas = NULL, summarise = TRUE
     }
 
     # A NULL schema means as_json_schema() could not be derived for this
-    # column -- dta_compile_columnspec_schemas() already warned about it once
-    # for the whole scan, so this is a silent skip of the value checks here.
+    # column. The value checks are skipped HERE, and only here: the finding that
+    # says so is a fact about the specification, not about a row, so it is not
+    # emitted per call (the streaming path calls this once per batch). The
+    # callers that settle the verdict add it once, from the compiled schemas --
+    # see dta_columnspec_not_run_errors().
     col_spec <- schemas[[i]]$schema
     if (is.null(col_spec)) {
       next
@@ -797,9 +880,12 @@ dta_summarise_columnspec_errors <- function(full_error) {
   # honest answer for a finding about the header rather than about a row.
   #
   # It is still listed by name when a required column is also missing, because
-  # that branch reports every object-level finding it has.
+  # that branch reports every object-level finding it has. So is a column whose
+  # checks could not be run: it is a fact about the specification, and a missing
+  # column must not be able to hide it.
   if (any(full_error$keyword == "required")) {
-    object_level <- full_error$keyword %in% c("required", "additionalProperties")
+    object_level <- full_error$keyword %in%
+      c("required", "additionalProperties", "dta_check_not_run")
     out <- unique(full_error[object_level, c("keyword", "message"), drop = FALSE])
     rownames(out) <- NULL
     return(out)
@@ -840,10 +926,14 @@ dta_summarise_columnspec_errors <- function(full_error) {
 #' @description
 #' Every constraint keyword `as_json_schema()` can emit, paired with the human
 #' label the console report groups it under. The row order is the report order.
-#' @return A data frame with columns `check`, `keyword` and `matrix_only`. The
-#'   matrix-only keywords (header, dimension, range and finiteness findings of a
-#'   matrix dataset) are counted in every tally, but only reported in a summary
-#'   built with `matrix = TRUE`.
+#' @return A data frame with columns `check`, `keyword`, `matrix_only` and
+#'   `only_when_found`. The matrix-only keywords (header, dimension, range and
+#'   finiteness findings of a matrix dataset) are counted in every tally, but
+#'   only reported in a summary built with `matrix = TRUE`. The one
+#'   `only_when_found` keyword, `dta_check_not_run`, is not a constraint a
+#'   column declares but the finding that a column's constraints could not be
+#'   run; it is listed in a summary only when it holds a finding, because
+#'   "no check failed to run" is the ordinary state and not worth a row.
 #' @keywords internal
 dta_columnspec_check_kinds <- function() {
   legacy <- data.frame(
@@ -855,6 +945,14 @@ dta_columnspec_check_kinds <- function() {
       "type", "format", "maxLength", "enum", "const", "pattern"
     ),
     matrix_only = FALSE,
+    only_when_found = FALSE,
+    stringsAsFactors = FALSE
+  )
+  not_run <- data.frame(
+    check = "notrun",
+    keyword = "dta_check_not_run",
+    matrix_only = FALSE,
+    only_when_found = TRUE,
     stringsAsFactors = FALSE
   )
   matrix_kinds <- data.frame(
@@ -867,9 +965,10 @@ dta_columnspec_check_kinds <- function() {
       "minimum", "maximum", "finite"
     ),
     matrix_only = TRUE,
+    only_when_found = FALSE,
     stringsAsFactors = FALSE
   )
-  rbind(legacy, matrix_kinds)
+  rbind(legacy, not_run, matrix_kinds)
 }
 
 #' @title Which Columns Declare Each Constraint
@@ -1070,6 +1169,12 @@ dta_columnspec_check_summary <- function(schemas,
       drop = FALSE
     ]
   }
+  # The finding that a column's checks could not be run is a row of its own only
+  # when there is one, on a tabular summary and a matrix one alike.
+  kinds <- kinds[
+    !kinds$only_when_found | tally$n_errors[kinds$keyword] > 0, ,
+    drop = FALSE
+  ]
   keywords <- kinds$keyword
   structure_keywords <- kinds$keyword[kinds$check %in% c("header", "dimensions")]
   if (is.null(settled)) {
@@ -1177,6 +1282,7 @@ dta_columnspec_check_summary <- function(schemas,
   length = "Length",
   values = "Values",
   pattern = "Pattern",
+  notrun = "Checks not run",
   header = "Header",
   dimensions = "Dimensions",
   range = "Range",
@@ -1192,6 +1298,8 @@ dta_columnspec_check_summary <- function(schemas,
   length = "no column spec declares a length",
   values = "no column spec declares a value list",
   pattern = "no column spec declares a pattern",
+  # Never printed: this row is listed only when it holds a finding.
+  notrun = "every column's checks could be run",
   header = "the matrix declares no header constraint",
   dimensions = "no dimension bound applies",
   range = "the cell spec declares no range",
@@ -1268,6 +1376,13 @@ dta_report_columnspec_checks <- function(checks,
         # the table carries that nothing describes.
         cli::cli_alert_danger(
           "{title} check failed: {n_columns} column{?s} in the table {?is/are} not described by the specs: {.field {columns}}"
+        )
+      } else if (identical(label, "notrun")) {
+        # Not a constraint that failed: a column none of whose constraints could
+        # be evaluated. Said as that, because "values" or "format" passing next
+        # to it would otherwise read as covering the column.
+        cli::cli_alert_danger(
+          "{title}: {n_columns} column{?s} not checked at all, because {?its/their} specification{?s} cannot be turned into a check: {.field {columns}}"
         )
       } else {
         # `cli::qty()` sits between the rendered count and the noun, not before

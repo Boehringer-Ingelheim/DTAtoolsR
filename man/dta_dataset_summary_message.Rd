@@ -11,7 +11,8 @@ dta_dataset_summary_message(
   n_invalid,
   n_unchecked,
   n_undelivered = 0,
-  n_count_errors = 0L
+  n_count_errors = 0L,
+  n_empty = 0L
 )
 }
 \arguments{
@@ -34,6 +35,10 @@ checks" the unchecked tally exists to prevent, one level up.}
 \item{n_count_errors}{Integer. 1 when the dataset's supplied file count lies
 outside the bounds its handlers declare. Named in the line (never a green
 "all valid" over it), alongside any failure or unchecked targets.}
+
+\item{n_empty}{Integer. Tables that were valid while holding no rows. Named
+in the line of an otherwise clean dataset, because no value check was run on
+them.}
 }
 \value{
 A list of \code{severity} (\code{"danger"}, \code{"warning"} or \code{"success"}) and

@@ -612,6 +612,9 @@ dta_count_noun <- function(n, singular, plural) {
 #' @param n_count_errors Integer. 1 when the dataset's supplied file count lies
 #'   outside the bounds its handlers declare. Named in the line (never a green
 #'   "all valid" over it), alongside any failure or unchecked targets.
+#' @param n_empty Integer. Tables that were valid while holding no rows. Named
+#'   in the line of an otherwise clean dataset, because no value check was run on
+#'   them.
 #' @return A list of `severity` (`"danger"`, `"warning"` or `"success"`) and
 #'   `text`.
 #' @keywords internal
@@ -621,7 +624,8 @@ dta_dataset_summary_message <- function(n_targets,
                                         n_invalid,
                                         n_unchecked,
                                         n_undelivered = 0,
-                                        n_count_errors = 0L) {
+                                        n_count_errors = 0L,
+                                        n_empty = 0L) {
   unchecked_tail <- if (n_unchecked > 0) {
     paste0("; ", dta_count_noun(n_unchecked, "target", "targets"), " not checked")
   } else {
@@ -664,10 +668,19 @@ dta_dataset_summary_message <- function(n_targets,
     ))
   }
 
+  # A table with a header and no rows is valid, deliberately, but no value check
+  # was run on it; "all valid" alone would certify more than was looked at.
+  empty_tail <- if (n_empty > 0) {
+    paste0("; ", n_empty, " with 0 rows, on which no value check was run")
+  } else {
+    ""
+  }
+
   list(
     severity = if (n_count_errors > 0) "danger" else "success",
     text = paste0(
-      dta_count_noun(n_validated, "table", "tables"), " validated: all valid", count_tail
+      dta_count_noun(n_validated, "table", "tables"), " validated: all valid",
+      empty_tail, count_tail
     )
   )
 }
@@ -706,7 +719,8 @@ dta_overall_summary_message <- function(total_invalid,
                                         total_undelivered = 0,
                                         total_count_errors = 0L,
                                         total_container_errors = 0L,
-                                        total_container_unverified = 0L) {
+                                        total_container_unverified = 0L,
+                                        total_empty = 0L) {
   unchecked_tail <- if (total_unchecked > 0) {
     paste0("; ", dta_count_noun(total_unchecked, "target", "targets"), " not checked")
   } else {
@@ -801,7 +815,35 @@ dta_overall_summary_message <- function(total_invalid,
     ))
   }
 
-  list(severity = "success", text = "Validation PASSED: All datasets are valid")
+  # A table with a header and no rows is valid, deliberately, but no value check
+  # was run on it; a certificate that says nothing of that overstates it.
+  empty_tail <- if (total_empty > 0) {
+    paste0(
+      "; ", dta_count_noun(total_empty, "table", "tables"),
+      " with 0 rows, on which no value check was run"
+    )
+  } else {
+    ""
+  }
+  list(
+    severity = "success",
+    text = paste0("Validation PASSED: All datasets are valid", empty_tail)
+  )
+}
+
+# How many tables of the dataset `ds` were validated as valid while holding no
+# rows, according to the verdicts recorded for them.
+#' @keywords internal
+dta_count_empty_validated_tables <- function(ds) {
+  index <- tryCatch(ds@validation_index, error = function(e) NULL)
+  if (!is.list(index)) {
+    return(0L)
+  }
+  sum(vapply(
+    index,
+    function(entry) isTRUE(entry$ok) && isTRUE(entry$n_rows == 0),
+    logical(1)
+  ))
 }
 
 # Renders whichever line the builders above returned. One place that maps a
@@ -1100,6 +1142,8 @@ method(check, DTA) <- function(
 
   summary_rows <- list()
   count_findings <- list()
+  # Tables of the datasets THIS run checked that were valid with no rows.
+  n_empty_tables <- 0L
 
   for (ds_name in target_datasets) {
     ds <- x@datasets[[ds_name]]
@@ -1192,6 +1236,8 @@ method(check, DTA) <- function(
     # otherwise a DTA whose data has not been delivered at all printed
     # "Validation PASSED: All datasets are valid" over a run that read no file.
     n_undelivered <- as.integer(n_targets == 0)
+    n_empty <- dta_count_empty_validated_tables(ds)
+    n_empty_tables <- n_empty_tables + n_empty
 
     summary_rows[[length(summary_rows) + 1]] <- data.frame(
       dataset = ds_name,
@@ -1216,7 +1262,8 @@ method(check, DTA) <- function(
         n_invalid = n_invalid,
         n_unchecked = n_unchecked,
         n_undelivered = n_undelivered,
-        n_count_errors = as.integer(!is.null(finding))
+        n_count_errors = as.integer(!is.null(finding)),
+        n_empty = n_empty
       ))
     }
   }
@@ -1344,7 +1391,8 @@ method(check, DTA) <- function(
       total_undelivered = total_undelivered,
       total_count_errors = total_count_errors,
       total_container_errors = n_out,
-      total_container_unverified = n_unv
+      total_container_unverified = n_unv,
+      total_empty = n_empty_tables
     ))
     if (total_invalid > 0 || total_import_errors > 0) {
       cli::cli_alert_info("Run {.fn explain_messages} on the checked object to see what failed and why.")

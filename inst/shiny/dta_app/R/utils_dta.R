@@ -405,6 +405,54 @@ dta_get_dataset <- function(dta, name) {
   tryCatch(DTAtools::datasets(dta, name), error = function(e) NULL)
 }
 
+# The shape of DTAtools::container_findings(), with no rows.
+dta_empty_container_findings <- function() {
+  data.frame(
+    dataset = character(0), item = character(0), file = character(0),
+    container = character(0), arrived = character(0), status = character(0),
+    message = character(0), stringsAsFactors = FALSE
+  )
+}
+
+# The packaging findings of `dta`, with a check that cannot run kept apart from
+# a check that found nothing. DTAtools::container_findings() is returned
+# unchanged when it works. When it throws, an empty frame would read as "every
+# file is packaged as agreed" in every surface that reads it (the chip, the
+# dataset list, the summary button, the report banner), so the frame instead
+# holds one row per dataset with status "not_checkable" and the cause in the
+# message. One row per dataset, not one NA row: readers filter on
+# `findings$dataset == id`. A missing document, or one without datasets, has
+# nothing to mark and gives the empty frame.
+dta_container_findings_or_not_checkable <- function(dta) {
+  if (is.null(dta)) {
+    return(dta_empty_container_findings())
+  }
+  cause <- NULL
+  f <- tryCatch(
+    DTAtools::container_findings(dta),
+    error = function(e) {
+      cause <<- gsub("\\s+", " ", trimws(conditionMessage(e)))
+      NULL
+    }
+  )
+  if (is.data.frame(f)) {
+    return(f)
+  }
+  ids <- dta_dataset_names(dta)
+  if (length(ids) == 0L) {
+    return(dta_empty_container_findings())
+  }
+  data.frame(
+    dataset = ids, item = NA_character_, file = NA_character_,
+    container = NA_character_, arrived = NA_character_, status = "not_checkable",
+    message = paste0(
+      "The packaging of dataset '", ids, "' could not be checked: ",
+      cause %||% "no findings table was returned"
+    ),
+    stringsAsFactors = FALSE
+  )
+}
+
 # What a person reads for a dataset: its name, else its id. Mirrors the
 # package's internal dta_dataset_label(), which the app cannot reach.
 dta_dataset_label <- function(ds) {
@@ -2448,7 +2496,8 @@ dta_export_pdf <- function(dta, file, signature_list = NULL, doc_args = list()) 
 # `findings` are the container findings (DTAtools::container_findings() rows);
 # NULL computes them from `dta`. A file outside its required container fails the
 # banner, a file whose packaging is unverified (checked on its own, or no record
-# of how it arrived) leaves it incomplete.
+# of how it arrived) leaves it incomplete, and so does a packaging check that
+# could not run ("not_checkable" findings, one per dataset): that is never a pass.
 dta_build_validation_report <- function(dta, status = NULL, document_name = NULL,
                                         organisation = NULL, organisation_unit = NULL,
                                         findings = NULL) {
@@ -2540,7 +2589,8 @@ dta_build_validation_report <- function(dta, status = NULL, document_name = NULL
   count_failed <- isFALSE(attr(dta, "last_validation_ok", exact = TRUE)) &&
     !is.null(dta_file_count_findings(dta))
   if (is.null(findings)) {
-    findings <- tryCatch(DTAtools::container_findings(dta), error = function(e) NULL)
+    # A check that cannot run is "not_checkable" findings, never no findings.
+    findings <- dta_container_findings_or_not_checkable(dta)
   }
   findings <- if (is.data.frame(findings) && all(c("status", "message") %in% names(findings))) {
     findings
@@ -2548,10 +2598,11 @@ dta_build_validation_report <- function(dta, status = NULL, document_name = NULL
     data.frame(status = character(0), message = character(0), stringsAsFactors = FALSE)
   }
   n_outside <- sum(findings$status == "outside")
+  n_not_checkable <- sum(findings$status == "not_checkable")
   n_unverified <- sum(findings$status %in% c("unverified", "unrecorded"))
   banner_cls <- if (n_fail > 0 || count_failed || n_outside > 0) {
     "warn"
-  } else if (n_pass > 0 && n_unvalidated == 0 && n_unverified == 0) {
+  } else if (n_pass > 0 && n_unvalidated == 0 && n_unverified == 0 && n_not_checkable == 0) {
     "pass"
   } else {
     "incomplete"
@@ -2565,8 +2616,17 @@ dta_build_validation_report <- function(dta, status = NULL, document_name = NULL
     n_pass, " passed, ", n_fail, " failed, ",
     n_nodata, " without data",
     if (n_pending > 0) paste0(", ", n_pending, " not validated") else "",
-    if (nrow(findings) > 0) {
-      paste0(", ", nrow(findings), if (nrow(findings) == 1) " packaging finding" else " packaging findings")
+    if (nrow(findings) > n_not_checkable) {
+      n_found <- nrow(findings) - n_not_checkable
+      paste0(", ", n_found, if (n_found == 1) " packaging finding" else " packaging findings")
+    } else {
+      ""
+    },
+    if (n_not_checkable > 0) {
+      paste0(
+        ", packaging not checkable for ", n_not_checkable,
+        if (n_not_checkable == 1) " dataset" else " datasets"
+      )
     } else {
       ""
     },
@@ -2601,6 +2661,15 @@ dta_build_validation_report <- function(dta, status = NULL, document_name = NULL
       )
     } else {
       ""
+    },
+    if (identical(banner_cls, "incomplete") && n_not_checkable > 0) {
+      paste0(
+        "<div class='caveat'>The packaging of the files could not be checked, ",
+        "so this DTA cannot be reported as passed. See ",
+        "&ldquo;Delivery&rdquo; below.</div>"
+      )
+    } else {
+      ""
     }
   )
   # Why a dataset failed on file count: the per-target table below cannot show
@@ -2617,7 +2686,10 @@ dta_build_validation_report <- function(dta, status = NULL, document_name = NULL
   # Packaging, judged on the document as a whole: the same findings that set the
   # banner, so nothing says passed while one is listed. Messages are escaped.
   delivery_html <- if (nrow(findings) > 0) {
-    lead <- ifelse(findings$status == "outside", "Not inside its container: ", "Not verified: ")
+    lead <- ifelse(
+      findings$status == "outside", "Not inside its container: ",
+      ifelse(findings$status == "not_checkable", "Not checkable: ", "Not verified: ")
+    )
     paste0(
       "<h2>Delivery</h2><ul>",
       paste0("<li>", vapply(paste0(lead, findings$message), esc, character(1)), "</li>", collapse = ""),

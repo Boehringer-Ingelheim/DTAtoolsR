@@ -11,7 +11,8 @@ dta_overall_summary_message(
   total_undelivered = 0,
   total_count_errors = 0L,
   total_container_errors = 0L,
-  total_container_unverified = 0L
+  total_container_unverified = 0L,
+  total_empty = 0L
 )
 }
 \arguments{

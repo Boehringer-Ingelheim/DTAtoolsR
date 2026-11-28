@@ -936,15 +936,26 @@ dta_validate_table_stream <- function(specs,
     cli::cli_h3("validating with column specs")
   }
 
-  # Header findings of a matrix dataset enter the sink BEFORE the first cell, so
-  # retention keeps them ahead of everything the scan finds. The batch loop
-  # below is never skipped because of them.
-  n_header_retained <- 0L
+  # Findings about the specification and the header enter the sink BEFORE the
+  # first cell, so retention keeps them ahead of everything the scan finds. The
+  # batch loop below is never skipped because of them.
+  #
+  # First, the columns whose checks could not be run: a fact about the
+  # specification, reported once for the scan (the batch loop skips such a
+  # column silently), in the same place the materialising path puts it. Then the
+  # header findings of a matrix dataset.
+  not_run_errors <- dta_columnspec_not_run_errors(columnspec_schemas)
+  n_leading <- NROW(not_run_errors)
+  if (n_leading > 0) {
+    columnspec_tally <- dta_columnspec_tally_add(columnspec_tally, not_run_errors)
+    dta_error_sink_add(columnspec_sink, not_run_errors)
+  }
   if (!is.null(structure) && NROW(structure$findings) > 0) {
     columnspec_tally <- dta_columnspec_tally_add(columnspec_tally, structure$findings)
     dta_error_sink_add(columnspec_sink, structure$findings)
-    n_header_retained <- columnspec_sink$retained
+    n_leading <- n_leading + NROW(structure$findings)
   }
+  n_header_retained <- if (n_leading > 0) columnspec_sink$retained else 0L
 
   repeat {
     batch <- reader$read_next_batch()
@@ -1205,7 +1216,7 @@ dta_validate_table_stream <- function(specs,
           names(attributes(full_error))
         )]
       }
-      header_overflowed <- NROW(structure$findings) > n_header_retained
+      header_overflowed <- n_leading > n_header_retained
       sink_full <- !is.null(columnspec_sink$max) &&
         columnspec_sink$retained >= columnspec_sink$max
       full_error <- if (header_overflowed) {
@@ -3139,14 +3150,25 @@ validate_file_stream <- function(specs,
 #' failure would be as wrong as claiming a pass.
 #' @param findings A list from `dta_structure_findings()`.
 #' @param schemas Compiled schemas, from `dta_compile_columnspec_schemas()`, or
-#'   `NULL`. Only the per-check summary reads them: presence and closedness were
+#'   `NULL`. The per-check summary reads them: presence and closedness were
 #'   both decided from the header, so they report a verdict, while every other
 #'   check reports `not_checked` rather than borrowing their failure or claiming
-#'   a pass over rows that were never read.
+#'   a pass over rows that were never read. A column whose schema could not be
+#'   compiled is reported as a `dta_check_not_run` finding, ahead of the
+#'   structural ones, because that needs no row either.
 #' @return A validation details list.
 #' @keywords internal
 dta_structural_failure_details <- function(findings, schemas = NULL) {
   full_error <- dta_structure_errors(findings)
+
+  # A column whose checks could not be run is a fact about the specification,
+  # decided without reading a row, so it belongs here too: a missing column must
+  # not be able to hide it. First, as on the other two paths.
+  not_run_error <- dta_columnspec_not_run_errors(schemas)
+  if (!is.null(not_run_error)) {
+    full_error <- rbind(not_run_error, full_error)
+    rownames(full_error) <- NULL
+  }
 
   details <- list(
     ok = FALSE,

@@ -673,21 +673,16 @@ ui <- function(req) ui_page(dta_app_config())
 # escapes it: file names are user-supplied.
 # ---------------------------------------------------------------------------
 
-dv_empty_findings <- function() {
-  data.frame(
-    dataset = character(0), item = character(0), file = character(0),
-    container = character(0), arrived = character(0), status = character(0),
-    message = character(0), stringsAsFactors = FALSE
-  )
-}
+dv_empty_findings <- function() dta_empty_container_findings()
 
-# The packaging findings of the live document; never throws.
+# The packaging findings of the live document; never throws. A check that cannot
+# run is not "no findings": it comes back as one "not_checkable" row per
+# dataset, which every reader below shows as such and never as a pass.
 dv_findings <- function(dta) {
   if (is.null(dta)) {
     return(dv_empty_findings())
   }
-  f <- tryCatch(DTAtools::container_findings(dta), error = function(e) NULL)
-  if (is.data.frame(f)) f else dv_empty_findings()
+  dta_container_findings_or_not_checkable(dta)
 }
 
 dv_provenance <- function(ds) {
@@ -746,6 +741,10 @@ dv_container_states <- function(dta, findings) {
     list(
       row = r, datasets = ds_ids, findings = f, inside = inside,
       n_outside = sum(f$status == "outside"),
+      # Counted over every finding, not the container's own: a check that could
+      # not run says nothing about which container a file belongs to, and the
+      # assignments it would have been matched against may be what failed.
+      n_not_checkable = sum(findings$status == "not_checkable"),
       n_unverified = sum(f$status == "unverified"),
       n_unrecorded = sum(f$status == "unrecorded")
     )
@@ -758,6 +757,9 @@ dv_container_line <- function(st) {
   files <- function(n) .ctr_count(n, "file", "files")
   if (st$n_outside > 0) {
     list(glyph = "\u26A0", cls = "dp-bad", text = paste0(fn, ": ", files(st$n_outside), " not inside it"))
+  } else if (isTRUE(st$n_not_checkable > 0)) {
+    # Before the tick below: no file is "inside" while nothing could be checked.
+    list(glyph = "\u25D0", cls = "dp-warn", text = paste0(fn, ": packaging could not be checked"))
   } else if (st$n_unverified > 0) {
     n <- st$n_unverified
     list(
@@ -782,19 +784,31 @@ dv_container_line <- function(st) {
 }
 
 # The packaging verdict of dataset `id` in the live findings: "outside" (a file
-# is not inside the container the agreement requires), "unverified" (checked
-# on its own, or its origin is not recorded) or "none".
+# is not inside the container the agreement requires), "not_checkable" (the
+# packaging check could not run), "unverified" (checked on its own, or its
+# origin is not recorded) or "none".
 dv_ds_packaging <- function(findings, id) {
   s <- findings$status[findings$dataset == id]
-  if (any(s == "outside")) "outside" else if (length(s) > 0) "unverified" else "none"
+  if (any(s == "outside")) {
+    "outside"
+  } else if (any(s == "not_checkable")) {
+    "not_checkable"
+  } else if (length(s) > 0) {
+    "unverified"
+  } else {
+    "none"
+  }
 }
 
 # "1 file not inside its container, 2 files whose packaging is not verified".
+# Not-checkable findings are per dataset, not per file, and are counted apart.
 dv_packaging_phrase <- function(findings) {
   n_out <- sum(findings$status == "outside")
-  n_unv <- sum(findings$status != "outside")
+  n_nck <- sum(findings$status == "not_checkable")
+  n_unv <- sum(!findings$status %in% c("outside", "not_checkable"))
   paste(c(
     if (n_out > 0) paste(.ctr_count(n_out, "file", "files"), "not inside", if (n_out == 1) "its container" else "their container"),
+    if (n_nck > 0) paste(.ctr_count(n_nck, "dataset", "datasets"), "whose packaging is not checkable"),
     if (n_unv > 0) paste(.ctr_count(n_unv, "file", "files"), "whose packaging is not verified")
   ), collapse = ", ")
 }
@@ -952,6 +966,8 @@ dv_members_table <- function(dta, st, ca) {
     f <- st$findings[st$findings$dataset == id, , drop = FALSE]
     status <- if (any(f$status == "outside")) {
       "not inside it"
+    } else if (any(f$status == "not_checkable")) {
+      "packaging not checkable"
     } else if (any(f$status == "unverified")) {
       "checked on its own"
     } else if (any(f$status == "unrecorded")) {
@@ -982,6 +998,8 @@ dv_view_ui <- function(dta, last, findings, active = NULL) {
   states <- dv_container_states(dta, findings)
   chip <- if (any(findings$status == "outside")) {
     list("status-fail", "Not conforming")
+  } else if (any(findings$status == "not_checkable")) {
+    list("status-nodata", "Packaging not checkable")
   } else if (any(findings$status %in% c("unverified", "unrecorded"))) {
     list("status-nodata", "Packaging not verified")
   } else if (length(states) == 0) {
@@ -2971,7 +2989,8 @@ server <- function(input, output, session) {
           label <- rv$structure[[i]]$label %||% nm
           st <- dta_lookup(st_map, nm, "pending")
           # A content pass with a packaging finding is no pass: the row goes
-          # amber (not verified) or red (outside its container), in words too.
+          # amber (not verified, or not checkable) or red (outside its
+          # container), in words too.
           pk <- dv_ds_packaging(fnd, nm)
           # Row background + icon encode status: passed (green), failed (red),
           # missing/no-data (orange), not-checked-yet (neutral grey).
@@ -2994,7 +3013,13 @@ server <- function(input, output, session) {
           }
           ic_cls <- paste0("nav-ic-", if (st2 == "pending") "pending" else st2)
           ic_ttl <- if (pk_pass) {
-            if (identical(pk, "outside")) "Content passed, but a file is not inside its container" else "Content passed; packaging not verified"
+            if (identical(pk, "outside")) {
+              "Content passed, but a file is not inside its container"
+            } else if (identical(pk, "not_checkable")) {
+              "Content passed, but the packaging could not be checked"
+            } else {
+              "Content passed; packaging not verified"
+            }
           } else {
             switch(st,
               pass = "Passed all checks",
@@ -8222,6 +8247,7 @@ server <- function(input, output, session) {
       format = dta_format_expected_text(.first_nonempty(r[["columnspec_columnspec"]])),
       required = "the value must be present (not missing)",
       additionalProperties = "no such column to be present: the specs do not declare it",
+      dta_check_not_run = "a column specification that can be turned into checks, so that the column's values are examined",
       # Matrix findings: the bound limit sits in columnspec_columnspec and the
       # finding names no column.
       rowLabelHeader = paste0("header text: ", {
@@ -8446,6 +8472,9 @@ server <- function(input, output, session) {
       # HTML report.
       aval <- if (identical(kw, "additionalProperties")) {
         "(an undeclared column)"
+      } else if (identical(kw, "dta_check_not_run")) {
+        # Present in the table, and never examined: not "(empty)".
+        "(no check was run on this column)"
       } else if (kw %in% c("minProperties", "maxProperties")) {
         paste(.first_nonempty(r[["columnspec_data"]]), "data columns")
       } else if (kw %in% c("minItems", "maxItems")) {
@@ -10221,6 +10250,9 @@ server <- function(input, output, session) {
     # is not a pass, however well the content validated.
     fnd <- findings_now()
     outside <- any(fnd$status == "outside")
+    # A packaging check that could not run is never complete, however the
+    # content validated.
+    not_checkable <- any(fnd$status == "not_checkable")
     complete <- length(validated) == length(st) && nrow(fnd) == 0
     # No divider of its own: this button belongs to the sidebar's Export
     # group, whose label sits above the two export buttons it follows.
@@ -10230,6 +10262,8 @@ server <- function(input, output, session) {
         # The state is in the words, not only the colour.
         if (outside) {
           "Validation summary (FAILED: packaging)"
+        } else if (not_checkable) {
+          "Validation summary (INCOMPLETE: packaging not checkable)"
         } else if (nrow(fnd) > 0) {
           "Validation summary (INCOMPLETE: packaging)"
         } else {
@@ -10250,6 +10284,12 @@ server <- function(input, output, session) {
           )
         } else if (complete) {
           "Download a summary certifying this successful validation"
+        } else if (not_checkable) {
+          paste(
+            "Download a summary of this validation.",
+            "The packaging of the files could not be checked, so it will report the",
+            "validation as incomplete rather than passed."
+          )
         } else if (nrow(fnd) > 0) {
           paste(
             "Download a summary of this validation.",
@@ -10381,6 +10421,17 @@ server <- function(input, output, session) {
     fnd <- fnd[fnd$dataset == dsname, , drop = FALSE]
     # The chip a file carries when its packaging is not what the agreement asks.
     finding_chip <- function(table) {
+      # A packaging check that could not run has no item to match (its rows are
+      # per dataset, item NA): every file of the dataset carries the chip, and
+      # the row is judged before the item filter below, which NA would turn
+      # into an all-NA row.
+      nck <- which(fnd$status == "not_checkable")
+      if (length(nck) > 0) {
+        return(tags$span(
+          class = "file-finding ff-not_checkable", title = fnd$message[[nck[[1]]]],
+          "◐ Packaging not checkable"
+        ))
+      }
       f <- fnd[fnd$item == table | basename(fnd$item) == table, , drop = FALSE]
       if (nrow(f) == 0) {
         return(NULL)
@@ -10502,7 +10553,8 @@ server <- function(input, output, session) {
     npend <- max(n - np - nf - nd, 0L)
     # A content pass whose files have a packaging finding is no pass: it moves
     # out of the passed count into the packaging segment (red when a file is
-    # outside its container, amber when it is only unverified).
+    # outside its container, amber when it is only unverified or its packaging
+    # could not be checked).
     fnd <- findings_now()
     pk <- vapply(names(st)[st == "pass"], function(id) dv_ds_packaging(fnd, id), character(1))
     npk <- sum(pk != "none")

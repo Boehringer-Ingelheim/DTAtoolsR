@@ -10,10 +10,12 @@ dta_structural_failure_details(findings, schemas = NULL)
 \item{findings}{A list from \code{dta_structure_findings()}.}
 
 \item{schemas}{Compiled schemas, from \code{dta_compile_columnspec_schemas()}, or
-\code{NULL}. Only the per-check summary reads them: presence and closedness were
+\code{NULL}. The per-check summary reads them: presence and closedness were
 both decided from the header, so they report a verdict, while every other
 check reports \code{not_checked} rather than borrowing their failure or claiming
-a pass over rows that were never read.}
+a pass over rows that were never read. A column whose schema could not be
+compiled is reported as a \code{dta_check_not_run} finding, ahead of the
+structural ones, because that needs no row either.}
 }
 \value{
 A validation details list.
